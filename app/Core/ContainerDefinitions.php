@@ -927,6 +927,15 @@ final class ContainerDefinitions
 
     private static function apiResourceControllerDefinitions(): array
     {
+        return array_merge(
+            self::pluginGroupControllerDefinitions(),
+            self::agentResourceControllerDefinitions(),
+            self::mediaResourceControllerDefinitions(),
+        );
+    }
+
+    private static function pluginGroupControllerDefinitions(): array
+    {
         return [
             AppsController::class => static function (ContainerInterface $c): AppsController {
                 return new AppsController(
@@ -961,32 +970,6 @@ final class ContainerDefinitions
                     self::resolvePluginInstallEnabled($c),
                     $enabled ? $c->get(PluginCatalogService::class) : null,
                     $enabled,
-                );
-            },
-
-            AgentController::class => static function (ContainerInterface $c): AgentController {
-                return new AgentController(
-                    $c->get(AuthService::class),
-                    $c->get(AgentServiceInterface::class),
-                    $c->get(DriverFactory::class),
-                    $c->get(ToolIconResolver::class),
-                    $c->get(AgentPictureService::class),
-                    $c->get(PrincipalService::class),
-                    $c->get(PrincipalResolver::class),
-                );
-            },
-
-            // Transfer split out so AgentController stays under the
-            // SonarCloud S1448 20-method-per-class ceiling. Talks to
-            // AgentPrincipalService (not AgentService) so the principal
-            // axis stays on its own.
-            AgentTransferController::class => static function (ContainerInterface $c): AgentTransferController {
-                return new AgentTransferController(
-                    $c->get(AuthService::class),
-                    $c->get(AgentPrincipalService::class),
-                    $c->get(DriverFactory::class),
-                    $c->get(ToolIconResolver::class),
-                    $c->get(AgentPictureService::class),
                 );
             },
 
@@ -1028,6 +1011,37 @@ final class ContainerDefinitions
                     $c->get(PrincipalService::class),
                 );
             },
+        ];
+    }
+
+    private static function agentResourceControllerDefinitions(): array
+    {
+        return [
+            AgentController::class => static function (ContainerInterface $c): AgentController {
+                return new AgentController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
+                );
+            },
+
+            // Transfer split out so AgentController stays under the
+            // SonarCloud S1448 20-method-per-class ceiling. Talks to
+            // AgentPrincipalService (not AgentService) so the principal
+            // axis stays on its own.
+            AgentTransferController::class => static function (ContainerInterface $c): AgentTransferController {
+                return new AgentTransferController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentPrincipalService::class),
+                    $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
+                );
+            },
 
             PrincipalController::class => static function (ContainerInterface $c): PrincipalController {
                 return new PrincipalController(
@@ -1065,7 +1079,12 @@ final class ContainerDefinitions
                     $c->get(ToolIconResolver::class),
                 );
             },
+        ];
+    }
 
+    private static function mediaResourceControllerDefinitions(): array
+    {
+        return [
             MediaArchiveController::class => static function (ContainerInterface $c): MediaArchiveController {
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),

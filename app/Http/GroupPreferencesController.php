@@ -9,6 +9,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
+use Spora\Models\Principal;
 use Spora\Models\PrincipalPreference;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -46,59 +47,83 @@ final class GroupPreferencesController
 
     public function show(int $id): JsonResponse
     {
-        $resolved = $this->resolvePrincipalForCaller($id);
+        $resolved = $this->resolveReadableGroup($id);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
+        [$principalId, ] = $resolved;
 
-        return $this->respondWithPreference($principalId, $userId);
+        return $this->respondWithPreference($principalId);
     }
 
     public function update(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolvePrincipalForCaller($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit preferences.');
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$principalId, ] = $resolved;
+
+        $configId = $this->validatedConfigIdOrFail($request);
+        if ($configId instanceof JsonResponse) {
+            return $configId;
+        }
+
+        return $this->applyAndRespond($principalId, $configId);
+    }
+
+    /**
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveReadableGroup(int $id): array|JsonResponse
+    {
+        $userId = $this->requireCurrentUserIdOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId);
+        if ($principal instanceof JsonResponse) {
+            return $principal;
+        }
+
+        return [(int) $principal->id, $userId];
+    }
+
+    /**
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveWritableGroup(int $id, string $denyMessage): array|JsonResponse
+    {
+        $resolved = $this->resolveReadableGroup($id);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
         [$principalId, $userId] = $resolved;
 
         if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can edit preferences.');
+            return $this->forbidden('FORBIDDEN', $denyMessage);
         }
 
-        $body = $this->decodeBody($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $configId = $this->validateAndExtractConfigId($body);
-        if ($configId instanceof JsonResponse) {
-            return $configId;
-        }
-
-        $this->upsertPreference($principalId, $configId);
-
-        return $this->respondWithPreference($principalId, $userId);
+        return [$principalId, $userId];
     }
 
     /**
-     * Resolve the caller's auth + the group's principal id, OR a
-     * 401/404 short-circuit. Returns `[principalId, userId]` when both
-     * the caller is authenticated and authorised to read the group;
-     * the controller short-circuits on the JsonResponse.
-     *
-     * @return array{0: int, 1: int}|JsonResponse
+     * @return int|JsonResponse
      */
-    private function resolvePrincipalForCaller(int $id): array|JsonResponse
+    private function requireCurrentUserIdOrFail(): int|JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
+        return (int) $userId;
+    }
 
+    private function loadGroupPrincipalIfVisible(int $id, int $userId): Principal|JsonResponse
+    {
         $group = Group::find($id);
-        if ($group === null) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -107,11 +132,7 @@ final class GroupPreferencesController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        if (!$this->callerCanSeeGroup($id, (int) $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return [(int) $principal->id, (int) $userId];
+        return $principal;
     }
 
     private function callerCanSeeGroup(int $groupId, int $userId): bool
@@ -125,7 +146,7 @@ final class GroupPreferencesController
             ->exists();
     }
 
-    private function respondWithPreference(int $principalId, int $userId): JsonResponse
+    private function respondWithPreference(int $principalId): JsonResponse
     {
         $row = PrincipalPreference::where('principal_id', $principalId)->first();
 
@@ -154,6 +175,23 @@ final class GroupPreferencesController
     }
 
     /**
+     * Decode + extract + validate. Splits the key-presence and value-shape
+     * checks into helpers so {@see validateAndExtractConfigId()} stays
+     * under the S1142 3-return cap.
+     *
+     * @return int|null|JsonResponse
+     */
+    private function validatedConfigIdOrFail(Request $request): int|null|JsonResponse
+    {
+        $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->validateAndExtractConfigId($body);
+    }
+
+    /**
      * @return array<string, mixed>|JsonResponse
      */
     private function decodeBody(Request $request): array|JsonResponse
@@ -174,7 +212,14 @@ final class GroupPreferencesController
         if (!array_key_exists('preferred_llm_config_id', $body)) {
             return $this->unprocessable('VALIDATION_ERROR', 'preferred_llm_config_id is required (may be null).');
         }
-        $value = $body['preferred_llm_config_id'];
+        return $this->parseStoredConfigId($body['preferred_llm_config_id']);
+    }
+
+    /**
+     * @return int|null|JsonResponse
+     */
+    private function parseStoredConfigId(mixed $value): int|null|JsonResponse
+    {
         if ($value === null) {
             return null;
         }
@@ -182,6 +227,15 @@ final class GroupPreferencesController
             return $this->unprocessable('VALIDATION_ERROR', 'preferred_llm_config_id must be a positive integer or null.');
         }
         return $value;
+    }
+
+    /**
+     * Upsert the preference and return the resolved wire payload.
+     */
+    private function applyAndRespond(int $principalId, ?int $configId): JsonResponse
+    {
+        $this->upsertPreference($principalId, $configId);
+        return $this->respondWithPreference($principalId);
     }
 
     private function upsertPreference(int $principalId, ?int $configId): void

@@ -9,6 +9,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\Principal;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalService;
@@ -58,11 +59,11 @@ final class GroupLlmConfigsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveReadableGroup($id);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
+        [$principalId, ] = $resolved;
 
         $rows = LLMDriverConfiguration::where('principal_id', $principalId)
             ->orderBy('name')
@@ -78,24 +79,15 @@ final class GroupLlmConfigsController
 
     public function store(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can create LLM configs.');
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
         [$principalId, $userId] = $resolved;
 
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can create LLM configs.');
-        }
-
-        $body = $this->decodeBody($request);
+        $body = $this->validatedStoreBodyOrFail($request);
         if ($body instanceof JsonResponse) {
             return $body;
-        }
-
-        $validation = $this->validator->validateStoreBody($body);
-        if ($validation !== null) {
-            return $validation;
         }
 
         return $this->createConfig($principalId, $userId, $body);
@@ -103,90 +95,116 @@ final class GroupLlmConfigsController
 
     public function update(int $id, int $cid, Request $request): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit LLM configs.');
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
         [$principalId, $userId] = $resolved;
 
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can edit LLM configs.');
-        }
-
-        $body = $this->decodeBody($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        return $this->performUpdate($id, $cid, $principalId, $userId, $body);
+        return $this->performScopedUpdate($cid, $principalId, $userId, $request);
     }
 
     public function destroy(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete LLM configs.');
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
+        [$principalId, ] = $resolved;
 
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can delete LLM configs.');
+        $error = $this->deleteScopedConfigOrFail($cid, $principalId);
+        if ($error !== null) {
+            return $error;
         }
-
-        $config = $this->findScopedConfig($cid, $principalId);
-        if ($config === null) {
-            return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
-        }
-
-        Capsule::table('llm_driver_configurations')
-            ->where('id', $cid)
-            ->delete();
 
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     public function setDefault(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can set the default LLM config.');
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$principalId, ] = $resolved;
+
+        $config = $this->setDefaultScopedConfigOrFail($cid, $principalId);
+        if ($config instanceof JsonResponse) {
+            return $config;
+        }
+
+        return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($config)]]);
+    }
+
+    /**
+     * Auth + group visibility + principal lookup → `[principalId, userId]`,
+     * or a 401/404 short-circuit. Splits the visibility check into
+     * {@see loadGroupPrincipalIfVisible} so this method stays under the
+     * S1142 3-return cap.
+     *
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveReadableGroup(int $id): array|JsonResponse
+    {
+        $userId = $this->requireCurrentUserIdOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId);
+        if ($principal instanceof JsonResponse) {
+            return $principal;
+        }
+
+        return [(int) $principal->id, $userId];
+    }
+
+    /**
+     * Like {@see resolveReadableGroup()} but additionally enforces the
+     * manage role for write actions. The forbidden message is
+     * caller-supplied so each action can name the resource it gates.
+     *
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveWritableGroup(int $id, string $denyMessage): array|JsonResponse
+    {
+        $resolved = $this->resolveReadableGroup($id);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
         [$principalId, $userId] = $resolved;
 
         if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can set the default LLM config.');
+            return $this->forbidden('FORBIDDEN', $denyMessage);
         }
 
-        $config = $this->findScopedConfig($cid, $principalId);
-        if ($config === null) {
-            return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
-        }
-
-        Capsule::table('llm_driver_configurations')
-            ->where('principal_id', $principalId)
-            ->where('is_default', true)
-            ->update(['is_default' => false, 'updated_at' => date('Y-m-d H:i:s')]);
-
-        Capsule::table('llm_driver_configurations')
-            ->where('id', $cid)
-            ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
-
-        $fresh = LLMDriverConfiguration::find($cid);
-        return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($fresh)]]);
+        return [$principalId, $userId];
     }
 
     /**
-     * @return array{0: int, 1: int}|JsonResponse
+     * Returns the authenticated user id (as int) or a 401 JsonResponse.
+     *
+     * @return int|JsonResponse
      */
-    private function resolveGroupAndPrincipal(int $id): array|JsonResponse
+    private function requireCurrentUserIdOrFail(): int|JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
+        return (int) $userId;
+    }
 
+    /**
+     * Group + visibility + principal existence in one pass. All three
+     * failures collapse to the same 404 (existence-hiding), and the
+     * principal itself is the success path — keeps the caller at one
+     * `instanceof` short-circuit instead of three.
+     */
+    private function loadGroupPrincipalIfVisible(int $id, int $userId): Principal|JsonResponse
+    {
         $group = Group::find($id);
-        if ($group === null) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -195,11 +213,7 @@ final class GroupLlmConfigsController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        if (!$this->callerCanSeeGroup($id, (int) $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return [(int) $principal->id, (int) $userId];
+        return $principal;
     }
 
     private function callerCanSeeGroup(int $groupId, int $userId): bool
@@ -218,6 +232,20 @@ final class GroupLlmConfigsController
         return LLMDriverConfiguration::where('id', $cid)
             ->where('principal_id', $principalId)
             ->first();
+    }
+
+    /**
+     * Decode JSON body → run store validation → return the body on
+     * success or the validator's first failure as a JsonResponse.
+     */
+    private function validatedStoreBodyOrFail(Request $request): array|JsonResponse
+    {
+        $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->validator->validateStoreBody($body) ?? $body;
     }
 
     /**
@@ -252,13 +280,29 @@ final class GroupLlmConfigsController
     }
 
     /**
-     * @param array<string, mixed> $body
+     * Scope-check → body decode + validation → apply update. Each
+     * stage short-circuits so the parent only sees three return paths.
      */
-    private function performUpdate(int $id, int $cid, int $principalId, int $userId, array $body): JsonResponse
+    private function performScopedUpdate(int $cid, int $principalId, int $userId, Request $request): JsonResponse
     {
         $config = $this->findScopedConfig($cid, $principalId);
         if ($config === null) {
             return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
+        }
+
+        $body = $this->decodeAndValidateUpdateBody($request, $config);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->applyUpdatePayload($cid, $userId, $body);
+    }
+
+    private function decodeAndValidateUpdateBody(Request $request, LLMDriverConfiguration $config): array|JsonResponse
+    {
+        $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
         }
 
         $nameError = $this->validator->validateUpdateName($body);
@@ -266,11 +310,14 @@ final class GroupLlmConfigsController
             return $nameError;
         }
 
-        $settingsError = $this->validator->validateUpdateSettings($body, $config);
-        if ($settingsError !== null) {
-            return $settingsError;
-        }
+        return $this->validator->validateUpdateSettings($body, $config) ?? $body;
+    }
 
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function applyUpdatePayload(int $cid, int $userId, array $body): JsonResponse
+    {
         $data = $this->validator->prepareUpdateData($body);
         $updated = $this->llmConfigService->updateConfiguration($cid, $userId, $data, true);
         if ($updated === null) {
@@ -278,6 +325,49 @@ final class GroupLlmConfigsController
         }
 
         return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($updated)]]);
+    }
+
+    /**
+     * Scope-check + delete in one helper. Returns the JsonResponse to
+     * surface when the cid is not in this group's principal, or `null`
+     * on a successful delete.
+     */
+    private function deleteScopedConfigOrFail(int $cid, int $principalId): ?JsonResponse
+    {
+        $config = $this->findScopedConfig($cid, $principalId);
+        if ($config === null) {
+            return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
+        }
+
+        Capsule::table('llm_driver_configurations')
+            ->where('id', $cid)
+            ->delete();
+
+        return null;
+    }
+
+    /**
+     * Scope-check → clear any other default → promote the target → return
+     * the fresh row. Returns JsonResponse on scope miss.
+     */
+    private function setDefaultScopedConfigOrFail(int $cid, int $principalId): LLMDriverConfiguration|JsonResponse
+    {
+        $config = $this->findScopedConfig($cid, $principalId);
+        if ($config === null) {
+            return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
+        }
+
+        Capsule::table('llm_driver_configurations')
+            ->where('principal_id', $principalId)
+            ->where('is_default', true)
+            ->update(['is_default' => false, 'updated_at' => date('Y-m-d H:i:s')]);
+
+        Capsule::table('llm_driver_configurations')
+            ->where('id', $cid)
+            ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
+
+        $fresh = LLMDriverConfiguration::find($cid);
+        return $fresh;
     }
 
     /**

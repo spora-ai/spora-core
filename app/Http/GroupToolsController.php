@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
+use Spora\Models\Principal;
 use Spora\Models\ToolUserSetting;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
@@ -46,11 +47,11 @@ final class GroupToolsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveReadableGroup($id);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
+        [$principalId, ] = $resolved;
 
         $rows = ToolUserSetting::where('principal_id', $principalId)
             ->orderBy('tool_class')
@@ -78,51 +79,27 @@ final class GroupToolsController
 
     public function upsert(int $id, string $toolClass, Request $request): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit tool settings.');
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
+        [$principalId, ] = $resolved;
 
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can edit tool settings.');
-        }
-
-        $body = $this->decodeBody($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $settings = $this->extractSettings($body);
+        $settings = $this->decodedSettingsOrFail($request);
         if ($settings instanceof JsonResponse) {
             return $settings;
         }
 
-        $this->toolConfigService->putPrincipalSettings($toolClass, $principalId, $settings);
-
-        return new JsonResponse(['data' => [
-            'tool' => [
-                'tool_class'   => $toolClass,
-                'principal_id' => $principalId,
-                'settings'     => $this->toolConfigService->maskForApi(
-                    $this->toolConfigService->getPrincipalSettings($toolClass, $principalId),
-                    $toolClass,
-                ),
-            ],
-        ]]);
+        return $this->applyToolSettings($toolClass, $principalId, $settings);
     }
 
     public function destroy(int $id, string $toolClass): JsonResponse
     {
-        $resolved = $this->resolveGroupAndPrincipal($id);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete tool settings.');
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$principalId, $userId] = $resolved;
-
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', 'Only group owners or admins can delete tool settings.');
-        }
+        [$principalId, ] = $resolved;
 
         $this->toolConfigService->deletePrincipalSettings($toolClass, $principalId);
 
@@ -132,15 +109,55 @@ final class GroupToolsController
     /**
      * @return array{0: int, 1: int}|JsonResponse
      */
-    private function resolveGroupAndPrincipal(int $id): array|JsonResponse
+    private function resolveReadableGroup(int $id): array|JsonResponse
+    {
+        $userId = $this->requireCurrentUserIdOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId);
+        if ($principal instanceof JsonResponse) {
+            return $principal;
+        }
+
+        return [(int) $principal->id, $userId];
+    }
+
+    /**
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveWritableGroup(int $id, string $denyMessage): array|JsonResponse
+    {
+        $resolved = $this->resolveReadableGroup($id);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$principalId, $userId] = $resolved;
+
+        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
+            return $this->forbidden('FORBIDDEN', $denyMessage);
+        }
+
+        return [$principalId, $userId];
+    }
+
+    /**
+     * @return int|JsonResponse
+     */
+    private function requireCurrentUserIdOrFail(): int|JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
+        return (int) $userId;
+    }
 
+    private function loadGroupPrincipalIfVisible(int $id, int $userId): Principal|JsonResponse
+    {
         $group = Group::find($id);
-        if ($group === null) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -149,11 +166,7 @@ final class GroupToolsController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        if (!$this->callerCanSeeGroup($id, (int) $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return [(int) $principal->id, (int) $userId];
+        return $principal;
     }
 
     private function callerCanSeeGroup(int $groupId, int $userId): bool
@@ -165,6 +178,23 @@ final class GroupToolsController
             ->where('group_id', $groupId)
             ->where('user_id', $userId)
             ->exists();
+    }
+
+    /**
+     * Decode + unwrap the settings payload from the request body. Pass
+     * either `{settings: {…}}` or a bare object — both shapes are
+     * accepted (see {@see extractSettings}).
+     *
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodedSettingsOrFail(Request $request): array|JsonResponse
+    {
+        $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->extractSettings($body);
     }
 
     /**
@@ -201,5 +231,28 @@ final class GroupToolsController
         // different principal (the principal is the group's, end of story).
         unset($body['principal_id']);
         return $body;
+    }
+
+    /**
+     * Persist settings via ToolConfigService and return the masked wire
+     * payload. Isolated from {@see upsert()} so the controller stays at
+     * the S1142 3-return cap.
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function applyToolSettings(string $toolClass, int $principalId, array $settings): JsonResponse
+    {
+        $this->toolConfigService->putPrincipalSettings($toolClass, $principalId, $settings);
+
+        return new JsonResponse(['data' => [
+            'tool' => [
+                'tool_class'   => $toolClass,
+                'principal_id' => $principalId,
+                'settings'     => $this->toolConfigService->maskForApi(
+                    $this->toolConfigService->getPrincipalSettings($toolClass, $principalId),
+                    $toolClass,
+                ),
+            ],
+        ]]);
     }
 }
