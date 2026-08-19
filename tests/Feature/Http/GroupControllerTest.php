@@ -359,4 +359,130 @@ describe('GroupController success paths', function (): void {
         // payload O(1) per group.
         expect($payload)->not->toHaveKey('members');
     });
+
+    it('show returns agent_count, llm_config_count, tool_setting_count for the group principal', function (): void {
+        [$controller, $auth, $groupService, $principalService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-counts-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-counts-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Counts Group');
+        $principalId = (int) $principalService->principalForGroup($group->id)->id;
+
+        // Insert 3 agents under the group principal
+        for ($i = 0; $i < 3; $i++) {
+            Illuminate\Database\Capsule\Manager::table('agents')->insert([
+                'principal_id' => $principalId,
+                'name'         => "Agent{$i}",
+                'description'  => null,
+                'max_steps'    => 10,
+                'is_active'    => 1,
+                'created_at'   => date('Y-m-d H:i:s'),
+                'updated_at'   => date('Y-m-d H:i:s'),
+            ]);
+        }
+        // Insert 2 LLM configs scoped to the group principal
+        for ($i = 0; $i < 2; $i++) {
+            Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->insert([
+                'principal_id' => $principalId,
+                'name'         => "Cfg{$i}",
+                'driver_class' => Spora\Drivers\OpenAICompatibleDriver::class,
+                'settings'     => '{}',
+                'is_default'   => false,
+                'is_global'    => false,
+                'created_at'   => date('Y-m-d H:i:s'),
+                'updated_at'   => date('Y-m-d H:i:s'),
+            ]);
+        }
+        // Insert 1 tool user setting row
+        Illuminate\Database\Capsule\Manager::table('tool_user_settings')->insert([
+            'principal_id' => $principalId,
+            'tool_class'   => Spora\Tools\CalculatorTool::class,
+            'settings'     => '{}',
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        $response = $controller->show($group->id);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        $g = $body['data']['group'];
+        expect($g)->toHaveKey('agent_count', 3);
+        expect($g)->toHaveKey('llm_config_count', 2);
+        expect($g)->toHaveKey('tool_setting_count', 1);
+        expect($g)->toHaveKey('member_count', 1);
+    });
+
+    it('agents returns 401 when no user is logged in', function (): void {
+        [$controller] = makeGroupController();
+        $response = $controller->agents(1);
+        expect($response->getStatusCode())->toBe(401);
+    });
+
+    it('agents returns 404 for a non-existent group', function (): void {
+        [$controller, $auth] = makeGroupController();
+        $uid = bootAuth($auth, 'gc-agents-404@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($uid, 'gc-agents-404@example.com');
+        $response = $controller->agents(999_999);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('agents returns 404 when the caller cannot see the group', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-agents-private-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Private');
+        $strangerId = bootAuth($auth, 'gc-agents-stranger@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($strangerId, 'gc-agents-stranger@example.com');
+        $response = $controller->agents($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('agents returns agents scoped to the group principal only', function (): void {
+        [$controller, $auth, $groupService, $principalService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-agents-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-agents-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Agents Group');
+        $groupPrincipalId = (int) $principalService->principalForGroup($group->id)->id;
+        $userPrincipalId = (int) $principalService->ensureUserPrincipal($ownerId)->id;
+
+        // Two agents under the group principal, one under the caller's user-principal
+        foreach (['A', 'B'] as $name) {
+            Illuminate\Database\Capsule\Manager::table('agents')->insert([
+                'principal_id' => $groupPrincipalId,
+                'name'         => $name,
+                'description'  => null,
+                'max_steps'    => 10,
+                'is_active'    => 1,
+                'created_at'   => date('Y-m-d H:i:s'),
+                'updated_at'   => date('Y-m-d H:i:s'),
+            ]);
+        }
+        Illuminate\Database\Capsule\Manager::table('agents')->insert([
+            'principal_id' => $userPrincipalId,
+            'name'         => 'Mine',
+            'description'  => null,
+            'max_steps'    => 10,
+            'is_active'    => 1,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        $response = $controller->agents($group->id);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['total'])->toBe(2);
+        $names = array_column($body['data']['agents'], 'name');
+        expect($names)->toContain('A')->toContain('B');
+        expect($names)->not->toContain('Mine');
+    });
+
+    it('agents returns 200 for member-only caller (read-only is allowed)', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-agents-member-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Members See Agents');
+        $memberId = bootAuth($auth, 'gc-agents-member@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, $memberId, 'member', $ownerId);
+        simulateLoggedInSession($memberId, 'gc-agents-member@example.com');
+
+        $response = $controller->agents($group->id);
+        expect($response->getStatusCode())->toBe(200);
+    });
 });
