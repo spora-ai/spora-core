@@ -19,7 +19,10 @@ use Spora\Models\Principal;
  */
 final class GroupDetailResource
 {
-    private function __construct() {}
+    private function __construct()
+    {
+        // Static-only utility — instantiation is intentionally disallowed.
+    }
 
     /**
      * @return array<string, mixed>

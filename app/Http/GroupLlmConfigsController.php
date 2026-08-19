@@ -366,8 +366,7 @@ final class GroupLlmConfigsController
             ->where('id', $cid)
             ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
 
-        $fresh = LLMDriverConfiguration::find($cid);
-        return $fresh;
+        return LLMDriverConfiguration::find($cid);
     }
 
     /**
