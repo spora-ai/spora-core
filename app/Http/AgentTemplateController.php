@@ -178,6 +178,11 @@ final class AgentTemplateController
             return null;
         }
 
+        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+    }
+
+    private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
+    {
         if ($this->auth->isAdmin()
             || $this->principalService->callerControlsPrincipal($userId, $requested)) {
             return $requested;
