@@ -334,4 +334,29 @@ describe('GroupController success paths', function (): void {
         $response = $controller->destroy(1);
         expect($response->getStatusCode())->toBe(401);
     });
+
+    it('index payload includes member_count matching GroupMembership rows', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-member-count@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-member-count@example.com');
+        $group = $groupService->createGroup($ownerId, 'Member Count Group');
+
+        // Add a second member
+        $secondId = bootAuth($auth, 'gc-member-count-2@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, (int) $secondId, 'admin', $ownerId);
+
+        $response = $controller->index();
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        $payload = array_values(array_filter(
+            $body['data']['groups'],
+            static fn(array $g): bool => $g['id'] === (int) $group->id,
+        ))[0] ?? null;
+        expect($payload)->not->toBeNull();
+        expect($payload)->toHaveKey('member_count', 2);
+        // List payload must NOT include the full members array — that is
+        // loaded on demand from /groups/{id}/members to keep the index
+        // payload O(1) per group.
+        expect($payload)->not->toHaveKey('members');
+    });
 });

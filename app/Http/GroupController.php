@@ -332,6 +332,7 @@ final class GroupController
         $role = GroupMembership::where('group_id', $group->id)
             ->where('user_id', $callerUserId)
             ->value('role');
+        $memberCount = (int) GroupMembership::where('group_id', $group->id)->count();
 
         return [
             'id'                  => (int) $group->id,
@@ -340,6 +341,7 @@ final class GroupController
             'created_by_user_id'  => (int) $group->created_by_user_id,
             'principal_id'        => $principal !== null ? (int) $principal->id : null,
             'caller_role'         => $role !== null ? (string) $role : null,
+            'member_count'        => $memberCount,
             'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
             'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
         ];

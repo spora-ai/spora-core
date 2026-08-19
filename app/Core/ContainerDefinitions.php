@@ -107,6 +107,7 @@ use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\LLMConfigPreferences;
+use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
@@ -888,10 +889,14 @@ final class ContainerDefinitions
             LlmConfigValidator::class => static function (ContainerInterface $c): LlmConfigValidator {
                 return new LlmConfigValidator(
                     $c->get(LLMConfigServiceInterface::class),
+                    $c->get(LlmConfigSchemaValidator::class),
                     $c->get(PrincipalService::class),
                     $c->get(PrincipalResolver::class),
                 );
             },
+
+            LlmConfigSchemaValidator::class => static fn(ContainerInterface $c): LlmConfigSchemaValidator
+                => new LlmConfigSchemaValidator(),
 
             UserPreferenceController::class => static function (ContainerInterface $c): UserPreferenceController {
                 return new UserPreferenceController(
