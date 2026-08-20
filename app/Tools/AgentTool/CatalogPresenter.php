@@ -7,6 +7,8 @@ namespace Spora\Tools\AgentTool;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolIconResolver;
 use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -27,6 +29,7 @@ final class CatalogPresenter
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         private readonly AgentToolSettingsServiceInterface $toolSettings,
+        private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
     ) {}
@@ -34,16 +37,20 @@ final class CatalogPresenter
     /**
      * `get_available_tools` executor. `userId` is nullable as a "minimal
      * boot" fallback — the orchestrator normally fills it from the
-     * calling Agent's row.
+     * calling Agent's row. The `PrincipalContext` overrides the legacy
+     * `$userId` path so the catalog reflects the principal's owner
+     * (paying user) rather than the runner.
      */
-    public function present(int $agentId, ?int $userId): ToolResult
+    public function present(int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
             return ToolResult::fail(self::notFoundMessage());
         }
 
-        $resolvedUserId = $userId ?? (int) $agent->user_id;
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $contextOwnerUserId = $context !== null ? $context->ownerUserId : null;
+        $resolvedUserId = $userId ?? $contextOwnerUserId ?? $resolver->ownerUserId((int) $agent->principal_id);
 
         $rows = $this->toolSettings->getAllToolsStatus($agentId, $resolvedUserId) ?? [];
         $operationsByClass = self::indexOperationsByToolClass(

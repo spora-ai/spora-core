@@ -21,8 +21,13 @@ final class TestTool implements ToolInterface
 {
     use HasOperations;
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
         return $this->run($arguments, $agentId);
     }
 

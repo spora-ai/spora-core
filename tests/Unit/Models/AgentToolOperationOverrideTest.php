@@ -17,7 +17,7 @@ it('uses the agent_tool_operation_overrides table', function (): void {
 it('allows mass assignment of operation override fields', function (): void {
     $userId = bootAuthLayer()->register('opoverride@example.com', AGENT_TOOL_OPERATION_OVERRIDE_TEST_PASSWORD, 'OpOverride');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Op Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -41,7 +41,7 @@ it('allows mass assignment of operation override fields', function (): void {
 it('casts enabled and default_requires_approval to int', function (): void {
     $userId = bootAuthLayer()->register('cast@example.com', AGENT_TOOL_OPERATION_OVERRIDE_TEST_PASSWORD, 'Cast');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Cast Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -64,7 +64,7 @@ it('casts enabled and default_requires_approval to int', function (): void {
 it('belongs to an agent', function (): void {
     $userId = bootAuthLayer()->register('oprel@example.com', AGENT_TOOL_OPERATION_OVERRIDE_TEST_PASSWORD, 'OpRel');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'OpRel Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

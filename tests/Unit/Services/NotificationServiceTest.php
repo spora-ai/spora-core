@@ -32,7 +32,7 @@ function makeNotificationServiceWithUser(): array
 function makeTaskForUser(int $userId): Task
 {
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'NotifTestAgent',
         'max_steps' => 5,
         'is_active' => true,
@@ -40,6 +40,7 @@ function makeTaskForUser(int $userId): Task
 
     return Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Hello world',

@@ -18,7 +18,7 @@ it('uses the tool_calls table', function (): void {
 it('allows mass assignment of tool call fields', function (): void {
     $userId = bootAuthLayer()->register('toolcall@example.com', TOOL_CALL_TEST_PASSWORD, 'ToolCall');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'ToolCall Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -27,6 +27,7 @@ it('allows mass assignment of tool call fields', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
@@ -55,7 +56,7 @@ it('allows mass assignment of tool call fields', function (): void {
 it('casts JSON columns to arrays and dates to Carbon', function (): void {
     $userId = bootAuthLayer()->register('cast-tc@example.com', TOOL_CALL_TEST_PASSWORD, 'Cast');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Cast TC Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -64,6 +65,7 @@ it('casts JSON columns to arrays and dates to Carbon', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
@@ -102,7 +104,7 @@ it('casts JSON columns to arrays and dates to Carbon', function (): void {
 it('belongs to a task, agent, and approver', function (): void {
     $userId = bootAuthLayer()->register('rel-tc@example.com', TOOL_CALL_TEST_PASSWORD, 'Rel');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Rel Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -111,6 +113,7 @@ it('belongs to a task, agent, and approver', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',

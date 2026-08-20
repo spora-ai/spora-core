@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Services\PrincipalResolver;
 use Spora\Tools\Traits\HasOperations;
 
 /**
@@ -18,17 +19,22 @@ final class AgentToolOperationsResolver
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly AgentToolInstanceResolver $instanceResolver,
         private readonly AgentToolOverrideResolver $overrideResolver,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
 
     /**
      * @return list<array{tool_class: string, tool_name: string, operation: string, enabled: int|null, default_requires_approval: int|null, effective_enabled: bool, effective_requires_approval: bool}>|null
      */
     public function getToolsOperations(int $agentId, int $userId): ?array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return null;
         }
@@ -79,7 +85,7 @@ final class AgentToolOperationsResolver
      */
     public function getOperationOverride(int $agentId, int $userId, string $toolClass, string $operation): array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return [];
         }
@@ -105,7 +111,7 @@ final class AgentToolOperationsResolver
      */
     public function patchOperationOverride(int $agentId, int $userId, string $toolClass, string $operation, array $data): array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        $agent = $this->loadAgentVisibleTo($agentId, $userId);
         if ($agent === null) {
             return [];
         }
@@ -194,5 +200,18 @@ final class AgentToolOperationsResolver
         }
 
         return true;
+    }
+
+    /**
+     * Mirrors {@see AgentToolOverrideResolver::loadAgentVisibleTo()}:
+     * agents no longer carry a `user_id`, so visibility pivots on the
+     * principal axis. A caller can see an agent iff they can act as one
+     * of its owning principals.
+     */
+    private function loadAgentVisibleTo(int $agentId, int $userId): ?Agent
+    {
+        return Agent::where('id', $agentId)
+            ->whereIn('principal_id', $this->principalResolver->visiblePrincipalIds($userId))
+            ->first();
     }
 }

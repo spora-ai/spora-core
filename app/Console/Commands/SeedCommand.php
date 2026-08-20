@@ -12,6 +12,8 @@ use Spora\Core\DatabaseSeeder;
 use Spora\Core\Paths;
 use Spora\Core\SecretKeyInstaller;
 use Spora\Services\Mail\MailTemplateSyncService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -60,7 +62,8 @@ final class SeedCommand extends Command
 
             /** @var AuthService $authService */
             $authService = ($this->authServiceFactory)();
-            $seeder = new DatabaseSeeder($authService, $this->mailTemplateSync, $this->templateImporter);
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $seeder = new DatabaseSeeder($authService, $this->mailTemplateSync, $this->templateImporter, $principalService);
             $seeder->run();
 
             $output->writeln('<info>Seeding finished successfully.</info>');

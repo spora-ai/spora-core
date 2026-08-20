@@ -19,6 +19,7 @@ use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
@@ -46,6 +47,7 @@ final class TickPhaseRunner
         private readonly ?MercurePublisherInterface $mercure = null,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?SubAgentServiceInterface $subAgent = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
     public function runTick(int $taskId): void
     {
@@ -294,10 +296,13 @@ final class TickPhaseRunner
 
         $llmConfig = $this->orchestrator->llmConfigResolver->resolveLlmConfig($agent);
 
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $principalContext = $resolver->resolveForToolExecute($agent->id);
+
         $request = new LLMRequest(
             systemPrompt: $this->resolveSystemPrompt($agent),
             messages: $this->orchestrator->buildMessages($task->id),
-            tools: $this->orchestrator->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agent->id, $agent->user_id),
+            tools: $this->orchestrator->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agent->id, $principalContext),
             contextWindow: $llmConfig['context_window'],
             maxTokens: $llmConfig['max_tokens_output'],
             temperature: $llmConfig['temperature'],

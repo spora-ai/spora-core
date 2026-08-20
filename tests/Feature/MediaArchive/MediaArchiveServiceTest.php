@@ -492,7 +492,7 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
         $userId = bootAuthLayer()->register('idem@example.com', 'Password1!', 'Idem');
 
         $config = LLMDriverConfiguration::create([
-            'user_id'          => null,
+            'principal_id' => null,
             'name'             => 'Idem Config',
             'driver_class'     => \Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'         => json_encode(['api_key' => 'test']),
@@ -503,13 +503,14 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
         ]);
 
         $agent = Agent::create([
-            'user_id'              => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'                 => 'idem-agent',
             'llm_driver_config_id' => $config->id,
             'max_steps'            => 10,
             'is_active'            => true,
         ]);
         $task = Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
@@ -966,7 +967,7 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
         $userId = bootAuthLayer()->register('idem2@example.com', 'Password1!', 'Idem2');
 
         $config = LLMDriverConfiguration::create([
-            'user_id'          => null,
+            'principal_id' => null,
             'name'             => 'Idem2 Config',
             'driver_class'     => \Spora\Drivers\OpenAICompatibleDriver::class,
             'settings'         => json_encode(['api_key' => 'test']),
@@ -977,13 +978,14 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
         ]);
 
         $agent = Agent::create([
-            'user_id'              => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'                 => 'idem2-agent',
             'llm_driver_config_id' => $config->id,
             'max_steps'            => 10,
             'is_active'            => true,
         ]);
         $task = Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',

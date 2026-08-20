@@ -66,7 +66,7 @@ function buildAgentController(): AgentController
         {
             return [];
         }
-        public function createAgent(int $userId, array $data): Agent
+        public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
         {
             throw new RuntimeException('not implemented in test');
         }
@@ -97,6 +97,10 @@ function buildAgentController(): AgentController
         public function setArchived(int $userId, int $agentId, bool $archived): Agent
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
+        }
+        public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
+        {
+            throw new RuntimeException('not implemented in test');
         }
     };
     // Tool enablement / overrides / operations moved to a separate
@@ -154,7 +158,7 @@ function seedShowLlmConfig(int $id, int $userId, string $driverClass, string $mo
     LLMDriverConfiguration::query()->where('id', $id)->delete();
     LLMDriverConfiguration::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "cfg-{$id}",
         'driver_class' => $driverClass,
         'settings' => json_encode([
@@ -164,6 +168,7 @@ function seedShowLlmConfig(int $id, int $userId, string $driverClass, string $mo
             'timeout' => '60',
         ]),
         'is_default' => 1,
+        'is_global' => 0,
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
@@ -176,7 +181,7 @@ function seedShowAgent(int $id, int $userId): void
     }
     Agent::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "agent-{$id}",
         'description' => '',
         'system_prompt' => '',

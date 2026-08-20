@@ -75,10 +75,16 @@ final class AgentManifest
     /**
      * @param AgentToolSettingsServiceInterface $toolSettings Per-agent state reader.
      * @param ?ToolIconResolver $iconResolver Optional 3-layer icon chain.
+     * @param ?PrincipalResolver $principalResolver Optional resolver
+     *        for translating the agent's principal back to a user id
+     *        when computing "who owns this agent?" for downstream
+     *        visibility checks. Defaults to a freshly-constructed
+     *        resolver so callers without DI wiring keep working.
      */
     public function __construct(
         private readonly AgentToolSettingsServiceInterface $toolSettings,
         private readonly ?ToolIconResolver $iconResolver = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -91,8 +97,16 @@ final class AgentManifest
      */
     public function toArray(Agent $agent): array
     {
-        $userId  = (int) $agent->user_id;
-        $agentId = (int) $agent->id;
+        // Migrated from `$agent->user_id` to PrincipalResolver: the
+        // owning principal can be a user-principal or a group-principal.
+        // For a group, the principal's first user-principal is the
+        // canonical "owner" we feed to downstream ownership checks
+        // (the controllers and tool-resolvers still key on userId, so
+        // we resolve through the principal axis rather than reading the
+        // agents row directly).
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $userId   = $resolver->ownerUserId((int) $agent->principal_id) ?? 0;
+        $agentId  = (int) $agent->id;
 
         $rows = $this->toolSettings->getAllToolsStatus($agentId, $userId) ?? [];
         $operationsByTool = self::indexOperationsByToolClass(
@@ -160,10 +174,6 @@ final class AgentManifest
         $overrideAudit = self::overrideAuditFor($effective);
 
         return [
-            // Slim per-tool entry: drop display_name + description since
-            // they're only useful when an agent browses tools, not when
-            // an LLM configures one. Operators who want descriptive
-            // metadata call `get_available_tools` instead.
             'tool_entry'       => [
                 'tool_class' => $toolClass,
                 'icon'       => $summary['icon'] ?? null,

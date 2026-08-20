@@ -11,7 +11,7 @@ it('maps every wire-format field for an agent', function (): void {
     $userId = bootAuthLayer()->register('agent-resource@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Mapped Agent',
         'description'          => 'desc',
         'system_prompt'        => 'sp',
@@ -74,7 +74,7 @@ it('formats created_at as ATOM and emits an empty tools list when the relationsh
     $userId = bootAuthLayer()->register('agent-resource-atom@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Atom Agent',
         'max_steps' => 10,
     ]);
@@ -104,7 +104,7 @@ it('resolves per-tool icon via the supplied ToolIconResolver', function (): void
     $userId = bootAuthLayer()->register('agent-resource-icon@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Icon Agent',
         'max_steps' => 10,
     ]);
@@ -140,7 +140,7 @@ it('emits icon: null when the resolver returns null (frontend falls back to puzz
     $userId = bootAuthLayer()->register('agent-resource-noicon@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'No-Icon Agent',
         'max_steps' => 10,
     ]);

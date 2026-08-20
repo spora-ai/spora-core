@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use RuntimeException;
 use Spora\Models\Agent;
 
 /**
@@ -14,6 +15,13 @@ use Spora\Models\Agent;
  * under SonarCloud's 20-method-per-class ceiling (S1448). Consumers that
  * only touch the lifecycle / flag surface (AgentController) keep depending
  * on this interface; consumers that touch tools depend on the narrower one.
+ *
+ * Principals-and-groups (migration 0067) re-keyed the ownership column from
+ * `agents.user_id` to `agents.principal_id`. Every "for $userId" method now
+ * matches on the union of principals the user can act as (own user-principal
+ * + every group-principal of which they are a member), so a single API call
+ * covers both personal and shared agents without callers having to know the
+ * principal model exists.
  */
 interface AgentServiceInterface
 {
@@ -22,10 +30,25 @@ interface AgentServiceInterface
      */
     public function getAgentsForUser(int $userId): array;
 
-    public function createAgent(int $userId, array $data): Agent;
+    /**
+     * Create an agent. The third parameter selects the owning principal:
+     * null defaults to the caller's user-principal (auto-created if
+     * missing); admins passing a group-principal id create on behalf of
+     * the group.
+     */
+    public function createAgent(int $userId, array $data, ?int $principalId = null): Agent;
 
+    /**
+     * Look up an agent by id, with visibility gated on the calling user
+     * being able to act as one of the agent's principals. Returns null
+     * for agents the user cannot see.
+     */
     public function getAgent(int $agentId, int $userId): ?Agent;
 
+    /**
+     * Edit allowed fields on a user-visible agent. Returns null when the
+     * agent is not visible to the calling user.
+     */
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent;
 
     /**
@@ -71,4 +94,16 @@ interface AgentServiceInterface
      * @throws Exceptions\AgentNotFoundException If the agent does not exist or is not owned by $userId
      */
     public function setArchived(int $userId, int $agentId, bool $archived): Agent;
+
+    /**
+     * Transfer an agent's ownership to a different principal. The caller
+     * must control both source and target principal (admin/owner of the
+     * source, admin/owner of the target, or owner of the target when the
+     * target is the caller's user-principal). Admins skip the source side
+     * of the gate.
+     *
+     * @throws Exceptions\UnauthorizedTransferException When the caller is not authorised
+     * @throws RuntimeException When the agent or target principal does not exist
+     */
+    public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent;
 }

@@ -20,10 +20,12 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
+use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -42,8 +44,6 @@ use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
-use Spora\Core\Exceptions\InvalidSecretKeyException;
-use Spora\Core\Exceptions\MissingSecretKeyException;
 use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
@@ -54,11 +54,17 @@ use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
+use Spora\Http\AgentTransferController;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\GroupController;
+use Spora\Http\GroupLlmConfigsController;
+use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPreferencesController;
+use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -71,6 +77,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\PluginsController;
+use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
@@ -85,6 +92,7 @@ use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\AgentPrincipalService;
 use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
@@ -96,8 +104,11 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\EmailTemplateLoader;
+use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\LLMConfigPreferences;
+use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
@@ -127,6 +138,8 @@ use Spora\Services\NotificationServiceInterface;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
@@ -405,7 +418,7 @@ final class ContainerDefinitions
             },
 
             SecurityManagerInterface::class => static fn(ContainerInterface $c): SecurityManager
-                => self::buildSecurityManager($c),
+                => SecurityKeyDefinitions::build($c),
 
             Database::class => static function (ContainerInterface $c): Database {
                 $db = new Database(
@@ -473,6 +486,20 @@ final class ContainerDefinitions
                 );
             },
 
+            PrincipalResolver::class => static fn(): PrincipalResolver => new PrincipalResolver(),
+
+            PrincipalService::class => static function (ContainerInterface $c): PrincipalService {
+                return new PrincipalService(
+                    $c->get(PrincipalResolver::class),
+                );
+            },
+
+            GroupService::class => static function (ContainerInterface $c): GroupService {
+                return new GroupService(
+                    $c->get(PrincipalService::class),
+                );
+            },
+
             HttpClientInterface::class => static function (): HttpClientInterface {
                 return HttpClient::create();
             },
@@ -485,6 +512,7 @@ final class ContainerDefinitions
                     $c->get(LoggerInterface::class),
                     $c->get(LLMConfigServiceInterface::class),
                     (int) ($c->get('config')['llm_timeout'] ?? 300),
+                    $c->get(LLMConfigPreferences::class),
                 );
             },
 
@@ -663,48 +691,6 @@ final class ContainerDefinitions
         ];
     }
 
-    private static function buildSecurityManager(ContainerInterface $c): SecurityManager
-    {
-        $envKey = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
-        if ($envKey !== null) {
-            $decoded = base64_decode($envKey, strict: true);
-            if ($decoded === false) {
-                throw new InvalidSecretKeyException(
-                    'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
-                );
-            }
-            return new SecurityManager($decoded);
-        }
-
-        $path = self::resolveKeyPath($c);
-        if ($path === null) {
-            throw new MissingSecretKeyException(
-                'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH, '
-                . 'or run `php bin/spora spora:install` (or `db:seed`) to auto-generate '
-                . 'storage/secret.key. Looked for: ' . $c->get(Paths::class)->storage('secret.key') . '.',
-            );
-        }
-
-        return new SecurityManager($path);
-    }
-
-    private static function resolveKeyPath(ContainerInterface $c): ?string
-    {
-        $envKeyPath = $_ENV['SPORA_KEY_PATH'] ?? getenv('SPORA_KEY_PATH') ?: null;
-        if ($envKeyPath !== null) {
-            return $envKeyPath;
-        }
-
-        $configKeyPath = ($c->get('config'))['key_path'] ?? null;
-        if ($configKeyPath !== null) {
-            return (string) $configKeyPath;
-        }
-
-        // Conventional fallback; SecretKeyInstaller writes here on `spora:install`.
-        $conventional = $c->get(Paths::class)->storage('secret.key');
-        return is_file($conventional) ? $conventional : null;
-    }
-
     // Gates the Web UI plugin install endpoints (docs/20_plugin_install_api.md).
     // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
@@ -766,6 +752,11 @@ final class ContainerDefinitions
                 return new LLMConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get('llm_driver_classes_merged'),
+                    null,
+                    null,
+                    null,
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -773,14 +764,29 @@ final class ContainerDefinitions
                 return $c->get(LLMConfigService::class);
             },
 
+            LLMConfigPreferences::class => static function (ContainerInterface $c): LLMConfigPreferences {
+                return new LLMConfigPreferences($c->get(PrincipalService::class));
+            },
+
             AgentServiceInterface::class => static function (ContainerInterface $c): AgentServiceInterface {
                 return new AgentService(
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AgentPrincipalService::class),
                 );
             },
 
             AgentPictureService::class => static fn(): AgentPictureService => new AgentPictureService(),
+
+            // Principal materialisation + agent-transfer path. Split out of
+            // AgentService so the umbrella stays under the SonarCloud
+            // S1448 20-method-per-class ceiling.
+            AgentPrincipalService::class => static function (ContainerInterface $c): AgentPrincipalService {
+                return new AgentPrincipalService(
+                    $c->get(PrincipalService::class),
+                );
+            },
 
             // Tool enablement, settings overrides, and operation overrides
             // moved here from AgentService so the umbrella stays under the
@@ -789,6 +795,7 @@ final class ContainerDefinitions
                 return new AgentToolSettingsService(
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -796,6 +803,7 @@ final class ContainerDefinitions
                 return new AgentManifest(
                     $c->get(AgentToolSettingsServiceInterface::class),
                     $c->get(ToolIconResolver::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -833,19 +841,28 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(LLMConfigServiceInterface::class),
                     $c->get(LlmConfigValidator::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
             LlmConfigValidator::class => static function (ContainerInterface $c): LlmConfigValidator {
                 return new LlmConfigValidator(
                     $c->get(LLMConfigServiceInterface::class),
+                    $c->get(LlmConfigSchemaValidator::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
+
+            LlmConfigSchemaValidator::class => static fn(ContainerInterface $c): LlmConfigSchemaValidator
+                => new LlmConfigSchemaValidator(),
 
             UserPreferenceController::class => static function (ContainerInterface $c): UserPreferenceController {
                 return new UserPreferenceController(
                     $c->get(AuthService::class),
                     $c->get(LLMConfigServiceInterface::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -865,6 +882,15 @@ final class ContainerDefinitions
     }
 
     private static function apiResourceControllerDefinitions(): array
+    {
+        return array_merge(
+            self::pluginGroupControllerDefinitions(),
+            self::agentResourceControllerDefinitions(),
+            self::mediaResourceControllerDefinitions(),
+        );
+    }
+
+    private static function pluginGroupControllerDefinitions(): array
     {
         return [
             AppsController::class => static function (ContainerInterface $c): AppsController {
@@ -903,6 +929,50 @@ final class ContainerDefinitions
                 );
             },
 
+            GroupController::class => static function (ContainerInterface $c): GroupController {
+                return new GroupController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupMemberController::class => static function (ContainerInterface $c): GroupMemberController {
+                return new GroupMemberController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                );
+            },
+
+            GroupPreferencesController::class => static function (ContainerInterface $c): GroupPreferencesController {
+                return new GroupPreferencesController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupToolsController::class => static function (ContainerInterface $c): GroupToolsController {
+                return new GroupToolsController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
+            GroupLlmConfigsController::class => static function (ContainerInterface $c): GroupLlmConfigsController {
+                return new GroupLlmConfigsController(
+                    $c->get(AuthService::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                    $c->get(LlmConfigValidator::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+        ];
+    }
+
+    private static function agentResourceControllerDefinitions(): array
+    {
+        return [
             AgentController::class => static function (ContainerInterface $c): AgentController {
                 return new AgentController(
                     $c->get(AuthService::class),
@@ -910,6 +980,29 @@ final class ContainerDefinitions
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalResolver::class),
+                );
+            },
+
+            // Transfer split out so AgentController stays under the
+            // SonarCloud S1448 20-method-per-class ceiling. Talks to
+            // AgentPrincipalService (not AgentService) so the principal
+            // axis stays on its own.
+            AgentTransferController::class => static function (ContainerInterface $c): AgentTransferController {
+                return new AgentTransferController(
+                    $c->get(AuthService::class),
+                    $c->get(AgentPrincipalService::class),
+                    $c->get(DriverFactory::class),
+                    $c->get(ToolIconResolver::class),
+                    $c->get(AgentPictureService::class),
+                );
+            },
+
+            PrincipalController::class => static function (ContainerInterface $c): PrincipalController {
+                return new PrincipalController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -942,7 +1035,12 @@ final class ContainerDefinitions
                     $c->get(ToolIconResolver::class),
                 );
             },
+        ];
+    }
 
+    private static function mediaResourceControllerDefinitions(): array
+    {
+        return [
             MediaArchiveController::class => static function (ContainerInterface $c): MediaArchiveController {
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),
@@ -1021,6 +1119,7 @@ final class ContainerDefinitions
                     $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
                     $c->get(ToolCallSerializer::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1032,6 +1131,7 @@ final class ContainerDefinitions
                     $c->get(AgentTemplateImporter::class),
                     $c->get(AgentTemplateExporter::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
@@ -1149,7 +1249,10 @@ final class ContainerDefinitions
                     new AgentTool\AgentToolCollaborators(
                         pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
                         iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
+                        principalResolver: $c->get(PrincipalResolver::class),
                     ),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AuthService::class),
                 );
             },
 
@@ -1258,7 +1361,10 @@ final class ContainerDefinitions
                         toolConfigService: $c->get(ToolConfigService::class),
                         toolCallSerializer: $c->get(ToolCallSerializer::class),
                         agentService: $c->get(AgentServiceInterface::class),
+                        principalPreferences: $c->get(LLMConfigPreferences::class),
                     ),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AuthService::class),
                 );
             },
 
@@ -1332,7 +1438,12 @@ final class ContainerDefinitions
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
-            ToolConfigSchemaInspector::class => static fn(): ToolConfigSchemaInspector => new ToolConfigSchemaInspector(),
+            ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
+                return new ToolConfigSchemaInspector(
+                    [],
+                    $c->get(PrincipalResolver::class),
+                );
+            },
 
             // Skills are scanned in priority order: project, then framework,
             // then each plugin. The `source` label on each root is what
@@ -1371,10 +1482,20 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
+                    $c->get(AgentTemplateToolsApplier::class),
+                    $c->get(AgentTemplateAgentCreator::class),
                     $c->get(AgentPictureService::class),
+                );
+            },
+
+            AgentTemplateToolsApplier::class => static function (ContainerInterface $c): AgentTemplateToolsApplier {
+                return new AgentTemplateToolsApplier(
+                    $c->get(ToolConfigService::class),
                     $c->get(AgentTemplateSettingsApplier::class),
                 );
             },
+
+            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
 
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(
@@ -1387,6 +1508,7 @@ final class ContainerDefinitions
                 $c->get(PluginLoader::class),
                 $c->get(ToolConfigService::class),
                 $c->get(ToolConfigSchemaInspector::class),
+                $c->get(PrincipalResolver::class),
             ),
 
             MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {

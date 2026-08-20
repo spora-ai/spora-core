@@ -9,10 +9,16 @@ use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
+use Spora\Http\AgentTransferController;
 use Spora\Http\AppsController;
 use Spora\Http\AssetController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
+use Spora\Http\GroupController;
+use Spora\Http\GroupLlmConfigsController;
+use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPreferencesController;
+use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -25,6 +31,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\PluginsController;
+use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\ScheduledRunController;
@@ -42,6 +49,7 @@ final class RouteDefinitions
     public const ROUTE_MEDIA_ITEM = '/api/v1/media/{id}';
 
     public const ROUTE_AGENTS_ID = '/api/v1/agents/{id}';
+    public const ROUTE_AGENTS_TRANSFER = '/api/v1/agents/{id}/transfer';
     public const ROUTE_AGENTS_TOOL_OVERRIDE = '/api/v1/agents/{id}/tools/{toolId}/override';
     public const ROUTE_TOOLS_SETTINGS = '/api/v1/tools/{toolId}/settings';
     public const ROUTE_TOOLS_USER_SETTINGS = '/api/v1/tools/{toolId}/user-settings';
@@ -51,6 +59,17 @@ final class RouteDefinitions
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
+    public const ROUTE_GROUPS = '/api/v1/groups';
+    public const ROUTE_GROUPS_ID = '/api/v1/groups/{id}';
+    public const ROUTE_GROUPS_ID_AGENTS = '/api/v1/groups/{id}/agents';
+    public const ROUTE_GROUPS_ID_MEMBERS = '/api/v1/groups/{id}/members';
+    public const ROUTE_GROUPS_ID_MEMBERS_UID = '/api/v1/groups/{id}/members/{uid}';
+    public const ROUTE_GROUPS_ID_PREFERENCES = '/api/v1/groups/{id}/preferences';
+    public const ROUTE_GROUPS_ID_TOOLS = '/api/v1/groups/{id}/tools';
+    public const ROUTE_GROUPS_ID_TOOLS_CLASS = '/api/v1/groups/{id}/tools/{toolClass}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS = '/api/v1/groups/{id}/llm-configs';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = '/api/v1/groups/{id}/llm-configs/{cid}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = '/api/v1/groups/{id}/llm-configs/{cid}/set-default';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
@@ -95,6 +114,43 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentTransferController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Groups + members + principal-discovery. Group writes are admin-only;
+        // member writes accept admin OR group-owner (the controller enforces
+        // the owner branch via GroupService::fetchCallerRole).
+        $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_GROUPS, [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID, [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID, [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Group settings pages (Overview / Agents / Tools / LLM Drivers / Preferences).
+        // All routes use AuthMiddleware + CsrfMiddleware; the per-action
+        // `callerCanManageGroup()` does the write gate (owner / admin / global admin),
+        // and `callerCanSeeGroup()` does the read gate (member / owner / admin / global admin).
+        // Non-members receive 404 (existence-hiding, not 403).
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_AGENTS, [GroupController::class, 'agents'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PUT', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_TOOLS, [GroupToolsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'upsert'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT, [GroupLlmConfigsController::class, 'setDefault'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
 
         // Agent picture — image upload + delete. Avatar-only fields
         // (archetype/variant_key/palette_key) ride on PATCH /api/v1/agents/{id}

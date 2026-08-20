@@ -41,7 +41,7 @@ function seedUserAndAgent(mixed $authService): array
     simulateLoggedInSession($userId, 'task@example.com');
 
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -359,6 +359,7 @@ it('approve returns 409 when task is not PENDING_APPROVAL', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'x',
@@ -420,6 +421,7 @@ it('approve forwards normalized decisions and returns updated task', function ()
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'approve test',
@@ -491,6 +493,7 @@ it('reject returns 409 when task is not PENDING_APPROVAL', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'x',
@@ -529,6 +532,7 @@ it('reject calls orchestrator reject and returns 200', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'reject test',
@@ -585,7 +589,7 @@ it('destroy returns 404 for task belonging to another user', function (): void {
     simulateLoggedInSession($userId, OTHER_EMAIL);
 
     $otherAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Other Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -594,6 +598,7 @@ it('destroy returns 404 for task belonging to another user', function (): void {
     ]);
     $otherTask = Task::create([
         'agent_id'    => $otherAgent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Other user task',
@@ -624,6 +629,7 @@ it('destroy deletes task and returns 204', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Delete me',
@@ -651,6 +657,7 @@ it('destroy cascade-deletes task_history rows', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'History test',
@@ -682,6 +689,7 @@ it('destroy cascade-deletes tool_calls rows', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'ToolCalls test',
@@ -742,6 +750,7 @@ it('retry returns 409 when task is not FAILED', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'x',
@@ -782,6 +791,7 @@ it('retry calls taskService->retryTask() and returns 200 with the in-place task 
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'FAILED',
         'user_prompt' => RETRY_PROMPT,
@@ -821,6 +831,7 @@ it('retry returns 200 with the in-place task resource', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'FAILED',
         'user_prompt' => RETRY_PROMPT,
@@ -906,6 +917,7 @@ it('continue returns 200 and resets task for completed task', function (): void 
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'original',
@@ -946,6 +958,7 @@ it('continue returns 200 and resets task for failed task', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'FAILED',
         'user_prompt' => 'original',
@@ -971,6 +984,7 @@ it('continue returns 422 when prompt is missing', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'original',
@@ -993,6 +1007,7 @@ it('continue returns 422 when additional_steps is out of range', function (): vo
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'original',
@@ -1039,6 +1054,7 @@ it('continue returns 200 with auto-abort when task is RUNNING', function (): voi
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'original',
@@ -1081,6 +1097,7 @@ it('continue returns 200 when resuming from ABORTED', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'ABORTED',
         'user_prompt' => 'original',
@@ -1111,6 +1128,7 @@ it('continue returns 409 when task is in a non-resumable state (PENDING_APPROVAL
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'original',
@@ -1172,6 +1190,7 @@ it('cancelRetryChain returns 409 when task is not in a retry chain', function ()
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'test',
@@ -1201,6 +1220,7 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
 
     $root = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'root',
@@ -1210,7 +1230,8 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
 
     $retry1 = Task::create([
         'agent_id'          => $agent->id,
-        'user_id'           => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status'            => 'FAILED',
         'user_prompt'      => 'retry 1',
         'step_count'        => 1,
@@ -1221,7 +1242,8 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
 
     Task::create([
         'agent_id'          => $agent->id,
-        'user_id'           => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status'            => 'FAILED',
         'user_prompt'      => 'retry 2',
         'step_count'        => 1,
@@ -1257,6 +1279,7 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
 
     $root = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($otherUser->id),
         'user_id'     => $otherUser->id,
         'status'      => 'COMPLETED',
         'user_prompt' => 'root',
@@ -1266,7 +1289,8 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
 
     $retry = Task::create([
         'agent_id'          => $agent->id,
-        'user_id'           => $otherUser->id,
+        'principal_id' => createUserPrincipalPublic($otherUser->id),
+        'user_id'     => $otherUser->id,
         'status'            => 'FAILED',
         'user_prompt'      => 'retry',
         'step_count'        => 1,

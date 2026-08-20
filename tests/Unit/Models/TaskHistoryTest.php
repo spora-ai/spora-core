@@ -21,7 +21,7 @@ it('disables updated_at (append-only)', function (): void {
 it('allows mass assignment of history fields', function (): void {
     $userId = bootAuthLayer()->register('history@example.com', TASK_HISTORY_TEST_PASSWORD, 'History');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'History Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -30,6 +30,7 @@ it('allows mass assignment of history fields', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
@@ -53,7 +54,7 @@ it('allows mass assignment of history fields', function (): void {
 it('belongs to a task', function (): void {
     $userId = bootAuthLayer()->register('history2@example.com', TASK_HISTORY_TEST_PASSWORD, 'History 2');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'History Agent 2',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -62,6 +63,7 @@ it('belongs to a task', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',

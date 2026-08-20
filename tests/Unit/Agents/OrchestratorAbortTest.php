@@ -50,7 +50,7 @@ function seedTaskWithStatus(string $status, array $data = []): int
     $userId      = $authService->register('abort-' . $status . '@example.com', TEST_PASSWORD, 'Abort ' . $status);
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Abort Test Agent',
         'llm_driver_config_id' => null,
         'max_steps'            => 5,
@@ -59,7 +59,7 @@ function seedTaskWithStatus(string $status, array $data = []): int
 
     $task = Task::create(array_merge([
         'agent_id'    => $agent->id,
-        'user_id'     => $userId,
+        'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId,
         'status'      => $status,
         'user_prompt' => 'orig',
         'step_count'  => 0,
@@ -205,7 +205,7 @@ it('Orchestrator::continue on RUNNING source flips to ABORTED, appends marker, n
 it('Orchestrator::continue on ABORTED source clears aborted_at and re-prompts', function (): void {
     // Set up an LLM config so the post-ABORTED tick doesn't blow up
     $config = Spora\Models\LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'Test Global Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -219,7 +219,7 @@ it('Orchestrator::continue on ABORTED source clears aborted_at and re-prompts', 
     $userId = $authService->register('cont-aborted@example.com', TEST_PASSWORD, 'Cont Aborted');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Aborted Continue Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 5,
@@ -228,6 +228,7 @@ it('Orchestrator::continue on ABORTED source clears aborted_at and re-prompts', 
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'ABORTED',
         'user_prompt' => 'orig',
@@ -270,7 +271,7 @@ it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the wor
     // path capable of picking it up. Apply continues now resets the
     // retry-chain markers alongside aborted_at.
     $config = Spora\Models\LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'Test Global Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -288,7 +289,7 @@ it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the wor
     );
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'RetryChain Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 5,
@@ -299,7 +300,8 @@ it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the wor
     // failure — exactly the row the worker was skipping.
     $task = Task::create([
         'agent_id'         => $agent->id,
-        'user_id'          => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status'           => 'ABORTED',
         'user_prompt'      => 'orig',
         'step_count'       => 0,
@@ -331,7 +333,7 @@ it('Orchestrator::continue from COMPLETED also clears stale retry markers', func
     // if the user continues a COMPLETED task whose auto-retry still
     // has a marker, the worker should still be able to claim the row.
     $config = Spora\Models\LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'Test Global Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -349,7 +351,7 @@ it('Orchestrator::continue from COMPLETED also clears stale retry markers', func
     );
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Completed RetryChain Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 5,
@@ -358,7 +360,8 @@ it('Orchestrator::continue from COMPLETED also clears stale retry markers', func
 
     $task = Task::create([
         'agent_id'         => $agent->id,
-        'user_id'          => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status'           => 'COMPLETED',
         'user_prompt'      => 'old',
         'final_response'   => 'done',

@@ -21,10 +21,10 @@ use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\MediaAsset;
+use Spora\Models\PrincipalPreference;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall as ToolCallModel;
-use Spora\Models\UserPreference;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\MercurePublisherInterface;
@@ -105,7 +105,7 @@ function seedAgent(): array
 
     // Create a global LLM config as default (tests mock the DriverFactory, so credentials don't matter)
     $config = LLMDriverConfiguration::create([
-        'user_id'       => null,
+        'principal_id' => null,
         'name'          => 'Test Global Config',
         'driver_class'  => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'      => json_encode(['api_key' => 'test']),
@@ -116,7 +116,7 @@ function seedAgent(): array
     ]);
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Test Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 10,
@@ -568,8 +568,13 @@ it('keeps the task status as PENDING_APPROVAL during tool execution to prevent a
         {
             return ['type' => 'object', 'properties' => [], 'required' => []];
         }
-        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-        {
+        public function execute(
+            array $arguments,
+            int $agentId,
+            ?int $userId = null,
+            ?int $taskId = null,
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             // Task status should still be PENDING_APPROVAL while the tool is heavily executing
             $task = Task::find($this->taskId);
             $this->statusInsideTool = $task->status;
@@ -1274,7 +1279,7 @@ test('resolveLlmConfig throws when no config exists at any level', function (): 
 
     // Create agent WITHOUT any config AND without a global default existing
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Agent Without Config',
         'llm_driver_config_id' => null,
         'max_steps'            => 10,
@@ -1293,7 +1298,7 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
 
     // Create a config and set it as user preference
     $config = LLMDriverConfiguration::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-test', 'model' => 'gpt-4o']),
@@ -1303,8 +1308,8 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
     $config->max_tokens_output = 2048;
     $config->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $config->id,
     ]);
 
@@ -1316,7 +1321,7 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
     expect($task->status)->toBe('COMPLETED');
 
     // Cleanup
-    UserPreference::where('user_id', $userId)->delete();
+    PrincipalPreference::where('principal_id', $userId)->delete();
     LLMDriverConfiguration::where('id', $config->id)->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1325,7 +1330,7 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 
     // Create a global default config
     $globalConfig = LLMDriverConfiguration::create([
-        'user_id' => null,
+        'principal_id' => null,
         'name' => 'Global Default Config',
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-global', 'model' => 'gpt-4o']),
@@ -1338,7 +1343,7 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 
     // Create a user preference config
     $prefConfig = LLMDriverConfiguration::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
@@ -1348,8 +1353,8 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $prefConfig->max_tokens_output = 2048;
     $prefConfig->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $prefConfig->id,
     ]);
 
@@ -1361,7 +1366,10 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     expect($task->status)->toBe('COMPLETED');
 
     // Cleanup
-    UserPreference::where('user_id', $userId)->delete();
+    PrincipalPreference::where('principal_id', $userId)->delete();
+    // Detach references first (FK from principal_preferences.preferred_llm_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$globalConfig->id, $prefConfig->id])->delete();
+
     LLMDriverConfiguration::whereIn('id', [$globalConfig->id, $prefConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1370,7 +1378,7 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
 
     // Create user preference config
     $prefConfig = LLMDriverConfiguration::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-pref', 'model' => 'gpt-4o']),
@@ -1380,14 +1388,14 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $prefConfig->max_tokens_output = 2048;
     $prefConfig->save();
 
-    UserPreference::create([
-        'user_id' => $userId,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'preferred_llm_config_id' => $prefConfig->id,
     ]);
 
     // Create agent-specific config
     $agentConfig = LLMDriverConfiguration::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'Agent Config',
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-agent', 'model' => 'gpt-4o']),
@@ -1410,7 +1418,11 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     expect($task->status)->toBe('COMPLETED');
 
     // Cleanup
-    UserPreference::where('user_id', $userId)->delete();
+    PrincipalPreference::where('principal_id', $userId)->delete();
+    // Detach references before deleting LLMDriverConfigurations (FK from
+    // principal_preferences.preferred_llm_config_id and from agents.llm_driver_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$prefConfig->id, $agentConfig->id])->delete();
+    Agent::where('id', $agentId)->update(['llm_driver_config_id' => null]);
     LLMDriverConfiguration::whereIn('id', [$prefConfig->id, $agentConfig->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1425,7 +1437,7 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
 
     // User A creates their own config
     $configA = LLMDriverConfiguration::create([
-        'user_id' => $userA,
+        'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Config',
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-usera', 'model' => 'gpt-4o']),
@@ -1435,14 +1447,14 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     ]);
 
     // User A sets preference for their own config
-    UserPreference::create([
-        'user_id' => $userA,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userA),
         'preferred_llm_config_id' => $configA->id,
     ]);
 
     // User B creates their own config
     $configB = LLMDriverConfiguration::create([
-        'user_id' => $userB,
+        'principal_id' => createUserPrincipalPublic($userB),
         'name' => 'User B Config',
         'driver_class' => OPENAI_COMPATIBLE_DRIVER,
         'settings' => json_encode(['api_key' => 'sk-userb', 'model' => 'gpt-4o']),
@@ -1452,14 +1464,14 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     ]);
 
     // User B sets preference for their own config
-    UserPreference::create([
-        'user_id' => $userB,
+    PrincipalPreference::create([
+        'principal_id' => createUserPrincipalPublic($userB),
         'preferred_llm_config_id' => $configB->id,
     ]);
 
     // Create agents for both users
     $agentA = Agent::create([
-        'user_id' => $userA,
+        'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Agent',
         'llm_driver_config_id' => null,
         'max_steps' => 10,
@@ -1467,7 +1479,7 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     ]);
 
     $agentB = Agent::create([
-        'user_id' => $userB,
+        'principal_id' => createUserPrincipalPublic($userB),
         'name' => 'User B Agent',
         'llm_driver_config_id' => null,
         'max_steps' => 10,
@@ -1487,7 +1499,10 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     expect($taskB->status)->toBe('COMPLETED');
 
     // Cleanup
-    UserPreference::whereIn('user_id', [$userA, $userB])->delete();
+    PrincipalPreference::whereIn('principal_id', [$userA, $userB])->delete();
+    // Detach references first (FK from principal_preferences.preferred_llm_config_id).
+    PrincipalPreference::whereIn('preferred_llm_config_id', [$configA->id, $configB->id])->delete();
+
     LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
     Agent::whereIn('id', [$agentA->id, $agentB->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -1689,7 +1704,7 @@ it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORT
     $driverFactory->allows('makeFromAgent')->andReturn($mock);
 
     $llmConfig = LLMDriverConfiguration::create([
-        'user_id'        => null,
+        'principal_id' => null,
         'name'           => 'Test Global Config',
         'driver_class'   => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'       => json_encode(['api_key' => 'test']),
@@ -1703,6 +1718,7 @@ it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORT
     $agent->save();
 
     $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($agent->user_id),
         'user_id'     => $agent->user_id,
         'agent_id'    => $agent->id,
         'status'      => 'RUNNING',
@@ -1780,7 +1796,7 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
 
     // Agent with no LLM config and no global default — resolveLlmConfig() will throw.
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Agent Without Config',
         'llm_driver_config_id' => null,
         'max_steps'            => 10,
@@ -1863,7 +1879,7 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     $method = $reflection->getMethod('buildToolDefinitions');
 
     // Call it with only StubInputTool enabled
-    $method->invoke($orch, [StubInputTool::class], $agentId, $userId);
+    $method->invoke($orch, [StubInputTool::class], $agentId, null);
 
     $logs = Capsule::connection()->getQueryLog();
     Capsule::connection()->disableQueryLog();
@@ -2933,7 +2949,8 @@ it('scheduleAutoRetry schedules the retry in place when error code is retryable 
 
     $task = Task::create([
         'agent_id'      => $agentId,
-        'user_id'       => $agent->user_id,
+        'principal_id' => createUserPrincipalPublic($agent->user_id),
+        'user_id'     => $agent->user_id,
         'status'        => 'RUNNING',
         'user_prompt'   => 'Retry me',
         'step_count'    => 0,
@@ -3034,6 +3051,7 @@ it('scheduleAutoRetry does NOT exceed max_retries', function (): void {
     // retry_count already at max → no new retry task.
     $task = Task::create([
         'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($agent->user_id),
         'user_id'     => $agent->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Exhausted retries',
@@ -3069,8 +3087,13 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
     // #[Tool] attribute and a single execute().
     $plainTool = new #[Tool(name: 'plain_tool', description: 'A tool without operations')]
     class implements ToolInterface {
-        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-        {
+        public function execute(
+            array $arguments,
+            int $agentId,
+            ?int $userId = null,
+            ?int $taskId = null,
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             return new ToolResult(true, 'plain result');
         }
         public function describeAction(array $arguments): string
@@ -3174,8 +3197,13 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     // Define a tool that we will attribute to a plugin.
     $pluginTool = new #[Tool(name: 'plugin_search', description: 'Search via plugin')]
     class implements ToolInterface {
-        public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-        {
+        public function execute(
+            array $arguments,
+            int $agentId,
+            ?int $userId = null,
+            ?int $taskId = null,
+            ?Spora\Services\PrincipalContext $context = null,
+        ): ToolResult {
             return new ToolResult(true, 'plugin result');
         }
         public function describeAction(array $arguments): string
@@ -3977,7 +4005,7 @@ describe('Orchestrator::start — attachment serialization round-trip', function
             'media_type'        => 'text',
             'byte_size'         => strlen($body),
             'agent_id'          => $agentId,
-            'user_id'           => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'plugin_slug'       => null,
             'asset_token'       => bin2hex(random_bytes(16)),
             'public_access_token' => null,
@@ -4050,7 +4078,8 @@ it('retry resets failed-task state in place (error fields cleared, history prese
     [$agentId, $userId] = seedAgent();
 
     $task = Task::create([
-        'user_id'        => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'       => $agentId,
         'status'         => 'FAILED',
         'user_prompt'    => 'retry me',
@@ -4094,6 +4123,7 @@ it('retry resets the failed task in place and clears retry_of_task_id so the mai
     [$agentId, $userId] = seedAgent();
 
     $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $agentId,
         'status'      => 'FAILED',
@@ -4135,6 +4165,7 @@ it('retry throws when the task is not in FAILED status', function (): void {
     [$agentId, $userId] = seedAgent();
 
     $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $agentId,
         'status'      => 'COMPLETED',

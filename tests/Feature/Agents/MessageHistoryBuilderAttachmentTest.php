@@ -31,7 +31,7 @@ function seedAttachmentAgent(): int
     $authService = bootAuthLayer();
     $userId      = $authService->register('att@example.com', TEST_PASSWORD, 'Att');
     $config = \Spora\Models\LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Test Global Config',
         'driver_class' => AnthropicCompatibleDriver::class,
         'settings'     => json_encode(['api_key' => 'test']),
@@ -41,7 +41,7 @@ function seedAttachmentAgent(): int
         'max_tokens_output' => 4096,
     ]);
     $agent = \Spora\Models\Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Attachment Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 10,

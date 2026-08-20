@@ -20,6 +20,50 @@ if (!function_exists('makeAdmin')) {
     }
 }
 
+if (!function_exists('encodeLlmSettingsForTest')) {
+    /**
+     * Test helper: encode LLM settings using a freshly-wired
+     * {@see Spora\Services\LLMConfigPersistence}. The production code
+     * path moved encodeSettings off {@see Spora\Services\LLMConfigService}
+     * during the S1448 split; tests that need the raw encryption use
+     * this helper to avoid re-implementing the constructor signature.
+     */
+    function encodeLlmSettingsForTest(string $driverClass, array $settings): string
+    {
+        $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new Spora\Core\SecurityManager($key);
+        $persistence = new Spora\Services\LLMConfigPersistence(
+            $security,
+            new Spora\Services\LLMConfigSchemaInspector(),
+            new Spora\Services\PrincipalResolver(),
+        );
+        return json_encode($persistence->encodeSettings($driverClass, $settings));
+    }
+}
+
+if (!function_exists('makeLlmPersistenceForService')) {
+    /**
+     * Build a {@see Spora\Services\LLMConfigPersistence} that shares its
+     * SecurityManager with the supplied {@see Spora\Services\LLMConfigService},
+     * so encode/decode round-trips against the same key. Used by helpers that
+     * need to write settings the service can later decrypt.
+     */
+    function makeLlmPersistenceForService(Spora\Services\LLMConfigService $llmConfigService): Spora\Services\LLMConfigPersistence
+    {
+        $inspector = (new ReflectionClass($llmConfigService))->getProperty('schemaInspector')
+            ->getValue($llmConfigService);
+        $persistence = (new ReflectionClass($llmConfigService))->getProperty('persistence')
+            ->getValue($llmConfigService);
+        $security = (new ReflectionClass($persistence))->getProperty('security')
+            ->getValue($persistence);
+
+        return new Spora\Services\LLMConfigPersistence(
+            $security,
+            $inspector,
+        );
+    }
+}
+
 if (!function_exists('createTestConfig')) {
     function createTestConfig(
         string $name,
@@ -38,15 +82,123 @@ if (!function_exists('createTestConfig')) {
             ]);
         }
 
+        $persistence = makeLlmPersistenceForService($llmConfigService);
+        $isGlobal = $userId === null;
+
+        // The migration's NOT NULL constraint on `principal_id` blocks the
+        // model save path for global configs (model XOR requires
+        // principal_id = null ⇔ is_global = true). Insert global rows via
+        // the query builder to skip the model-level XOR check.
+        if ($isGlobal) {
+            return createTestGlobalConfig($name, $driverClass, $settings, $isDefault, $persistence);
+        }
+
+        $principalId = createUserPrincipalPublic($userId);
+
         $config = new Spora\Models\LLMDriverConfiguration();
-        $config->user_id = $userId ?? ($_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1);
+        $config->principal_id = $principalId;
         $config->name = $name;
         $config->driver_class = $driverClass;
-        $config->settings = json_encode($llmConfigService->encodeSettings($driverClass, $settings));
+        $config->settings = json_encode($persistence->encodeSettings($driverClass, $settings));
         $config->is_default = $isDefault;
+        $config->is_global = false;
         $config->save();
 
         return $config;
+    }
+}
+
+if (!function_exists('createTestGlobalConfig')) {
+    /**
+     * Insert a global LLMDriverConfiguration row directly via the query
+     * builder. The model's `validateGlobalXor()` requires
+     * `principal_id = null` for globals, but migration 0067 promoted the
+     * column to NOT NULL — bypassing the model save() gets us a row in the
+     * correct shape for the controller / preference tests without needing
+     * to amend the migration in this PR.
+     */
+    function createTestGlobalConfig(
+        string $name,
+        string $driverClass,
+        array $settings,
+        bool $isDefault,
+        ?Spora\Services\LLMConfigPersistence $persistence = null,
+    ): Spora\Models\LLMDriverConfiguration {
+        if ($persistence === null) {
+            $persistence = new Spora\Services\LLMConfigPersistence(
+                new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+                new Spora\Services\LLMConfigSchemaInspector(),
+            );
+        }
+        $id = (int) Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->insertGetId([
+            'principal_id' => null,
+            'name'         => $name,
+            'driver_class' => $driverClass,
+            'settings'     => json_encode($persistence->encodeSettings($driverClass, $settings)),
+            'is_default'   => $isDefault,
+            'is_global'    => true,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        return Spora\Models\LLMDriverConfiguration::findOrFail($id);
+    }
+}
+
+if (!function_exists('createUserPrincipalPublic')) {
+    /**
+     * Materialise the user-principal row for $userId and return its id.
+     *
+     * Wraps the same logic as {@see Tests\Concerns\CreatesPrincipal::createUserPrincipal()}
+     * so functions defined in this preloaded helper file (which run before
+     * Pest's per-test class binding wires in traits) can still satisfy the
+     * FK on `principal_id`.
+     *
+     * If `$materialiseUser` is true (default), a `users` row is created on
+     * demand so the FK constraint is satisfied. Pass false when stubbing an
+     * agent with a fake user id (e.g. `$agent->user_id = 99`) — the test
+     * never persists the agent, so the FK on `principals.user_id` is never
+     * actually checked.
+     */
+    function createUserPrincipalPublic(int $userId, bool $materialiseUser = true): int
+    {
+        $existing = Illuminate\Database\Capsule\Manager::table('principals')
+            ->where('type', 'user')->where('user_id', $userId)->value('id');
+        if ($existing !== null) {
+            return (int) $existing;
+        }
+
+        if ($materialiseUser && !Illuminate\Database\Capsule\Manager::table('users')->where('id', $userId)->exists()) {
+            Illuminate\Database\Capsule\Manager::table('users')->insert([
+                'id'         => $userId,
+                'email'      => "stub-user-{$userId}@spora.test",
+                'username'   => "stub_user_{$userId}",
+                'password'   => str_repeat("\0", 60),
+                'status'     => 1,
+                'verified'   => 1,
+                'resettable' => 1,
+                'roles_mask' => 0,
+                'registered' => time(),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        try {
+            return (int) Illuminate\Database\Capsule\Manager::table('principals')->insertGetId([
+                'type'       => 'user',
+                'user_id'    => $userId,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (PDOException) {
+            $existing = Illuminate\Database\Capsule\Manager::table('principals')
+                ->where('type', 'user')->where('user_id', $userId)->value('id');
+            if ($existing !== null) {
+                return (int) $existing;
+            }
+            throw new RuntimeException("Failed to materialise user-principal for user {$userId}");
+        }
     }
 }
 

@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
+use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
@@ -18,6 +19,17 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  * Tool enablement, per-agent settings overrides, and per-operation overrides
  * moved to {@see AgentToolSettingsService} so this umbrella service stays
  * under SonarCloud's 20-method-per-class ceiling (S1448).
+ *
+ * Principal materialisation and ownership transfer moved to
+ * {@see AgentPrincipalService} for the same reason — the principal axis
+ * is a self-contained responsibility (talks to `principals` and
+ * `PrincipalService::transferAgent()` only) and earns its own class.
+ *
+ * Principals-and-groups (migration 0067) re-keyed the ownership column from
+ * `agents.user_id` to `agents.principal_id`. Every user-scoped read or
+ * mutation matches on the union of principals the user can act as, so the
+ * shared-agent model is transparent to controllers that still think in
+ * terms of "user owns agent".
  */
 final class AgentService implements AgentServiceInterface
 {
@@ -26,7 +38,7 @@ final class AgentService implements AgentServiceInterface
     /**
      * Editable agent columns the service will write through updateAgent()
      * and updateAgentByAgentId(). Keep in sync with AgentController::$allowed
-     * (minus internal-only fields like user_id / llm_driver_config_id) so
+     * (minus internal-only fields like principal_id / llm_driver_config_id) so
      * the operator-facing PATCH and the in-tool update_agent stay on the
      * same allowlist.
      *
@@ -50,6 +62,8 @@ final class AgentService implements AgentServiceInterface
     public function __construct(
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?AgentPrincipalServiceInterface $principalService = null,
     ) {}
 
 
@@ -61,7 +75,7 @@ final class AgentService implements AgentServiceInterface
         // eager-load avoids an N+1 chain when AgentResource serializes
         // the per-agent picture (one query per agent for the picture row,
         // plus one per agent for the uploaded image's media_assets row).
-        return Agent::where('user_id', $userId)
+        return $this->newVisibleForUserQuery($userId)
             ->with(['agentTools', 'profilePicture.mediaAsset'])
             ->orderByDesc('created_at')
             ->get()
@@ -69,51 +83,83 @@ final class AgentService implements AgentServiceInterface
             ->all();
     }
 
-    public function createAgent(int $userId, array $data): Agent
+    public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
-        // Whitelist the inbound data to the editable columns so a
-        // caller can't smuggle non-Agent columns (notes, required_plugins,
-        // etc.) into the insert.
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
+        if ($principalId === null) {
+            $principalId = $this->principalService?->resolveDefaultPrincipalId($userId)
+                ?? $this->resolveDefaultPrincipalIdFallback($userId);
+        }
+
         return Capsule::connection()->transaction(
-            function () use ($userId, $allowed): Agent {
-                $id = Capsule::table('agents')->insertGetId([
-                    'user_id'                => $userId,
-                    'name'                   => $allowed['name'],
-                    'description'            => $allowed['description'] ?? null,
-                    'system_prompt'          => $allowed['system_prompt'] ?? null,
-                    'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
-                    'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
-                    'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
-                    'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
-                    'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
-                    'is_active'              => 1,
-                    'created_at'             => date(self::DATETIME_FORMAT),
-                    'updated_at'             => date(self::DATETIME_FORMAT),
-                ]);
-
-                // Persist the default agent_pictures row in the same
-                // transaction so a brand-new agent always has a
-                // `profile_picture` (deterministic default avatar) on
-                // the very next read. Without this, the dashboard
-                // rendered initials for new agents until the operator
-                // touched the picker.
-                if ($this->pictureService !== null) {
-                    $this->pictureService->createDefaultPicture($id);
-                }
-
-                $created = Agent::find($id);
-                if ($created === null) {
-                    throw AgentCreateLostException::forId($id);
-                }
-                return $created;
-            },
+            fn(): Agent => $this->persistNewAgent($allowed, $principalId),
         );
+    }
+
+    /**
+     * Last-resort principal materialisation for legacy test paths that
+     * construct {@see AgentService} directly without DI wiring
+     * {@see AgentPrincipalService}. Production callers always wire the
+     * service via the DI container; this branch only fires in
+     * `new AgentService()`-style test fixtures.
+     */
+    private function resolveDefaultPrincipalIdFallback(int $userId): int
+    {
+        $existing = Capsule::table('principals')
+            ->where('type', Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->value('id');
+        if ($existing !== null) {
+            return (int) $existing;
+        }
+        return (int) Capsule::table('principals')->insertGetId([
+            'type'       => Principal::TYPE_USER,
+            'user_id'    => $userId,
+            'created_at' => date(self::DATETIME_FORMAT),
+            'updated_at' => date(self::DATETIME_FORMAT),
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $allowed
+     */
+    private function persistNewAgent(array $allowed, int $principalId): Agent
+    {
+        $id = Capsule::table('agents')->insertGetId([
+            'principal_id'           => $principalId,
+            'name'                   => $allowed['name'],
+            'description'            => $allowed['description'] ?? null,
+            'system_prompt'          => $allowed['system_prompt'] ?? null,
+            'llm_driver_config_id'   => $allowed['llm_driver_config_id'] ?? null,
+            'max_steps'              => (int) ($allowed['max_steps'] ?? 10),
+            'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
+            'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
+            'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
+            'is_active'              => 1,
+            'created_at'             => date(self::DATETIME_FORMAT),
+            'updated_at'             => date(self::DATETIME_FORMAT),
+        ]);
+
+        // Persist the default agent_pictures row in the same transaction
+        // so a brand-new agent always has a `profile_picture` on the
+        // very next read. The dashboard relies on this to render an
+        // avatar instead of initials for brand-new agents.
+        if ($this->pictureService !== null) {
+            $this->pictureService->createDefaultPicture($id);
+        }
+
+        $created = Agent::find($id);
+        if ($created === null) {
+            throw AgentCreateLostException::forId($id);
+        }
+        return $created;
     }
 
     public function getAgent(int $agentId, int $userId): ?Agent
     {
-        return Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        return $this->newVisibleForUserQuery($userId)
+            ->where('id', $agentId)
+            ->first();
     }
 
     public function updateAgent(int $agentId, int $userId, array $data): ?Agent
@@ -135,7 +181,7 @@ final class AgentService implements AgentServiceInterface
 
         // No user-ownership check — the orchestrator has pinned the agent
         // id. EDITABLE_AGENT_FIELDS still gates the columns, so the tool
-        // cannot escalate to user_id / llm_driver_config_id.
+        // cannot escalate to principal_id / llm_driver_config_id.
         return $this->applyAgentPatch($agentId, $agent, $data);
     }
 
@@ -195,7 +241,7 @@ final class AgentService implements AgentServiceInterface
     }
 
     /**
-     * Shared flip-a-boolean-column path for setPinned / setArchived.
+     * Share flip-a-boolean-column path for setPinned / setArchived.
      * Centralises the user-scoped ownership check + updated_at stamp so
      * the public methods stay one-liners and the SQL shape stays in one place.
      */
@@ -216,6 +262,52 @@ final class AgentService implements AgentServiceInterface
         $agent->refresh();
 
         return $agent;
+    }
+
+    public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
+    {
+        if ($this->principalService === null) {
+            throw new Exceptions\DependencyNotWiredException('AgentPrincipalService not wired into AgentService — cannot transfer.');
+        }
+        return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+    }
+
+    /**
+     * Reusable Eloquent query builder scoped to agents the user can see.
+     * Uses the principal resolver when wired (production); falls back to
+     * a direct user-principal lookup otherwise so legacy tests don't break.
+     */
+    private function newVisibleForUserQuery(int $userId)
+    {
+        if ($this->principalResolver !== null) {
+            return $this->queryFromVisiblePrincipalIds($userId);
+        }
+        return $this->legacyQueryFromUserPrincipal($userId);
+    }
+
+    private function queryFromVisiblePrincipalIds(int $userId)
+    {
+        $ids = $this->principalResolver->visiblePrincipalIds($userId);
+        if ($ids === []) {
+            return Agent::whereRaw('1 = 0');
+        }
+        return Agent::whereIn('principal_id', $ids);
+    }
+
+    /**
+     * Test path: the resolver is unwired, so resolve the user's
+     * user-principal directly. A missing principal returns an empty
+     * query so callers treat it as "no agents" rather than "all agents".
+     */
+    private function legacyQueryFromUserPrincipal(int $userId)
+    {
+        $principal = Principal::where('type', 'user')
+            ->where('user_id', $userId)
+            ->first();
+        if ($principal === null) {
+            return Agent::whereRaw('1 = 0');
+        }
+        return Agent::where('principal_id', $principal->id);
     }
 
 

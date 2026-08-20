@@ -75,7 +75,7 @@ test('GET /skills requires authentication', function (): void {
     $controller = new SkillController($auth, $scanner);
     $response = $controller->index();
 
-    expect($response->getStatusCode())->toBe(422)
+    expect($response->getStatusCode())->toBe(401)
         ->and(json_decode((string) $response->getContent(), true)['error']['code'])
         ->toBe('UNAUTHENTICATED');
 

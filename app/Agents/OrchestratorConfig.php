@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -39,5 +40,6 @@ final class OrchestratorConfig
         public readonly ?AgentServiceInterface $agentService = null,
         public readonly ?SubAgentServiceInterface $subAgent = null,
         public readonly WorkerMode $workerMode = WorkerMode::Sync,
+        public readonly ?LLMConfigPreferences $principalPreferences = null,
     ) {}
 }

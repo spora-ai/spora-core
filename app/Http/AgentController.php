@@ -12,6 +12,8 @@ use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,7 +24,8 @@ use Throwable;
  * Agent CRUD endpoints.
  *
  * Tool enablement / status / overrides are handled by AgentToolController
- * and AgentOverrideController respectively.
+ * and AgentOverrideController respectively. Agent ownership transfer
+ * (POST /api/v1/agents/{id}/transfer) is handled by AgentTransferController.
  */
 final class AgentController
 {
@@ -44,6 +47,8 @@ final class AgentController
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?PrincipalService $principalService = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -69,7 +74,15 @@ final class AgentController
             // else is silently dropped so future schema additions don't leak.
             $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
-                $agents = Agent::where('user_id', $userId)
+                $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+                // Caller may have no principals — likely a freshly-registered
+                // user whose principal hasn't been materialised yet. Materialise
+                // the user-principal on the fly so the picker doesn't render
+                // empty even though ownership will work going forward.
+                if ($principalIds === [] && $this->principalService !== null) {
+                    $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+                }
+                $agents = Agent::whereIn('principal_id', $principalIds)
                     ->orderBy('name')
                     ->get($columns)
                     ->all();
@@ -100,6 +113,8 @@ final class AgentController
             return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $principalId = $this->resolvePrincipalIdForCreate($userId, $body);
+
         $data = [
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
@@ -114,12 +129,45 @@ final class AgentController
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
         ];
 
-        $agent = $this->agentService->createAgent($userId, $data);
+        $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
             ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Resolve the owning principal for {@see store()}. Accepts an
+     * explicit `principal_id` in the body when the caller is admin or
+     * owns the target principal; otherwise defaults to the caller's
+     * user-principal. Returns null when the field is omitted and no
+     * PrincipalService is wired (legacy test path).
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
+    {
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return null;
+        }
+        $requested = (int) $requested;
+
+        if ($this->principalService === null) {
+            return null;
+        }
+
+        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+    }
+
+    private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
+    {
+        if ($this->authService->isAdmin()
+            || $this->principalService->callerControlsPrincipal($userId, $requested)) {
+            return $requested;
+        }
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
     }
 
     /**

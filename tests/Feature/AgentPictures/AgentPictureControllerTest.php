@@ -32,7 +32,7 @@ beforeEach(function (): void {
     // Seed an agent for tests that exercise it; tests that don't need an
     // agent just ignore the seed.
     \Illuminate\Database\Capsule\Manager::table('agents')->insert([
-        'id' => 1, 'user_id' => $userId, 'name' => 'Test', 'max_steps' => 10,
+        'id' => 1, 'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Test', 'max_steps' => 10,
         'is_active' => 1, 'allow_followup' => 1, 'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
@@ -69,7 +69,7 @@ function buildController(AgentPictureService $service): AgentPictureController
         {
             return [];
         }
-        public function createAgent(int $userId, array $data): Agent
+        public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
         {
             throw new RuntimeException('not used');
         }
@@ -100,6 +100,10 @@ function buildController(AgentPictureService $service): AgentPictureController
         public function setArchived(int $userId, int $agentId, bool $archived): Agent
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('not found');
+        }
+        public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
+        {
+            throw new RuntimeException('not used');
         }
     };
     $toolSettings = new class implements AgentToolSettingsServiceInterface {

@@ -34,7 +34,13 @@ function makeController(): AgentTemplateController
         directories: $paths->agentTemplatesPaths(),
     );
     $validator = new AgentTemplateValidator();
-    $importer = new AgentTemplateImporter($toolConfig, $plugins, $paths);
+    $importer = new AgentTemplateImporter(
+        $toolConfig,
+        $plugins,
+        $paths,
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+    );
     $exporter = new AgentTemplateExporter($plugins, $toolConfig, new Spora\Services\ToolConfigSchemaInspector());
     $agentService = new AgentService();
 
@@ -115,6 +121,25 @@ test('import returns 422 VALIDATION_ERROR when validator reports errors', functi
     expect(json_decode($response->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
 });
 
+test('import accepts a body with `principal_id` as API metadata, not a template field', function (): void {
+    // Without the strip-before-validate fix, the validator would
+    // reject the body under UNKNOWN_TOP_LEVEL_KEY 'principal_id'
+    // because that key is not in the template ALLOWED_TOP_KEYS list.
+    // The controller now pulls principal_id off before validation
+    // and forwards the rest as a clean template payload.
+    $request = jsonRequest('POST', '/api/v1/agent-templates/import', [
+        'id' => 'meta-key', 'name' => 'Meta key', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'meta key test'],
+        'tools' => [],
+        'required_plugins' => [],
+        'principal_id' => null,
+    ]);
+    $response = $this->controller->import($request);
+    expect($response->getStatusCode())->toBe(201);
+    $data = json_decode($response->getContent(), true)['data'];
+    expect($data['agent']['name'])->toBe('Meta key');
+});
+
 test('exportAgent returns 404 for an agent owned by another user', function (): void {
     $request = Symfony\Component\HttpFoundation\Request::create(
         '/api/v1/agents/9999/export',
@@ -127,7 +152,7 @@ test('exportAgent returns 404 for an agent owned by another user', function (): 
 
 test('exportAgent returns the template payload + inline_warning for an owned agent', function (): void {
     $agent = Agent::create([
-        'user_id'   => $this->userId,
+        'principal_id' => createUserPrincipalPublic($this->userId),
         'name'      => 'Owned',
         'max_steps' => 5,
         'is_active' => true,
