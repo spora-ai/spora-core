@@ -43,33 +43,33 @@ final class GroupMemberController
     /**
      * GET /api/v1/groups/{id}/members
      */
-    public function index(int $groupId): JsonResponse
+    public function index(int $id): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
 
-        if (!$this->callerCanReadGroup($groupId, (int) $userId)) {
+        if (!$this->callerCanReadGroup($id, (int) $userId)) {
             // 404 whether the group exists or not — the response is
             // intentionally non-distinguishing so a stranger can't
             // probe group ids.
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['members' => $this->memberRows($groupId)]]);
+        return new JsonResponse(['data' => ['members' => $this->memberRows($id)]]);
     }
 
     /**
      * POST /api/v1/groups/{id}/members
      */
-    public function store(int $groupId, Request $request): JsonResponse
+    public function store(int $id, Request $request): JsonResponse
     {
-        $auth = $this->requireCallerAndWriteAccess($groupId);
+        $auth = $this->requireCallerAndWriteAccess($id);
         if ($auth instanceof JsonResponse) {
             return $auth;
         }
-        return $this->addMemberAfterAuth($groupId, $request, $auth[0]);
+        return $this->addMemberAfterAuth($id, $request, $auth[0]);
     }
 
     /**
@@ -122,13 +122,13 @@ final class GroupMemberController
     /**
      * PATCH /api/v1/groups/{id}/members/{uid}
      */
-    public function update(int $groupId, int $userId, Request $request): JsonResponse
+    public function update(int $id, int $userId, Request $request): JsonResponse
     {
-        $auth = $this->requireCallerAndWriteAccess($groupId);
+        $auth = $this->requireCallerAndWriteAccess($id);
         if ($auth instanceof JsonResponse) {
             return $auth;
         }
-        return $this->changeMemberRoleAfterAuth($groupId, $userId, $request, $auth[0]);
+        return $this->changeMemberRoleAfterAuth($id, $userId, $request, $auth[0]);
     }
 
     /**
@@ -180,16 +180,16 @@ final class GroupMemberController
     /**
      * DELETE /api/v1/groups/{id}/members/{uid}
      */
-    public function destroy(int $groupId, int $userId): JsonResponse
+    public function destroy(int $id, int $userId): JsonResponse
     {
-        $auth = $this->requireCallerAndWriteAccess($groupId);
+        $auth = $this->requireCallerAndWriteAccess($id);
         if ($auth instanceof JsonResponse) {
             return $auth;
         }
         [$callerUserId] = $auth;
 
         try {
-            $this->groupService->removeMember($groupId, $userId, $callerUserId);
+            $this->groupService->removeMember($id, $userId, $callerUserId);
         } catch (GroupMembershipRuleException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'ROLE_RULE_VIOLATION', 'message' => $e->getMessage()]],
