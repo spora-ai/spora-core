@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
@@ -17,6 +18,7 @@ use Spora\Services\Exceptions\PrincipalHasDependentsException;
 use Spora\Services\GroupDetailResource;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalService;
+use Spora\Services\ProfilePictures\GroupPictureService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -52,6 +54,7 @@ final class GroupController
         private readonly AuthService $authService,
         private readonly GroupService $groupService,
         private readonly PrincipalService $principalService,
+        private readonly GroupPictureService $pictureService = new GroupPictureService(),
     ) {}
 
     /**
@@ -89,7 +92,7 @@ final class GroupController
         }
 
         return new JsonResponse([
-            'data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService)],
+            'data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService, $this->pictureService)],
         ]);
     }
 
@@ -116,7 +119,7 @@ final class GroupController
         $group = $this->groupService->createGroup((int) $userId, $name, $description);
 
         return new JsonResponse(
-            ['data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService)]],
+            ['data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService, $this->pictureService)]],
             Response::HTTP_CREATED,
         );
     }
@@ -142,10 +145,35 @@ final class GroupController
             $group = Group::findOrFail($id);
         }
 
+        $this->applyProfilePictureUpdate($id, $request);
+
         $userId = $this->authService->currentUserId() ?? 0;
         return new JsonResponse([
-            'data' => ['group' => GroupDetailResource::toArray($group, $userId, $this->principalService)],
+            'data' => ['group' => GroupDetailResource::toArray($group, $userId, $this->principalService, $this->pictureService)],
         ]);
+    }
+
+    /**
+     * Write the optional `profile_picture` nested object to the
+     * group's `group_pictures` row. Mirrors
+     * {@see AgentController::applyProfilePictureUpdate()}
+     * — validation runs *before* the groups-row write (via
+     * {@see resolveGroupUpdateChanges()}) so an invalid picture never
+     * partially overwrites the name / description.
+     */
+    private function applyProfilePictureUpdate(int $groupId, Request $request): void
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse || !is_array($body['profile_picture'] ?? null)) {
+            return;
+        }
+
+        $this->pictureService->updateAvatar(
+            $groupId,
+            isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
+            isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
+            isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
+        );
     }
 
     /**
@@ -347,7 +375,107 @@ final class GroupController
             $description = $body['description'] === null ? null : trim((string) $body['description']);
             $update['description'] = ($description === '') ? null : $description;
         }
+
+        $pictureError = $this->validateProfilePicturePayload($body);
+        if ($pictureError !== null) {
+            return $pictureError;
+        }
         return $update;
+    }
+
+    /**
+     * Validate the optional `profile_picture` nested payload (type +
+     * shape + enum values). Returns the first 422 JsonResponse on any
+     * failure, or null when the key is absent / well-formed. Mirrors
+     * {@see AgentController::validateProfilePicturePayload()}
+     * so the operator's PATCH body uses the same shape for both
+     * agents and groups.
+     *
+     * The picture payload is validated *before* the groups-row write
+     * so an invalid picture never partially overwrites the name /
+     * description.
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function validateProfilePicturePayload(array $body): ?JsonResponse
+    {
+        if (!array_key_exists('profile_picture', $body)) {
+            return null;
+        }
+        $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
+        if ($pictureTypeError !== null) {
+            return $pictureTypeError;
+        }
+        return $this->validateProfilePicture($body['profile_picture']);
+    }
+
+    private function validateProfilePictureType(mixed $picture): ?JsonResponse
+    {
+        if (!is_array($picture)) {
+            return $this->unprocessable(
+                'PROFILE_PICTURE_TYPE',
+                "Field 'profile_picture' must be a JSON object.",
+            );
+        }
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed> $picture
+     */
+    private function validateProfilePicture(array $picture): ?JsonResponse
+    {
+        $allowed = ['archetype', 'variant_key', 'palette_key'];
+        foreach (array_keys($picture) as $key) {
+            if (!in_array($key, $allowed, true)) {
+                return $this->unprocessable(
+                    'PROFILE_PICTURE_UNKNOWN_KEY',
+                    "Unknown field 'profile_picture.{$key}'.",
+                );
+            }
+        }
+        $typeError = $this->validateProfilePictureTypes($picture);
+        if ($typeError !== null) {
+            return $typeError;
+        }
+        return $this->validateProfilePictureEnums($picture);
+    }
+
+    /**
+     * @param array<string, mixed> $picture
+     */
+    private function validateProfilePictureTypes(array $picture): ?JsonResponse
+    {
+        foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
+            if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
+                return $this->unprocessable(
+                    'PROFILE_PICTURE_TYPE',
+                    "Field 'profile_picture.{$key}' must be a string.",
+                );
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $picture
+     */
+    private function validateProfilePictureEnums(array $picture): ?JsonResponse
+    {
+        try {
+            if (isset($picture['archetype'])) {
+                $this->pictureService->normaliseArchetype((string) $picture['archetype']);
+            }
+            if (isset($picture['variant_key'])) {
+                $this->pictureService->normaliseVariantKey((string) $picture['variant_key']);
+            }
+            if (isset($picture['palette_key'])) {
+                $this->pictureService->normalisePalette((string) $picture['palette_key']);
+            }
+        } catch (InvalidArgumentException $e) {
+            return $this->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
+        }
+        return null;
     }
 
     private function callerCanSeeGroup(int $groupId, int $userId): bool
@@ -387,7 +515,7 @@ final class GroupController
     private function listAllGroups(int $userId): array
     {
         $rows = Group::orderBy('name')->get();
-        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService);
+        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService, $this->pictureService);
     }
 
     /**
@@ -400,6 +528,6 @@ final class GroupController
             return [];
         }
         $rows = Group::whereIn('id', $groupIds)->orderBy('name')->get();
-        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService);
+        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService, $this->pictureService);
     }
 }

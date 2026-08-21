@@ -7,6 +7,7 @@ namespace Spora\Services;
 use DateTimeInterface;
 use Spora\Models\Group;
 use Spora\Models\Principal;
+use Spora\Services\ProfilePictures\GroupPictureService;
 
 /**
  * Group → wire-format array mapping, plus the index-page serialiser that
@@ -27,8 +28,12 @@ final class GroupDetailResource
     /**
      * @return array<string, mixed>
      */
-    public static function toArray(Group $group, int $callerUserId, PrincipalService $principalService): array
-    {
+    public static function toArray(
+        Group $group,
+        int $callerUserId,
+        PrincipalService $principalService,
+        ?GroupPictureService $pictureService = null,
+    ): array {
         $principal = $principalService->principalForGroup((int) $group->id);
 
         return [
@@ -42,6 +47,7 @@ final class GroupDetailResource
             'agent_count'         => self::countForPrincipal($principal, 'agents', 'principal_id'),
             'llm_config_count'    => self::countForPrincipal($principal, 'llm_driver_configurations', 'principal_id'),
             'tool_setting_count'  => self::countForPrincipal($principal, 'tool_user_settings', 'principal_id'),
+            'profile_picture'     => $pictureService?->toWireShape((int) $group->id),
             'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
             'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
         ];
@@ -51,11 +57,15 @@ final class GroupDetailResource
      * @param  iterable<Group>     $groups
      * @return list<array<string, mixed>>
      */
-    public static function collect(iterable $groups, int $callerUserId, PrincipalService $principalService): array
-    {
+    public static function collect(
+        iterable $groups,
+        int $callerUserId,
+        PrincipalService $principalService,
+        ?GroupPictureService $pictureService = null,
+    ): array {
         $out = [];
         foreach ($groups as $g) {
-            $out[] = self::toArray($g, $callerUserId, $principalService);
+            $out[] = self::toArray($g, $callerUserId, $principalService, $pictureService);
         }
         return $out;
     }

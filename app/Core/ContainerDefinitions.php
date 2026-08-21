@@ -63,6 +63,7 @@ use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
 use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
@@ -140,6 +141,7 @@ use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\ProfilePictures\GroupPictureService;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
@@ -779,6 +781,8 @@ final class ContainerDefinitions
 
             AgentPictureService::class => static fn(): AgentPictureService => new AgentPictureService(),
 
+            GroupPictureService::class => static fn(): GroupPictureService => new GroupPictureService(),
+
             // Principal materialisation + agent-transfer path. Split out of
             // AgentService so the umbrella stays under the SonarCloud
             // S1448 20-method-per-class ceiling.
@@ -934,6 +938,7 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(GroupService::class),
                     $c->get(PrincipalService::class),
+                    $c->get(GroupPictureService::class),
                 );
             },
 
@@ -965,6 +970,18 @@ final class ContainerDefinitions
                     $c->get(LLMConfigServiceInterface::class),
                     $c->get(LlmConfigValidator::class),
                     $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupPictureController::class => static function (ContainerInterface $c): GroupPictureController {
+                return new GroupPictureController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupPictureService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(MediaArchiveService::class),
+                    $c->get(MimeSniffer::class),
+                    new MediaAssetSerializer(),
+                    $c->get('config'),
                 );
             },
         ];

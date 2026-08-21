@@ -17,6 +17,7 @@ use Spora\Http\ConfigController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
 use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
@@ -70,6 +71,7 @@ final class RouteDefinitions
     public const ROUTE_GROUPS_ID_LLM_CONFIGS = '/api/v1/groups/{id}/llm-configs';
     public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = '/api/v1/groups/{id}/llm-configs/{cid}';
     public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = '/api/v1/groups/{id}/llm-configs/{cid}/set-default';
+    public const ROUTE_GROUPS_ID_PICTURE_IMAGE = '/api/v1/groups/{id}/picture/image';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
@@ -149,6 +151,14 @@ final class RouteDefinitions
         $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT, [GroupLlmConfigsController::class, 'setDefault'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Group picture — image upload + delete. Avatar-only fields
+        // (archetype/variant_key/palette_key) ride on PATCH /api/v1/groups/{id}
+        // via the `profile_picture` nested object — only the image-file
+        // path needs a multipart endpoint. Auth gate is owner-or-admin,
+        // enforced in {@see GroupPictureController}.
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_PICTURE_IMAGE, [GroupPictureController::class, 'uploadImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_PICTURE_IMAGE, [GroupPictureController::class, 'deleteImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
 

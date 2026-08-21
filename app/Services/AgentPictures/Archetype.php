@@ -33,4 +33,11 @@ enum Archetype: string
     case Explorer = 'explorer';
     case Advisor = 'advisor';
     case Creative = 'creative';
+    // Group archetypes — added when groups adopted the same picture
+    // pipeline. The agent and group pipelines share the registry so the
+    // frontend's variant SVGs and the server's enum stay in sync.
+    case Collaborative = 'collaborative';
+    case Ensemble = 'ensemble';
+    case Project = 'project';
+    case Community = 'community';
 }

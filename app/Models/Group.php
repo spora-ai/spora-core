@@ -51,6 +51,11 @@ final class Group extends Model
         return $this->hasOne(Principal::class);
     }
 
+    public function picture(): HasOne
+    {
+        return $this->hasOne(GroupPicture::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');

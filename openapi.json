@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.17.0-45-gdee0c6c"
+        "version": "0.17.0-47-gaae409f"
     },
     "servers": [
         {
@@ -1187,6 +1187,66 @@
                         "required": true,
                         "schema": {
                             "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/groups/{id}/picture/image": {
+            "post": {
+                "tags": [
+                    "Groups"
+                ],
+                "summary": "UploadImage GroupPicture",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Groups"
+                ],
+                "summary": "DeleteImage GroupPicture",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 ],
