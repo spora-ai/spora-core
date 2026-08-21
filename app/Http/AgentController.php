@@ -103,13 +103,21 @@ final class AgentController
     }
 
     /**
-     * Parse `?principal_id=` (repeatable) and intersect with the user's
-     * visible principals. Returns null when the caller didn't ask for a
-     * filter (the agent service returns every visible agent in that
+     * Parse `?principal_id=` (single or repeated) and intersect with the
+     * user's visible principals. Returns null when the caller didn't ask
+     * for a filter (the agent service returns every visible agent in that
      * case). Returns an empty list when the user asked for a filter
      * but every requested principal is outside their visibility scope —
      * the agent service then returns an empty payload without exposing
      * the existence of out-of-scope principals.
+     *
+     * Accepts all three syntaxes Symfony exposes:
+     *   `?principal_id=10`              — single value, scalar.
+     *   `?principal_id=10&principal_id=20` — repeated, becomes array.
+     *   `?principal_id[]=10&principal_id[]=20` — explicit array.
+     * `query->all('principal_id')` throws on a single string, so we read
+     * the whole bag and pull the slot — that path yields scalar OR array
+     * without complaint.
      *
      * @return list<int>|null
      */
@@ -118,11 +126,11 @@ final class AgentController
         if ($request === null) {
             return null;
         }
-        $raw = $request->query->all('principal_id');
-        if ($raw === []) {
+        $raw = $request->query->all()['principal_id'] ?? null;
+        if ($raw === null) {
             return null;
         }
-        $values = $raw;
+        $values = is_array($raw) ? $raw : [$raw];
         $ids = [];
         foreach ($values as $v) {
             if (is_int($v)) {

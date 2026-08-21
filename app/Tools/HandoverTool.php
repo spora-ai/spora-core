@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use InvalidArgumentException;
+use Spora\Models\Agent;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigServiceInterface;
@@ -26,7 +27,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                    history row so the next LLM tick sees the results.
  *
  * Both share the `allowed_target_agents` multi-select so the operator
- * explicitly approves which delegated agents the LLM may pick.
+ * explicitly approves which delegated agents the LLM may pick. The
+ * allowlist is **intra-principal**: the LLM may only target agents owned
+ * by the same `principal_id` as the source. The picker surfaces only
+ * same-principal agents, the tool re-validates the principal match at
+ * runtime (`isTargetAllowed()`), and the service layer
+ * (`HandoverService` / `SubAgentService`) enforces a final
+ * `callerControlsPrincipal` check.
  *
  * Example front-end usage (for the ToolSettingField "multi-select"):
  *   GET /api/v1/agents?select=id,name
@@ -223,6 +230,13 @@ final class HandoverTool extends AbstractTool
      * Security gate: the LLM picks the target from the allowlist it sees,
      * but the tool re-validates here so a tampered payload can't reach an
      * agent the user did not pre-approve.
+     *
+     * Defense in depth: after the allowlist hit, cross-check that the
+     * source and target share a `principal_id`. A foreign id that slipped
+     * into the stored allowlist (manual override, tampered payload,
+     * copy-paste error) is rejected here in addition to the service-level
+     * `callerControlsPrincipal` check. Fail-closed when the source agent
+     * cannot be loaded.
      */
     private function isTargetAllowed(int $targetAgentId, int $agentId, ?int $userId): bool
     {
@@ -233,7 +247,17 @@ final class HandoverTool extends AbstractTool
         $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
         $allowed  = $settings['allowed_target_agents'] ?? [];
 
-        return is_array($allowed) && in_array($targetAgentId, array_map('intval', $allowed), true);
+        if (!is_array($allowed) || !in_array($targetAgentId, array_map('intval', $allowed), true)) {
+            return false;
+        }
+
+        $source = Agent::find($agentId);
+        $target = Agent::find($targetAgentId);
+        if ($source === null || $target === null) {
+            return false;
+        }
+
+        return (int) $source->principal_id === (int) $target->principal_id;
     }
 
     public function describeAction(array $arguments): string

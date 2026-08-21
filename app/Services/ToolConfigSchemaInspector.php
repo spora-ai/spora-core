@@ -248,14 +248,22 @@ final class ToolConfigSchemaInspector
      * - 'raw'   → value is surfaced unchanged.
      *
      * @param  array<string, mixed> $effectiveSettings
+     * @param  int|null             $agentId  Source agent id; the agent-name
+     *                                          map is scoped to this agent's
+     *                                          principal so foreign names
+     *                                          never reach the LLM. Null
+     *                                          (e.g. global operator defaults
+     *                                          with no source agent) returns
+     *                                          "#id" placeholders — same
+     *                                          safe-by-default as before.
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, array $effectiveSettings, ?int $userId = null): array
+    public function getLlmToolSettings(string $toolClass, array $effectiveSettings, ?int $userId = null, ?int $agentId = null): array
     {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
         $resolveAsByKey = $this->getResolveAsByKey($toolClass);
-        $resolvedAgentNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $resolveAsByKey, $userId);
+        $resolvedAgentNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $resolveAsByKey, $userId, $agentId);
 
         $result = [];
         foreach ($labels as $key => $label) {
@@ -282,9 +290,13 @@ final class ToolConfigSchemaInspector
      * @param  array<string, int>   $multiKeys        keys of multi-select settings (flipped for isset())
      * @param  array<string, string> $resolveAsByKey  key => resolveAs ('agent' | 'skill' | 'raw')
      * @param  int|null             $userId           scope of the lookup; null returns no names
+     * @param  int|null             $agentId          source agent id; when provided the lookup is
+     *                                                 scoped to this agent's principal (intra-principal
+     *                                                 scoping for the Handover tool). Null = legacy
+     *                                                 visible-principals scope (operator defaults).
      * @return array<int, string>                     id => "Name"
      */
-    private function resolveAgentNames(array $effectiveSettings, array $multiKeys, array $resolveAsByKey, ?int $userId): array
+    private function resolveAgentNames(array $effectiveSettings, array $multiKeys, array $resolveAsByKey, ?int $userId, ?int $agentId = null): array
     {
         // Multi-select values are user-controlled, so an unscoped lookup would
         // happily resolve another tenant's agent name and leak it to the LLM.
@@ -299,7 +311,7 @@ final class ToolConfigSchemaInspector
             return [];
         }
 
-        return $this->fetchAgentNameMap($userId, $ids);
+        return $this->fetchAgentNameMap($userId, $ids, $agentId);
     }
 
     /**
@@ -329,20 +341,39 @@ final class ToolConfigSchemaInspector
     }
 
     /**
-     * Migration 0067 cut `agents.user_id`; the agent is owned by a
-     * principal. We resolve via the caller's visible principals so
-     * shared/group-owned agents are still resolvable when the caller
-     * is a group member.
+     * Resolve agent ids to human-readable names. Two scopes:
+     *
+     * - `$agentId` set: look up the source agent's principal and restrict
+     *   to that single principal. Foreign agents never reach the LLM tool
+     *   definition even when their id sits in the stored allowlist.
+     * - `$agentId` null: fall back to the caller's `visiblePrincipalIds`,
+     *   matching the legacy behaviour for operator-default settings that
+     *   have no source-agent context.
+     *
+     * Either branch short-circuits to `[]` when the principal scope is
+     * empty (no resolver wired, no visible principals, no source principal),
+     * which makes the caller emit "#id" placeholders — the safe-by-default
+     * behaviour preserved from before this change.
      *
      * @param  array<int, int> $ids
      * @return array<int, string>
      */
-    private function fetchAgentNameMap(int $userId, array $ids): array
+    private function fetchAgentNameMap(int $userId, array $ids, ?int $agentId = null): array
     {
         if ($this->principalResolver === null) {
             return [];
         }
-        $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+
+        if ($agentId !== null) {
+            $source = Agent::find($agentId);
+            if ($source === null) {
+                return [];
+            }
+            $principalIds = [(int) $source->principal_id];
+        } else {
+            $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        }
+
         if ($principalIds === []) {
             return [];
         }
