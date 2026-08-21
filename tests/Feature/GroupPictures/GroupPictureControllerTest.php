@@ -89,8 +89,8 @@ function buildGroupPictureController(GroupPictureService $service): GroupPicture
 
     return new GroupPictureController(
         bootAuthLayer(),
-        $service,
         new PrincipalService(new PrincipalResolver()),
+        $service,
         $mediaArchive,
         new MimeSniffer(),
     );
