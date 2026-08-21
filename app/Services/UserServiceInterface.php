@@ -103,4 +103,10 @@ interface UserServiceInterface
      * @return bool True if deleted, false if not found
      */
     public function deleteLocation(int $locationId, int $userId): bool;
+
+    /**
+     * Resolve a user id from a (case-insensitive) email address. Returns
+     * null if no user has that email — callers should map that to a 404.
+     */
+    public function getUserIdByEmail(string $email): ?int;
 }

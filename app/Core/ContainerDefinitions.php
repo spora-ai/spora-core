@@ -946,6 +946,7 @@ final class ContainerDefinitions
                 return new GroupMemberController(
                     $c->get(AuthService::class),
                     $c->get(GroupService::class),
+                    $c->get(UserServiceInterface::class),
                 );
             },
 

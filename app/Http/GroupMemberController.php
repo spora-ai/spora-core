@@ -12,6 +12,7 @@ use Spora\Models\GroupMembership;
 use Spora\Models\User;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
 use Spora\Services\GroupService;
+use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -39,6 +40,7 @@ final class GroupMemberController
     public function __construct(
         private readonly AuthService $authService,
         private readonly GroupService $groupService,
+        private readonly UserServiceInterface $userService,
     ) {}
 
     /**
@@ -294,9 +296,34 @@ final class GroupMemberController
      */
     private function validateAddMemberBody(array $body): array|JsonResponse
     {
-        $targetUserId = (int) ($body['user_id'] ?? 0);
-        if ($targetUserId <= 0) {
-            return $this->unprocessable('VALIDATION_ERROR', 'user_id is required.');
+        $hasUserId = isset($body['user_id']) && (int) $body['user_id'] > 0;
+        $hasEmail = isset($body['email']) && trim((string) $body['email']) !== '';
+
+        // Exactly one of `user_id` or `email` is required — the wire
+        // contract accepts either so the frontend can pick the friendlier
+        // input (email) while machine-to-machine callers keep their
+        // integer-id path.
+        if ($hasUserId === $hasEmail) {
+            return $this->unprocessable(
+                'VALIDATION_ERROR',
+                'Provide exactly one of "user_id" (integer) or "email" (string).',
+            );
+        }
+
+        if ($hasUserId) {
+            $targetUserId = (int) $body['user_id'];
+        } else {
+            $email = strtolower(trim((string) $body['email']));
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $this->unprocessable('VALIDATION_ERROR', 'The "email" field must be a valid email address.');
+            }
+            $targetUserId = $this->userService->getUserIdByEmail($email);
+            if ($targetUserId === null) {
+                return $this->notFound(
+                    'USER_NOT_FOUND',
+                    sprintf('No user exists with email "%s".', $email),
+                );
+            }
         }
 
         $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);

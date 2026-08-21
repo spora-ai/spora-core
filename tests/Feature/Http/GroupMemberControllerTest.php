@@ -6,6 +6,7 @@ use Spora\Http\GroupMemberController;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\UserService;
 
 defined('GMC_TEST_PASSWORD') || define('GMC_TEST_PASSWORD', 'Password1!');
 
@@ -14,9 +15,10 @@ function makeGroupMemberController(): array
     $auth = bootAuthLayer();
     $principalService = new PrincipalService(new PrincipalResolver());
     $groupService = new GroupService($principalService);
-    $controller = new GroupMemberController($auth, $groupService);
+    $userService = new UserService();
+    $controller = new GroupMemberController($auth, $groupService, $userService);
 
-    return [$controller, $auth, $groupService, $principalService];
+    return [$controller, $auth, $groupService, $principalService, $userService];
 }
 
 describe('GroupMemberController', function (): void {
@@ -188,6 +190,92 @@ describe('GroupMemberController', function (): void {
         simulateLoggedInSession($ownerId, 'gmc2c@example.com');
 
         $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', []);
+        $response = $controller->store($group->id, $request);
+        expect($response->getStatusCode())->toBe(422);
+    });
+
+    it('store resolves email to user_id and returns 201', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-email1@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'EmailAdd');
+        $targetId = bootAuth($auth, 'gmc-email1-target@example.com', GMC_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gmc-email1@example.com');
+
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'email' => 'gmc-email1-target@example.com',
+            'role'  => 'member',
+        ]);
+        $response = $controller->store($group->id, $request);
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['member']['user_id'])->toBe($targetId);
+        expect($body['data']['member']['role'])->toBe('member');
+    });
+
+    it('store email lookup is case-insensitive', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-email2@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'EmailAddCI');
+        $targetId = bootAuth($auth, 'gmc-email2-target@example.com', GMC_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gmc-email2@example.com');
+
+        // Caller wrote the email in mixed case + whitespace; should still match.
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'email' => '  GMC-Email2-Target@Example.COM  ',
+            'role'  => 'admin',
+        ]);
+        $response = $controller->store($group->id, $request);
+        expect($response->getStatusCode())->toBe(201);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['member']['user_id'])->toBe($targetId);
+        expect($body['data']['member']['role'])->toBe('admin');
+    });
+
+    it('store returns 404 when no user has the email', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-email3@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'EmailAddMiss');
+        simulateLoggedInSession($ownerId, 'gmc-email3@example.com');
+
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'email' => 'no-such-user@example.com',
+            'role'  => 'member',
+        ]);
+        $response = $controller->store($group->id, $request);
+        expect($response->getStatusCode())->toBe(404);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('USER_NOT_FOUND');
+    });
+
+    it('store rejects malformed email with 422', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-email4@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'EmailAddBad');
+        simulateLoggedInSession($ownerId, 'gmc-email4@example.com');
+
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'email' => 'not-an-email',
+            'role'  => 'member',
+        ]);
+        $response = $controller->store($group->id, $request);
+        expect($response->getStatusCode())->toBe(422);
+    });
+
+    it('store rejects when both user_id and email are provided', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-email5@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'EmailAddBoth');
+        $targetId = bootAuth($auth, 'gmc-email5-target@example.com', GMC_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gmc-email5@example.com');
+
+        // Mutually exclusive — caller must pick one or the other. Resolving
+        // both ambiguously would risk surprising the operator with the wrong
+        // user, so we 422 instead.
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'user_id' => $targetId,
+            'email'   => 'gmc-email5-target@example.com',
+            'role'    => 'member',
+        ]);
         $response = $controller->store($group->id, $request);
         expect($response->getStatusCode())->toBe(422);
     });
