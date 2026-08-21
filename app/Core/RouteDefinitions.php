@@ -15,7 +15,10 @@ use Spora\Http\AssetController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\GroupController;
+use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPreferencesController;
+use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -58,8 +61,15 @@ final class RouteDefinitions
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
     public const ROUTE_GROUPS = '/api/v1/groups';
     public const ROUTE_GROUPS_ID = '/api/v1/groups/{id}';
+    public const ROUTE_GROUPS_ID_AGENTS = '/api/v1/groups/{id}/agents';
     public const ROUTE_GROUPS_ID_MEMBERS = '/api/v1/groups/{id}/members';
     public const ROUTE_GROUPS_ID_MEMBERS_UID = '/api/v1/groups/{id}/members/{uid}';
+    public const ROUTE_GROUPS_ID_PREFERENCES = '/api/v1/groups/{id}/preferences';
+    public const ROUTE_GROUPS_ID_TOOLS = '/api/v1/groups/{id}/tools';
+    public const ROUTE_GROUPS_ID_TOOLS_CLASS = '/api/v1/groups/{id}/tools/{toolClass}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS = '/api/v1/groups/{id}/llm-configs';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = '/api/v1/groups/{id}/llm-configs/{cid}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = '/api/v1/groups/{id}/llm-configs/{cid}/set-default';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
@@ -119,6 +129,26 @@ final class RouteDefinitions
         $r->addRoute('POST', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Group settings pages (Overview / Agents / Tools / LLM Drivers / Preferences).
+        // All routes use AuthMiddleware + CsrfMiddleware; the per-action
+        // `callerCanManageGroup()` does the write gate (owner / admin / global admin),
+        // and `callerCanSeeGroup()` does the read gate (member / owner / admin / global admin).
+        // Non-members receive 404 (existence-hiding, not 403).
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_AGENTS, [GroupController::class, 'agents'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PUT', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_TOOLS, [GroupToolsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'upsert'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_TOOLS_CLASS, [GroupToolsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS, [GroupLlmConfigsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID, [GroupLlmConfigsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT, [GroupLlmConfigsController::class, 'setDefault'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
 

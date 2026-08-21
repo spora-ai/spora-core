@@ -121,6 +121,25 @@ test('import returns 422 VALIDATION_ERROR when validator reports errors', functi
     expect(json_decode($response->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
 });
 
+test('import accepts a body with `principal_id` as API metadata, not a template field', function (): void {
+    // Without the strip-before-validate fix, the validator would
+    // reject the body under UNKNOWN_TOP_LEVEL_KEY 'principal_id'
+    // because that key is not in the template ALLOWED_TOP_KEYS list.
+    // The controller now pulls principal_id off before validation
+    // and forwards the rest as a clean template payload.
+    $request = jsonRequest('POST', '/api/v1/agent-templates/import', [
+        'id' => 'meta-key', 'name' => 'Meta key', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5, 'system_prompt' => 'meta key test'],
+        'tools' => [],
+        'required_plugins' => [],
+        'principal_id' => null,
+    ]);
+    $response = $this->controller->import($request);
+    expect($response->getStatusCode())->toBe(201);
+    $data = json_decode($response->getContent(), true)['data'];
+    expect($data['agent']['name'])->toBe('Meta key');
+});
+
 test('exportAgent returns 404 for an agent owned by another user', function (): void {
     $request = Symfony\Component\HttpFoundation\Request::create(
         '/api/v1/agents/9999/export',

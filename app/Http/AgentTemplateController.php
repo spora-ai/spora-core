@@ -128,9 +128,19 @@ final class AgentTemplateController
             if ($body === null) {
                 $response = $this->invalidJson();
             } else {
-                $validation = $this->validator->validate($body);
+                // `principal_id` is API-level metadata used to attribute
+                // the imported agent to a group. It is not part of the
+                // template schema, so the validator would (correctly)
+                // reject it under UNKNOWN_TOP_LEVEL_KEY. Pull it off
+                // before validation so the template body arrives at
+                // validator + importer as a clean template payload.
+                $resolvedPrincipalId = $this->resolvePrincipalIdForImport($userId, $body);
+                $templateBody = $body;
+                unset($templateBody['principal_id']);
+
+                $validation = $this->validator->validate($templateBody);
                 $response = $validation->isValid()
-                    ? $this->buildImportSuccess($userId, $body, $this->resolvePrincipalIdForImport($userId, $body))
+                    ? $this->buildImportSuccess($userId, $templateBody, $resolvedPrincipalId)
                     : $this->buildImportValidationError($validation);
             }
         }

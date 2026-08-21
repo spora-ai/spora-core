@@ -44,8 +44,6 @@ use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
-use Spora\Core\Exceptions\InvalidSecretKeyException;
-use Spora\Core\Exceptions\MissingSecretKeyException;
 use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
@@ -63,7 +61,10 @@ use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\GroupController;
+use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
+use Spora\Http\GroupPreferencesController;
+use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -417,7 +418,7 @@ final class ContainerDefinitions
             },
 
             SecurityManagerInterface::class => static fn(ContainerInterface $c): SecurityManager
-                => self::buildSecurityManager($c),
+                => SecurityKeyDefinitions::build($c),
 
             Database::class => static function (ContainerInterface $c): Database {
                 $db = new Database(
@@ -690,48 +691,6 @@ final class ContainerDefinitions
         ];
     }
 
-    private static function buildSecurityManager(ContainerInterface $c): SecurityManager
-    {
-        $envKey = $_ENV['SPORA_SECRET_KEY'] ?? getenv('SPORA_SECRET_KEY') ?: null;
-        if ($envKey !== null) {
-            $decoded = base64_decode($envKey, strict: true);
-            if ($decoded === false) {
-                throw new InvalidSecretKeyException(
-                    'SPORA_SECRET_KEY is not valid base64. Regenerate with: base64_encode(random_bytes(32))',
-                );
-            }
-            return new SecurityManager($decoded);
-        }
-
-        $path = self::resolveKeyPath($c);
-        if ($path === null) {
-            throw new MissingSecretKeyException(
-                'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH, '
-                . 'or run `php bin/spora spora:install` (or `db:seed`) to auto-generate '
-                . 'storage/secret.key. Looked for: ' . $c->get(Paths::class)->storage('secret.key') . '.',
-            );
-        }
-
-        return new SecurityManager($path);
-    }
-
-    private static function resolveKeyPath(ContainerInterface $c): ?string
-    {
-        $envKeyPath = $_ENV['SPORA_KEY_PATH'] ?? getenv('SPORA_KEY_PATH') ?: null;
-        if ($envKeyPath !== null) {
-            return $envKeyPath;
-        }
-
-        $configKeyPath = ($c->get('config'))['key_path'] ?? null;
-        if ($configKeyPath !== null) {
-            return (string) $configKeyPath;
-        }
-
-        // Conventional fallback; SecretKeyInstaller writes here on `spora:install`.
-        $conventional = $c->get(Paths::class)->storage('secret.key');
-        return is_file($conventional) ? $conventional : null;
-    }
-
     // Gates the Web UI plugin install endpoints (docs/20_plugin_install_api.md).
     // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
@@ -924,6 +883,15 @@ final class ContainerDefinitions
 
     private static function apiResourceControllerDefinitions(): array
     {
+        return array_merge(
+            self::pluginGroupControllerDefinitions(),
+            self::agentResourceControllerDefinitions(),
+            self::mediaResourceControllerDefinitions(),
+        );
+    }
+
+    private static function pluginGroupControllerDefinitions(): array
+    {
         return [
             AppsController::class => static function (ContainerInterface $c): AppsController {
                 return new AppsController(
@@ -961,6 +929,50 @@ final class ContainerDefinitions
                 );
             },
 
+            GroupController::class => static function (ContainerInterface $c): GroupController {
+                return new GroupController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupMemberController::class => static function (ContainerInterface $c): GroupMemberController {
+                return new GroupMemberController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                );
+            },
+
+            GroupPreferencesController::class => static function (ContainerInterface $c): GroupPreferencesController {
+                return new GroupPreferencesController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            GroupToolsController::class => static function (ContainerInterface $c): GroupToolsController {
+                return new GroupToolsController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(ToolConfigService::class),
+                );
+            },
+
+            GroupLlmConfigsController::class => static function (ContainerInterface $c): GroupLlmConfigsController {
+                return new GroupLlmConfigsController(
+                    $c->get(AuthService::class),
+                    $c->get(LLMConfigServiceInterface::class),
+                    $c->get(LlmConfigValidator::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+        ];
+    }
+
+    private static function agentResourceControllerDefinitions(): array
+    {
+        return [
             AgentController::class => static function (ContainerInterface $c): AgentController {
                 return new AgentController(
                     $c->get(AuthService::class),
@@ -984,21 +996,6 @@ final class ContainerDefinitions
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),
-                );
-            },
-
-            GroupController::class => static function (ContainerInterface $c): GroupController {
-                return new GroupController(
-                    $c->get(AuthService::class),
-                    $c->get(GroupService::class),
-                    $c->get(PrincipalService::class),
-                );
-            },
-
-            GroupMemberController::class => static function (ContainerInterface $c): GroupMemberController {
-                return new GroupMemberController(
-                    $c->get(AuthService::class),
-                    $c->get(GroupService::class),
                 );
             },
 
@@ -1038,7 +1035,12 @@ final class ContainerDefinitions
                     $c->get(ToolIconResolver::class),
                 );
             },
+        ];
+    }
 
+    private static function mediaResourceControllerDefinitions(): array
+    {
+        return [
             MediaArchiveController::class => static function (ContainerInterface $c): MediaArchiveController {
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),

@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use DateTimeInterface;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Models\Agent;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
+use Spora\Models\Principal;
+use Spora\Services\AgentResource;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
 use Spora\Services\Exceptions\PrincipalHasDependentsException;
+use Spora\Services\GroupDetailResource;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,15 +29,21 @@ use Symfony\Component\HttpFoundation\Response;
  *   POST   /api/v1/groups                 — create (admin-only); creator becomes owner + group-principal is materialised
  *   PATCH  /api/v1/groups/{id}            — update (admin-only)
  *   DELETE /api/v1/groups/{id}            — destroy (admin-only); 409 if agents still reference the group-principal
+ *   GET    /api/v1/groups/{id}/agents     — list agents whose principal_id matches the group's group-principal
  *
  * Authorisation is principally driven by the middleware stack
  * ({@see Middleware\AdminMiddleware} gates the writes), but the
  * destroy path also surfaces a structured 409 with the orphan agent
  * ids so the operator can either transfer them first or delete them.
+ *
+ * Wire-format mapping moved to {@see GroupDetailResource} so the
+ * controller stays under SonarCloud's S1448 20-method-per-class cap
+ * (single source of truth shared with {@see GroupDetailResource}).
  */
 final class GroupController
 {
     use JsonControllerHelpers;
+    use GroupAuthorizationTrait;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
     private const MSG_GROUP_NOT_FOUND = 'Group not found.';
@@ -57,7 +67,7 @@ final class GroupController
         }
 
         $groups = $this->authService->isAdmin()
-            ? $this->listAllGroups()
+            ? $this->listAllGroups((int) $userId)
             : $this->listGroupsForMember((int) $userId);
 
         return new JsonResponse(['data' => ['groups' => $groups]]);
@@ -78,7 +88,9 @@ final class GroupController
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, (int) $userId)]]);
+        return new JsonResponse([
+            'data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService)],
+        ]);
     }
 
     /**
@@ -104,22 +116,9 @@ final class GroupController
         $group = $this->groupService->createGroup((int) $userId, $name, $description);
 
         return new JsonResponse(
-            ['data' => ['group' => $this->groupResource($group, (int) $userId)]],
+            ['data' => ['group' => GroupDetailResource::toArray($group, (int) $userId, $this->principalService)]],
             Response::HTTP_CREATED,
         );
-    }
-
-    /**
-     * @return array{0: string, 1: ?string}|JsonResponse
-     */
-    private function createGroupFromRequest(Request $request): array|JsonResponse
-    {
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        return $this->validateCreateBody($body);
     }
 
     /**
@@ -136,11 +135,88 @@ final class GroupController
         [$group, $updates] = $resolved;
 
         if ($updates !== []) {
-            $group = $this->applyGroupRowUpdate($id, $updates);
+            $updates['updated_at'] = date('Y-m-d H:i:s');
+            Capsule::table('groups')
+                ->where('id', $id)
+                ->update($updates);
+            $group = Group::findOrFail($id);
         }
 
         $userId = $this->authService->currentUserId() ?? 0;
-        return new JsonResponse(['data' => ['group' => $this->groupResource($group, $userId)]]);
+        return new JsonResponse([
+            'data' => ['group' => GroupDetailResource::toArray($group, $userId, $this->principalService)],
+        ]);
+    }
+
+    /**
+     * DELETE /api/v1/groups/{id}
+     *
+     * Admin-only via middleware. The GroupService pre-flight refuses if
+     * any agent still references the group-principal; we surface a 409
+     * with the orphan ids so the operator can transfer or delete them.
+     */
+    public function destroy(int $id): JsonResponse
+    {
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $error = $this->attemptDelete($id, (int) $userId);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * GET /api/v1/groups/{id}/agents
+     *
+     * Lists every agent whose `principal_id` matches the group's
+     * group-principal. The principal axis is the bug-prone bit — the
+     * caller's user-principal id (`PrincipalResolver::principalForUser`)
+     * must NOT be used here, or the response would leak the caller's
+     * own agents under the group's url.
+     */
+    public function agents(int $id): JsonResponse
+    {
+        $userId = $this->requireUserOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $principal = $this->loadGroupPrincipalOrFail($id, (int) $userId);
+        if ($principal instanceof JsonResponse) {
+            return $principal;
+        }
+
+        $rows = Agent::where('principal_id', (int) $principal->id)
+            ->orderByDesc('created_at')
+            ->get();
+
+        return new JsonResponse([
+            'data' => [
+                'agents' => array_map(
+                    static fn(Agent $a): array => AgentResource::toArray($a),
+                    $rows->all(),
+                ),
+                'total' => $rows->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * @return array{0: string, 1: ?string}|JsonResponse
+     */
+    private function createGroupFromRequest(Request $request): array|JsonResponse
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        return $this->validateCreateBody($body);
     }
 
     /**
@@ -172,40 +248,6 @@ final class GroupController
         }
 
         return $this->buildUpdatePayload($body);
-    }
-
-    /**
-     * @param array<string, mixed> $updates
-     */
-    private function applyGroupRowUpdate(int $id, array $updates): Group
-    {
-        $updates['updated_at'] = date('Y-m-d H:i:s');
-        \Illuminate\Database\Capsule\Manager::table('groups')
-            ->where('id', $id)
-            ->update($updates);
-        return Group::findOrFail($id);
-    }
-
-    /**
-     * DELETE /api/v1/groups/{id}
-     *
-     * Admin-only via middleware. The GroupService pre-flight refuses if
-     * any agent still references the group-principal; we surface a 409
-     * with the orphan ids so the operator can transfer or delete them.
-     */
-    public function destroy(int $id): JsonResponse
-    {
-        $userId = $this->requireUserOrFail();
-        if ($userId instanceof JsonResponse) {
-            return $userId;
-        }
-
-        $error = $this->attemptDelete($id, (int) $userId);
-        if ($error !== null) {
-            return $error;
-        }
-
-        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     private function attemptDelete(int $id, int $userId): ?JsonResponse
@@ -319,45 +361,33 @@ final class GroupController
     }
 
     /**
-     * Wire-format group row. The `principal_id` is included so the
-     * dashboard can hand it back to the agent transfer endpoint;
-     * `role` is the caller's role in this group (or null when not a
-     * member).
-     *
-     * @return array<string, mixed>
+     * Load the group + verify the caller may see it + resolve the
+     * group's principal. The two 404-not-visible states (no group /
+     * not a member) collapse to the same notFound response, which lets
+     * {@see agents()} stay at the S1142 3-return cap.
      */
-    private function groupResource(Group $group, int $callerUserId): array
+    private function loadGroupPrincipalOrFail(int $id, int $userId): Principal|JsonResponse
     {
-        $principal = $this->principalService->principalForGroup((int) $group->id);
-        $role = GroupMembership::where('group_id', $group->id)
-            ->where('user_id', $callerUserId)
-            ->value('role');
-        $memberCount = (int) GroupMembership::where('group_id', $group->id)->count();
+        $group = Group::find($id);
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
 
-        return [
-            'id'                  => (int) $group->id,
-            'name'                => $group->name,
-            'description'         => $group->description,
-            'created_by_user_id'  => (int) $group->created_by_user_id,
-            'principal_id'        => $principal !== null ? (int) $principal->id : null,
-            'caller_role'         => $role !== null ? (string) $role : null,
-            'member_count'        => $memberCount,
-            'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
-            'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
-        ];
+        $principal = $this->principalService->principalForGroup($id);
+        if ($principal === null) {
+            return new JsonResponse(['data' => ['agents' => [], 'total' => 0]]);
+        }
+
+        return $principal;
     }
 
     /**
      * @return list<array<string, mixed>>
      */
-    private function listAllGroups(): array
+    private function listAllGroups(int $userId): array
     {
         $rows = Group::orderBy('name')->get();
-        $userId = $this->authService->currentUserId() ?? 0;
-        return array_map(
-            fn(Group $g): array => $this->groupResource($g, $userId),
-            $rows->all(),
-        );
+        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService);
     }
 
     /**
@@ -370,9 +400,6 @@ final class GroupController
             return [];
         }
         $rows = Group::whereIn('id', $groupIds)->orderBy('name')->get();
-        return array_map(
-            fn(Group $g): array => $this->groupResource($g, $userId),
-            $rows->all(),
-        );
+        return GroupDetailResource::collect($rows->all(), $userId, $this->principalService);
     }
 }
