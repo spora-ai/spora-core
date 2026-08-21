@@ -17,14 +17,15 @@ function seedAbortTaskServiceFixtures(string $status, array $data = []): array
     $userId      = $authService->register('svc-abort-' . $status . '@example.com', TEST_PASSWORD, 'Svc Abort');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'Svc Abort Agent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
 
     $task = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => $status,
         'user_prompt' => 'orig',
@@ -50,7 +51,7 @@ final class CapturingMercure implements MercurePublisherInterface
     {
         $this->captured[] = [
             'task_id' => $taskId,
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'status'  => $taskData['status'] ?? null,
         ];
         return true;
@@ -137,7 +138,7 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
     $userId = $authService->register('svc-cascade@example.com', TEST_PASSWORD, 'Cascade');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Cascade Agent',
         'max_steps' => 5,
         'is_active' => true,
@@ -145,7 +146,8 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
 
     // Build a 3-deep chain: grandparent → parent → child
     $grandparent = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'AWAITING_SUB_AGENTS',
         'user_prompt' => 'gp',
@@ -153,7 +155,8 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
         'data'      => ['spawned_sub_task_ids' => [], 'sub_agent_expected_count' => 1],
     ]);
     $parent = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $grandparent->id,
         'status'    => 'AWAITING_SUB_AGENTS',
@@ -162,7 +165,8 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
         'data'      => ['spawned_sub_task_ids' => [], 'sub_agent_expected_count' => 1],
     ]);
     $child = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $parent->id,
         'status'    => 'RUNNING',
@@ -203,21 +207,23 @@ it('abortSubAgentAndCascade is a no-op for non-awaiting ancestors', function ():
     $userId = $authService->register('svc-cascade-noop@example.com', TEST_PASSWORD, 'Cascade');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Noop Agent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
 
     $parent = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'COMPLETED',
         'user_prompt' => 'already done',
         'max_steps' => 5,
     ]);
     $child = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $parent->id,
         'status'    => 'RUNNING',

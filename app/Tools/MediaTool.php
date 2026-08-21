@@ -109,8 +109,13 @@ final class MediaTool extends AbstractTool
         $this->config = is_array($request) ? $request : [];
     }
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {

@@ -50,7 +50,7 @@ function seedAgentAndTask(array $toolInstances = []): array
     $userId      = $authService->register('exec@example.com', TEST_PASSWORD, 'Exec');
 
     $config = LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'Executor Test Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -61,7 +61,7 @@ function seedAgentAndTask(array $toolInstances = []): array
     ]);
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Executor Test Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 10,
@@ -80,6 +80,7 @@ function seedAgentAndTask(array $toolInstances = []): array
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'executor test',

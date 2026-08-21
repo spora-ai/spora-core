@@ -366,7 +366,12 @@ describe('AgentOverrideController::getOperationOverride / patchOperationOverride
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
     });
+});
 
+// transferPrincipal tests moved to AgentTransferControllerTest when
+// AgentController was split (S1448).
+
+describe('AgentController::patchOperationOverride', function (): void {
     test('patchOperationOverride returns 400 on invalid JSON', function (): void {
         [, , $controller, $authService] = makeAgentControllers();
         bootAuth($authService);

@@ -43,7 +43,7 @@ function makeAgent(mixed $authService, string $suffix = ''): int
     $userId = $authService->register($email, 'Password1!', $displayName);
 
     return Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'Test Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -395,27 +395,30 @@ test('deleteGlobalSettings is idempotent (no error if not exists)', function ():
 
 test('deleteUserSettings removes the row', function (): void {
     [$service, , $authService] = makeToolConfigService();
+    $userAdapter = makeUserAdapter($service);
     $userId = $authService->register('delete-user@example.com', 'Password1!', 'Deleteuser');
+    $principalId = createUserPrincipalPublic($userId);
 
-    $service->putUserSettings(TestTool::class, $userId, ['max_results' => '30']);
-    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeTrue();
+    $userAdapter->putUserSettings(TestTool::class, $userId, ['max_results' => '30']);
+    expect(Capsule::table('tool_user_settings')->where('principal_id', $principalId)->exists())->toBeTrue();
 
-    $service->deleteUserSettings(TestTool::class, $userId);
-    expect(Capsule::table('tool_user_settings')->where('user_id', $userId)->exists())->toBeFalse();
+    $userAdapter->deleteUserSettings(TestTool::class, $userId);
+    expect(Capsule::table('tool_user_settings')->where('principal_id', $principalId)->exists())->toBeFalse();
 })->afterEach(fn() => Database::resetBootState());
 
 test('deleteUserSettings requires userId to target correct user', function (): void {
     [$service, , $authService] = makeToolConfigService();
+    $userAdapter = makeUserAdapter($service);
     $user1 = $authService->register('delete-user1@example.com', 'Password1!', 'Deleteuser1');
     $user2 = $authService->register('delete-user2@example.com', 'Password1!', 'Deleteuser2');
 
-    $service->putUserSettings(TestTool::class, $user1, ['max_results' => 'user1-value']);
+    $userAdapter->putUserSettings(TestTool::class, $user1, ['max_results' => 'user1-value']);
 
     // Delete for user2 should do nothing (no row for user2)
-    $service->deleteUserSettings(TestTool::class, $user2);
+    $userAdapter->deleteUserSettings(TestTool::class, $user2);
 
     // user1's settings should still exist
-    $user1Settings = $service->getUserSettings(TestTool::class, $user1);
+    $user1Settings = $userAdapter->getUserSettings(TestTool::class, $user1);
     expect($user1Settings)->toBe(['max_results' => 'user1-value']);
 })->afterEach(fn() => Database::resetBootState());
 

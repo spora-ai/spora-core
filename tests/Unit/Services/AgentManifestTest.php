@@ -40,7 +40,7 @@ function makeManifestServiceWithUser(): array
 function makeManifestAgent(int $userId): array
 {
     $id = Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-        'user_id'                => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                   => 'Manifest Test',
         'description'            => 'desc',
         'system_prompt'          => 'sp',

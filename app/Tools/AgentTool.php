@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentManifestRenderer;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Tools\AgentTool\AgentTargetResolver;
 use Spora\Tools\AgentTool\AgentToolCollaborators;
 use Spora\Tools\AgentTool\CatalogPresenter;
@@ -245,22 +249,40 @@ final class AgentTool extends AbstractTool
 
     private readonly AgentTargetResolver $targetResolver;
 
+    private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly AgentServiceInterface $agentService,
         \Spora\Services\AgentToolSettingsServiceInterface $toolSettings,
         private readonly AgentManifest $manifest,
         ?AgentToolCollaborators $collaborators = null,
+        ?PrincipalResolver $principalResolver = null,
+        private readonly ?AuthService $authService = null,
+        ?PrincipalService $principalService = null,
     ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $principalResolver ??= new PrincipalResolver();
         $collaborators      ??= new AgentToolCollaborators();
+        $this->principalService   = $principalService ?? new PrincipalService($principalResolver);
         $this->notesHandler      = $collaborators->notesHandler($agentService);
-        $this->catalogPresenter  = $collaborators->catalogPresenter($agentService, $toolSettings);
+        $this->catalogPresenter  = $collaborators->catalogPresenter(
+            $agentService,
+            $toolSettings,
+            $principalResolver,
+        );
         $this->configurePlanner  = $collaborators->configurePlanner($toolSettings);
         $this->payloadValidator  = $collaborators->payloadValidator();
         $this->targetResolver    = $collaborators->targetResolver();
     }
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?PrincipalContext $context = null,
+    ): ToolResult {
         $operation = $this->getOperationName($arguments);
 
         if ($operation === 'read_agent_configuration') {
@@ -272,11 +294,11 @@ final class AgentTool extends AbstractTool
             'read_notes'                => $this->notesHandler->read($agentId),
             'write_notes'               => $this->notesHandler->write($agentId, $arguments, 'append'),
             'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
-            'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId),
-            'create_agent'              => $this->createAgent($agentId, $arguments),
+            'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId, $context),
+            'create_agent'              => $this->createAgent($agentId, $arguments, $context),
             'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
             'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
-            'list_agents'               => $this->listAgents($agentId),
+            'list_agents'               => $this->listAgents($agentId, $context),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
         };
     }
@@ -368,19 +390,34 @@ final class AgentTool extends AbstractTool
 
     /**
      * Enumerate the calling agent's owner agents as a slim
-     * {agent_id, name, description}[] list. `user_id` is sourced
-     * from the calling Agent (not a parameter) so the type system
-     * stays fail-closed: the only nullable path is a missing agent
-     * row, which is already a system-level error.
+     * {agent_id, name, description}[] list. The user scope is
+     * derived from the supplied `PrincipalContext` (`runnerUserId`
+     * so the LLM sees the agents owned by the user who triggered
+     * this turn) and falls back to a fresh resolver + agent row
+     * lookup for the legacy code path. The only nullable path is a
+     * missing agent row, which is already a system-level error.
      */
-    private function listAgents(int $agentId): ToolResult
+    private function listAgents(int $agentId, ?PrincipalContext $context): ToolResult
     {
         $agent = $this->agentService->getAgentByAgentId($agentId);
         if ($agent === null) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
 
-        $rows = $this->agentService->getAgentsForUser((int) $agent->user_id);
+        $resolver = $this->principalResolver;
+        if ($context === null) {
+            $context = $resolver->resolveForToolExecute($agentId);
+        }
+
+        $userId = $context->runnerUserId
+            ?? $resolver->ownerUserId((int) $agent->principal_id)
+            ?? $this->authService?->currentUserId();
+
+        if ($userId === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+
+        $rows = $this->agentService->getAgentsForUser($userId);
         $slim = array_map(
             static function (array $a): array {
                 return [
@@ -417,26 +454,23 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * `user_id` is sourced from the calling Agent's row — async callers
-     * don't have a session, and the new agent is owned by the same
-     * user as the agent that created it. Match the {@see self::listAgents()}
-     * pattern: looking up the calling agent is the only trust anchor.
+     * The new agent inherits the calling agent's principal — async callers
+     * don't have a session, and the owner is the principal that
+     * "created" the agent. The trust anchor is the calling agent row; the
+     * principal/owner user id are derived from `PrincipalContext` so the
+     * agent is owned by the same principal the calling agent belongs to.
      *
      * @param array<string, mixed> $arguments
      */
-    private function createAgent(int $callingAgentId, array $arguments): ToolResult
+    private function createAgent(int $callingAgentId, array $arguments, ?PrincipalContext $context): ToolResult
     {
-        $callingAgent = $this->agentService->getAgentByAgentId($callingAgentId);
-        if ($callingAgent === null) {
-            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        $prepared = $this->prepareCreateAgentInputs($callingAgentId, $arguments, $context);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
+        [$userId, $principalId, $data] = $prepared;
 
-        $data = $this->payloadValidator->validateCreateAgentPayload($arguments);
-        if ($data instanceof ToolResult) {
-            return $data;
-        }
-
-        $agent = $this->agentService->createAgent((int) $callingAgent->user_id, $data);
+        $agent = $this->agentService->createAgent($userId, $data, $principalId);
         $intro = "Created agent #{$agent->id} ('{$agent->name}'). "
                . "Configure tools next with `configure_tools(agent_id: {$agent->id}, tools: [...])` "
                . "and verify with `read_agent(agent_id: {$agent->id})`.";
@@ -445,6 +479,48 @@ final class AgentTool extends AbstractTool
             $intro . "\n\n" . AgentManifestRenderer::markdown($manifest),
             $manifest,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array{0: int, 1: int, 2: array<string, mixed>}|ToolResult
+     */
+    private function prepareCreateAgentInputs(int $callingAgentId, array $arguments, ?PrincipalContext $context): array|ToolResult
+    {
+        $callingAgent = $this->agentService->getAgentByAgentId($callingAgentId);
+        if ($callingAgent === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+
+        return $this->resolveCreateAgentInputs($callingAgent, $callingAgentId, $arguments, $context);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array{0: int, 1: int, 2: array<string, mixed>}|ToolResult
+     */
+    private function resolveCreateAgentInputs(Agent $callingAgent, int $callingAgentId, array $arguments, ?PrincipalContext $context): array|ToolResult
+    {
+        $data = $this->payloadValidator->validateCreateAgentPayload($arguments);
+        if ($data instanceof ToolResult) {
+            return $data;
+        }
+
+        $resolver = $this->principalResolver;
+        if ($context === null) {
+            $context = $resolver->resolveForToolExecute($callingAgentId);
+        }
+
+        $principalId = $context->principalId ?: (int) $callingAgent->principal_id;
+        $userId = $context->ownerUserId
+            ?? $resolver->ownerUserId($principalId)
+            ?? $this->authService?->currentUserId();
+
+        if ($userId === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+
+        return [$userId, $principalId, $data];
     }
 
     /**
@@ -510,13 +586,13 @@ final class AgentTool extends AbstractTool
 
     private function renderFreshAgentAfterConfigure(int $userId, int $agentId): ToolResult
     {
-        // User-scoped re-read so the manifest sees the same row the
-        // resolver already validated.
-        $fresh = Agent::query()
-            ->where('user_id', $userId)
-            ->where('id', $agentId)
-            ->first();
+        // Migration 0067: an agent is owned by a principal, not a user.
+        // Re-read by id and verify the caller controls its principal.
+        $fresh = Agent::where('id', $agentId)->first();
         if ($fresh === null) {
+            return ToolResult::fail(self::AGENT_NOT_FOUND);
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $fresh->principal_id)) {
             return ToolResult::fail(self::AGENT_NOT_FOUND);
         }
         return $this->renderManifestResult($fresh);

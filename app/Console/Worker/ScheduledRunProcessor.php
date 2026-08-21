@@ -17,6 +17,7 @@ use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
@@ -344,7 +345,12 @@ final class ScheduledRunProcessor
 
     private function resolveUserName(Agent $agent, string $key): string
     {
-        $user = \Spora\Models\User::find($agent->user_id);
+        $resolver = new PrincipalResolver();
+        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
+        if ($ownerUserId === null) {
+            return $key;
+        }
+        $user = \Spora\Models\User::find($ownerUserId);
         return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
     }
 }

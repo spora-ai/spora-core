@@ -14,6 +14,7 @@ use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
@@ -24,6 +25,8 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
@@ -68,10 +71,14 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?PluginLoader $pluginLoader;
     public readonly ?AgentServiceInterface $agentService;
     public readonly ?SubAgentServiceInterface $subAgent;
+    public readonly ?PrincipalResolver $principalResolver;
+    public readonly ?AuthService $authService;
 
     public function __construct(
         DriverFactory $driverFactory,
         ?OrchestratorConfig $config = null,
+        ?PrincipalResolver $principalResolver = null,
+        ?AuthService $authService = null,
     ) {
         $config ??= new OrchestratorConfig();
 
@@ -86,9 +93,14 @@ final class Orchestrator implements OrchestratorInterface
         $this->pluginLoader          = $config->pluginLoader;
         $this->agentService          = $config->agentService;
         $this->subAgent              = $config->subAgent;
+        $this->principalResolver     = $principalResolver ?? new PrincipalResolver();
+        $this->authService           = $authService;
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
-        $this->llmConfigResolver     = new LlmConfigResolver($config->llmConfigService);
+        $this->llmConfigResolver     = new LlmConfigResolver(
+            $config->principalPreferences ?? new \Spora\Services\LLMConfigPreferences(),
+            $config->llmConfigService,
+        );
         $this->toolDefinitionBuilder = new ToolDefinitionBuilder(
             $config->toolInstances,
             $config->toolConfigService,
@@ -107,6 +119,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->mercure,
             $config->toolCallSerializer,
             $config->subAgent,
+            $principalResolver ?? new PrincipalResolver(),
         );
         $this->toolCallExecutor      = new ToolCallExecutor($this);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
@@ -118,13 +131,16 @@ final class Orchestrator implements OrchestratorInterface
 
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task
     {
-        $agent = Agent::findOrFail($agentId);
+        Agent::findOrFail($agentId);
 
         $taskData = $runId !== null ? ['run_id' => $runId] : [];
 
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $runnerUserId = $resolver->runnerUserId($agentId) ?? $this->authService?->currentUserId();
+
         $task = Task::create([
             'agent_id'      => $agentId,
-            'user_id'       => $agent->user_id,
+            'user_id'       => $runnerUserId,
             'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
             'user_prompt'   => Utf8Sanitizer::scrubString($userPrompt),
             'step_count'    => 0,
@@ -472,6 +488,9 @@ final class Orchestrator implements OrchestratorInterface
         $attrs    = $ref->getAttributes(Tool::class);
         $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
 
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $context  = $resolver->resolveForToolExecute($agentId);
+
         // Source the calling user's id from the calling Agent's row
         // — tools never see a session-derived `$userId`. When the
         // orchestrator runs without AgentService (e.g. a minimal
@@ -481,7 +500,7 @@ final class Orchestrator implements OrchestratorInterface
         if ($this->agentService !== null) {
             $callingAgent = $this->agentService->getAgentByAgentId($agentId);
             if ($callingAgent !== null) {
-                $userId = (int) $callingAgent->user_id;
+                $userId = $callingAgent->user_id;
             }
         }
 
@@ -495,7 +514,7 @@ final class Orchestrator implements OrchestratorInterface
         ]);
 
         try {
-            $result = $toolInstance->execute($arguments, $agentId, $userId, $taskId);
+            $result = $toolInstance->execute($arguments, $agentId, $userId, $taskId, $context);
 
             if (!$result->success) {
                 $this->logger?->error('Tool returned failure', [
@@ -604,9 +623,9 @@ final class Orchestrator implements OrchestratorInterface
      * @return list<array<string, mixed>>
      */
     /** @phpstan-ignore method.unused (used via reflection in tests) */
-    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
+    private function buildToolDefinitions(array $enabledClasses, int $agentId, ?PrincipalContext $context = null): array
     {
-        return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $userId);
+        return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $context);
     }
 
     private function buildLlmConfigBlock(array $llmSettings): string

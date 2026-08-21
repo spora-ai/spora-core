@@ -37,6 +37,17 @@ trait JsonControllerHelpers
         return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
     }
 
+    /**
+     * The standard 401 envelope. The wire-format `error.code` and
+     * message literals are kept here in lockstep — adding new
+     * consuming controllers that ask for the unified envelope will
+     * stay in sync with the others by construction.
+     */
+    private function unauthenticated(): JsonResponse
+    {
+        return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+    }
+
     private function notFound(string $code, string $message): JsonResponse
     {
         return new JsonResponse(

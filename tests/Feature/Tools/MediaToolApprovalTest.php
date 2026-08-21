@@ -60,7 +60,7 @@ function seedMediaToolApprovalAgent(): int
     $userId = (int) $pdo->lastInsertId();
 
     return Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'MediaTool approval agent',
         'is_active' => true,
     ])->id;
@@ -183,7 +183,7 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
         $toolInstance = buildMediaToolForSchema();
 
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
-        $defs    = $builder->buildToolDefinitions([MediaTool::class], agentId: 999_001, userId: null);
+        $defs    = $builder->buildToolDefinitions([MediaTool::class], agentId: 999_001, context: null);
 
         expect($defs)->toHaveCount(1);
         expect($defs[0]['function']['name'])->toBe('media');
@@ -206,7 +206,7 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
 
         $toolInstance = buildMediaToolForSchema();
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
-        $defs    = $builder->buildToolDefinitions([MediaTool::class], agentId: $agentId, userId: null);
+        $defs    = $builder->buildToolDefinitions([MediaTool::class], agentId: $agentId, context: null);
 
         expect($defs)->toHaveCount(1);
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
@@ -217,7 +217,7 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
         $toolInstance = buildMediaToolForSchema();
 
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
-        $defs    = $builder->buildToolDefinitions(enabledClasses: [], agentId: 999_003, userId: null);
+        $defs    = $builder->buildToolDefinitions(enabledClasses: [], agentId: 999_003, context: null);
 
         expect($defs)->toBe([]);
     });

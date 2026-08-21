@@ -5,9 +5,21 @@ declare(strict_types=1);
 namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
 
 /**
+ * Principal-scoped tool settings override — was `user_id` keyed until the
+ * principals-and-groups migration (0067) renamed the column to `principal_id`.
+ *
+ * The model is named for the historical table name (`ToolUserSetting` → still
+ * `:tool_user_settings` table). Cascade is a re-name-in-spirit only; the class
+ * itself now points at {@see Principal} instead of {@see User}.
+ *
+ * @property int     $id
+ * @property int     $principal_id
+ * @property string  $tool_class
+ * @property string  $settings  (encrypted JSON; never access directly)
  * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
 final class ToolUserSetting extends Model
@@ -17,10 +29,15 @@ final class ToolUserSetting extends Model
 
     /** @var list<string> */
     protected $fillable = [
-        'user_id',
+        'principal_id',
         'tool_class',
         'settings',
     ];
+
+    public function principal(): BelongsTo
+    {
+        return $this->belongsTo(Principal::class);
+    }
 
     // settings is intentionally NOT in $casts — all access via ToolConfigService
     // Do NOT add 'settings' => 'array' here.

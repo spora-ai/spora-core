@@ -108,7 +108,7 @@ function persistAgent(int $userId): Agent
     $user->save();
 
     $agent = new Agent();
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->name = 'test-agent';
     $agent->is_active = true;
     $agent->save();

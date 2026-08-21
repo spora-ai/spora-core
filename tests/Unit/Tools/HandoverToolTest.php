@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Mockery\MockInterface;
+use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\SubAgentServiceInterface;
@@ -26,6 +27,34 @@ function makeHandoverTool(): array
     $config   = Mockery::mock(ToolConfigServiceInterface::class);
 
     return [new HandoverTool($handover, $subAgent, $config), $handover, $subAgent, $config];
+}
+
+/**
+ * Seed real `agents` rows for HANDOVER_AGENT_ID and HANDOVER_TARGET_AGENT
+ * under a shared user-principal. `HandoverTool::isTargetAllowed()` now
+ * cross-checks `principal_id` after the allowlist hit, so any test that
+ * exercises the tool past the allowlist needs both agents to exist with
+ * the same principal in the (in-memory) DB.
+ */
+function seedHandoverAgents(int $userId = HANDOVER_USER_ID): int
+{
+    $principalId = createUserPrincipalPublic($userId);
+    $now = date('Y-m-d H:i:s');
+    foreach ([HANDOVER_AGENT_ID, HANDOVER_TARGET_AGENT] as $i => $agentId) {
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => $agentId],
+            [
+                'principal_id' => $principalId,
+                'name'         => $i === 0 ? 'Handover Source Agent' : 'Handover Target Agent',
+                'max_steps'    => $i === 0 ? 10 : 7,
+                'is_active'    => 1,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ],
+        );
+    }
+
+    return $principalId;
 }
 
 describe('HandoverTool::execute (handover op)', function (): void {
@@ -100,6 +129,7 @@ describe('HandoverTool::execute (handover op)', function (): void {
 
     test('returns failure when service throws InvalidArgumentException', function (): void {
         [$tool, $handover, , $config] = makeHandoverTool();
+        seedHandoverAgents();
         $config->allows('getEffectiveSettings')
             ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
         $handover->allows('handover')
@@ -118,6 +148,7 @@ describe('HandoverTool::execute (handover op)', function (): void {
 
     test('returns success with new_task_id and target_agent_id on happy path', function (): void {
         [$tool, $handover, , $config] = makeHandoverTool();
+        seedHandoverAgents();
         $newTask = new Task();
         $newTask->id = HANDOVER_NEW_TASK_ID;
         $config->allows('getEffectiveSettings')
@@ -149,6 +180,7 @@ describe('HandoverTool::execute (sub_agent op)', function (): void {
 
     test('routes to SubAgentService with the right args', function (): void {
         [$tool, , $subAgent, $config] = makeHandoverTool();
+        seedHandoverAgents();
         $config->allows('getEffectiveSettings')
             ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
 
@@ -221,6 +253,7 @@ describe('HandoverTool::execute (sub_agent op)', function (): void {
 
     test('returns failure when SubAgentService throws InvalidArgumentException', function (): void {
         [$tool, , $subAgent, $config] = makeHandoverTool();
+        seedHandoverAgents();
         $config->allows('getEffectiveSettings')
             ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
         $subAgent->allows('spawn')
@@ -318,5 +351,67 @@ describe('HandoverTool back-compat: single-op agents may omit `op`', function ()
             $schema,
             'sub_agent',
         ))->toThrow(InvalidArgumentException::class, "Required argument 'agent_id'");
+    });
+});
+
+describe('HandoverTool::isTargetAllowed (intra-principal defense in depth)', function (): void {
+
+    test('returns false when source and target belong to different principals even though the target id is in the stored allowlist', function (): void {
+        [$tool, $handover, , $config] = makeHandoverTool();
+
+        // Source owned by user A, target owned by user B — different principals.
+        $principalA = createUserPrincipalPublic(HANDOVER_USER_ID);
+        $otherUserId = HANDOVER_USER_ID + 100;
+        $principalB = createUserPrincipalPublic($otherUserId);
+
+        $now = date('Y-m-d H:i:s');
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => HANDOVER_AGENT_ID],
+            ['principal_id' => $principalA, 'name' => 'Source A', 'max_steps' => 10, 'is_active' => 1, 'created_at' => $now, 'updated_at' => $now],
+        );
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => HANDOVER_TARGET_AGENT],
+            ['principal_id' => $principalB, 'name' => 'Target B', 'max_steps' => 7, 'is_active' => 1, 'created_at' => $now, 'updated_at' => $now],
+        );
+
+        // Stored allowlist contains the foreign id — tampered payload / copy-paste.
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
+
+        $result = $tool->execute(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
+            HANDOVER_AGENT_ID,
+            HANDOVER_USER_ID,
+            HANDOVER_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not in the allowed_target_agents list');
+        $handover->shouldNotHaveReceived('handover');
+    });
+
+    test('returns false when the source agent cannot be loaded (fail-closed)', function (): void {
+        [$tool, $handover, , $config] = makeHandoverTool();
+        // Only the target is seeded; the source agent does NOT exist in the DB.
+        $principalId = createUserPrincipalPublic(HANDOVER_USER_ID);
+        $now = date('Y-m-d H:i:s');
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => HANDOVER_TARGET_AGENT],
+            ['principal_id' => $principalId, 'name' => 'Target Only', 'max_steps' => 7, 'is_active' => 1, 'created_at' => $now, 'updated_at' => $now],
+        );
+
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
+
+        $result = $tool->execute(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
+            HANDOVER_AGENT_ID,
+            HANDOVER_USER_ID,
+            HANDOVER_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not in the allowed_target_agents list');
+        $handover->shouldNotHaveReceived('handover');
     });
 });

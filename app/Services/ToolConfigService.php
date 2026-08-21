@@ -30,6 +30,14 @@ use Spora\Skills\SkillScanner;
  * resolves the php:S1448 (too many methods) violation that motivated the
  * refactor. If a future change makes the class `final`, the consumer-side
  * type hints should be switched to ToolConfigServiceInterface.
+ *
+ * Migration 0067 renamed `tool_user_settings.user_id` to
+ * `tool_user_settings.principal_id`. The new effective-settings cascade
+ * is `schema defaults → global → principal → agent`. The caller-friendly
+ * `(string $toolClass, int $agentId, ?int $userId)` shape is preserved
+ * by deriving the principal scope from the user-id when `PrincipalContext`
+ * is not provided, so existing controllers and tests don't have to
+ * change shape — only the underlying query.
  */
 class ToolConfigService implements ToolConfigServiceInterface
 {
@@ -88,11 +96,8 @@ class ToolConfigService implements ToolConfigServiceInterface
     {
         $toolName = $this->nameResolver->getToolName($toolClass);
 
-        // Merge with existing stored settings so omitted fields are preserved.
-        // Only fields present in $settings are overwritten; everything else carries over.
         $existing = $this->getGlobalSettings($toolClass);
 
-        // Replace '***' sentinel (masked password from client) with actual existing values.
         foreach ($settings as $key => $value) {
             if ($value === '***' && array_key_exists($key, $existing)) {
                 $settings[$key] = $existing[$key];
@@ -100,7 +105,6 @@ class ToolConfigService implements ToolConfigServiceInterface
         }
 
         $merged   = array_merge($existing, $settings);
-        // Filter out any remaining '***' sentinels before saving (only for password fields)
         $merged   = $this->crypto->filterSettings($toolClass, $merged);
 
         $encrypted = $this->crypto->encryptSettings($toolClass, $merged);
@@ -121,19 +125,19 @@ class ToolConfigService implements ToolConfigServiceInterface
                 'tool_name'   => $toolName,
                 'settings'    => $encrypted,
                 'created_at'  => date(self::DATETIME_FORMAT),
-                'updated_at'  => date(self::DATETIME_FORMAT),
+                'updated_at' => date(self::DATETIME_FORMAT),
             ]);
         }
     }
 
     /**
-     * Load user-specific settings for a tool class, decrypting password fields.
+     * Load principal-scoped settings for a tool class.
      *
      * @return array<string, mixed>
      */
-    public function getUserSettings(string $toolClass, int $userId): array
+    public function getPrincipalSettings(string $toolClass, int $principalId): array
     {
-        $model = ToolUserSetting::where('user_id', $userId)
+        $model = ToolUserSetting::where('principal_id', $principalId)
             ->where('tool_class', $toolClass)
             ->first();
 
@@ -145,18 +149,14 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Persist user-specific settings for a tool class.
-     * Password fields are encrypted; other fields stored as plain strings.
+     * Persist principal-scoped settings for a tool class.
      *
      * @return array<string, mixed> Decrypted settings (for immediate use)
      */
-    public function putUserSettings(string $toolClass, int $userId, array $settings): array
+    public function putPrincipalSettings(string $toolClass, int $principalId, array $settings): array
     {
-        // Merge with existing stored settings so omitted fields are preserved.
-        $existingSettings = $this->getUserSettings($toolClass, $userId);
+        $existingSettings = $this->getPrincipalSettings($toolClass, $principalId);
 
-        // Replace '***' sentinel (masked password from client) with actual existing values.
-        // The sentinel only means "preserve" when the key already exists in $existing.
         foreach ($settings as $key => $value) {
             if ($value === '***' && array_key_exists($key, $existingSettings)) {
                 $settings[$key] = $existingSettings[$key];
@@ -164,17 +164,16 @@ class ToolConfigService implements ToolConfigServiceInterface
         }
 
         $merged    = array_merge($existingSettings, $settings);
-        // Filter out any remaining '***' sentinels before saving (only for password fields)
         $merged    = $this->crypto->filterSettings($toolClass, $merged);
         $encrypted = $this->crypto->encryptSettings($toolClass, $merged);
 
-        $record = ToolUserSetting::where('user_id', $userId)
+        $record = ToolUserSetting::where('principal_id', $principalId)
             ->where('tool_class', $toolClass)
             ->first();
 
         if ($record !== null) {
             Capsule::table('tool_user_settings')
-                ->where('user_id', $userId)
+                ->where('principal_id', $principalId)
                 ->where('tool_class', $toolClass)
                 ->update([
                     'settings'   => $encrypted,
@@ -182,11 +181,11 @@ class ToolConfigService implements ToolConfigServiceInterface
                 ]);
         } else {
             Capsule::table('tool_user_settings')->insert([
-                'user_id'    => $userId,
-                'tool_class' => $toolClass,
-                'settings'   => $encrypted,
-                'created_at' => date(self::DATETIME_FORMAT),
-                'updated_at' => date(self::DATETIME_FORMAT),
+                'principal_id' => $principalId,
+                'tool_class'   => $toolClass,
+                'settings'     => $encrypted,
+                'created_at'   => date(self::DATETIME_FORMAT),
+                'updated_at'   => date(self::DATETIME_FORMAT),
             ]);
         }
 
@@ -194,19 +193,35 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Return effective settings: global defaults merged with user settings and agent-specific overrides.
-     * Cascade: schema defaults → global settings → user settings → agent overrides.
+     * Return effective settings: global defaults merged with principal
+     * settings and agent-specific overrides.
+     *
+     * Cascade: schema defaults → global settings → principal settings → agent overrides.
+     *
+     * The `?PrincipalContext` parameter is the preferred shape — it
+     * carries the principal id directly so we don't re-derive a
+     * user-principal from `currentUserId()`. The legacy `?int $userId`
+     * parameter is preserved at the front so existing call sites (tools,
+     * controllers) don't have to be updated as part of the migration;
+     * new callers should pass an explicit `PrincipalContext`.
      *
      * @return array<string, mixed>
      */
-    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null): array
+    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
+        if ($context !== null) {
+            $principalId = $context->principalId;
+        } elseif ($userId !== null) {
+            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
+
         $merged = $this->getGlobalSettings($toolClass);
 
-        // Merge user settings if userId is provided
-        if ($userId !== null) {
-            $userSettings = $this->getUserSettings($toolClass, $userId);
-            foreach ($userSettings as $key => $value) {
+        if ($principalId !== null) {
+            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
+            foreach ($principalSettings as $key => $value) {
                 $merged[$key] = $value;
             }
         }
@@ -226,7 +241,6 @@ class ToolConfigService implements ToolConfigServiceInterface
             }
         }
 
-        // Fill in schema defaults where nothing is set yet
         $defaults = $this->schema->getSchemaDefaults($toolClass);
         foreach ($defaults as $key => $defaultValue) {
             if (!isset($merged[$key])) {
@@ -234,10 +248,6 @@ class ToolConfigService implements ToolConfigServiceInterface
             }
         }
 
-        // Multi-select values travel through the form as JSON-encoded strings
-        // (the form layer is Record<string, string>), so the cryptographer
-        // round-trips them as literal strings. Decode them back to arrays so
-        // tool `execute()` and the LLM-facing projection see a list<int>.
         return $this->schema->normalizeMultiSelectValues($toolClass, $merged);
     }
 
@@ -269,10 +279,8 @@ class ToolConfigService implements ToolConfigServiceInterface
             $agentSettings[$key] = $value;
         }
 
-        // Merge with existing stored settings so omitted fields are preserved.
         $merged = array_merge($existing, $agentSettings);
 
-        // Filter: remove '***' sentinel (only for password fields), null, and empty strings (they mean "use parent")
         $filtered = $this->crypto->filterSettings($toolClass, $merged);
         $filtered = array_filter($filtered, fn($v) => $v !== null && $v !== '');
 
@@ -320,11 +328,11 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Delete user-specific settings for a tool class.
+     * Delete principal-specific settings for a tool class.
      */
-    public function deleteUserSettings(string $toolClass, int $userId): void
+    public function deletePrincipalSettings(string $toolClass, int $principalId): void
     {
-        ToolUserSetting::where('user_id', $userId)
+        ToolUserSetting::where('principal_id', $principalId)
             ->where('tool_class', $toolClass)
             ->delete();
     }
@@ -352,6 +360,9 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     /**
      * Resolve a tool identifier (from #[Tool(name:)]) to its fully-qualified PHP class name.
+     *
+     * @deprecated use the injected {@see ToolConfigService::nameResolver}
+     *             directly via its own injection point.
      */
     public function resolveToolClass(string $toolName): ?string
     {
@@ -362,6 +373,8 @@ class ToolConfigService implements ToolConfigServiceInterface
      * Return all registered tool class names.
      *
      * @return list<string>
+     *
+     * @deprecated see {@see ToolConfigService::resolveToolClass()}
      */
     public function getRegisteredToolClasses(): array
     {
@@ -391,27 +404,36 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Return effective settings annotated with their source ('global', 'agent', or 'default').
-     * Used by the frontend to show (global) / (local) badges per field.
+     * Return effective settings annotated with their source.
      *
-     * @return array<string, array{value: mixed, source: 'global'|'user'|'agent'|'default'}>
+     * In the principals-and-groups model the source values are
+     * `'global' | 'principal' | 'agent' | 'default'`. The `'user'`
+     * source from the previous schema has been renamed to `'principal'`
+     * so the frontend badge aligns with the column name.
+     *
+     * @return array<string, array{value: mixed, source: 'global'|'principal'|'agent'|'default'}>
      */
-    public function getEffectiveSettingsWithSource(string $toolClass, int $agentId): array
+    public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
+        if ($context !== null) {
+            $principalId = $context->principalId;
+        } elseif ($userId !== null) {
+            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
+
         $global = $this->getGlobalSettings($toolClass);
         $result = [];
 
-        // Seed from global defaults
         foreach ($global as $key => $value) {
             $result[$key] = ['value' => $value, 'source' => 'global'];
         }
 
-        // Merge user-specific settings (per-user overrides)
-        $agent = Agent::find($agentId);
-        if ($agent !== null) {
-            $userSettings = $this->getUserSettings($toolClass, $agent->user_id);
-            foreach ($userSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => 'user'];
+        if ($principalId !== null) {
+            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
+            foreach ($principalSettings as $key => $value) {
+                $result[$key] = ['value' => $value, 'source' => 'principal'];
             }
         }
 
@@ -430,7 +452,6 @@ class ToolConfigService implements ToolConfigServiceInterface
             }
         }
 
-        // Fill in schema defaults where nothing is set yet
         $defaults = $this->schema->getSchemaDefaults($toolClass);
         foreach ($defaults as $key => $defaultValue) {
             if (!array_key_exists($key, $result)) {
@@ -466,10 +487,10 @@ class ToolConfigService implements ToolConfigServiceInterface
      *
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null): array
+    public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId);
+        $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId, $context);
 
-        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId);
+        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId, $agentId);
     }
 }

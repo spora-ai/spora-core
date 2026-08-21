@@ -30,7 +30,7 @@ function makeAgentWithLlm(mixed $authService): int
     $userId = $authService->register($email, 'Password1!', ucfirst(explode('@', $email)[0]));
 
     return Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'LLM Test Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -82,7 +82,8 @@ test('getLlmToolSettings respects user-specific settings cascade', function (): 
 
     // Set user-level override
     $agent = Agent::find($agentId);
-    $service->putUserSettings(TestTool::class, $agent->user_id, [
+    $userAdapter = makeUserAdapter($service);
+    $userAdapter->putUserSettings(TestTool::class, $agent->user_id, [
         'allowed_target_agents' => ['user-override-agent'],
     ]);
 

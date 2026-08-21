@@ -17,7 +17,7 @@ it('uses the scheduled_runs table', function (): void {
 it('casts is_active to bool and date columns to Carbon', function (): void {
     $userId = bootAuthLayer()->register('scheduled@example.com', SCHEDULED_RUN_TEST_PASSWORD, 'Scheduled');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Scheduled Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -27,7 +27,7 @@ it('casts is_active to bool and date columns to Carbon', function (): void {
 
     $run = ScheduledRun::create([
         'agent_id'        => $agent->id,
-        'user_id'         => $userId,
+        'user_id' => $userId,
         'timezone'        => 'UTC',
         'is_active'       => true,
         'last_run_at'     => '2099-01-01 00:00:00',
@@ -44,7 +44,7 @@ it('casts is_active to bool and date columns to Carbon', function (): void {
 it('belongs to an agent and a template', function (): void {
     $userId = bootAuthLayer()->register('scheduled-rel@example.com', SCHEDULED_RUN_TEST_PASSWORD, 'ScheduledRel');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Rel Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -53,7 +53,7 @@ it('belongs to an agent and a template', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'user_id'   => $userId,
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);
@@ -66,7 +66,7 @@ it('belongs to an agent and a template', function (): void {
 it('has many next run entries ordered by due_at', function (): void {
     $userId = bootAuthLayer()->register('scheduled-has@example.com', SCHEDULED_RUN_TEST_PASSWORD, 'ScheduledHas');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Has Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -75,7 +75,7 @@ it('has many next run entries ordered by due_at', function (): void {
     ]);
     $run = ScheduledRun::create([
         'agent_id'  => $agent->id,
-        'user_id'   => $userId,
+        'user_id' => $userId,
         'timezone'  => 'UTC',
         'is_active' => true,
     ]);

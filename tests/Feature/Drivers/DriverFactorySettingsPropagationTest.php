@@ -38,7 +38,7 @@ function makeDriverFactory(?LLMConfigService $svc = null): DriverFactory
 
 test('OpenAI driver gets supports_image_input=true from "true" string setting', function (): void {
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Vision-enabled',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings'     => json_encode([
@@ -59,7 +59,7 @@ test('OpenAI driver gets supports_image_input=true from "true" string setting', 
 
 test('OpenAI driver gets supports_image_input=false from "false" string setting', function (): void {
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Text-only',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings'     => json_encode([
@@ -79,7 +79,7 @@ test('OpenAI driver gets supports_image_input=false from "false" string setting'
 
 test('OpenAI driver falls back to model heuristic when setting key is absent', function (): void {
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Legacy row',
         'driver_class' => OpenAICompatibleDriver::class,
         'settings'     => json_encode([
@@ -97,7 +97,7 @@ test('OpenAI driver falls back to model heuristic when setting key is absent', f
 
 test('Anthropic driver propagates toggle', function (): void {
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Anthropic with toggle',
         'driver_class' => AnthropicCompatibleDriver::class,
         'settings'     => json_encode([
@@ -117,7 +117,7 @@ test('Anthropic driver propagates toggle', function (): void {
 
 test('Anthropic driver falls back to model heuristic when toggle is absent', function (): void {
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Anthropic legacy',
         'driver_class' => AnthropicCompatibleDriver::class,
         'settings'     => json_encode([

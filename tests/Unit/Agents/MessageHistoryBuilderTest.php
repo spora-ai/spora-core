@@ -20,7 +20,7 @@ function seedHistoryAgent(): array
     $userId      = $authService->register('hist@example.com', TEST_PASSWORD, 'Hist');
 
     $config = Spora\Models\LLMDriverConfiguration::create([
-        'user_id'           => null,
+        'principal_id' => null,
         'name'              => 'Test Global Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
@@ -31,7 +31,7 @@ function seedHistoryAgent(): array
     ]);
 
     $agent = Spora\Models\Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'History Builder Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 10,

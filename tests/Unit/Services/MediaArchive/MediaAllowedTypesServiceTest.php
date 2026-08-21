@@ -102,7 +102,7 @@ function seedLlmConfig(int $id, int $userId, string $driverClass, string $model)
     }
     LLMDriverConfiguration::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "cfg-{$id}",
         'driver_class' => $driverClass,
         'settings' => json_encode([
@@ -124,7 +124,7 @@ function seedAgent(int $id, int $userId): void
     }
     Agent::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "agent-{$id}",
         'description' => '',
         'system_prompt' => '',

@@ -16,14 +16,20 @@ use Spora\Models\LLMDriverConfiguration;
  *  - {@see LLMConfigPersistence} for CRUD with per-field encryption
  *  - {@see LLMConfigPreferences} for the three-tier default-resolution path
  *
- * Public method signatures are preserved so the DI container wiring,
- * existing controllers, and tests remain unchanged.
+ * Migration 0067 cut the wire format over from `user_id` to
+ * `principal_id`; the public method names that say "user" remain only
+ * where they describe the controller-facing HTTP path (whose auth
+ * layer still passes the caller user-id) so changing them here would
+ * be a footgun. Internal `*ForPrincipal` helpers model the principal
+ * axis directly.
  */
 final class LLMConfigService implements LLMConfigServiceInterface
 {
     private readonly LLMConfigSchemaInspector $schemaInspector;
     private readonly LLMConfigPersistence $persistence;
     private readonly LLMConfigPreferences $preferences;
+    private readonly PrincipalResolver $principalResolver;
+    private readonly PrincipalService $principalService;
 
     /**
      * @param list<class-string<\Spora\Drivers\LLMDriverConfigInterface>> $driverClasses
@@ -36,10 +42,14 @@ final class LLMConfigService implements LLMConfigServiceInterface
         ?LLMConfigSchemaInspector $schemaInspector = null,
         ?LLMConfigPersistence $persistence = null,
         ?LLMConfigPreferences $preferences = null,
+        ?PrincipalResolver $principalResolver = null,
+        ?PrincipalService $principalService = null,
     ) {
-        $this->schemaInspector = $schemaInspector ?? new LLMConfigSchemaInspector($driverClasses);
-        $this->persistence = $persistence ?? new LLMConfigPersistence($security, $this->schemaInspector);
-        $this->preferences = $preferences ?? new LLMConfigPreferences();
+        $this->schemaInspector    = $schemaInspector ?? new LLMConfigSchemaInspector($driverClasses);
+        $this->principalResolver  = $principalResolver ?? new PrincipalResolver();
+        $this->principalService   = $principalService ?? new PrincipalService($this->principalResolver);
+        $this->persistence        = $persistence ?? new LLMConfigPersistence($security, $this->schemaInspector, $this->principalResolver);
+        $this->preferences        = $preferences ?? new LLMConfigPreferences($this->principalService);
     }
 
     // ---------------------------------------------------------------------
@@ -57,15 +67,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
     // ---------------------------------------------------------------------
     // Settings encode / decode / mask (delegated to Persistence)
     // ---------------------------------------------------------------------
-
-    /**
-     * @param array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    public function encodeSettings(string $driverClass, array $settings): array
-    {
-        return $this->persistence->encodeSettings($driverClass, $settings);
-    }
 
     /**
      * @return array<string, mixed>
@@ -114,13 +115,27 @@ final class LLMConfigService implements LLMConfigServiceInterface
     // ---------------------------------------------------------------------
 
     /**
+     * Union of every principal-scoped config the user can see plus every
+     * global config. Controllers use this in place of the old
+     * `where('user_id', $userId)->orWhere('is_global', true)` query so a
+     * user with multiple principals sees all their configs at once.
+     *
      * @return list<array>
      */
     public function getConfigurationsForUser(int $userId): array
     {
-        return LLMDriverConfiguration::where('user_id', $userId)
-            ->orWhere('is_global', true)
-            ->get()
+        $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+
+        $query = LLMDriverConfiguration::where(static function ($q) use ($principalIds): void {
+            if ($principalIds !== []) {
+                $q->whereIn('principal_id', $principalIds);
+            } else {
+                $q->whereRaw('1 = 0');
+            }
+            $q->orWhere('is_global', true);
+        });
+
+        return $query->get()
             ->map(fn(LLMDriverConfiguration $config): array => $this->configResource($config))
             ->all();
     }
@@ -141,11 +156,19 @@ final class LLMConfigService implements LLMConfigServiceInterface
     {
         $query = LLMDriverConfiguration::where('id', $configId);
         if (!$isAdmin) {
-            // A non-admin can see their own configs plus every global config;
-            // personal configs belonging to other users are hidden (returns
-            // null so the caller emits 404 and avoids enumeration).
-            $query->where(static function ($q) use ($userId): void {
-                $q->where('user_id', $userId)->orWhere('is_global', true);
+            $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+            $query->where(static function ($q) use ($principalIds): void {
+                // A global config is always visible. A principal-scoped
+                // config is only visible when its principal is one the
+                // caller can act as. WHERE 1 = 0 in the whereIn() branch
+                // short-circuits to "globals only" when the caller has
+                // no principal memberships (e.g. a fresh account).
+                if ($principalIds === []) {
+                    $q->whereRaw('1 = 0');
+                } else {
+                    $q->whereIn('principal_id', $principalIds);
+                }
+                $q->orWhere('is_global', true);
             });
         }
         return $query->first();
@@ -162,14 +185,21 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        return $this->persistence->createConfiguration($userId, $data, $isAdmin);
+        // Body may carry an explicit principal_id (admins can write to
+        // any group); otherwise the caller's user-principal is the
+        // default so the principal created by Spora's guard layer is
+        // reused.
+        $principalId = isset($data['principal_id']) && is_int($data['principal_id'])
+            ? $data['principal_id']
+            : $this->principalService->ensureUserPrincipal($userId)->id;
+
+        unset($data['principal_id']);
+
+        return $this->persistence->createConfiguration($principalId, $userId, $data, $isAdmin);
     }
 
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        // $userId is preserved on the public facade signature for backwards
-        // compatibility with controllers/callers; the persistence collaborator
-        // dropped the parameter (it was unused in the body).
         unset($userId);
 
         return $this->persistence->updateConfiguration($configId, $data, $isAdmin);
@@ -186,9 +216,6 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        // $userId is preserved on the public facade signature for backwards
-        // compatibility; the preferences collaborator dropped the parameter
-        // (it was unused in the body).
         unset($userId);
 
         return $this->preferences->setDefaultConfiguration($configId, $isAdmin);
@@ -199,24 +226,19 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $this->preferences->getDefaultConfiguration($userId);
     }
 
-    public function getEffectiveConfigForAgent(\Spora\Models\Agent $agent): ?LLMDriverConfiguration
+    public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration
     {
-        return $this->preferences->getEffectiveConfigForAgent($agent);
+        return $this->preferences->getPrincipalPreferredConfig($principalId);
     }
 
-    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration
+    public function setPrincipalPreferredConfig(int $principalId, int $configId, int $callerUserId): bool
     {
-        return $this->preferences->getUserPreferredConfig($userId);
+        return $this->preferences->setPrincipalPreferredConfig($principalId, $configId, $callerUserId);
     }
 
-    public function setUserPreferredConfig(int $userId, int $configId): bool
+    public function unsetPrincipalPreferredConfig(int $principalId): void
     {
-        return $this->preferences->setUserPreferredConfig($userId, $configId);
-    }
-
-    public function unsetUserPreferredConfig(int $userId): void
-    {
-        $this->preferences->unsetUserPreferredConfig($userId);
+        $this->preferences->unsetPrincipalPreferredConfig($principalId);
     }
 
     // ---------------------------------------------------------------------
@@ -242,7 +264,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
             'context_window' => $config->context_window,
             'max_tokens_output' => $config->max_tokens_output,
             'is_default' => $config->is_default,
-            'user_id' => $config->user_id,
+            'principal_id' => $config->principal_id,
             'is_global' => $config->is_global,
             'created_at' => $config->created_at->toIso8601String(),
             'updated_at' => $config->updated_at->toIso8601String(),

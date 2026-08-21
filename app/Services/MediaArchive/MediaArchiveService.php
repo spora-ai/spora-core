@@ -15,6 +15,8 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 
@@ -125,7 +127,12 @@ final class MediaArchiveService
         private readonly MediaConverterRegistry $converters,
         private readonly MediaIngestDecoder $decoder,
         private readonly ?LoggerInterface $logger = null,
-    ) {}
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
+
+    private readonly PrincipalService $principalService;
 
     /**
      * Ingest a single asset. Returns the persisted row (existing row
@@ -166,11 +173,16 @@ final class MediaArchiveService
         // HTTP listings always use agentOwnerUserId; userId remains available
         // for direct callers that explicitly request upload-only filtering.
         if ($query->agentOwnerUserId !== null) {
-            $builder->where(function (Builder $q) use ($query): void {
+            // Migration 0067: agent ownership is via principal, not user_id.
+            // Materialise the user-principal first, then match either:
+            //   (a) media uploaded by this user, OR
+            //   (b) media attached to an agent owned by this user-principal.
+            $principalId = $this->principalService->ensureUserPrincipal($query->agentOwnerUserId)->id;
+            $builder->where(function (Builder $q) use ($query, $principalId): void {
                 $q->where('user_id', $query->agentOwnerUserId)
                   ->orWhereIn('agent_id', Agent::query()
                       ->select('id')
-                      ->where('user_id', $query->agentOwnerUserId));
+                      ->where('principal_id', $principalId));
             });
         } elseif ($query->userId !== null) {
             $builder->where('user_id', $query->userId);

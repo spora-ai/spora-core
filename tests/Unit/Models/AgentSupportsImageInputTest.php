@@ -110,22 +110,22 @@ test('returns false when DriverFactory throws a generic exception', function ():
     expect($agent->supportsImageInput($factory))->toBeFalse();
 });
 
-test('user(), tasks(), agentTools(), agentToolOverrides(), and toolCalls() return their Eloquent relations', function (): void {
+test('principal(), tasks(), agentTools(), agentToolOverrides(), and toolCalls() return their Eloquent relations', function (): void {
     $agent = new Agent();
 
-    expect($agent->user())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class)
+    expect($agent->principal())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\BelongsTo::class)
         ->and($agent->tasks())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
         ->and($agent->agentTools())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
         ->and($agent->agentToolOverrides())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class)
         ->and($agent->toolCalls())->toBeInstanceOf(\Illuminate\Database\Eloquent\Relations\HasMany::class);
 });
 
-test('user() relation targets the User model', function (): void {
+test('principal() relation targets the Principal model', function (): void {
     $agent = new Agent();
     /** @var \Illuminate\Database\Eloquent\Relations\BelongsTo $relation */
-    $relation = $agent->user();
+    $relation = $agent->principal();
 
-    expect($relation->getRelated()::class)->toBe(\Spora\Models\User::class);
+    expect($relation->getRelated()::class)->toBe(\Spora\Models\Principal::class);
 });
 
 test('tasks() relation targets the Task model', function (): void {
@@ -158,7 +158,7 @@ function seedLlmConfig(int $id, int $userId, string $driverClass, string $model)
     LLMDriverConfiguration::query()->where('id', $id)->delete();
     LLMDriverConfiguration::query()->insert([
         'id'           => $id,
-        'user_id'      => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'         => "cfg-{$id}",
         'driver_class' => $driverClass,
         'settings'     => json_encode([
@@ -168,6 +168,7 @@ function seedLlmConfig(int $id, int $userId, string $driverClass, string $model)
             'timeout'  => '60',
         ]),
         'is_default' => 1,
+        'is_global'  => 0,
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
@@ -178,7 +179,7 @@ function seedAgentWithConfig(int $id, int $userId, int $configId): Agent
     Agent::query()->where('id', $id)->delete();
     Agent::query()->insert([
         'id'                   => $id,
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => "agent-{$id}",
         'description'          => '',
         'system_prompt'        => '',

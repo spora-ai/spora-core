@@ -213,6 +213,7 @@ describe('ToolController::putUserSettings', function (): void {
     test('returns 200 with saved user settings on success', function (): void {
         [$controller, $authService] = makeToolController();
         $userId = bootAuth($authService, 'putuser@example.com');
+        $this->createUserPrincipal($userId);
 
         $request = jsonRequest('PUT', '/api/v1/user-tools/calculator/settings', ['settings' => ['precision' => 2]]);
         $response = $controller->putUserSettings($request, 'calculator');

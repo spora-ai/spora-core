@@ -9,11 +9,12 @@ use ReflectionMethod;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentToolController;
+use Spora\Http\AgentTransferController;
 
 /**
  * Smoke test for the AgentController split (php:S1448).
  *
- * Asserts the three new classes exist with the expected public method
+ * Asserts the four split classes exist with the expected public method
  * surface and that `AgentController` only retains the CRUD methods.
  */
 test('AgentController exposes only CRUD methods after the split', function (): void {
@@ -30,8 +31,12 @@ test('AgentController exposes only CRUD methods after the split', function (): v
         $crudReflection->getMethods(ReflectionMethod::IS_PUBLIC),
     );
 
-    // Tool/override methods must no longer be on the CRUD controller.
-    foreach (['enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations', 'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride'] as $moved) {
+    // Tool/override/transfer methods must no longer be on the CRUD controller.
+    foreach ([
+        'enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations',
+        'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride',
+        'transferPrincipal',
+    ] as $moved) {
         expect($publicMethods)->not()->toContain($moved);
     }
 });
@@ -52,6 +57,9 @@ test('AgentToolController exposes only tool methods', function (): void {
     foreach (['index', 'store', 'show', 'update', 'destroy'] as $crud) {
         expect($reflection->hasMethod($crud))->toBeFalse();
     }
+
+    // Transfer must not be on the tool controller.
+    expect($reflection->hasMethod('transferPrincipal'))->toBeFalse();
 });
 
 test('AgentOverrideController exposes only override methods', function (): void {
@@ -70,27 +78,54 @@ test('AgentOverrideController exposes only override methods', function (): void 
     foreach (['index', 'store', 'show', 'update', 'destroy'] as $crud) {
         expect($reflection->hasMethod($crud))->toBeFalse();
     }
+
+    // Transfer must not be on the override controller.
+    expect($reflection->hasMethod('transferPrincipal'))->toBeFalse();
 });
 
-test('All three controllers share a consistent constructor surface', function (): void {
-    $crud = new ReflectionClass(AgentController::class)->getConstructor();
-    $tool = new ReflectionClass(AgentToolController::class)->getConstructor();
+test('AgentTransferController exposes only the transfer method', function (): void {
+    $reflection = new ReflectionClass(AgentTransferController::class);
+
+    expect($reflection->getMethod('transferPrincipal'))->toBeInstanceOf(ReflectionMethod::class);
+
+    // CRUD methods must not be on the transfer controller.
+    foreach (['index', 'store', 'show', 'update', 'destroy'] as $crud) {
+        expect($reflection->hasMethod($crud))->toBeFalse();
+    }
+
+    // Tool/override methods must not be on the transfer controller.
+    foreach ([
+        'enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations',
+        'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride',
+    ] as $moved) {
+        expect($reflection->hasMethod($moved))->toBeFalse();
+    }
+});
+
+test('All split controllers share a consistent constructor surface', function (): void {
+    $crud     = new ReflectionClass(AgentController::class)->getConstructor();
+    $tool     = new ReflectionClass(AgentToolController::class)->getConstructor();
     $override = new ReflectionClass(AgentOverrideController::class)->getConstructor();
+    $transfer = new ReflectionClass(AgentTransferController::class)->getConstructor();
 
     expect($crud)->toBeInstanceOf(ReflectionMethod::class);
     expect($tool)->toBeInstanceOf(ReflectionMethod::class);
     expect($override)->toBeInstanceOf(ReflectionMethod::class);
+    expect($transfer)->toBeInstanceOf(ReflectionMethod::class);
 
     // CRUD controller takes auth, agentService, DriverFactory, ToolIconResolver
-    // (per-tool icon chain), and (since the agent profile-picture feature)
-    // AgentPictureService. The tool and override controllers take 3 (auth + their
-    // service + a config helper).
-    expect($crud->getNumberOfParameters())->toBe(5);
+    // (per-tool icon chain), AgentPictureService, PrincipalService, and
+    // PrincipalResolver. The tool and override controllers take 3 (auth +
+    // their service + a config helper). The transfer controller takes 5
+    // (auth + AgentPrincipalService + DriverFactory + ToolIconResolver +
+    // AgentPictureService).
+    expect($crud->getNumberOfParameters())->toBe(7);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
+    expect($transfer->getNumberOfParameters())->toBe(5);
 });
 
-test('Route registration wires agent tool + override routes to the new controllers', function (): void {
+test('Route registration wires agent tool + override + transfer routes to the new controllers', function (): void {
     $routeFile = (new ReflectionClass(\Spora\Core\RouteDefinitions::class))->getFileName();
     expect(is_file($routeFile))->toBeTrue();
     $contents = (string) file_get_contents($routeFile);
@@ -107,7 +142,13 @@ test('Route registration wires agent tool + override routes to the new controlle
     expect($contents)->toContain('[AgentOverrideController::class, \'getOperationOverride\']');
     expect($contents)->toContain('[AgentOverrideController::class, \'patchOperationOverride\']');
 
-    foreach (['enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations', 'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride'] as $moved) {
+    expect($contents)->toContain('[AgentTransferController::class, \'transferPrincipal\']');
+
+    foreach ([
+        'enableTool', 'disableTool', 'getToolStatus', 'getToolsStatus', 'getToolsOperations',
+        'getOverride', 'putOverride', 'deleteOverride', 'getOperationOverride', 'patchOperationOverride',
+        'transferPrincipal',
+    ] as $moved) {
         expect($contents)
             ->not->toContain('[AgentController::class, \'' . $moved . '\']');
     }

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Tools\AgentTool;
 
 use Spora\Models\Agent;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
@@ -24,6 +26,14 @@ final class AgentTargetResolver
     private const READ_AGENT_ERR_PREFIX      = 'read_agent: ';
     private const WRITE_AGENT_ERR_PREFIX     = 'update_agent: ';
     private const AGENT_ID_POSITIVE_INTEGER_MSG  = '`agent_id` must be a positive integer.';
+    private const AGENT_NOT_OWNED_MSG = 'agent not found or not owned by this user.';
+
+    private readonly PrincipalService $principalService;
+
+    public function __construct(?PrincipalService $principalService = null)
+    {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
 
     /**
      * Three input modes:
@@ -33,6 +43,10 @@ final class AgentTargetResolver
      *
      * `template_id` is refused: templates are creation labels, not row
      * identifiers (multiple agents can share one).
+     *
+     * Migration 0067 cut `agents.user_id`. We accept the agent if the
+     * caller controls the agent's principal (own user-principal or a
+     * group-principal of which they are owner/admin).
      *
      * @param  array<string, mixed> $arguments
      * @return Agent|ToolResult
@@ -51,12 +65,7 @@ final class AgentTargetResolver
             return $resolvedId;
         }
 
-        $agent = Agent::query()
-            ->where('user_id', $userId)
-            ->where('id', $resolvedId)
-            ->first();
-        return $agent
-            ?? ToolResult::fail(self::READ_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+        return $this->loadAgentForCaller($userId, $resolvedId);
     }
 
     public function resolvePositiveAgentId(array $arguments, int $callingAgentId): int|ToolResult
@@ -79,6 +88,26 @@ final class AgentTargetResolver
         }
         $n = (int) $raw;
         return $n > 0 ? $n : ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_ID_POSITIVE_INTEGER_MSG);
+    }
+
+    /**
+     * Migration 0067 cut `agents.user_id`; ownership is now expressed
+     * via `principal_id`. We accept the agent iff the caller controls
+     * the agent's principal (their user-principal, or a group-principal
+     * they admin or own).
+     *
+     * @return Agent|ToolResult
+     */
+    private function loadAgentForCaller(int $userId, int $resolvedAgentId): Agent|ToolResult
+    {
+        $agent = Agent::query()->where('id', $resolvedAgentId)->first();
+        if ($agent === null) {
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return ToolResult::fail(self::READ_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        return $agent;
     }
 
     /**
@@ -117,11 +146,14 @@ final class AgentTargetResolver
 
     private function ensureAgentOwnedByUser(int $userId, int $agentId): int|ToolResult
     {
-        return Agent::query()
-            ->where('user_id', $userId)
-            ->where('id', $agentId)
-            ->exists()
-                ? $agentId
-                : ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . 'agent not found or not owned by this user.');
+        // Migration 0067: agent ownership is via principal, not user_id.
+        $agent = Agent::query()->where('id', $agentId)->first();
+        if ($agent === null) {
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
+            return ToolResult::fail(self::WRITE_AGENT_ERR_PREFIX . self::AGENT_NOT_OWNED_MSG);
+        }
+        return $agentId;
     }
 }

@@ -19,7 +19,7 @@ it('uses the tasks table', function (): void {
 it('casts step_count, max_steps, retry_count to integers and data to array', function (): void {
     $userId = bootAuthLayer()->register('task-cast@example.com', TASK_TEST_PASSWORD, 'Task');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Task Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -29,6 +29,7 @@ it('casts step_count, max_steps, retry_count to integers and data to array', fun
 
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
@@ -45,7 +46,7 @@ it('casts step_count, max_steps, retry_count to integers and data to array', fun
 it('belongs to an agent and a user', function (): void {
     $userId = bootAuthLayer()->register('task-belong@example.com', TASK_TEST_PASSWORD, 'Task');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Belongs Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -54,6 +55,7 @@ it('belongs to an agent and a user', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
@@ -70,7 +72,7 @@ it('belongs to an agent and a user', function (): void {
 it('has many task history entries and tool calls', function (): void {
     $userId = bootAuthLayer()->register('task-hasmany@example.com', TASK_TEST_PASSWORD, 'TaskMany');
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Many Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -79,6 +81,7 @@ it('has many task history entries and tool calls', function (): void {
     ]);
     $task = Task::create([
         'agent_id'    => $agent->id,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',

@@ -122,7 +122,7 @@ function buildCapabilityController(string $model, string $driverClass): array
     if (LLMDriverConfiguration::query()->find(1) === null) {
         LLMDriverConfiguration::query()->insert([
             'id' => 1,
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'name' => 'capability-test',
             'driver_class' => $driverClass,
             'settings' => json_encode([
@@ -139,7 +139,7 @@ function buildCapabilityController(string $model, string $driverClass): array
     if (Agent::query()->find(10) === null) {
         Agent::query()->insert([
             'id' => 10,
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
             'name' => 'agent-10',
             'description' => '',
             'system_prompt' => '',

@@ -20,7 +20,7 @@ function seedAbortEndpointFixtures(): array
     simulateLoggedInSession($userId, 'abort-ep@example.com');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'Abort EP Agent',
         'max_steps' => 5,
         'is_active' => true,
@@ -32,7 +32,8 @@ function seedAbortEndpointFixtures(): array
 it('POST /abort returns 200 with the aborted task on a RUNNING source', function (): void {
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'RUNNING',
         'user_prompt' => 'live',
@@ -80,7 +81,8 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
 it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_APPROVAL)', function (): void {
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'PENDING_APPROVAL',
         'user_prompt' => 'awaiting',
@@ -138,7 +140,8 @@ it('POST /abort returns 404 when the task is not found', function (): void {
 it('POST /abort with no body works (no-body call)', function (): void {
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'RUNNING',
         'user_prompt' => 'live',

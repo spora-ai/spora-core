@@ -7,6 +7,7 @@ namespace Spora\Tools;
 use Illuminate\Support\Carbon;
 use Spora\Models\Agent;
 use Spora\Models\User;
+use Spora\Services\PrincipalResolver;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -35,12 +36,21 @@ final class UserInfoTool extends AbstractTool
     {
         /** @var Agent|null $agent */
         $agent = Agent::find($agentId);
+        if ($agent === null) {
+            return null;
+        }
 
-        return $agent?->user;
+        $ownerUserId = (new PrincipalResolver())->ownerUserId((int) $agent->principal_id);
+        return $ownerUserId !== null ? User::find($ownerUserId) : null;
     }
 
-    public function execute(array $arguments, int $agentId, ?int $userId = null, ?int $taskId = null): ToolResult
-    {
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?\Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
