@@ -55,6 +55,20 @@ describe('GroupMemberController', function (): void {
         expect($body['data']['members'][0]['role'])->toBe('owner');
     });
 
+    it('index returns the user name and email for each member', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc1b-name@example.com', GMC_TEST_PASSWORD, 'Owner Name');
+        simulateLoggedInSession($ownerId, 'gmc1b-name@example.com');
+        $group = $groupService->createGroup($ownerId, 'Name Email');
+
+        $response = $controller->index($group->id);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['members'][0])->toHaveKeys(['user_id', 'role', 'joined_at', 'name', 'email']);
+        expect($body['data']['members'][0]['name'])->toBe('Owner Name');
+        expect($body['data']['members'][0]['email'])->toBe('gmc1b-name@example.com');
+    });
+
     it('returns 401 on store when not authenticated', function (): void {
         [$controller] = makeGroupMemberController();
         $request = jsonRequest('POST', '/api/v1/groups/1/members', ['user_id' => 1, 'role' => 'member']);

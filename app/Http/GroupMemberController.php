@@ -9,6 +9,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
+use Spora\Models\User;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
 use Spora\Services\GroupService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -90,8 +91,11 @@ final class GroupMemberController
             return $error;
         }
 
+        // Enrich with name + email so the operator sees the new row
+        // populated on the next render instead of falling back to
+        // `User #${user_id}` until the index re-runs.
         return new JsonResponse(
-            ['data' => ['member' => ['user_id' => $targetUserId, 'role' => $role]]],
+            ['data' => ['member' => $this->memberRow($targetUserId, $role)]],
             Response::HTTP_CREATED,
         );
     }
@@ -148,7 +152,10 @@ final class GroupMemberController
             return $error;
         }
 
-        return new JsonResponse(['data' => ['member' => ['user_id' => $userId, 'role' => $newRole]]]);
+        // Same enrichment as POST — keeps the wire shape consistent
+        // across GET / POST / PATCH so the frontend doesn't need
+        // conditional fallback paths.
+        return new JsonResponse(['data' => ['member' => $this->memberRow($userId, $newRole)]]);
     }
 
     private function parseNewRole(Request $request): string|JsonResponse
@@ -206,13 +213,38 @@ final class GroupMemberController
     private function memberRows(int $groupId): array
     {
         return array_map(
-            static fn(GroupMembership $m): array => [
-                'user_id'   => (int) $m->user_id,
-                'role'      => (string) $m->role,
-                'joined_at' => $m->joined_at?->format(DateTimeInterface::ATOM),
-            ],
-            GroupMembership::where('group_id', $groupId)->orderBy('id')->get()->all(),
+            static function (GroupMembership $m): array {
+                /** @var User|null $user Eloquent's `user` relation returns the related model when loaded, null otherwise. */
+                $user = $m->user;
+                return [
+                    'user_id'   => (int) $m->user_id,
+                    'role'      => (string) $m->role,
+                    'joined_at' => $m->joined_at?->format(DateTimeInterface::ATOM),
+                    // Eager-loaded via `with('user:id,name,email')` below.
+                    'name'      => $user !== null ? $user->name : null,
+                    'email'     => $user !== null ? (string) $user->email : '',
+                ];
+            },
+            GroupMembership::where('group_id', $groupId)
+                ->with('user:id,name,email')
+                ->orderBy('id')
+                ->get()
+                ->all(),
         );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function memberRow(int $userId, string $role): array
+    {
+        $user = User::find($userId);
+        return [
+            'user_id' => $userId,
+            'role'    => $role,
+            'name'    => $user?->name,
+            'email'   => $user !== null ? (string) $user->email : '',
+        ];
     }
 
     private function callerCanReadGroup(int $groupId, int $userId): bool
