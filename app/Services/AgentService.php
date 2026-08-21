@@ -67,7 +67,7 @@ final class AgentService implements AgentServiceInterface
     ) {}
 
 
-    public function getAgentsForUser(int $userId): array
+    public function getAgentsForUser(int $userId, ?array $principalIds = null): array
     {
         // Dashboard ordering (pinned-first, archived-hidden) lives in
         // spora-frontend PR #52; the backend stays filter-free so the same
@@ -75,7 +75,18 @@ final class AgentService implements AgentServiceInterface
         // eager-load avoids an N+1 chain when AgentResource serializes
         // the per-agent picture (one query per agent for the picture row,
         // plus one per agent for the uploaded image's media_assets row).
-        return $this->newVisibleForUserQuery($userId)
+        $query = $this->newVisibleForUserQuery($userId);
+        if ($principalIds !== null) {
+            // Caller asked for a principal filter; intersect with the
+            // already-visible set so the controller's filter step is
+            // idempotent. Empty filter = no rows, matching the UI's
+            // empty-state when the user selects zero groups.
+            if ($principalIds === []) {
+                return [];
+            }
+            $query->whereIn('principal_id', $principalIds);
+        }
+        return $query
             ->with(['agentTools', 'profilePicture.mediaAsset'])
             ->orderByDesc('created_at')
             ->get()

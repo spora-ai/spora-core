@@ -15,6 +15,7 @@ use Spora\Services\AgentToolSettingsService;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Tools\CalculatorTool;
@@ -42,6 +43,33 @@ function makeAgentServiceWithUser(): array
     static $seq = 0;
     $seq++;
     $email = "agent-service-{$seq}@example.com";
+    $userId = bootAuth($auth, $email, AGENT_TEST_PASSWORD);
+
+    return [$service, $userId, $toolConfig, $llmConfig];
+}
+
+/**
+ * @return array{0: AgentService, 1: int}
+ */
+function makeAgentServiceWithResolver(): array
+{
+    // Variant of makeAgentServiceWithUser() that wires a real
+    // PrincipalResolver, so the production visibility path runs and
+    // group-owned agents come back alongside user-owned ones. Used by the
+    // principal-filter and principal-wire-payload tests.
+    $key      = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new SecurityManager($key);
+    $logger   = new NullLogger();
+
+    $toolConfig = new ToolConfigService($security, $logger, [CalculatorTool::class]);
+    $llmConfig  = new LLMConfigService($security, []);
+
+    $service = new AgentService(null, null, new PrincipalResolver());
+
+    $auth = bootAuthLayer();
+    static $seq = 0;
+    $seq++;
+    $email = "agent-svc-resolver-{$seq}@example.com";
     $userId = bootAuth($auth, $email, AGENT_TEST_PASSWORD);
 
     return [$service, $userId, $toolConfig, $llmConfig];
@@ -181,6 +209,73 @@ describe('AgentService::getAgentsForUser', function (): void {
         // Listing should stay under 10 queries regardless of agent count;
         // the lazy-load version would have exceeded that for N>5.
         expect($baselineQueryCount)->toBeLessThan(10);
+    });
+
+    it('filters the listing to the requested principals when given a non-null principalIds', function (): void {
+        [$service, $userId] = makeAgentServiceWithResolver();
+
+        $userPrincipalId = $this->createUserPrincipal($userId);
+        $groupPrincipalId = $this->makeGroupPrincipal($userId, 'Engineering');
+
+        Agent::create(['principal_id' => $userPrincipalId, 'name' => 'My Agent', 'max_steps' => 10, 'is_active' => true]);
+        Agent::create(['principal_id' => $groupPrincipalId, 'name' => 'Group Agent', 'max_steps' => 10, 'is_active' => true]);
+
+        $all = $service->getAgentsForUser($userId);
+        expect($all)->toHaveCount(2);
+
+        $userOnly = $service->getAgentsForUser($userId, [$userPrincipalId]);
+        expect(array_column($userOnly, 'name'))->toBe(['My Agent']);
+
+        $groupOnly = $service->getAgentsForUser($userId, [$groupPrincipalId]);
+        expect(array_column($groupOnly, 'name'))->toBe(['Group Agent']);
+
+        $both = $service->getAgentsForUser($userId, [$userPrincipalId, $groupPrincipalId]);
+        expect(array_column($both, 'name'))->toContain('My Agent', 'Group Agent');
+    });
+
+    it('returns an empty list when the requested principalIds intersect with visibility to nothing', function (): void {
+        [$service, $userId] = makeAgentServiceWithResolver();
+        $userPrincipalId = $this->createUserPrincipal($userId);
+        Agent::create(['principal_id' => $userPrincipalId, 'name' => 'Mine', 'max_steps' => 10, 'is_active' => true]);
+
+        // 999_999 is well outside the caller's visibility — the service
+        // should not surface any rows. (The controller is responsible
+        // for intersecting with visible-principals upstream.)
+        $result = $service->getAgentsForUser($userId, [999_999]);
+        expect($result)->toBe([]);
+    });
+
+    it('returns an empty list when the requested principalIds list is empty', function (): void {
+        [$service, $userId] = makeAgentServiceWithResolver();
+        $userPrincipalId = $this->createUserPrincipal($userId);
+        Agent::create(['principal_id' => $userPrincipalId, 'name' => 'Mine', 'max_steps' => 10, 'is_active' => true]);
+
+        // An empty filter list = "user explicitly asked for nothing" =
+        // empty result, matching the dashboard's empty state when the
+        // group filter is cleared.
+        $result = $service->getAgentsForUser($userId, []);
+        expect($result)->toBe([]);
+    });
+
+    it('emits principal_id and a resolved principal block on every agent', function (): void {
+        [$service, $userId] = makeAgentServiceWithResolver();
+        $userPrincipalId = $this->createUserPrincipal($userId);
+        $groupPrincipalId = $this->makeGroupPrincipal($userId, 'Engineering');
+
+        Agent::create(['principal_id' => $userPrincipalId, 'name' => 'Mine', 'max_steps' => 10, 'is_active' => true]);
+        Agent::create(['principal_id' => $groupPrincipalId, 'name' => 'Group', 'max_steps' => 10, 'is_active' => true]);
+
+        $result = $service->getAgentsForUser($userId);
+        expect($result)->toHaveCount(2);
+
+        $byName = array_column($result, null, 'name');
+        expect($byName['Mine']['principal_id'])->toBe($userPrincipalId);
+        expect($byName['Mine']['principal']['type'])->toBe('user');
+        expect($byName['Mine']['principal']['user_id'])->toBe($userId);
+
+        expect($byName['Group']['principal_id'])->toBe($groupPrincipalId);
+        expect($byName['Group']['principal']['type'])->toBe('group');
+        expect($byName['Group']['principal']['name'])->toBe('Engineering');
     });
 });
 

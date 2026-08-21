@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Request;
 function buildProfilePictureAgentController(): AgentController
 {
     $agentService = new class implements AgentServiceInterface {
-        public function getAgentsForUser(int $userId): array
+        public function getAgentsForUser(int $userId, ?array $principalIds = null): array
         {
             return [];
         }

@@ -65,7 +65,7 @@ function teardownStorage(string $tmp): void
 function buildController(AgentPictureService $service): AgentPictureController
 {
     $agentService = new class implements AgentServiceInterface {
-        public function getAgentsForUser(int $userId): array
+        public function getAgentsForUser(int $userId, ?array $principalIds = null): array
         {
             return [];
         }

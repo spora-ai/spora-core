@@ -13,7 +13,7 @@ use Spora\Services\AgentServiceInterface;
  */
 class StubAgentService implements AgentServiceInterface
 {
-    public function getAgentsForUser(int $userId): array
+    public function getAgentsForUser(int $userId, ?array $principalIds = null): array
     {
         return [[
             'id'                     => 1,

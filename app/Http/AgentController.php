@@ -64,6 +64,12 @@ final class AgentController
     {
         $userId = $this->authService->currentUserId();
 
+        // `?principal_id=` is repeatable and intersects with the user's
+        // visible principals — the caller can never scope to a principal
+        // they don't own. Empty list = "no filter, show every visible
+        // agent", matching the legacy behaviour.
+        $principalFilter = $this->resolvePrincipalFilter($request, $userId);
+
         $select = $request?->query->get('select');
         if (is_string($select) && $select !== '') {
             $requested = array_values(array_filter(
@@ -82,17 +88,57 @@ final class AgentController
                 if ($principalIds === [] && $this->principalService !== null) {
                     $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
                 }
-                $agents = Agent::whereIn('principal_id', $principalIds)
-                    ->orderBy('name')
-                    ->get($columns)
-                    ->all();
+                $query = Agent::whereIn('principal_id', $principalIds);
+                if ($principalFilter !== null) {
+                    $query->whereIn('principal_id', $principalFilter);
+                }
+                $agents = $query->orderBy('name')->get($columns)->all();
                 return new JsonResponse(['data' => ['agents' => $agents]]);
             }
         }
 
-        $agents = $this->agentService->getAgentsForUser($userId);
+        $agents = $this->agentService->getAgentsForUser($userId, $principalFilter);
 
         return new JsonResponse(['data' => ['agents' => $agents]]);
+    }
+
+    /**
+     * Parse `?principal_id=` (repeatable) and intersect with the user's
+     * visible principals. Returns null when the caller didn't ask for a
+     * filter (the agent service returns every visible agent in that
+     * case). Returns an empty list when the user asked for a filter
+     * but every requested principal is outside their visibility scope —
+     * the agent service then returns an empty payload without exposing
+     * the existence of out-of-scope principals.
+     *
+     * @return list<int>|null
+     */
+    private function resolvePrincipalFilter(?Request $request, int $userId): ?array
+    {
+        if ($request === null) {
+            return null;
+        }
+        $raw = $request->query->all('principal_id');
+        if ($raw === []) {
+            return null;
+        }
+        $values = $raw;
+        $ids = [];
+        foreach ($values as $v) {
+            if (is_int($v)) {
+                $ids[] = $v;
+            } elseif (is_string($v) && ctype_digit($v)) {
+                $ids[] = (int) $v;
+            }
+        }
+        if ($ids === []) {
+            return null;
+        }
+        $visible = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        if ($visible === [] && $this->principalService !== null) {
+            $visible = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+        }
+        return array_values(array_intersect($ids, $visible));
     }
 
     /**

@@ -62,7 +62,7 @@ function buildAgentController(): AgentController
     // llm_driver_config_id — show() needs the real DB row so the
     // DriverFactory can resolve the configured LLM.
     $agentService = new class implements AgentServiceInterface {
-        public function getAgentsForUser(int $userId): array
+        public function getAgentsForUser(int $userId, ?array $principalIds = null): array
         {
             return [];
         }

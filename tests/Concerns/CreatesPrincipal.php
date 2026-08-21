@@ -110,4 +110,41 @@ trait CreatesPrincipal
 
         return $id !== null ? (int) $id : null;
     }
+
+    /**
+     * Materialise a group with `$userId` as a member and return the
+     * resulting group-principal id. Idempotent on `$name`. The user's
+     * role is `member` by default — tests that need owner/admin promote
+     * the row directly via `Capsule::table('group_memberships')->update(...)`.
+     */
+    protected function makeGroupPrincipal(int $userId, string $name): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $groupId = (int) Capsule::table('groups')->insertGetId([
+            'name'                => $name,
+            'description'         => null,
+            'created_by_user_id'  => $userId,
+            'created_at'          => $now,
+            'updated_at'          => $now,
+        ]);
+        Capsule::table('group_memberships')->insertOrIgnore([
+            'group_id'   => $groupId,
+            'user_id'    => $userId,
+            'role'       => 'member',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        $existing = Capsule::table('principals')
+            ->where('type', 'group')->where('group_id', $groupId)->value('id');
+        if ($existing !== null) {
+            return (int) $existing;
+        }
+        return (int) Capsule::table('principals')->insertGetId([
+            'type'       => 'group',
+            'group_id'   => $groupId,
+            'user_id'    => null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    }
 }

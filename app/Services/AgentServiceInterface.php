@@ -28,7 +28,7 @@ interface AgentServiceInterface
     /**
      * @return list<array> Agent resource arrays for a user
      */
-    public function getAgentsForUser(int $userId): array;
+    public function getAgentsForUser(int $userId, ?array $principalIds = null): array;
 
     /**
      * Create an agent. The third parameter selects the owning principal:
