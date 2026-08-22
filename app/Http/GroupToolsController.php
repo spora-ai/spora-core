@@ -234,9 +234,6 @@ final class GroupToolsController
     }
 
     /**
-     * Persist settings via ToolConfigService and return the masked wire
-     * payload.
-     *
      * @param array<string, mixed> $settings
      */
     private function applyToolSettings(string $toolClass, int $principalId, array $settings): JsonResponse

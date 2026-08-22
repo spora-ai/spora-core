@@ -89,11 +89,12 @@ final class LLMConfigPersistence
             return true;
         }
 
-        // Non-admin caller: refuse on global configs and on personal
-        // configs whose principal the caller doesn't own. The principal
-        // ownership check honours the principals-and-groups model (the
-        // old `principal_id === callerUserId` check only worked by
-        // accident for user-principals, not group-principals).
+        // Non-admin caller: refuse on global configs (admin-only) and on
+        // personal configs whose principal the caller doesn't own. The
+        // primary check is `isPrincipalOwner` — the principals-and-groups
+        // model routes ownership through principals, so a raw `principal_id
+        // === callerUserId` check would incorrectly fail group-principal
+        // configs that the caller controls as their group's owner/admin.
         if ($config->is_global) {
             return false;
         }

@@ -75,10 +75,6 @@ final class GroupPictureController
         return $this->performUpload($prepared['file'], $prepared['bytes'], $groupId, $userId);
     }
 
-    /**
-     * Look up the group for an upload. Authorisation: admin OR owner/admin
-     * of the group. Returns null on success, or a 4xx JsonResponse on failure.
-     */
     private function resolveGroupForUpload(int $groupId, int $userId): ?JsonResponse
     {
         $group = Group::find($groupId);
@@ -95,10 +91,6 @@ final class GroupPictureController
         return null;
     }
 
-    /**
-     * Run the byte-path (MediaArchive → group_pictures write) after the
-     * controller has finished the input validations.
-     */
     private function performUpload(
         UploadedFile $file,
         string $bytes,

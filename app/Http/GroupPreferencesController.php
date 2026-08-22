@@ -176,8 +176,6 @@ final class GroupPreferencesController
     }
 
     /**
-     * Decode + extract + validate the preferred config id from the body.
-     *
      * @return int|null|JsonResponse
      */
     private function validatedConfigIdOrFail(Request $request): int|null|JsonResponse

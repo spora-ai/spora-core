@@ -62,22 +62,49 @@ final class RouteDefinitions
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
     public const ROUTE_GROUPS = '/api/v1/groups';
     public const ROUTE_GROUPS_ID = '/api/v1/groups/{id}';
-    public const ROUTE_GROUPS_ID_AGENTS = '/api/v1/groups/{id}/agents';
-    public const ROUTE_GROUPS_ID_MEMBERS = '/api/v1/groups/{id}/members';
-    public const ROUTE_GROUPS_ID_MEMBERS_UID = '/api/v1/groups/{id}/members/{uid}';
-    public const ROUTE_GROUPS_ID_PREFERENCES = '/api/v1/groups/{id}/preferences';
-    public const ROUTE_GROUPS_ID_TOOLS = '/api/v1/groups/{id}/tools';
-    public const ROUTE_GROUPS_ID_TOOLS_CLASS = '/api/v1/groups/{id}/tools/{toolClass}';
-    public const ROUTE_GROUPS_ID_LLM_CONFIGS = '/api/v1/groups/{id}/llm-configs';
-    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = '/api/v1/groups/{id}/llm-configs/{cid}';
-    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = '/api/v1/groups/{id}/llm-configs/{cid}/set-default';
-    public const ROUTE_GROUPS_ID_PICTURE_IMAGE = '/api/v1/groups/{id}/picture/image';
+    public const ROUTE_GROUPS_ID_AGENTS = self::ROUTE_GROUPS_ID . '/agents';
+    public const ROUTE_GROUPS_ID_MEMBERS = self::ROUTE_GROUPS_ID . '/members';
+    public const ROUTE_GROUPS_ID_MEMBERS_UID = self::ROUTE_GROUPS_ID_MEMBERS . '/{uid}';
+    public const ROUTE_GROUPS_ID_PREFERENCES = self::ROUTE_GROUPS_ID . '/preferences';
+    public const ROUTE_GROUPS_ID_TOOLS = self::ROUTE_GROUPS_ID . '/tools';
+    public const ROUTE_GROUPS_ID_TOOLS_CLASS = self::ROUTE_GROUPS_ID_TOOLS . '/{toolClass}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS = self::ROUTE_GROUPS_ID . '/llm-configs';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID = self::ROUTE_GROUPS_ID_LLM_CONFIGS . '/{cid}';
+    public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID . '/set-default';
+    public const ROUTE_GROUPS_ID_PICTURE_IMAGE = self::ROUTE_GROUPS_ID . '/picture/image';
 
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
+        self::registerCoreRoutes($r);
+        self::registerAssetRoutes($r);
+        self::registerPluginRoutes($r);
+        self::registerAuthRoutes($r);
+        self::registerAgentRoutes($r);
+        self::registerGroupRoutes($r);
+        self::registerAgentPictureRoutes($r);
+        self::registerToolRoutes($r);
+        self::registerTaskRoutes($r);
+        self::registerMediaRoutes($r);
+        self::registerTemplateRoutes($r);
+        self::registerSkillRoutes($r);
+        self::registerLlmConfigRoutes($r);
+        self::registerPreferenceRoutes($r);
+        self::registerUserProfileRoutes($r);
+        self::registerUserRoutes($r);
+        self::registerMailRoutes($r);
+        self::registerPromptTemplateRoutes($r);
+        self::registerScheduledRunRoutes($r);
+    }
+
+    private static function registerCoreRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/health', [HealthController::class, 'check'], []);
         $r->addRoute('GET', '/api/v1/config', [ConfigController::class, 'index'], []);
+        $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerAssetRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Asset serving — authenticated; the controller enforces ownership
         // (asset.task.user_id == currentUserId, with admin bypass). The
         // URL is no longer the authorization token because the new
@@ -85,7 +112,10 @@ final class RouteDefinitions
         // primary key as the URL component, so anyone with the URL
         // could otherwise fetch the bytes.
         $r->addRoute('GET', '/api/v1/assets/{filename}', [AssetController::class, 'show'], [AuthMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/apps', [AppsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
+
+    private static function registerPluginRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/plugins', [PluginsController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         // Plugin catalog (Packagist browse) — Auth only. Read-only, so no Csrf.
         // Admin not required: any logged-in user can browse. The controller
@@ -95,6 +125,10 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/plugins', [PluginsController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/plugins/{package}', [PluginsController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('PATCH', '/api/v1/plugins/{package}', [PluginsController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+    }
+
+    private static function registerAuthRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('POST', '/api/v1/auth/login', [AuthController::class, 'login'], []);
         $r->addRoute('POST', '/api/v1/auth/register', [AuthController::class, 'register'], []);
         // Authenticated + CSRF: the controllers dereference the current user, so
@@ -110,7 +144,10 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/auth/reset-password', [AuthController::class, 'resetPassword'], []);
         $r->addRoute('POST', '/api/v1/auth/email/change-request', [AuthController::class, 'requestEmailChange'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/auth/email/confirm', [AuthController::class, 'confirmEmailChange'], []);
+    }
 
+    private static function registerAgentRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents', [AgentController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -118,6 +155,21 @@ final class RouteDefinitions
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentTransferController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
+        $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentToolController::class, 'getToolsStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentToolController::class, 'getToolStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('GET', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'getOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PUT', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'putOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'deleteOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/agents/{id}/tools/operations', [AgentToolController::class, 'getToolsOperations'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'getOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
+
+    private static function registerGroupRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Groups + members + principal-discovery. Group writes are admin-only;
         // member writes accept admin OR group-owner (the controller enforces
         // the owner branch via GroupService::fetchCallerRole).
@@ -161,27 +213,20 @@ final class RouteDefinitions
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_PICTURE_IMAGE, [GroupPictureController::class, 'deleteImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/principals/me', [PrincipalController::class, 'currentForUser'], [AuthMiddleware::class]);
+    }
 
+    private static function registerAgentPictureRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Agent picture — image upload + delete. Avatar-only fields
         // (archetype/variant_key/palette_key) ride on PATCH /api/v1/agents/{id}
         // via the `profile_picture` nested object — only the image-file
         // path needs a multipart endpoint.
         $r->addRoute('POST', '/api/v1/agents/{id}/picture/image', [AgentPictureController::class, 'uploadImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/agents/{id}/picture/image', [AgentPictureController::class, 'deleteImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
-        $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'disableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/agents/{id}/tools/status', [AgentToolController::class, 'getToolsStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/status', [AgentToolController::class, 'getToolStatus'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
-        $r->addRoute('GET', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'getOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PUT', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'putOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_AGENTS_TOOL_OVERRIDE, [AgentOverrideController::class, 'deleteOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
-        $r->addRoute('GET', '/api/v1/agents/{id}/tools/operations', [AgentToolController::class, 'getToolsOperations'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'getOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
+    private static function registerToolRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'getSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'putSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -190,7 +235,10 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'getUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'putUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'deleteUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerTaskRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/tasks', [TaskController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks', [TaskController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/tasks/{taskId}', [TaskController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -202,7 +250,10 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort-sub-agent', [TaskController::class, 'abortSubAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerMediaRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Media Archive — read & delete surface for the operator. Plugin
         // tools write rows via MediaArchiveService::ingest(); this route
         // set is for browsing and cleanup.
@@ -218,7 +269,10 @@ final class RouteDefinitions
         // itself is the credential. The id is always a UUID shape; the
         // controller returns 404 on any mismatch.
         $r->addRoute('GET', '/api/v1/public/media/{id}', [PublicMediaController::class, 'show'], []);
+    }
 
+    private static function registerTemplateRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Agent Templates — list/show/validate/import + per-agent export.
         // The {id:.+} regex lets the captured id contain slashes (the
         // namespaced form `<source>/<slug>`), so the API can be called
@@ -228,14 +282,20 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/agent-templates/validate', [AgentTemplateController::class, 'validatePayload'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agent-templates/import', [AgentTemplateController::class, 'import'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/agents/{id}/export', [AgentTemplateController::class, 'exportAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerSkillRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // Skills — list + detail. The list powers the Skill tool's
         // `allowed_skills` multi-select `dataSource`; the detail
         // endpoint surfaces the full SKILL.md body and sidecar listing
         // for the admin UI's skill-detail view.
         $r->addRoute('GET', '/api/v1/skills', [SkillController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_SKILLS_SLUG, [SkillController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerLlmConfigRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/llm-drivers', [LLMConfigController::class, 'drivers'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/llm-configs', [LLMConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/llm-configs', [LLMConfigController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -244,15 +304,22 @@ final class RouteDefinitions
         $r->addRoute('PUT', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/llm-configs/{id}/set-default', [LLMConfigController::class, 'setDefault'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerPreferenceRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
         $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/notifications', [NotificationController::class, 'destroyAll'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/notifications/{id}', [NotificationController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerUserProfileRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/me/profile', [UserProfileController::class, 'getProfile'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/me/profile', [UserProfileController::class, 'putProfile'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/me/locations', [UserProfileController::class, 'getLocations'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -260,6 +327,13 @@ final class RouteDefinitions
         $r->addRoute('PUT', '/api/v1/me/locations/{id}', [UserProfileController::class, 'putLocation'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/me/locations/{id}', [UserProfileController::class, 'deleteLocation'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
+        $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/sse/auth', [SseController::class, 'auth'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/sse/authorize', [SseController::class, 'authorize'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
+
+    private static function registerUserRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/users', [UserController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/users', [UserController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_USERS_ID, [UserController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
@@ -269,28 +343,32 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/users/{id}/roles', [UserController::class, 'listRoles'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/users/{id}/roles', [UserController::class, 'grantRole'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/users/{id}/roles/{role}', [UserController::class, 'revokeRole'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+    }
 
+    private static function registerMailRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/mail-config', [MailConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/mail-config', [MailConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/mail-config/test', [MailConfigController::class, 'test'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
-
         $r->addRoute('GET', '/api/v1/mail-templates', [MailTemplateController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/mail-templates', [MailTemplateController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('GET', '/api/v1/mail-templates/{name}/preview', [MailTemplateController::class, 'preview'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_MAIL_TEMPLATES_ID, [MailTemplateController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_MAIL_TEMPLATES_ID, [MailTemplateController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_MAIL_TEMPLATES_ID, [MailTemplateController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+    }
 
-        $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/sse/auth', [SseController::class, 'auth'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/sse/authorize', [SseController::class, 'authorize'], [AuthMiddleware::class, CsrfMiddleware::class]);
-
+    private static function registerPromptTemplateRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/agents/{id}/templates', [PromptTemplateController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents/{id}/templates', [PromptTemplateController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID, [PromptTemplateController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID, [PromptTemplateController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID, [PromptTemplateController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerScheduledRunRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         $r->addRoute('GET', '/api/v1/agents/{id}/scheduled-runs', [ScheduledRunController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents/{id}/scheduled-runs', [ScheduledRunController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID, [ScheduledRunController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);

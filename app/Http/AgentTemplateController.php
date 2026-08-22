@@ -255,11 +255,6 @@ final class AgentTemplateController
         return new JsonResponse(['data' => $data]);
     }
 
-    private function unauthenticated(): JsonResponse
-    {
-        return $this->unauthenticated();
-    }
-
     private function invalidJson(): JsonResponse
     {
         return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use DateTimeInterface;
-use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
@@ -34,7 +33,6 @@ final class GroupMemberController
 {
     use JsonControllerHelpers;
 
-    private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
     private const MSG_GROUP_NOT_FOUND = 'Group not found.';
 
     public function __construct(
@@ -277,18 +275,6 @@ final class GroupMemberController
         }
 
         return [$callerUserId];
-    }
-
-    /**
-     * @return array<string, mixed>|JsonResponse
-     */
-    private function safeDecodeJson(Request $request): array|JsonResponse
-    {
-        try {
-            return $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
     }
 
     /**

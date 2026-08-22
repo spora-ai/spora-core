@@ -99,14 +99,20 @@ final class AgentService implements AgentServiceInterface
     public function createAgent(int $userId, array $data, ?int $principalId = null): Agent
     {
         $allowed = array_intersect_key($data, array_flip(self::EDITABLE_AGENT_FIELDS));
-        if ($principalId === null) {
-            $principalId = $this->principalService?->resolveDefaultPrincipalId($userId)
-                ?? $this->resolveDefaultPrincipalIdFallback($userId);
-        }
+        $principalId = $this->resolvePrincipalIdForCreate($userId, $principalId);
 
         return Capsule::connection()->transaction(
             fn(): Agent => $this->persistNewAgent($allowed, $principalId),
         );
+    }
+
+    private function resolvePrincipalIdForCreate(int $userId, ?int $principalId): int
+    {
+        if ($principalId !== null) {
+            return $principalId;
+        }
+        return $this->principalService?->resolveDefaultPrincipalId($userId)
+            ?? $this->resolveDefaultPrincipalIdFallback($userId);
     }
 
     /**

@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
-use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\Group;
@@ -47,8 +46,8 @@ final class GroupController
     use JsonControllerHelpers;
     use GroupAuthorizationTrait;
 
-    private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
     private const MSG_GROUP_NOT_FOUND = 'Group not found.';
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
     public function __construct(
         private readonly AuthService $authService,
@@ -87,7 +86,7 @@ final class GroupController
         }
 
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId, $this->authService)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -140,7 +139,7 @@ final class GroupController
         [$group, $updates, $picturePayload] = $resolved;
 
         if ($updates !== []) {
-            $updates['updated_at'] = date('Y-m-d H:i:s');
+            $updates['updated_at'] = date(self::DB_TIMESTAMP_FORMAT);
         }
 
         Capsule::connection()->transaction(function () use ($id, $updates, $picturePayload): void {
@@ -251,7 +250,15 @@ final class GroupController
             return $body;
         }
 
-        return $this->validateCreateBody($body);
+        $name = trim((string) ($body['name'] ?? ''));
+        if ($name === '') {
+            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
+        }
+        $description = isset($body['description']) ? trim((string) $body['description']) : null;
+        if ($description === '') {
+            $description = null;
+        }
+        return [$name, $description];
     }
 
     /**
@@ -336,35 +343,6 @@ final class GroupController
     }
 
     /**
-     * @return array<string, mixed>|JsonResponse
-     */
-    private function safeDecodeJson(Request $request): array|JsonResponse
-    {
-        try {
-            return $this->decodeJson($request);
-        } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
-        }
-    }
-
-    /**
-     * @param  array<string, mixed> $body
-     * @return array{0: string, 1: ?string}|JsonResponse
-     */
-    private function validateCreateBody(array $body): array|JsonResponse
-    {
-        $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
-        }
-        $description = isset($body['description']) ? trim((string) $body['description']) : null;
-        if ($description === '') {
-            $description = null;
-        }
-        return [$name, $description];
-    }
-
-    /**
      * @param  array<string, mixed> $body
      * @return array{0: array<string, mixed>, 1: array<string, mixed>|null}|JsonResponse
      */
@@ -397,11 +375,9 @@ final class GroupController
      * failure, or null when the key is absent / well-formed. Mirrors
      * {@see AgentController::validateProfilePicturePayload()}
      * so the operator's PATCH body uses the same shape for both
-     * agents and groups.
-     *
-     * The picture payload is validated *before* the groups-row write
-     * so an invalid picture never partially overwrites the name /
-     * description.
+     * agents and groups. The picture payload is validated *before*
+     * the groups-row write so an invalid picture never partially
+     * overwrites the name / description.
      *
      * @param  array<string, mixed> $body
      */
@@ -410,29 +386,14 @@ final class GroupController
         if (!array_key_exists('profile_picture', $body)) {
             return null;
         }
-        $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
-        if ($pictureTypeError !== null) {
-            return $pictureTypeError;
-        }
-        return $this->validateProfilePicture($body['profile_picture']);
-    }
-
-    private function validateProfilePictureType(mixed $picture): ?JsonResponse
-    {
+        $picture = $body['profile_picture'];
         if (!is_array($picture)) {
             return $this->unprocessable(
                 'PROFILE_PICTURE_TYPE',
                 "Field 'profile_picture' must be a JSON object.",
             );
         }
-        return null;
-    }
 
-    /**
-     * @param  array<string, mixed> $picture
-     */
-    private function validateProfilePicture(array $picture): ?JsonResponse
-    {
         $allowed = ['archetype', 'variant_key', 'palette_key'];
         foreach (array_keys($picture) as $key) {
             if (!in_array($key, $allowed, true)) {
@@ -442,18 +403,7 @@ final class GroupController
                 );
             }
         }
-        $typeError = $this->validateProfilePictureTypes($picture);
-        if ($typeError !== null) {
-            return $typeError;
-        }
-        return $this->validateProfilePictureEnums($picture);
-    }
 
-    /**
-     * @param array<string, mixed> $picture
-     */
-    private function validateProfilePictureTypes(array $picture): ?JsonResponse
-    {
         foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
             if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
                 return $this->unprocessable(
@@ -462,14 +412,7 @@ final class GroupController
                 );
             }
         }
-        return null;
-    }
 
-    /**
-     * @param array<string, mixed> $picture
-     */
-    private function validateProfilePictureEnums(array $picture): ?JsonResponse
-    {
         try {
             if (isset($picture['archetype'])) {
                 $this->pictureService->normaliseArchetype((string) $picture['archetype']);
@@ -486,16 +429,6 @@ final class GroupController
         return null;
     }
 
-    private function callerCanSeeGroup(int $groupId, int $userId): bool
-    {
-        if ($this->authService->isAdmin()) {
-            return true;
-        }
-        return GroupMembership::where('group_id', $groupId)
-            ->where('user_id', $userId)
-            ->exists();
-    }
-
     /**
      * Load the group + verify the caller may see it + resolve the
      * group's principal. The two 404-not-visible states (no group /
@@ -505,7 +438,7 @@ final class GroupController
     private function loadGroupPrincipalOrFail(int $id, int $userId): Principal|JsonResponse
     {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $this->authService)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 

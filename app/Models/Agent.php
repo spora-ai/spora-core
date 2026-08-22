@@ -84,11 +84,11 @@ final class Agent extends Model
 
     /**
      * Legacy `user` relation — migration 0067 routed ownership through
-     * the principal table, so the direct `User` FK is gone. The accessor
-     * resolves the principal's user; for a group-principal it returns
-     * the first `owner` user so legacy code paths still get a User
-     * instance. Kept temporarily while downstream consumers are
-     * migrated in their own PRs.
+     * the principal table, so the direct `User` FK is gone. For a
+     * user-principal this returns the matching `User`; for a
+     * group-principal it returns the first `owner` user so legacy code
+     * paths still get a User instance. Kept temporarily while downstream
+     * consumers are migrated in their own PRs.
      */
     public function user(): ?BelongsTo
     {

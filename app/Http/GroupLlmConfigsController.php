@@ -49,6 +49,7 @@ final class GroupLlmConfigsController
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
     private const MSG_GROUP_NOT_FOUND = 'Group not found.';
     private const MSG_CONFIG_NOT_FOUND = 'Configuration not found.';
+    private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
     public function __construct(
         private readonly AuthService $authService,
@@ -279,9 +280,6 @@ final class GroupLlmConfigsController
         );
     }
 
-    /**
-     * Scope-check → body decode + validation → apply update.
-     */
     private function performScopedUpdate(int $cid, int $principalId, int $userId, Request $request): JsonResponse
     {
         $config = $this->findScopedConfig($cid, $principalId);
@@ -364,11 +362,11 @@ final class GroupLlmConfigsController
                 Capsule::table('llm_driver_configurations')
                     ->where('principal_id', $principalId)
                     ->where('is_default', true)
-                    ->update(['is_default' => false, 'updated_at' => date('Y-m-d H:i:s')]);
+                    ->update(['is_default' => false, 'updated_at' => date(self::DB_TIMESTAMP_FORMAT)]);
 
                 Capsule::table('llm_driver_configurations')
                     ->where('id', $cid)
-                    ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
+                    ->update(['is_default' => true, 'updated_at' => date(self::DB_TIMESTAMP_FORMAT)]);
 
                 return LLMDriverConfiguration::find($cid);
             },

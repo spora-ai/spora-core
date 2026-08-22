@@ -93,43 +93,53 @@ final class GroupService
         }
 
         Capsule::connection()->transaction(
-            static function () use ($groupId, $userIdToAdd, $role, $callerUserId): void {
+            function () use ($groupId, $userIdToAdd, $role, $callerUserId): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
+                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
 
-                $callerRole = static::fetchCallerRole($groupId, $callerUserId);
+                self::assertCallerCanAddRole($callerRole, $role);
+                self::assertNotAlreadyMember($groupId, $userIdToAdd);
 
-                if ($role === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
-                    throw new GroupMembershipRuleException(
-                        'Only group owners can add owners.',
-                    );
-                }
-
-                if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
-                    throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to add a member.',
-                    );
-                }
-
-                $existing = Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $userIdToAdd)
-                    ->first();
-                if ($existing !== null) {
-                    throw new GroupMembershipRuleException(
-                        "User {$userIdToAdd} is already a member of group {$groupId}.",
-                    );
-                }
-
-                Capsule::table('group_memberships')->insert([
-                    'group_id'   => $groupId,
-                    'user_id'    => $userIdToAdd,
-                    'role'       => $role,
-                    'joined_at'  => date(self::DB_TIMESTAMP_FORMAT),
-                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
-                    'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
-                ]);
+                self::insertMembershipRow($groupId, $userIdToAdd, $role);
             },
         );
+    }
+
+    private static function assertCallerCanAddRole(?string $callerRole, string $targetRole): void
+    {
+        if ($targetRole === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
+            throw new GroupMembershipRuleException('Only group owners can add owners.');
+        }
+        if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
+            throw new GroupMembershipRuleException(
+                'Caller must be owner or admin to add a member.',
+            );
+        }
+    }
+
+    private static function assertNotAlreadyMember(int $groupId, int $userId): void
+    {
+        $existing = Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->first();
+        if ($existing !== null) {
+            throw new GroupMembershipRuleException(
+                "User {$userId} is already a member of group {$groupId}.",
+            );
+        }
+    }
+
+    private static function insertMembershipRow(int $groupId, int $userId, string $role): void
+    {
+        Capsule::table('group_memberships')->insert([
+            'group_id'   => $groupId,
+            'user_id'    => $userId,
+            'role'       => $role,
+            'joined_at'  => date(self::DB_TIMESTAMP_FORMAT),
+            'created_at' => date(self::DB_TIMESTAMP_FORMAT),
+            'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
+        ]);
     }
 
     /**
@@ -148,37 +158,46 @@ final class GroupService
         }
 
         Capsule::connection()->transaction(
-            static function () use ($groupId, $memberUserId, $newRole, $callerUserId): void {
+            function () use ($groupId, $memberUserId, $newRole, $callerUserId): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
 
-                $callerRole = static::fetchCallerRole($groupId, $callerUserId);
+                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
                 if ($callerRole === null) {
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }
 
-                static::assertCallerCanChangeRole($callerRole, $newRole);
-
-                $existing = Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $memberUserId)
-                    ->first();
+                self::assertCallerCanChangeRole($callerRole, $newRole);
+                $existing = self::fetchMembershipRow($groupId, $memberUserId);
                 if ($existing === null) {
                     throw new GroupMembershipRuleException(
                         "User {$memberUserId} is not a member of group {$groupId}.",
                     );
                 }
 
-                static::assertNotDemotingLastOwner($groupId, $existing->role, $newRole);
+                self::assertNotDemotingLastOwner($groupId, $existing->role, $newRole);
 
-                Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $memberUserId)
-                    ->update([
-                        'role'       => $newRole,
-                        'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
-                    ]);
+                self::updateMembershipRole($groupId, $memberUserId, $newRole);
             },
         );
+    }
+
+    private static function fetchMembershipRow(int $groupId, int $userId): ?object
+    {
+        return Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->first();
+    }
+
+    private static function updateMembershipRole(int $groupId, int $userId, string $role): void
+    {
+        Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->update([
+                'role'       => $role,
+                'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
+            ]);
     }
 
     private static function assertCallerCanChangeRole(string $callerRole, string $newRole): void
@@ -198,15 +217,20 @@ final class GroupService
         if ($currentRole !== GroupMembership::ROLE_OWNER || $newRole === GroupMembership::ROLE_OWNER) {
             return;
         }
-        $ownerCount = Capsule::table('group_memberships')
-            ->where('group_id', $groupId)
-            ->where('role', GroupMembership::ROLE_OWNER)
-            ->count();
+        $ownerCount = self::countOwners($groupId);
         if ($ownerCount <= 1) {
             throw new GroupMembershipRuleException(
                 'Cannot demote the last owner of the group.',
             );
         }
+    }
+
+    private static function countOwners(int $groupId): int
+    {
+        return (int) Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->count();
     }
 
     /**
@@ -219,49 +243,62 @@ final class GroupService
     public function removeMember(int $groupId, int $userId, int $callerUserId): void
     {
         Capsule::connection()->transaction(
-            static function () use ($groupId, $userId, $callerUserId): void {
+            function () use ($groupId, $userId, $callerUserId): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
 
-                $callerRole = static::fetchCallerRole($groupId, $callerUserId);
+                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
                 if ($callerRole === null) {
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }
 
-                $target = Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $userId)
-                    ->first();
+                $target = self::fetchMembershipRow($groupId, $userId);
                 if ($target === null) {
                     return; // idempotent
                 }
 
-                if ($target->role === GroupMembership::ROLE_OWNER) {
-                    $ownerCount = Capsule::table('group_memberships')
-                        ->where('group_id', $groupId)
-                        ->where('role', GroupMembership::ROLE_OWNER)
-                        ->count();
-                    if ($ownerCount <= 1) {
-                        throw new GroupMembershipRuleException(
-                            'Cannot remove the last owner of the group.',
-                        );
-                    }
-                    if ($callerRole !== GroupMembership::ROLE_OWNER) {
-                        throw new GroupMembershipRuleException(
-                            'Only owners can remove other owners.',
-                        );
-                    }
-                } elseif ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
-                    throw new GroupMembershipRuleException(
-                        'Caller must be owner or admin to remove members.',
-                    );
-                }
-
-                Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $userId)
-                    ->delete();
+                self::assertCallerCanRemoveMember($groupId, $userId, $callerRole, $target->role);
+                self::deleteMembershipRow($groupId, $userId);
             },
         );
+    }
+
+    private static function assertCallerCanRemoveMember(int $groupId, int $targetUserId, string $callerRole, string $targetRole): void
+    {
+        if ($targetRole === GroupMembership::ROLE_OWNER) {
+            self::assertCallerCanRemoveOwner($groupId, $callerRole);
+            return;
+        }
+        if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
+            throw new GroupMembershipRuleException(
+                'Caller must be owner or admin to remove members.',
+            );
+        }
+    }
+
+    private static function assertCallerCanRemoveOwner(int $groupId, string $callerRole): void
+    {
+        $ownerCount = Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('role', GroupMembership::ROLE_OWNER)
+            ->count();
+        if ($ownerCount <= 1) {
+            throw new GroupMembershipRuleException(
+                'Cannot remove the last owner of the group.',
+            );
+        }
+        if ($callerRole !== GroupMembership::ROLE_OWNER) {
+            throw new GroupMembershipRuleException(
+                'Only owners can remove other owners.',
+            );
+        }
+    }
+
+    private static function deleteMembershipRow(int $groupId, int $userId): void
+    {
+        Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->delete();
     }
 
     /**
