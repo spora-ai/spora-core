@@ -108,4 +108,25 @@ describe('PrincipalController', function (): void {
         expect($groupRow['user_id'])->toBeNull();
         expect($groupRow['group_id'])->toBe($groupId);
     });
+
+    it('derives a name from the user/group row', function (): void {
+        [$controller, $auth, $resolver, $ps] = makePrincipalControllerHarness();
+
+        $callerId = bootAuth($auth, 'pc-name@example.com', PRINCCTRL_TEST_PASSWORD);
+        simulateLoggedInSession($callerId, 'pc-name@example.com');
+
+        $gs = new GroupService($ps);
+        $groupId = seedCallerWithUserAndGroup($callerId, $ps, $gs);
+
+        $response = $controller->currentForUser();
+        $body = json_decode($response->getContent(), true);
+
+        $userRow = collect($body['data']['principals'])->firstWhere('type', 'user');
+        $groupRow = collect($body['data']['principals'])->firstWhere('type', 'group');
+
+        expect($userRow['name'])->toBeString();
+        expect((string) $userRow['name'])->not->toBe('');
+        expect((string) $userRow['name'])->not->toContain('undefined');
+        expect((string) $groupRow['name'])->toBe('CoverageGroup');
+    });
 });

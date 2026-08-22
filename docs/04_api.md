@@ -342,3 +342,246 @@ Same shape as a single item from `GET /api/v1/groups/{id}/llm-configs`, with `is
 - `403 FORBIDDEN` — caller is `member`-only.
 - `404 GROUP_NOT_FOUND` — group missing OR caller is not a member.
 - `404 NOT_FOUND` — config missing OR scoped to a different principal.
+
+## Groups — CRUD
+
+The settings-pages surface above assumes the group already exists. The CRUD endpoints below are the admin surface for creating and managing those groups. They sit alongside the existing per-group routes under `/api/v1/groups/{id}`.
+
+### `GET /api/v1/groups`
+
+List groups. Members see the groups they belong to; admins see every group. The response reuses the per-group shape returned by `GET /api/v1/groups/{id}`, including `my_role` (`owner` | `admin` | `member`), the four count fields, and `principal_id`.
+
+**Auth:** session.
+
+### 200 — response
+
+```json
+{
+  "data": {
+    "groups": [
+      {
+        "id": 1,
+        "name": "Marketing",
+        "description": "Outbound campaign agents",
+        "created_by_user_id": 1,
+        "principal_id": 5,
+        "my_role": "owner",
+        "member_count": 3,
+        "agent_count": 12,
+        "llm_config_count": 2,
+        "tool_setting_count": 4,
+        "created_at": "2026-08-19T10:00:00+00:00",
+        "updated_at": "2026-08-19T10:00:00+00:00"
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/groups`
+
+Create a group. **Admin only** — the route is gated by `AdminMiddleware`. The caller becomes `role: owner` of the new group and the group's group-principal is materialised in the same transaction.
+
+**Auth:** admin + CSRF.
+
+### Request
+
+```json
+{ "name": "Marketing", "description": "Outbound campaign agents" }
+```
+
+`name` required (non-empty, ≤ 120 chars); `description` optional (≤ 500 chars).
+
+### 201 — response
+
+Same shape as a single item from `GET /api/v1/groups/{id}`.
+
+### Errors
+
+- `400 INVALID_JSON`
+- `401 UNAUTHENTICATED`
+- `403 FORBIDDEN` — non-admin
+- `422 VALIDATION_ERROR` — empty name
+
+### `PATCH /api/v1/groups/{id}`
+
+Update `name` / `description` / `profile_picture`. **Admin only.** The `profile_picture` field uses the same object shape as the agent picture resource.
+
+**Auth:** admin + CSRF.
+
+### `DELETE /api/v1/groups/{id}`
+
+Delete a group. **Admin only.** Returns `409 GROUP_HAS_AGENTS` with `agent_ids` and `reassign_endpoint: /api/v1/agents/{id}/transfer` if any agent still references the group's principal — the operator must transfer or delete those agents first.
+
+**Auth:** admin + CSRF.
+
+## Group members — admin surface
+
+The settings-pages surface already documents `GET /api/v1/groups/{id}/members`. The admin CRUD endpoints below layer on top.
+
+### `POST /api/v1/groups/{id}/members`
+
+Add a member. Caller must be group owner, group admin, or global admin. Admins cannot touch `owner` rows; finer role-tier rules are enforced inside `GroupService::addMember()`. The endpoint accepts either a `user_id` or an `email`, but not both.
+
+**Auth:** session + CSRF.
+
+### Request
+
+```json
+{ "user_id": 7, "role": "admin" }
+```
+
+Or by email (mutually exclusive with `user_id`):
+
+```json
+{ "email": "ada@example.com", "role": "admin" }
+```
+
+`role` ∈ {`owner`, `admin`, `member`}; default `member` when omitted.
+
+### 201 — response
+
+The new member record, with `name` and `email` enriched from the `users` table:
+
+```json
+{
+  "data": {
+    "member": {
+      "user_id": 7,
+      "name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "role": "admin",
+      "joined_at": "2026-08-19T10:00:00+00:00"
+    }
+  }
+}
+```
+
+### Errors
+
+- `400 INVALID_JSON`
+- `401 UNAUTHENTICATED`
+- `403 FORBIDDEN` — caller is `member`-only
+- `404 GROUP_NOT_FOUND`
+- `404 USER_NOT_FOUND` — `email` / `user_id` resolves to no user
+- `409 ALREADY_A_MEMBER` — the user is already a member
+- `422 VALIDATION_ERROR` — both `user_id` and `email` provided, neither provided, or invalid `role`
+
+### `PATCH /api/v1/groups/{id}/members/{uid}`
+
+Change a member's role. Same authorisation gate as POST. Body: `{ "role": "admin" }`.
+
+**Auth:** session + CSRF.
+
+### `DELETE /api/v1/groups/{id}/members/{uid}`
+
+Remove a member. Same authorisation gate. The last `owner` of a group cannot be removed — surfaces `403 FORBIDDEN` with `GroupMembershipRuleException`.
+
+**Auth:** session + CSRF.
+
+## Group picture — multipart
+
+### `POST /api/v1/groups/{id}/picture/image`
+
+Multipart avatar upload (≤ 1 MiB; `image/*` MIME allowlist; byte-decode verified). Mirrors the agent picture endpoint — bytes land in `media_assets` (`upload_source = 'avatar'`) and a 1:1 row is upserted into `group_pictures`. If the request also supplies a `picture` JSON part, the archetype / variant / palette are applied first, then the uploaded image.
+
+**Auth:** session + CSRF. Caller must be group owner / admin / global admin.
+
+### `DELETE /api/v1/groups/{id}/picture/image`
+
+Clear the group picture and reset to the default archetype (`collaborative / null / slate`).
+
+**Auth:** session + CSRF.
+
+## Agent transfer
+
+### `POST /api/v1/agents/{id}/transfer`
+
+Re-key an agent's `principal_id` to a different principal the caller controls. Authorisation is enforced inside `AgentPrincipalService::transferAgent()`:
+
+- Caller must be admin OR `role ∈ {owner, admin}` of the **source** principal (admins skip this check).
+- Caller must be admin OR `role ∈ {owner, admin}` of the **target** principal, OR be the owner of the target when the target is the caller's own user-principal.
+
+**Auth:** session + CSRF.
+
+### Request
+
+```json
+{ "principal_id": 5 }
+```
+
+### 200 — response
+
+```json
+{
+  "data": {
+    "agent": {
+      "id": 42,
+      "name": "Outreach Bot",
+      "principal_id": 5,
+      "principal": { "id": 5, "type": "group", "name": "Marketing" }
+    }
+  }
+}
+```
+
+### Errors
+
+- `400 INVALID_JSON`
+- `401 UNAUTHENTICATED`
+- `403 FORBIDDEN` — `UnauthorizedTransferException`
+- `404 NOT_FOUND` — agent or target principal missing
+- `422 VALIDATION_ERROR` — missing/non-positive `principal_id`
+
+## Principals
+
+### `GET /api/v1/principals/me`
+
+Return the principal rows the caller can act as: their own user-principal (auto-created if missing) and the group-principal for every group they belong to. Each entry includes a derived `name` so the principal picker can label entries without a second round-trip.
+
+**Auth:** session (no CSRF — read-only).
+
+### 200 — response
+
+```json
+{
+  "data": {
+    "principals": [
+      {
+        "id": 3,
+        "type": "user",
+        "name": "Ada Lovelace",
+        "user_id": 1,
+        "group_id": null,
+        "created_at": "2026-08-19T10:00:00+00:00",
+        "updated_at": "2026-08-19T10:00:00+00:00"
+      },
+      {
+        "id": 5,
+        "type": "group",
+        "name": "Marketing",
+        "user_id": null,
+        "group_id": 2,
+        "created_at": "2026-08-19T10:00:00+00:00",
+        "updated_at": "2026-08-19T10:00:00+00:00"
+      }
+    ]
+  }
+}
+```
+
+When the caller has zero principals (e.g. freshly-registered user with no agent and no group), returns `200` with `principals: []` so the UI can render the empty state without a second round-trip.
+
+### Errors
+
+- `401 UNAUTHENTICATED`.
+
+## Updated contract — `GET /api/v1/agents`
+
+Accepts a repeatable `?principal_id=` query parameter (single `?principal_id=1`, multi `?principal_id=1&principal_id=2`, or PHP-style `?principal_id[]=1&principal_id[]=2`). Values are intersected with `PrincipalResolver::visiblePrincipalIds()` — out-of-scope ids are silently dropped so a caller cannot probe principal existence.
+
+Omitted filter (legacy) returns every agent the caller can see across their visible principals.
+
+## Updated contract — `POST /api/v1/agents`
+
+Accepts an optional `principal_id` body field. The caller must be admin OR control the target principal (`AgentPrincipalService::callerControlsPrincipal`). When omitted, or when the caller doesn't control the value, the agent lands on the caller's own user-principal (materialised on demand).
