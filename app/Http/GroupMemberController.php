@@ -254,7 +254,8 @@ final class GroupMemberController
         if ($this->authService->isAdmin()) {
             return true;
         }
-        return GroupService::fetchCallerRole($groupId, $userId) !== null;
+        $role = GroupService::fetchCallerRole($groupId, $userId);
+        return $role === GroupMembership::ROLE_OWNER || $role === GroupMembership::ROLE_ADMIN;
     }
 
     /**

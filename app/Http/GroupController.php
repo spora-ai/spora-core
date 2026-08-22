@@ -127,7 +127,9 @@ final class GroupController
     /**
      * PATCH /api/v1/groups/{id}
      *
-     * Admin-only via middleware.
+     * Admin-only via middleware. The groups-row write and the optional
+     * `profile_picture` write share a single transaction so a partial
+     * update can't leave the row and its picture out of sync.
      */
     public function update(int $id, Request $request): JsonResponse
     {
@@ -135,18 +137,22 @@ final class GroupController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$group, $updates] = $resolved;
+        [$group, $updates, $picturePayload] = $resolved;
 
         if ($updates !== []) {
             $updates['updated_at'] = date('Y-m-d H:i:s');
-            Capsule::table('groups')
-                ->where('id', $id)
-                ->update($updates);
-            $group = Group::findOrFail($id);
         }
 
-        $this->applyProfilePictureUpdate($id, $request);
+        Capsule::connection()->transaction(function () use ($id, $updates, $picturePayload): void {
+            if ($updates !== []) {
+                Capsule::table('groups')->where('id', $id)->update($updates);
+            }
+            if ($picturePayload !== null) {
+                $this->applyProfilePictureUpdate($id, $picturePayload);
+            }
+        });
 
+        $group = Group::findOrFail($id);
         $userId = $this->authService->currentUserId() ?? 0;
         return new JsonResponse([
             'data' => ['group' => GroupDetailResource::toArray($group, $userId, $this->principalService, $this->pictureService)],
@@ -160,19 +166,20 @@ final class GroupController
      * — validation runs *before* the groups-row write (via
      * {@see resolveGroupUpdateChanges()}) so an invalid picture never
      * partially overwrites the name / description.
+     *
+     * @param array<string, mixed>|null $picturePayload
      */
-    private function applyProfilePictureUpdate(int $groupId, Request $request): void
+    private function applyProfilePictureUpdate(int $groupId, ?array $picturePayload): void
     {
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse || !is_array($body['profile_picture'] ?? null)) {
+        if ($picturePayload === null) {
             return;
         }
 
         $this->pictureService->updateAvatar(
             $groupId,
-            isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
-            isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
-            isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
+            isset($picturePayload['archetype']) ? (string) $picturePayload['archetype'] : null,
+            isset($picturePayload['variant_key']) ? (string) $picturePayload['variant_key'] : null,
+            isset($picturePayload['palette_key']) ? (string) $picturePayload['palette_key'] : null,
         );
     }
 
@@ -248,7 +255,7 @@ final class GroupController
     }
 
     /**
-     * @return array{0: Group, 1: array<string, mixed>}|JsonResponse
+     * @return array{0: Group, 1: array<string, mixed>, 2: array<string, mixed>|null}|JsonResponse
      */
     private function resolveGroupUpdate(int $id, Request $request): array|JsonResponse
     {
@@ -262,11 +269,11 @@ final class GroupController
             return $changes;
         }
 
-        return [$group, $changes];
+        return [$group, $changes[0], $changes[1]];
     }
 
     /**
-     * @return array<string, mixed>|JsonResponse
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>|null}|JsonResponse
      */
     private function resolveGroupUpdateChanges(Request $request): array|JsonResponse
     {
@@ -281,7 +288,7 @@ final class GroupController
     private function attemptDelete(int $id, int $userId): ?JsonResponse
     {
         try {
-            $this->groupService->deleteGroup($id, $userId);
+            $this->groupService->deleteGroup($id, $userId, $this->authService->isAdmin());
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
@@ -359,7 +366,7 @@ final class GroupController
 
     /**
      * @param  array<string, mixed> $body
-     * @return array<string, mixed>|JsonResponse
+     * @return array{0: array<string, mixed>, 1: array<string, mixed>|null}|JsonResponse
      */
     private function buildUpdatePayload(array $body): array|JsonResponse
     {
@@ -380,7 +387,8 @@ final class GroupController
         if ($pictureError !== null) {
             return $pictureError;
         }
-        return $update;
+        $picturePayload = is_array($body['profile_picture'] ?? null) ? $body['profile_picture'] : null;
+        return [$update, $picturePayload];
     }
 
     /**

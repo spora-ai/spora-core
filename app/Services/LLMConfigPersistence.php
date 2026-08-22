@@ -10,7 +10,6 @@ use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\PrincipalPreference;
-use Spora\Services\Exceptions\PrincipalHasDependentsException;
 use Spora\Services\Exceptions\PrincipalNotAccessibleException;
 
 /**
@@ -26,8 +25,8 @@ use Spora\Services\Exceptions\PrincipalNotAccessibleException;
  *   - `$principalId` is the principal on which the config lives
  *     (own user-principal, or a group the caller controls).
  *   - `$callerUserId` is the authenticated user — used for the
- *     `PrincipalResolver::isVisibleTo` cross-call approval gate so a
- *     caller cannot create or delete a personal config under a
+ *     `PrincipalResolver::visiblePrincipalIds` cross-call approval gate
+ *     so a caller cannot create or delete a personal config under a
  *     principal they don't act as.
  */
 final class LLMConfigPersistence
@@ -80,30 +79,26 @@ final class LLMConfigPersistence
     public function deleteConfiguration(int $configId, int $callerUserId, bool $isAdmin): bool
     {
         $config = LLMDriverConfiguration::find($configId);
-        $authorized = $config !== null
-            && ($isAdmin || !$config->is_global)
-            && ($config->is_global || $config->principal_id === $callerUserId);
-
-        if (!$authorized) {
+        if ($config === null) {
             return false;
         }
 
-        // A personal config is deletable as long as the caller owns the
-        // principal bound to it. We replace the old user-id equality
-        // check with PrincipalResolver so the gate honours principal
-        // ownership across groups (the principal's `principal_id` is
-        // a single int; `$config->principal_id === $callerUserId` only
-        // worked by accident when user-principals were 1:1 with users,
-        // which is no longer true).
-        if (!$isAdmin && !$config->is_global && !$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
-            return false;
+        if ($isAdmin) {
+            $this->detachConfigurationReferences($configId);
+            $config->delete();
+            return true;
         }
 
-        $dependents = $this->dependentNonGlobalConfigIds($configId);
-        if ($dependents !== []) {
-            throw new PrincipalHasDependentsException(
-                'Configuration has dependent rows that must be reassigned before it can be deleted.',
-            );
+        // Non-admin caller: refuse on global configs and on personal
+        // configs whose principal the caller doesn't own. The principal
+        // ownership check honours the principals-and-groups model (the
+        // old `principal_id === callerUserId` check only worked by
+        // accident for user-principals, not group-principals).
+        if ($config->is_global) {
+            return false;
+        }
+        if (!$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
+            return false;
         }
 
         $this->detachConfigurationReferences($configId);
@@ -218,6 +213,15 @@ final class LLMConfigPersistence
         bool $isGlobal,
         array $data,
     ): LLMDriverConfiguration {
+        // Cross-call approval gate: a non-admin caller may only persist
+        // a personal config under one of their visible principals. Global
+        // configs short-circuit because their principal_id is null. The
+        // gate runs BEFORE the save() so an out-of-scope principal can't
+        // get a transient row written that the caller then has to retry.
+        if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
+            throw new PrincipalNotAccessibleException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
+        }
+
         $config = new LLMDriverConfiguration();
         $config->principal_id = $isGlobal ? null : $principalId;
         $config->is_global = $isGlobal;
@@ -237,13 +241,6 @@ final class LLMConfigPersistence
         $config->context_window = isset($data['context_window']) ? (int) $data['context_window'] : null;
         $config->max_tokens_output = isset($data['max_tokens_output']) ? (int) $data['max_tokens_output'] : null;
         $config->save();
-
-        // Cross-call approval gate: a non-admin caller may only persist
-        // a personal config under one of their visible principals. Global
-        // configs short-circuit because their principal_id is null.
-        if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
-            throw new PrincipalNotAccessibleException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
-        }
 
         return $config;
     }
@@ -293,28 +290,5 @@ final class LLMConfigPersistence
         Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
 
         PrincipalPreference::where('preferred_llm_config_id', $configId)->delete();
-    }
-
-    /**
-     * Pre-flight check: refuse to delete a config that other
-     * non-global configs (cascade elsewhere) or `principal_preferences`
-     * rows currently depend on. The agent-link and preference-link are
-     * detached unconditionally by {@see self::detachConfigurationReferences()},
-     * but a cross-config dependency requires a human-in-loop transfer
-     * step so we surface the 409 instead.
-     *
-     * @return list<int>
-     */
-    private function dependentNonGlobalConfigIds(int $configId): array
-    {
-        // principal_preferences rows are cascade-detached in
-        // {@see self::detachConfigurationReferences()} before the delete,
-        // so a non-zero preference count is not a blocker — only a cross-
-        // config dependency (other LLMDriverConfiguration rows pointing at
-        // this one) requires a manual transfer.
-        $linkedPreferences = PrincipalPreference::where('preferred_llm_config_id', $configId)->count();
-        unset($linkedPreferences);
-
-        return [];
     }
 }

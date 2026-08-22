@@ -56,6 +56,10 @@ final class AgentResource
      *     uploaded picture. Ignored when `$preloadedPicture` is null or has
      *     no `media_asset_id`. Pass alongside `$preloadedPicture` to fully
      *     avoid N+1 on the dashboard endpoint.
+     * @param ?Principal $preloadedPrincipal  Pre-loaded `principal` relation
+     *     so the dashboard listing doesn't issue one Principal::find per
+     *     agent (then another user/group lookup for the display name).
+     *     When null, the resource resolves the principal lazily.
      *
      * @return array<string, mixed>
      */
@@ -67,9 +71,12 @@ final class AgentResource
         ?Collection $preloadedTools = null,
         ?AgentPicture $preloadedPicture = null,
         ?MediaAsset $preloadedMediaAsset = null,
+        ?Principal $preloadedPrincipal = null,
     ): array {
         /** @var Collection<int, AgentTool> $tools */
         $tools = $preloadedTools ?? $agent->agentTools;
+
+        $principal = $preloadedPrincipal ?? Principal::find((int) $agent->principal_id);
 
         $payload = [
             'id'                   => (int) $agent->id,
@@ -94,7 +101,7 @@ final class AgentResource
             // The DB schema is NOT NULL today; the null branch is
             // defensive for legacy fixtures or future soft-delete columns.
             'principal_id'         => $agent->principal_id,
-            'principal'            => self::principalBlock($agent->principal_id),
+            'principal'            => self::principalBlock($principal),
             'created_at'           => $agent->created_at !== null
                 ? $agent->created_at->format(DateTimeInterface::ATOM)
                 : null,
@@ -134,12 +141,8 @@ final class AgentResource
      *
      * @return array{id:int,type:string,name:string,user_id:?int,group_id:?int}|null
      */
-    private static function principalBlock(?int $principalId): ?array
+    private static function principalBlock(?Principal $principal): ?array
     {
-        if ($principalId === null) {
-            return null;
-        }
-        $principal = Principal::find($principalId);
         if ($principal === null) {
             return null;
         }

@@ -9,6 +9,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\Group;
+use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Principal;
 use Spora\Models\PrincipalPreference;
 use Spora\Services\PrincipalService;
@@ -175,9 +176,7 @@ final class GroupPreferencesController
     }
 
     /**
-     * Decode + extract + validate. Splits the key-presence and value-shape
-     * checks into helpers so {@see validateAndExtractConfigId()} stays
-     * under the S1142 3-return cap.
+     * Decode + extract + validate the preferred config id from the body.
      *
      * @return int|null|JsonResponse
      */
@@ -234,8 +233,39 @@ final class GroupPreferencesController
      */
     private function applyAndRespond(int $principalId, ?int $configId): JsonResponse
     {
+        $error = $this->validateConfigBelongsToPrincipal($configId, $principalId);
+        if ($error !== null) {
+            return $error;
+        }
+
         $this->upsertPreference($principalId, $configId);
         return $this->respondWithPreference($principalId);
+    }
+
+    /**
+     * The `config_id` body field is the row's primary key, but the
+     * row also has a `principal_id` (or `is_global = true`). Without
+     * the scope check, a caller authorised to manage the group could
+     * point the group's preference at another group's config or at a
+     * personal config that belongs to a user-principal they don't
+     * control. Refuse the mismatched pointer with a 422 so the
+     * operator gets a clean error instead of a silently misrouted
+     * preference.
+     */
+    private function validateConfigBelongsToPrincipal(?int $configId, int $principalId): ?JsonResponse
+    {
+        if ($configId === null) {
+            return null;
+        }
+
+        $config = LLMDriverConfiguration::find($configId);
+        if ($config === null) {
+            return $this->unprocessable('CONFIG_NOT_FOUND', 'preferred_llm_config_id does not reference an existing configuration.');
+        }
+        if (!$config->is_global && (int) $config->principal_id !== $principalId) {
+            return $this->unprocessable('CONFIG_PRINCIPAL_MISMATCH', 'preferred_llm_config_id must be global or belong to the same principal as the group.');
+        }
+        return null;
     }
 
     private function upsertPreference(int $principalId, ?int $configId): void

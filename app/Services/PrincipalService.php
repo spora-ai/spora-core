@@ -9,7 +9,6 @@ use PDOException;
 use Spora\Models\Agent;
 use Spora\Models\Group;
 use Spora\Models\Principal;
-use Spora\Services\Exceptions\PrincipalHasDependentsException;
 use Spora\Services\Exceptions\PrincipalMaterialisationException;
 use Spora\Services\Exceptions\TransferTargetNotFoundException;
 use Spora\Services\Exceptions\UnauthorizedTransferException;
@@ -41,6 +40,11 @@ final class PrincipalService
     /**
      * Get the principal for the given user, creating the row if missing.
      * Idempotent: callers may invoke this on every request without locking.
+     *
+     * @throws PrincipalMaterialisationException When the user row does
+     *         not exist (the FK on `principals.user_id` would otherwise
+     *         fail; the principals-and-groups model has no concept of a
+     *         "stub user" so we refuse instead of fabricating one).
      */
     public function ensureUserPrincipal(int $userId): Principal
     {
@@ -51,30 +55,10 @@ final class PrincipalService
             return $existing;
         }
 
-        // If the user row doesn't exist yet (e.g. in unit tests where the
-        // caller passes a fake $userId without registering), materialise a
-        // minimal stub row so the FK on principals.user_id is satisfied.
-        // Production callers always go through `register()` which has
-        // already inserted the user; the insert below is a defensive
-        // last-resort path.
         if (!Capsule::table('users')->where('id', $userId)->exists()) {
-            try {
-                Capsule::table('users')->insert([
-                    'id'         => $userId,
-                    'email'      => "stub-user-{$userId}@spora.test",
-                    'username'   => "stub_user_{$userId}",
-                    'password'   => str_repeat("\0", 60),
-                    'status'     => 1,
-                    'verified'   => 1,
-                    'resettable' => 1,
-                    'roles_mask' => 0,
-                    'registered' => time(),
-                    'created_at' => date(self::DB_TIMESTAMP_FORMAT),
-                    'updated_at' => date(self::DB_TIMESTAMP_FORMAT),
-                ]);
-            } catch (PDOException) {
-                // Already inserted between our check and insert — fine.
-            }
+            throw new PrincipalMaterialisationException(
+                "Cannot materialise user-principal for user {$userId}: user row does not exist.",
+            );
         }
 
         // The UNIQUE(user_id) index protects against a race; if two parallel
@@ -148,8 +132,6 @@ final class PrincipalService
      * succeed against the same source principal.
      *
      * @throws UnauthorizedTransferException When the caller controls neither side
-     * @throws PrincipalHasDependentsException Reserved for future use; thrown only if
-     *         the target principal is being deleted in the same call
      */
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
     {

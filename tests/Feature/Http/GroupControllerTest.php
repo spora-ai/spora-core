@@ -147,7 +147,7 @@ describe('GroupController success paths', function (): void {
         expect($response->getStatusCode())->toBe(201);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['group']['name'])->toBe('NewOne');
-        expect($body['data']['group']['caller_role'])->toBe('owner');
+        expect($body['data']['group']['my_role'])->toBe('owner');
     });
 
     it('update renames a group', function (): void {

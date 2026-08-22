@@ -77,9 +77,7 @@ final class GroupPictureController
 
     /**
      * Look up the group for an upload. Authorisation: admin OR owner/admin
-     * of the group. Returns null on success, or a 4xx JsonResponse on
-     * failure. Extracted from {@see uploadImage()} so the controller
-     * stays under the 3-return ceiling (S1142).
+     * of the group. Returns null on success, or a 4xx JsonResponse on failure.
      */
     private function resolveGroupForUpload(int $groupId, int $userId): ?JsonResponse
     {
@@ -99,8 +97,7 @@ final class GroupPictureController
 
     /**
      * Run the byte-path (MediaArchive → group_pictures write) after the
-     * controller has finished the input validations. Extracted from
-     * `uploadImage()` so the controller stays under the 3-return ceiling.
+     * controller has finished the input validations.
      */
     private function performUpload(
         UploadedFile $file,

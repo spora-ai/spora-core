@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
@@ -88,7 +89,12 @@ final class AgentTransferController
      */
     private function resolveTransferSetup(Request $request): array|JsonResponse
     {
-        $targetPrincipalId = (int) ($request->request->get('principal_id') ?? 0);
+        $body = $this->decodeTransferBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+
+        $targetPrincipalId = (int) ($body['principal_id'] ?? 0);
         if ($targetPrincipalId <= 0) {
             return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
@@ -99,6 +105,18 @@ final class AgentTransferController
         }
 
         return [$targetPrincipalId, $callerUserId];
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function decodeTransferBody(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
     }
 
     /**

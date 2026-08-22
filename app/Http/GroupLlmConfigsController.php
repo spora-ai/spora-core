@@ -280,8 +280,7 @@ final class GroupLlmConfigsController
     }
 
     /**
-     * Scope-check → body decode + validation → apply update. Each
-     * stage short-circuits so the parent only sees three return paths.
+     * Scope-check → body decode + validation → apply update.
      */
     private function performScopedUpdate(int $cid, int $principalId, int $userId, Request $request): JsonResponse
     {
@@ -352,21 +351,28 @@ final class GroupLlmConfigsController
      */
     private function setDefaultScopedConfigOrFail(int $cid, int $principalId): LLMDriverConfiguration|JsonResponse
     {
-        $config = $this->findScopedConfig($cid, $principalId);
-        if ($config === null) {
-            return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
-        }
+        return Capsule::connection()->transaction(
+            function () use ($cid, $principalId): LLMDriverConfiguration|JsonResponse {
+                $config = LLMDriverConfiguration::where('id', $cid)
+                    ->where('principal_id', $principalId)
+                    ->lockForUpdate()
+                    ->first();
+                if ($config === null) {
+                    return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
+                }
 
-        Capsule::table('llm_driver_configurations')
-            ->where('principal_id', $principalId)
-            ->where('is_default', true)
-            ->update(['is_default' => false, 'updated_at' => date('Y-m-d H:i:s')]);
+                Capsule::table('llm_driver_configurations')
+                    ->where('principal_id', $principalId)
+                    ->where('is_default', true)
+                    ->update(['is_default' => false, 'updated_at' => date('Y-m-d H:i:s')]);
 
-        Capsule::table('llm_driver_configurations')
-            ->where('id', $cid)
-            ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
+                Capsule::table('llm_driver_configurations')
+                    ->where('id', $cid)
+                    ->update(['is_default' => true, 'updated_at' => date('Y-m-d H:i:s')]);
 
-        return LLMDriverConfiguration::find($cid);
+                return LLMDriverConfiguration::find($cid);
+            },
+        );
     }
 
     /**

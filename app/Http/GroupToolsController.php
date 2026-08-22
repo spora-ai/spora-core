@@ -235,8 +235,7 @@ final class GroupToolsController
 
     /**
      * Persist settings via ToolConfigService and return the masked wire
-     * payload. Isolated from {@see upsert()} so the controller stays at
-     * the S1142 3-return cap.
+     * payload.
      *
      * @param array<string, mixed> $settings
      */

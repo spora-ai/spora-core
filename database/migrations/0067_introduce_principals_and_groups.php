@@ -66,7 +66,7 @@ return new class extends Migration
         $schema = Capsule::schema();
         $driver = Capsule::connection()->getDriverName();
 
-        // ── Phase 1: New tables (DDL only; safe on both engines) ───────────
+        // Phase 1: new tables (DDL only; safe on both engines).
 
         if (!$schema->hasTable('groups')) {
             $schema->create('groups', static function (Blueprint $table): void {
@@ -119,12 +119,11 @@ return new class extends Migration
             });
         }
 
-        // ── Phase 2: DML backfill (transactional) ───────────────────────────
-        //
-        // Only the user → principal_id inserts run inside the transaction.
-        // The settings tables and agents user_id → principal_id column swap
-        // happens in Phase 3 (outside the transaction) so the
-        // `PRAGMA foreign_keys = OFF` it relies on actually takes effect.
+        // Phase 2: DML backfill (transactional). Only the user → principal_id
+        // inserts run inside the transaction. The settings tables and
+        // agents user_id → principal_id column swap happens in Phase 3
+        // (outside the transaction) so the `PRAGMA foreign_keys = OFF`
+        // it relies on actually takes effect.
 
         Capsule::connection()->transaction(static function (): void {
             if (Capsule::connection()->getDriverName() === 'mysql' || Capsule::connection()->getDriverName() === 'mariadb') {
@@ -146,8 +145,7 @@ return new class extends Migration
             $schema->rename('user_preferences', 'principal_preferences');
         }
 
-        // ── Phase 3: Column swap (no transaction; PRAGMA needs to take effect)
-        //
+        // Phase 3: column swap (no transaction; PRAGMA needs to take effect).
         // For each settings table, and finally for `agents`:
         //   1. ADD COLUMN principal_id (nullable) + index
         //   2. UPDATE principal_id = user-principal (backfill, idempotent)
@@ -228,7 +226,7 @@ return new class extends Migration
             }
         }
 
-        // ── Phase 3b: agents table — same dance as the settings tables ─────
+        // Phase 3b: agents table — same dance as the settings tables.
         if (!$schema->hasColumn('agents', 'principal_id')) {
             $schema->table('agents', static function (Blueprint $t): void {
                 $t->unsignedBigInteger('principal_id')->nullable()->after('id');

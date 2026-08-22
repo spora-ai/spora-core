@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
+use Spora\Services\PrincipalResolver;
 use Throwable;
 
 /**
@@ -112,11 +113,6 @@ final class Agent extends Model
             : null;
     }
 
-    /**
-     * Legacy accessor for `$agent->user` — returns the resolved User
-     * model (or null) for dynamic-property access patterns. Equivalent
-     * to calling the `user()` relation.
-     */
     public function getUserAttribute(): ?User
     {
         $relation = $this->user();
@@ -155,32 +151,29 @@ final class Agent extends Model
     /**
      * Legacy alias for `$agent->user_id`. Migration 0067 cut the column
      * but downstream consumers (controllers, tools, workers) still read
-     * it. The accessor resolves through the principal: a user-principal
-     * returns its `user_id`; a group-principal returns the group's first
-     * `owner` user id. Returns null for an unloaded principal.
+     * it. The accessor delegates to {@see PrincipalResolver::ownerUserId()}
+     * so the principals-and-groups resolution (user-principal user_id or
+     * group-principal first owner) lives in exactly one place. The
+     * result is memoised per model instance so repeated reads in the
+     * same request don't re-issue the principal lookup.
      *
      * Read-only. New code must use {@see PrincipalResolver::ownerUserId()}
      * directly so the principals-and-groups model is explicit.
      */
     public function getUserIdAttribute(): ?int
     {
-        $principal = Principal::find($this->principal_id);
-        if ($principal === null) {
-            return null;
+        if ($this->userIdCacheResolved) {
+            return $this->userIdCache;
         }
-
-        if ($principal->type === Principal::TYPE_USER) {
-            return (int) $principal->user_id;
-        }
-
-        $ownerUserId = Capsule::table('group_memberships')
-            ->where('group_id', $principal->group_id)
-            ->where('role', GroupMembership::ROLE_OWNER)
-            ->orderBy('id')
-            ->value('user_id');
-
-        return $ownerUserId !== null ? (int) $ownerUserId : null;
+        $resolved = (new PrincipalResolver())->ownerUserId((int) $this->principal_id);
+        $this->userIdCache = $resolved;
+        $this->userIdCacheResolved = true;
+        return $resolved;
     }
+
+    private ?int $userIdCache = null;
+
+    private bool $userIdCacheResolved = false;
 
     /**
      * Image-input capability for the agent's configured LLM.

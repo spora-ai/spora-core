@@ -374,6 +374,19 @@ test('getEffectiveConfigForAgent returns null when no config at any tier', funct
 
 describe('LLMConfigService::validateNewConfigurationInputs', function (): void {
 
+    beforeEach(function (): void {
+        if (!Capsule::table('users')->where('id', 1)->exists()) {
+            Capsule::table('users')->insert([
+                'id'         => 1,
+                'email'      => 'validate-cfg-1@example.com',
+                'password'   => password_hash(TEST_USER_PASSWORD, PASSWORD_DEFAULT),
+                'registered' => time(),
+                'created_at' => date(TEST_TIMESTAMP_FORMAT),
+                'updated_at' => date(TEST_TIMESTAMP_FORMAT),
+            ]);
+        }
+    });
+
     test('returns null when name is empty', function (): void {
         $security = Mockery::mock(SecurityManagerInterface::class);
         $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);

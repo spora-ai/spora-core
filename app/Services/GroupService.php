@@ -265,19 +265,28 @@ final class GroupService
     }
 
     /**
-     * Delete a group. Pre-flight: refuse if any agent still references the
-     * group's principal; the caller should surface a 409 with a
-     * `reassign_endpoint` hint to the operator.
+     * Delete a group. Route is gated by AdminMiddleware (see
+     * RouteDefinitions::ROUTE_GROUPS_ID), so the caller is either a
+     * global admin or an `owner` of the group. Non-owner non-admin
+     * callers are refused so the service still holds its own gate —
+     * callers that happen to bypass the middleware (tests, future
+     * bulk-import paths) can't delete groups they don't control.
      *
-     * @throws GroupMembershipRuleException When the caller is not the owner
+     * Pre-flight: refuse if any agent still references the group's
+     * principal; the caller surfaces a 409 with a `reassign_endpoint`
+     * hint to the operator.
+     *
+     * @throws GroupMembershipRuleException When the caller is not admin
+     *         and is not the group owner
      * @throws PrincipalHasDependentsException When the group still owns agents
      */
-    public function deleteGroup(int $groupId, int $callerUserId): void
+    public function deleteGroup(int $groupId, int $callerUserId, bool $isAdmin = false): void
     {
-        // Caller must be an owner. Admin cannot delete.
-        $callerRole = self::fetchCallerRole($groupId, $callerUserId);
-        if ($callerRole !== GroupMembership::ROLE_OWNER) {
-            throw new GroupMembershipRuleException('Only an owner can delete the group.');
+        if (!$isAdmin) {
+            $callerRole = self::fetchCallerRole($groupId, $callerUserId);
+            if ($callerRole !== GroupMembership::ROLE_OWNER) {
+                throw new GroupMembershipRuleException('Only an owner or a global admin can delete the group.');
+            }
         }
 
         $principal = $this->principalService->principalForGroup($groupId);
@@ -295,8 +304,23 @@ final class GroupService
             );
         }
 
+        // Re-check the dependent count + lock the group row inside a
+        // transaction so two parallel deletes (e.g. one from the
+        // operator UI and one from a cron-driven cleanup) can't both
+        // observe an empty dependents list and try to delete the same
+        // row twice.
         Capsule::connection()->transaction(
             static function () use ($groupId, $principal): void {
+                Group::where('id', $groupId)->lockForUpdate()->first();
+                $recheck = Capsule::table('agents')
+                    ->where('principal_id', $principal->id)
+                    ->count();
+                if ($recheck > 0) {
+                    throw new PrincipalHasDependentsException(
+                        "Group {$groupId} cannot be deleted while it owns agents (race detected).",
+                        [],
+                    );
+                }
                 Capsule::table('principals')->where('id', $principal->id)->delete();
                 Capsule::table('groups')->where('id', $groupId)->delete();
             },

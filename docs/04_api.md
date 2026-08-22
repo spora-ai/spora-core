@@ -25,7 +25,7 @@ Returns the group row plus four count fields used by the Overview page cards.
       "description": "Outbound campaign agents",
       "created_by_user_id": 1,
       "principal_id": 5,
-      "caller_role": "owner",
+      "my_role": "owner",
       "member_count": 3,
       "agent_count": 12,
       "llm_config_count": 2,

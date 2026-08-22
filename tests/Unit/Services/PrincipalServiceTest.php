@@ -47,11 +47,10 @@ describe('PrincipalService::ensureUserPrincipal', function (): void {
         expect($a->id)->toBe($b->id);
     });
 
-    it('materialises a user-principal for an unknown user_id', function (): void {
+    it('refuses to materialise a user-principal for an unknown user_id', function (): void {
         [$service] = makePrincipalService();
-        $principal = $service->ensureUserPrincipal(987_654);
-        expect((int) $principal->user_id)->toBe(987_654)
-            ->and((string) $principal->type)->toBe('user');
+        expect(fn() => $service->ensureUserPrincipal(987_654))
+            ->toThrow(Spora\Services\Exceptions\PrincipalMaterialisationException::class);
     });
 });
 

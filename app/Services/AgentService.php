@@ -75,6 +75,8 @@ final class AgentService implements AgentServiceInterface
         // eager-load avoids an N+1 chain when AgentResource serializes
         // the per-agent picture (one query per agent for the picture row,
         // plus one per agent for the uploaded image's media_assets row).
+        // The `principal` eager-load saves another N+1 on the resolved
+        // `principal` block that the dashboard sidebar consumes.
         $query = $this->newVisibleForUserQuery($userId);
         if ($principalIds !== null) {
             // Caller asked for a principal filter; intersect with the
@@ -87,7 +89,7 @@ final class AgentService implements AgentServiceInterface
             $query->whereIn('principal_id', $principalIds);
         }
         return $query
-            ->with(['agentTools', 'profilePicture.mediaAsset'])
+            ->with(['agentTools', 'profilePicture.mediaAsset', 'principal'])
             ->orderByDesc('created_at')
             ->get()
             ->map(fn(Agent $a) => $this->agentResource($a))
@@ -328,6 +330,7 @@ final class AgentService implements AgentServiceInterface
         $media = $picture instanceof AgentPicture && $picture->media_asset_id !== null
             ? $picture->getRelation('mediaAsset')
             : null;
+        $principal = $agent->getRelation('principal');
         return AgentResource::toArray(
             $agent,
             null,
@@ -336,6 +339,7 @@ final class AgentService implements AgentServiceInterface
             $agent->getRelation('agentTools'),
             $picture instanceof AgentPicture ? $picture : null,
             $media instanceof MediaAsset ? $media : null,
+            $principal instanceof Principal ? $principal : null,
         );
     }
 }

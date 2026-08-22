@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use DateTimeInterface;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Group;
 use Spora\Models\Principal;
 use Spora\Services\ProfilePictures\GroupPictureService;
@@ -20,6 +21,20 @@ use Spora\Services\ProfilePictures\GroupPictureService;
  */
 final class GroupDetailResource
 {
+    /**
+     * Tables whose row counts the resource exposes per-group. The values
+     * are the `[table, label]` tuples used in the grouped count query
+     * and the wire-field-name lookup. Centralised so a new settings
+     * table only needs to be added in one place.
+     *
+     * @var list<array{0: string, 1: string}>
+     */
+    private const COUNT_TABLES = [
+        ['agents',                    'agents'],
+        ['llm_driver_configurations', 'llm_driver_configurations'],
+        ['tool_user_settings',        'tool_user_settings'],
+    ];
+
     private function __construct()
     {
         // Static-only utility — instantiation is intentionally disallowed.
@@ -35,6 +50,8 @@ final class GroupDetailResource
         ?GroupPictureService $pictureService = null,
     ): array {
         $principal = $principalService->principalForGroup((int) $group->id);
+        $principalCounts = self::principalCountsFor([$principal]);
+        $memberCount = self::memberCountsFor([(int) $group->id])[(int) $group->id] ?? 0;
 
         return [
             'id'                  => (int) $group->id,
@@ -42,11 +59,11 @@ final class GroupDetailResource
             'description'         => $group->description,
             'created_by_user_id'  => (int) $group->created_by_user_id,
             'principal_id'        => $principal !== null ? (int) $principal->id : null,
-            'caller_role'         => self::roleForCaller($group, $callerUserId),
-            'member_count'        => self::memberCountForGroup($group),
-            'agent_count'         => self::countForPrincipal($principal, 'agents', 'principal_id'),
-            'llm_config_count'    => self::countForPrincipal($principal, 'llm_driver_configurations', 'principal_id'),
-            'tool_setting_count'  => self::countForPrincipal($principal, 'tool_user_settings', 'principal_id'),
+            'my_role'             => self::roleForCaller($group, $callerUserId),
+            'member_count'        => $memberCount,
+            'agent_count'         => self::extractCount($principalCounts, $principal, 'agents'),
+            'llm_config_count'    => self::extractCount($principalCounts, $principal, 'llm_driver_configurations'),
+            'tool_setting_count'  => self::extractCount($principalCounts, $principal, 'tool_user_settings'),
             'profile_picture'     => $pictureService?->toWireShape((int) $group->id),
             'created_at'          => $group->created_at->format(DateTimeInterface::ATOM),
             'updated_at'          => $group->updated_at->format(DateTimeInterface::ATOM),
@@ -63,27 +80,115 @@ final class GroupDetailResource
         PrincipalService $principalService,
         ?GroupPictureService $pictureService = null,
     ): array {
+        $list = is_array($groups) ? $groups : iterator_to_array($groups);
+        if ($list === []) {
+            return [];
+        }
+
+        // Resolve the group-principal for every group in one batch so
+        // the per-group count fan-out below doesn't repeat the lookup.
+        $principalsByGroup = [];
+        foreach ($list as $g) {
+            $principalsByGroup[(int) $g->id] = $principalService->principalForGroup((int) $g->id);
+        }
+        $principalCounts = self::principalCountsFor(array_values($principalsByGroup));
+        $memberCounts = self::memberCountsFor(array_map(static fn(Group $g): int => (int) $g->id, $list));
+
         $out = [];
-        foreach ($groups as $g) {
-            $out[] = self::toArray($g, $callerUserId, $principalService, $pictureService);
+        foreach ($list as $g) {
+            $groupId = (int) $g->id;
+            $principal = $principalsByGroup[$groupId] ?? null;
+            $out[] = [
+                'id'                  => $groupId,
+                'name'                => $g->name,
+                'description'         => $g->description,
+                'created_by_user_id'  => (int) $g->created_by_user_id,
+                'principal_id'        => $principal !== null ? (int) $principal->id : null,
+                'my_role'             => self::roleForCaller($g, $callerUserId),
+                'member_count'        => $memberCounts[$groupId] ?? 0,
+                'agent_count'         => self::extractCount($principalCounts, $principal, 'agents'),
+                'llm_config_count'    => self::extractCount($principalCounts, $principal, 'llm_driver_configurations'),
+                'tool_setting_count'  => self::extractCount($principalCounts, $principal, 'tool_user_settings'),
+                'profile_picture'     => $pictureService?->toWireShape($groupId),
+                'created_at'          => $g->created_at->format(DateTimeInterface::ATOM),
+                'updated_at'          => $g->updated_at->format(DateTimeInterface::ATOM),
+            ];
         }
         return $out;
     }
 
     /**
-     * Count rows for the group-principal on one of the settings tables
-     * (or `agents`). Returns 0 when the principal has not been
-     * materialised yet so a freshly-created group with no principal row
-     * doesn't 500.
+     * Issue one grouped count query per settings table and return
+     * `principal_id => [table => count]`. Tables with no rows for any
+     * of the supplied principals return an empty map (no entries, but
+     * the field still exists when accessed via {@see self::extractCount}).
+     *
+     * @param  list<Principal|null> $principals
+     * @return array<int, array<string, int>>
      */
-    private static function countForPrincipal(?Principal $principal, string $table, string $column): int
+    private static function principalCountsFor(array $principals): array
+    {
+        $principalIds = [];
+        foreach ($principals as $p) {
+            if ($p !== null) {
+                $principalIds[(int) $p->id] = (int) $p->id;
+            }
+        }
+        if ($principalIds === []) {
+            return [];
+        }
+
+        $result = [];
+        foreach (self::COUNT_TABLES as [$table, $_label]) {
+            $rows = Capsule::table($table)
+                ->selectRaw('principal_id, COUNT(*) AS aggregate_count')
+                ->whereIn('principal_id', array_values($principalIds))
+                ->groupBy('principal_id')
+                ->get()
+                ->all();
+            foreach ($rows as $row) {
+                /** @var object $row */
+                $pid = (int) $row->principal_id;
+                $result[$pid][$table] = (int) $row->aggregate_count;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * @param  array<int, array<string, int>> $principalCounts
+     */
+    private static function extractCount(array $principalCounts, ?Principal $principal, string $table): int
     {
         if ($principal === null) {
             return 0;
         }
-        return (int) \Illuminate\Database\Capsule\Manager::table($table)
-            ->where($column, (int) $principal->id)
-            ->count();
+        return $principalCounts[(int) $principal->id][$table] ?? 0;
+    }
+
+    /**
+     * Issue one grouped count query and return `group_id => count`.
+     *
+     * @param  list<int> $groupIds
+     * @return array<int, int>
+     */
+    private static function memberCountsFor(array $groupIds): array
+    {
+        if ($groupIds === []) {
+            return [];
+        }
+        $rows = Capsule::table('group_memberships')
+            ->selectRaw('group_id, COUNT(*) AS aggregate_count')
+            ->whereIn('group_id', array_values(array_unique($groupIds)))
+            ->groupBy('group_id')
+            ->get()
+            ->all();
+        $out = [];
+        foreach ($rows as $row) {
+            /** @var object $row */
+            $out[(int) $row->group_id] = (int) $row->aggregate_count;
+        }
+        return $out;
     }
 
     private static function roleForCaller(Group $group, int $callerUserId): ?string
@@ -92,10 +197,5 @@ final class GroupDetailResource
             ->where('user_id', $callerUserId)
             ->value('role');
         return $role !== null ? (string) $role : null;
-    }
-
-    private static function memberCountForGroup(Group $group): int
-    {
-        return (int) \Spora\Models\GroupMembership::where('group_id', $group->id)->count();
     }
 }
