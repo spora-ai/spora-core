@@ -145,7 +145,7 @@ final class GroupController
             if ($updates !== []) {
                 Capsule::table('groups')->where('id', $id)->update($updates);
             }
-            if ($picturePayload !== null) {
+            if ($picturePayload !== []) {
                 $this->applyProfilePictureUpdate($id, $picturePayload);
             }
         });
@@ -165,11 +165,11 @@ final class GroupController
      * {@see resolveGroupUpdateChanges()}) so an invalid picture never
      * partially overwrites the name / description.
      *
-     * @param array<string, mixed>|null $picturePayload
+     * @param array<string, string> $picturePayload
      */
-    private function applyProfilePictureUpdate(int $groupId, ?array $picturePayload): void
+    private function applyProfilePictureUpdate(int $groupId, array $picturePayload): void
     {
-        if ($picturePayload === null) {
+        if ($picturePayload === []) {
             return;
         }
 
@@ -343,7 +343,7 @@ final class GroupController
 
     /**
      * @param  array<string, mixed> $body
-     * @return array{0: array<string, mixed>, 1: array<string, mixed>|null}|JsonResponse
+     * @return array{0: array<string, mixed>, 1: array<string, string>}|JsonResponse
      */
     private function buildUpdatePayload(array $body): array|JsonResponse
     {
@@ -360,26 +360,34 @@ final class GroupController
             $update['description'] = ($description === '') ? null : $description;
         }
 
-        $pictureError = $this->validateProfilePicturePayload($body);
-        if ($pictureError !== null) {
-            return $pictureError;
+        $picturePayload = $this->validateProfilePicturePayload($body);
+        if ($picturePayload instanceof JsonResponse) {
+            return $picturePayload;
         }
-        $picturePayload = is_array($body['profile_picture'] ?? null) ? $body['profile_picture'] : null;
         return [$update, $picturePayload];
     }
 
     /**
      * Validate the optional `profile_picture` nested payload. Returns
-     * the first 422 JsonResponse on any failure, or null when the key
-     * is absent / well-formed. Delegates to
-     * {@see GroupProfilePictureValidator} so the controller stays under
-     * the SonarCloud S1448 20-method cap.
+     * the validated payload (empty array when the key is absent) or a
+     * 422 JsonResponse on the first failure. Delegates to
+     * {@see \Spora\Services\ProfilePictures\ProfilePictureService::validatePayload()}
+     * so the wire contract is shared with {@see AgentController}.
      *
      * @param  array<string, mixed> $body
+     * @return array<string, string>|JsonResponse
      */
-    private function validateProfilePicturePayload(array $body): ?JsonResponse
+    private function validateProfilePicturePayload(array $body): array|JsonResponse
     {
-        return GroupProfilePictureValidator::validate($body, $this->pictureService, $this->unprocessable(...));
+        if (!array_key_exists('profile_picture', $body)) {
+            return [];
+        }
+        $validated = $this->pictureService->validatePayload($body['profile_picture']);
+        if ($validated instanceof \Spora\Services\ProfilePictures\ProfilePictureValidationError) {
+            return $this->unprocessable($validated->code, $validated->message);
+        }
+        /** @var array<string, string> $validated */
+        return $validated;
     }
 
     /**

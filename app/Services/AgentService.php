@@ -10,7 +10,6 @@ use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
-use Spora\Services\AgentResourceContext;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
 
