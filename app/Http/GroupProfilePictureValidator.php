@@ -41,11 +41,20 @@ final class GroupProfilePictureValidator
         if (!array_key_exists('profile_picture', $body)) {
             return null;
         }
-        $picture = $body['profile_picture'];
+        return self::validatePicture($body['profile_picture'], $pictureService, $unprocessable);
+    }
+
+    /**
+     * @param  callable(string, string): JsonResponse $unprocessable
+     */
+    private static function validatePicture(
+        mixed $picture,
+        GroupPictureService $pictureService,
+        callable $unprocessable,
+    ): ?JsonResponse {
         if (!is_array($picture)) {
             return $unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture' must be a JSON object.");
         }
-
         $shapeError = self::shapeError($picture, $unprocessable);
         if ($shapeError !== null) {
             return $shapeError;
