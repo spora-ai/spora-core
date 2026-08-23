@@ -243,20 +243,27 @@ final class HandoverTool extends AbstractTool
         if ($userId === null) {
             return false;
         }
-
-        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
-        $allowed  = $settings['allowed_target_agents'] ?? [];
-
-        if (!is_array($allowed) || !in_array($targetAgentId, array_map('intval', $allowed), true)) {
+        if (!$this->isTargetOnAllowlist($targetAgentId, $agentId, $userId)) {
             return false;
         }
+        return $this->sharePrincipal($targetAgentId, $agentId);
+    }
 
+    private function isTargetOnAllowlist(int $targetAgentId, int $agentId, int $userId): bool
+    {
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
+        $allowed  = $settings['allowed_target_agents'] ?? [];
+        return is_array($allowed)
+            && in_array($targetAgentId, array_map('intval', $allowed), true);
+    }
+
+    private function sharePrincipal(int $targetAgentId, int $agentId): bool
+    {
         $source = Agent::find($agentId);
         $target = Agent::find($targetAgentId);
         if ($source === null || $target === null) {
             return false;
         }
-
         return (int) $source->principal_id === (int) $target->principal_id;
     }
 

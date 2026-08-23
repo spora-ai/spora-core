@@ -12,6 +12,7 @@ use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPrincipalServiceInterface;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\Exceptions\UnauthorizedTransferException;
 use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -74,12 +75,11 @@ final class AgentTransferController
 
         return new JsonResponse([
             'data' => [
-                'agent' => AgentResource::toArray(
-                    $agent,
-                    $this->resolveSupportsImageInput($agent),
-                    $this->toolIconResolver,
-                    $this->pictureService,
-                ),
+                'agent' => AgentResource::toArray($agent, new AgentResourceContext(
+                    supportsImageInput: $this->resolveSupportsImageInput($agent),
+                    iconResolver: $this->toolIconResolver,
+                    pictureService: $this->pictureService,
+                )),
             ],
         ]);
     }
@@ -94,9 +94,9 @@ final class AgentTransferController
             return $body;
         }
 
-        $targetPrincipalId = (int) ($body['principal_id'] ?? 0);
-        if ($targetPrincipalId <= 0) {
-            return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        $targetPrincipalId = $this->parseTargetPrincipalId($body);
+        if ($targetPrincipalId instanceof JsonResponse) {
+            return $targetPrincipalId;
         }
 
         $callerUserId = $this->authService->currentUserId();
@@ -105,6 +105,19 @@ final class AgentTransferController
         }
 
         return [$targetPrincipalId, $callerUserId];
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return int|JsonResponse
+     */
+    private function parseTargetPrincipalId(array $body): int|JsonResponse
+    {
+        $targetPrincipalId = (int) ($body['principal_id'] ?? 0);
+        if ($targetPrincipalId <= 0) {
+            return $this->error('VALIDATION_ERROR', 'principal_id is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        return $targetPrincipalId;
     }
 
     /**

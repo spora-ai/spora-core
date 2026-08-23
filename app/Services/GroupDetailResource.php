@@ -22,17 +22,17 @@ use Spora\Services\ProfilePictures\GroupPictureService;
 final class GroupDetailResource
 {
     /**
-     * Tables whose row counts the resource exposes per-group. The values
-     * are the `[table, label]` tuples used in the grouped count query
-     * and the wire-field-name lookup. Centralised so a new settings
-     * table only needs to be added in one place.
+     * Tables whose row counts the resource exposes per-group. Each entry
+     * is the SQL table name; the wire field name matches the table name.
+     * Centralised so a new settings table only needs to be added in one
+     * place.
      *
-     * @var list<array{0: string, 1: string}>
+     * @var list<string>
      */
     private const COUNT_TABLES = [
-        ['agents',                    'agents'],
-        ['llm_driver_configurations', 'llm_driver_configurations'],
-        ['tool_user_settings',        'tool_user_settings'],
+        'agents',
+        'llm_driver_configurations',
+        'tool_user_settings',
     ];
 
     private function __construct()
@@ -139,7 +139,7 @@ final class GroupDetailResource
         }
 
         $result = [];
-        foreach (self::COUNT_TABLES as [$table, $_label]) {
+        foreach (self::COUNT_TABLES as $table) {
             $rows = Capsule::table($table)
                 ->selectRaw('principal_id, COUNT(*) AS aggregate_count')
                 ->whereIn('principal_id', array_values($principalIds))

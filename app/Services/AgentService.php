@@ -10,6 +10,7 @@ use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
 
@@ -337,15 +338,13 @@ final class AgentService implements AgentServiceInterface
             ? $picture->getRelation('mediaAsset')
             : null;
         $principal = $agent->getRelation('principal');
-        return AgentResource::toArray(
-            $agent,
-            null,
-            $this->toolIconResolver,
-            $this->pictureService,
-            $agent->getRelation('agentTools'),
-            $picture instanceof AgentPicture ? $picture : null,
-            $media instanceof MediaAsset ? $media : null,
-            $principal instanceof Principal ? $principal : null,
-        );
+        return AgentResource::toArray($agent, new AgentResourceContext(
+            iconResolver: $this->toolIconResolver,
+            pictureService: $this->pictureService,
+            preloadedTools: $agent->getRelation('agentTools'),
+            preloadedPicture: $picture instanceof AgentPicture ? $picture : null,
+            preloadedMediaAsset: $media instanceof MediaAsset ? $media : null,
+            preloadedPrincipal: $principal instanceof Principal ? $principal : null,
+        ));
     }
 }

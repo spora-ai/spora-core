@@ -58,8 +58,19 @@ final class PrincipalController
             return new JsonResponse(['data' => ['principals' => []]]);
         }
 
+        return new JsonResponse([
+            'data' => ['principals' => $this->serialisePrincipals($principalIds)],
+        ]);
+    }
+
+    /**
+     * @param  list<int> $principalIds
+     * @return list<array<string, mixed>>
+     */
+    private function serialisePrincipals(array $principalIds): array
+    {
         $principals = Principal::whereIn('id', $principalIds)->get();
-        $payload = $principals->map(static function (Principal $p): array {
+        return $principals->map(static function (Principal $p): array {
             return [
                 'id'         => (int) $p->id,
                 'type'       => (string) $p->type,
@@ -70,39 +81,54 @@ final class PrincipalController
                 'updated_at' => $p->updated_at->format(DateTimeInterface::ATOM),
             ];
         })->values()->all();
-
-        return new JsonResponse(['data' => ['principals' => $payload]]);
     }
 
     private static function deriveName(Principal $p): string
     {
         if ($p->type === Principal::TYPE_USER && $p->user_id !== null) {
-            $row = Capsule::table('users')
-                ->where('id', $p->user_id)
-                ->select(['email', 'name'])
-                ->first();
-            if ($row !== null) {
-                $display = $row->name ?? $row->email;
-                if (is_string($display) && $display !== '') {
-                    return $display;
-                }
-                $email = $row->email ?? null;
-                if (is_string($email) && $email !== '') {
-                    return $email;
-                }
-            }
-            return 'User #' . $p->user_id;
+            return self::userPrincipalName($p);
         }
         if ($p->type === Principal::TYPE_GROUP && $p->group_id !== null) {
-            $row = Capsule::table('groups')
-                ->where('id', $p->group_id)
-                ->select(['name'])
-                ->first();
-            if ($row !== null && isset($row->name) && $row->name !== '') {
-                return (string) $row->name;
-            }
-            return 'Group #' . $p->group_id;
+            return self::groupPrincipalName($p);
         }
         return 'Principal #' . $p->id;
+    }
+
+    private static function userPrincipalName(Principal $p): string
+    {
+        $row = Capsule::table('users')
+            ->where('id', $p->user_id)
+            ->select(['email', 'name'])
+            ->first();
+        if ($row === null) {
+            return 'User #' . $p->user_id;
+        }
+        return self::firstNonEmpty($row->name, $row->email) ?? ('User #' . $p->user_id);
+    }
+
+    private static function groupPrincipalName(Principal $p): string
+    {
+        $row = Capsule::table('groups')
+            ->where('id', $p->group_id)
+            ->select(['name'])
+            ->first();
+        if ($row !== null && isset($row->name) && is_string($row->name) && $row->name !== '') {
+            return $row->name;
+        }
+        return 'Group #' . $p->group_id;
+    }
+
+    /**
+     * @param  mixed $first
+     * @param  mixed $second
+     */
+    private static function firstNonEmpty($first, $second): ?string
+    {
+        foreach ([$first, $second] as $candidate) {
+            if (is_string($candidate) && $candidate !== '') {
+                return $candidate;
+            }
+        }
+        return null;
     }
 }

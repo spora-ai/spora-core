@@ -11,6 +11,7 @@ use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -123,6 +124,19 @@ final class AgentController
      */
     private function resolvePrincipalFilter(?Request $request, int $userId): ?array
     {
+        $ids = $this->parsePrincipalIdsFromRequest($request);
+        if ($ids === null) {
+            return null;
+        }
+        $visible = $this->visiblePrincipalIdsOrFallback($userId);
+        return array_values(array_intersect($ids, $visible));
+    }
+
+    /**
+     * @return list<int>|null
+     */
+    private function parsePrincipalIdsFromRequest(?Request $request): ?array
+    {
         if ($request === null) {
             return null;
         }
@@ -139,14 +153,19 @@ final class AgentController
                 $ids[] = (int) $v;
             }
         }
-        if ($ids === []) {
-            return null;
-        }
+        return $ids === [] ? null : $ids;
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function visiblePrincipalIdsOrFallback(int $userId): array
+    {
         $visible = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
-        if ($visible === [] && $this->principalService !== null) {
-            $visible = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+        if ($visible !== [] || $this->principalService === null) {
+            return $visible;
         }
-        return array_values(array_intersect($ids, $visible));
+        return [(int) $this->principalService->ensureUserPrincipal($userId)->id];
     }
 
     /**
@@ -186,7 +205,7 @@ final class AgentController
         $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
             Response::HTTP_CREATED,
         );
     }
@@ -238,7 +257,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
     }
 
     /**
@@ -260,7 +279,7 @@ final class AgentController
             return $agent;
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
     }
 
     /**
@@ -485,5 +504,14 @@ final class AgentController
             return false;
         }
         return $driver->supportsImageInput();
+    }
+
+    private function agentResourceContext(Agent $agent): AgentResourceContext
+    {
+        return new AgentResourceContext(
+            supportsImageInput: $this->resolveSupportsImageInput($agent),
+            iconResolver: $this->toolIconResolver,
+            pictureService: $this->pictureService,
+        );
     }
 }

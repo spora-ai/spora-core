@@ -297,20 +297,11 @@ final class GroupMemberController
             );
         }
 
-        if ($hasUserId) {
-            $targetUserId = (int) $body['user_id'];
-        } else {
-            $email = strtolower(trim((string) $body['email']));
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                return $this->unprocessable('VALIDATION_ERROR', 'The "email" field must be a valid email address.');
-            }
-            $targetUserId = $this->userService->getUserIdByEmail($email);
-            if ($targetUserId === null) {
-                return $this->notFound(
-                    'USER_NOT_FOUND',
-                    sprintf('No user exists with email "%s".', $email),
-                );
-            }
+        $targetUserId = $hasUserId
+            ? (int) $body['user_id']
+            : $this->resolveUserIdByEmail($body);
+        if ($targetUserId instanceof JsonResponse) {
+            return $targetUserId;
         }
 
         $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
@@ -320,6 +311,26 @@ final class GroupMemberController
         }
 
         return [$targetUserId, $roleError];
+    }
+
+    /**
+     * @param  array<string, mixed> $body
+     * @return int|JsonResponse
+     */
+    private function resolveUserIdByEmail(array $body): int|JsonResponse
+    {
+        $email = strtolower(trim((string) $body['email']));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->unprocessable('VALIDATION_ERROR', 'The "email" field must be a valid email address.');
+        }
+        $targetUserId = $this->userService->getUserIdByEmail($email);
+        if ($targetUserId === null) {
+            return $this->notFound(
+                'USER_NOT_FOUND',
+                sprintf('No user exists with email "%s".', $email),
+            );
+        }
+        return $targetUserId;
     }
 
     /**

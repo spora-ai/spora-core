@@ -360,20 +360,7 @@ final class ToolConfigSchemaInspector
      */
     private function fetchAgentNameMap(int $userId, array $ids, ?int $agentId = null): array
     {
-        if ($this->principalResolver === null) {
-            return [];
-        }
-
-        if ($agentId !== null) {
-            $source = Agent::find($agentId);
-            if ($source === null) {
-                return [];
-            }
-            $principalIds = [(int) $source->principal_id];
-        } else {
-            $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
-        }
-
+        $principalIds = $this->resolvePrincipalIdsForAgentLookup($userId, $agentId);
         if ($principalIds === []) {
             return [];
         }
@@ -382,6 +369,32 @@ final class ToolConfigSchemaInspector
             ->get(['id', 'name'])
             ->mapWithKeys(static fn(Agent $a) => [(int) $a->id => (string) $a->name])
             ->all();
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function resolvePrincipalIdsForAgentLookup(int $userId, ?int $agentId): array
+    {
+        if ($this->principalResolver === null) {
+            return [];
+        }
+        if ($agentId !== null) {
+            return $this->sourceAgentPrincipalIds($agentId);
+        }
+        return $this->principalResolver->visiblePrincipalIds($userId);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function sourceAgentPrincipalIds(int $agentId): array
+    {
+        $source = Agent::find($agentId);
+        if ($source === null) {
+            return [];
+        }
+        return [(int) $source->principal_id];
     }
 
     /**

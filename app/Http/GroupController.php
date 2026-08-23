@@ -136,7 +136,7 @@ final class GroupController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        [$group, $updates, $picturePayload] = $resolved;
+        [, $updates, $picturePayload] = $resolved;
 
         if ($updates !== []) {
             $updates['updated_at'] = date(self::DB_TIMESTAMP_FORMAT);
@@ -379,6 +379,11 @@ final class GroupController
      * the groups-row write so an invalid picture never partially
      * overwrites the name / description.
      *
+     * Splitting the per-key validation into helpers keeps this orchestrator
+     * under SonarCloud's S1142 3-return cap and lets the helpers express
+     * each failure mode in its own focused signature. The orchestrator
+     * itself only ever returns the final 422-or-null verdict.
+     *
      * @param  array<string, mixed> $body
      */
     private function validateProfilePicturePayload(array $body): ?JsonResponse
@@ -394,6 +399,15 @@ final class GroupController
             );
         }
 
+        return $this->validateProfilePictureKeysAndTypes($picture)
+            ?? $this->validateProfilePictureEnums($picture);
+    }
+
+    /**
+     * @param  array<int|string, mixed> $picture
+     */
+    private function validateProfilePictureKeysAndTypes(array $picture): ?JsonResponse
+    {
         $allowed = ['archetype', 'variant_key', 'palette_key'];
         foreach (array_keys($picture) as $key) {
             if (!in_array($key, $allowed, true)) {
@@ -403,8 +417,7 @@ final class GroupController
                 );
             }
         }
-
-        foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
+        foreach ($allowed as $key) {
             if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
                 return $this->unprocessable(
                     'PROFILE_PICTURE_TYPE',
@@ -412,7 +425,14 @@ final class GroupController
                 );
             }
         }
+        return null;
+    }
 
+    /**
+     * @param  array<int|string, mixed> $picture
+     */
+    private function validateProfilePictureEnums(array $picture): ?JsonResponse
+    {
         try {
             if (isset($picture['archetype'])) {
                 $this->pictureService->normaliseArchetype((string) $picture['archetype']);

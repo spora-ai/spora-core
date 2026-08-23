@@ -256,13 +256,13 @@ final class GroupService
                     return; // idempotent
                 }
 
-                self::assertCallerCanRemoveMember($groupId, $userId, $callerRole, $target->role);
+                self::assertCallerCanRemoveMember($groupId, $callerRole, $target->role);
                 self::deleteMembershipRow($groupId, $userId);
             },
         );
     }
 
-    private static function assertCallerCanRemoveMember(int $groupId, int $targetUserId, string $callerRole, string $targetRole): void
+    private static function assertCallerCanRemoveMember(int $groupId, string $callerRole, string $targetRole): void
     {
         if ($targetRole === GroupMembership::ROLE_OWNER) {
             self::assertCallerCanRemoveOwner($groupId, $callerRole);

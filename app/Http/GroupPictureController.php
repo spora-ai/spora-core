@@ -62,6 +62,11 @@ final class GroupPictureController
         }
         $groupId = (int) $request->attributes->get('id', 0);
 
+        return $this->runPictureUpload($request, $groupId, $userId);
+    }
+
+    private function runPictureUpload(Request $request, int $groupId, int $userId): JsonResponse
+    {
         $groupError = $this->resolveGroupForUpload($groupId, $userId);
         if ($groupError !== null) {
             return $groupError;
@@ -84,6 +89,11 @@ final class GroupPictureController
         if ($this->authService->isAdmin()) {
             return null;
         }
+        return $this->authoriseGroupManager($groupId, $userId);
+    }
+
+    private function authoriseGroupManager(int $groupId, int $userId): ?JsonResponse
+    {
         $role = GroupService::fetchCallerRole($groupId, $userId);
         if ($role !== GroupMembership::ROLE_OWNER && $role !== GroupMembership::ROLE_ADMIN) {
             return $this->forbidden('FORBIDDEN', 'Only group owners or admins can manage the group picture.');

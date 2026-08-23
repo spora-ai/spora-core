@@ -8,6 +8,7 @@ use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
@@ -110,7 +111,7 @@ final class AgentPictureController
         return new JsonResponse([
             'data' => [
                 'asset'  => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? '')),
-                'agent'  => $fresh !== null ? AgentResource::toArray($fresh, null, null, $this->pictureService) : null,
+                'agent'  => $fresh !== null ? AgentResource::toArray($fresh, new AgentResourceContext(pictureService: $this->pictureService)) : null,
             ],
         ], Response::HTTP_CREATED);
     }
@@ -133,7 +134,7 @@ final class AgentPictureController
         $fresh = $this->agentService->getAgent($agentId, $userId);
         return new JsonResponse([
             'data' => [
-                'agent' => $fresh !== null ? AgentResource::toArray($fresh, null, null, $this->pictureService) : null,
+                'agent' => $fresh !== null ? AgentResource::toArray($fresh, new AgentResourceContext(pictureService: $this->pictureService)) : null,
             ],
         ]);
     }

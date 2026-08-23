@@ -6,13 +6,10 @@ namespace Spora\Services;
 
 use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Illuminate\Database\Eloquent\Collection;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
-use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
-use Spora\Services\AgentPictures\AgentPictureService;
 
 /**
  * Agent → wire-format array mapping. Single source of truth for the shape
@@ -25,58 +22,19 @@ use Spora\Services\AgentPictures\AgentPictureService;
 final class AgentResource
 {
     /**
-     * @param bool|null $supportsImageInput  Whether the agent's configured LLM
-     *     accepts image blocks. `null` means the caller could not resolve the
-     *     driver (no factory injected, agent has no `llm_driver_config_id`,
-     *     or driver construction threw); the field is then omitted from the
-     *     response rather than reported as `false` to avoid misleading the
-     *     frontend. Pass a real bool from AgentController where the
-     *     DriverFactory is available.
-     * @param ?ToolIconResolver $iconResolver  Resolver for the per-tool icon
-     *     via the 3-layer chain (tool.icon → plugin.icon → null). Optional —
-     *     when null, the per-tool `icon` field is omitted from each tool
-     *     entry (callers without DI access can pass null and the wire payload
-     *     still parses; the frontend's <Icon> component falls back to
-     *     'puzzle' on missing keys).
-     * @param ?AgentPictureService $pictureService  When provided, the
-     *     `profile_picture` field is included in the wire payload (the
-     *     resolved `archetype`, `variant_key`, `palette_key`, plus the
-     *     derived `fg_color`/`bg_color`, or the uploaded image URL).
-     *     When null — e.g. from the `?select=id,name` projection — the
-     *     field is omitted. The dashboard / sidebar / agent-detail render
-     *     sites always pass a service.
-     * @param ?Collection<int, AgentTool> $preloadedTools  Pre-loaded agentTools
-     *     relation (typically passed by AgentService::getAgentsForUser which
-     *     eager-loads `agentTools` to avoid N+1 on the dashboard endpoint).
-     *     When null, AgentResource reads `$agent->agentTools` lazily.
-     * @param ?AgentPicture $preloadedPicture  Pre-loaded profilePicture
-     *     relation. When null, the resource falls back to
-     *     AgentPictureService::toWireShape() which performs its own lookup.
-     * @param ?MediaAsset $preloadedMediaAsset  Pre-loaded mediaAsset for an
-     *     uploaded picture. Ignored when `$preloadedPicture` is null or has
-     *     no `media_asset_id`. Pass alongside `$preloadedPicture` to fully
-     *     avoid N+1 on the dashboard endpoint.
-     * @param ?Principal $preloadedPrincipal  Pre-loaded `principal` relation
-     *     so the dashboard listing doesn't issue one Principal::find per
-     *     agent (then another user/group lookup for the display name).
-     *     When null, the resource resolves the principal lazily.
+     * @param ?AgentResourceContext $context  Optional bundled eager-loads +
+     *     resolvers (see {@see AgentResourceContext}). When null, the
+     *     resource falls back to lazy resolution + omitted optional fields
+     *     — the minimum-viable wire shape used by lightweight callers like
+     *     the `?select=id,name` projection.
      *
      * @return array<string, mixed>
      */
-    public static function toArray(
-        Agent $agent,
-        ?bool $supportsImageInput = null,
-        ?ToolIconResolver $iconResolver = null,
-        ?AgentPictureService $pictureService = null,
-        ?Collection $preloadedTools = null,
-        ?AgentPicture $preloadedPicture = null,
-        ?MediaAsset $preloadedMediaAsset = null,
-        ?Principal $preloadedPrincipal = null,
-    ): array {
-        /** @var Collection<int, AgentTool> $tools */
-        $tools = $preloadedTools ?? $agent->agentTools;
-
-        $principal = $preloadedPrincipal ?? Principal::find((int) $agent->principal_id);
+    public static function toArray(Agent $agent, ?AgentResourceContext $context = null): array
+    {
+        /** @var \Illuminate\Database\Eloquent\Collection<int, AgentTool> $tools */
+        $tools = ($context !== null ? $context->preloadedTools : null) ?? $agent->agentTools;
+        $principal = ($context !== null ? $context->preloadedPrincipal : null) ?? Principal::find((int) $agent->principal_id);
 
         $payload = [
             'id'                   => (int) $agent->id,
@@ -105,28 +63,28 @@ final class AgentResource
             'created_at'           => $agent->created_at !== null
                 ? $agent->created_at->format(DateTimeInterface::ATOM)
                 : null,
-            'tools'                => $tools->map(static function (AgentTool $t) use ($iconResolver): array {
+            'tools'                => $tools->map(static function (AgentTool $t) use ($context): array {
                 $entry = [
                     'tool_class' => $t->tool_class,
                     'tool_name'  => $t->tool_name,
                 ];
                 // Per-tool icon resolved server-side via the 3-layer chain.
                 // null on the wire = frontend's <Icon> falls back to 'puzzle'.
-                if ($iconResolver !== null) {
-                    $entry['icon'] = $iconResolver->resolve($t->tool_class);
+                if ($context?->iconResolver !== null) {
+                    $entry['icon'] = $context->iconResolver->resolve($t->tool_class);
                 }
                 return $entry;
             })->values()->toArray(),
         ];
 
-        if ($supportsImageInput !== null) {
-            $payload['llm_supports_image_input'] = $supportsImageInput;
+        if ($context !== null && $context->supportsImageInput !== null) {
+            $payload['llm_supports_image_input'] = $context->supportsImageInput;
         }
 
-        if ($pictureService !== null) {
-            $payload['profile_picture'] = $preloadedPicture instanceof AgentPicture
-                ? $pictureService->pictureToWireWithAsset($preloadedPicture, $preloadedMediaAsset)
-                : $pictureService->toWireShape((int) $agent->id);
+        if ($context !== null && $context->pictureService !== null) {
+            $payload['profile_picture'] = $context->preloadedPicture instanceof AgentPicture
+                ? $context->pictureService->pictureToWireWithAsset($context->preloadedPicture, $context->preloadedMediaAsset)
+                : $context->pictureService->toWireShape((int) $agent->id);
         }
 
         return $payload;

@@ -89,6 +89,11 @@ final class LLMConfigPersistence
             return true;
         }
 
+        return $this->deleteConfigurationForNonAdmin($config, $callerUserId);
+    }
+
+    private function deleteConfigurationForNonAdmin(LLMDriverConfiguration $config, int $callerUserId): bool
+    {
         // Non-admin caller: refuse on global configs (admin-only) and on
         // personal configs whose principal the caller doesn't own. The
         // primary check is `isPrincipalOwner` — the principals-and-groups
@@ -102,7 +107,7 @@ final class LLMConfigPersistence
             return false;
         }
 
-        $this->detachConfigurationReferences($configId);
+        $this->detachConfigurationReferences((int) $config->id);
         $config->delete();
 
         return true;

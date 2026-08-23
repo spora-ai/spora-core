@@ -260,10 +260,15 @@ final class GroupPreferencesController
         if ($config === null) {
             return $this->unprocessable('CONFIG_NOT_FOUND', 'preferred_llm_config_id does not reference an existing configuration.');
         }
-        if (!$config->is_global && (int) $config->principal_id !== $principalId) {
-            return $this->unprocessable('CONFIG_PRINCIPAL_MISMATCH', 'preferred_llm_config_id must be global or belong to the same principal as the group.');
+        return $this->assertConfigMatchesPrincipal($config, $principalId);
+    }
+
+    private function assertConfigMatchesPrincipal(LLMDriverConfiguration $config, int $principalId): ?JsonResponse
+    {
+        if ($config->is_global || (int) $config->principal_id === $principalId) {
+            return null;
         }
-        return null;
+        return $this->unprocessable('CONFIG_PRINCIPAL_MISMATCH', 'preferred_llm_config_id must be global or belong to the same principal as the group.');
     }
 
     private function upsertPreference(int $principalId, ?int $configId): void

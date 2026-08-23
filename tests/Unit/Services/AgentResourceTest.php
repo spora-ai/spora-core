@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\ToolIconResolver;
 
 it('maps every wire-format field for an agent', function (): void {
@@ -128,7 +129,7 @@ it('resolves per-tool icon via the supplied ToolIconResolver', function (): void
         }
     };
 
-    $array = AgentResource::toArray($agent, null, $resolver);
+    $array = AgentResource::toArray($agent, new AgentResourceContext(iconResolver: $resolver));
 
     expect($array['tools'])->toHaveCount(1)
         ->and($array['tools'][0]['tool_class'])->toBe('Tests\\Fixtures\\Icons\\TestCalendarTool')
@@ -160,7 +161,7 @@ it('emits icon: null when the resolver returns null (frontend falls back to puzz
         }
     };
 
-    $array = AgentResource::toArray($agent, null, $resolver);
+    $array = AgentResource::toArray($agent, new AgentResourceContext(iconResolver: $resolver));
 
     expect($array['tools'])->toHaveCount(1)
         ->and($array['tools'][0])->toHaveKey('icon')
