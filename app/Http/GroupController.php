@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use InvalidArgumentException;
 use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\Group;
@@ -370,84 +369,17 @@ final class GroupController
     }
 
     /**
-     * Validate the optional `profile_picture` nested payload (type +
-     * shape + enum values). Returns the first 422 JsonResponse on any
-     * failure, or null when the key is absent / well-formed. Mirrors
-     * {@see AgentController::validateProfilePicturePayload()}
-     * so the operator's PATCH body uses the same shape for both
-     * agents and groups. The picture payload is validated *before*
-     * the groups-row write so an invalid picture never partially
-     * overwrites the name / description.
-     *
-     * The per-key failure modes are handled in
-     * {@see self::profilePictureValidationError()} so this orchestrator
-     * stays under SonarCloud's S1142 3-return cap.
+     * Validate the optional `profile_picture` nested payload. Returns
+     * the first 422 JsonResponse on any failure, or null when the key
+     * is absent / well-formed. Delegates to
+     * {@see GroupProfilePictureValidator} so the controller stays under
+     * the SonarCloud S1448 20-method cap.
      *
      * @param  array<string, mixed> $body
      */
     private function validateProfilePicturePayload(array $body): ?JsonResponse
     {
-        if (!array_key_exists('profile_picture', $body)) {
-            return null;
-        }
-        $picture = $body['profile_picture'];
-        if (!is_array($picture)) {
-            return $this->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture' must be a JSON object.");
-        }
-
-        return self::profilePictureValidationError($picture, $this->pictureService);
-    }
-
-    /**
-     * @param  array<int|string, mixed> $picture
-     */
-    private function profilePictureValidationError(array $picture, GroupPictureService $pictureService): ?JsonResponse
-    {
-        $shapeError = self::profilePictureShapeError($picture, $this);
-        if ($shapeError !== null) {
-            return $shapeError;
-        }
-        return self::profilePictureEnumError($picture, $pictureService, $this);
-    }
-
-    /**
-     * @param  array<int|string, mixed> $picture
-     */
-    private static function profilePictureShapeError(array $picture, self $controller): ?JsonResponse
-    {
-        $allowed = ['archetype', 'variant_key', 'palette_key'];
-        foreach (array_keys($picture) as $key) {
-            if (!in_array($key, $allowed, true)) {
-                return $controller->unprocessable('PROFILE_PICTURE_UNKNOWN_KEY', "Unknown field 'profile_picture.{$key}'.");
-            }
-        }
-        foreach ($allowed as $key) {
-            if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
-                return $controller->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture.{$key}' must be a string.");
-            }
-        }
-        return null;
-    }
-
-    /**
-     * @param  array<int|string, mixed> $picture
-     */
-    private static function profilePictureEnumError(array $picture, GroupPictureService $pictureService, self $controller): ?JsonResponse
-    {
-        try {
-            if (isset($picture['archetype'])) {
-                $pictureService->normaliseArchetype((string) $picture['archetype']);
-            }
-            if (isset($picture['variant_key'])) {
-                $pictureService->normaliseVariantKey((string) $picture['variant_key']);
-            }
-            if (isset($picture['palette_key'])) {
-                $pictureService->normalisePalette((string) $picture['palette_key']);
-            }
-        } catch (InvalidArgumentException $e) {
-            return $controller->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
-        }
-        return null;
+        return GroupProfilePictureValidator::validate($body, $this->pictureService, $this->unprocessable(...));
     }
 
     /**
