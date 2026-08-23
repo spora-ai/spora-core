@@ -142,40 +142,11 @@ final class GroupMemberController
      */
     private function changeMemberRoleAfterAuth(int $groupId, int $userId, Request $request, int $callerUserId): JsonResponse
     {
-        $newRole = $this->parseNewRole($request);
+        $newRole = $this->parseRoleFromRequest($request);
         if ($newRole instanceof JsonResponse) {
             return $newRole;
         }
 
-        $error = $this->attemptRoleChange($groupId, $userId, $newRole, $callerUserId);
-        if ($error !== null) {
-            return $error;
-        }
-
-        // Same enrichment as POST — keeps the wire shape consistent
-        // across GET / POST / PATCH so the frontend doesn't need
-        // conditional fallback paths.
-        return new JsonResponse(['data' => ['member' => $this->memberRow($userId, $newRole)]]);
-    }
-
-    /**
-     * @return string|JsonResponse
-     */
-    private function parseNewRole(Request $request): string|JsonResponse
-    {
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $newRole = (string) ($body['role'] ?? '');
-        if (!in_array($newRole, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$newRole}");
-        }
-        return $newRole;
-    }
-
-    private function attemptRoleChange(int $groupId, int $userId, string $newRole, int $callerUserId): ?JsonResponse
-    {
         try {
             $this->groupService->changeMemberRole($groupId, $userId, $newRole, $callerUserId);
         } catch (GroupMembershipRuleException $e) {
@@ -187,7 +158,23 @@ final class GroupMemberController
                 Response::HTTP_CONFLICT,
             );
         }
-        return null;
+
+        // Same enrichment as POST — keeps the wire shape consistent
+        // across GET / POST / PATCH so the frontend doesn't need
+        // conditional fallback paths.
+        return new JsonResponse(['data' => ['member' => $this->memberRow($userId, $newRole)]]);
+    }
+
+    /**
+     * @return string|JsonResponse
+     */
+    private function parseRoleFromRequest(Request $request): string|JsonResponse
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+        return GroupMemberBodyParser::validateRole((string) ($body['role'] ?? ''), $this->unprocessable(...));
     }
 
     /**
@@ -289,55 +276,23 @@ final class GroupMemberController
      */
     private function validateAddMemberBody(array $body): array|JsonResponse
     {
-        $targetUserId = $this->resolveAddMemberTargetUserId($body);
+        $targetUserId = GroupMemberBodyParser::resolveTargetUserId(
+            $body,
+            $this->userService,
+            $this->unprocessable(...),
+            $this->notFound(...),
+        );
         if ($targetUserId instanceof JsonResponse) {
             return $targetUserId;
         }
 
-        $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
-        if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$role}");
+        $role = $body['role'] ?? GroupMembership::ROLE_MEMBER;
+        $roleError = GroupMemberBodyParser::validateRole((string) $role, $this->unprocessable(...));
+        if ($roleError instanceof JsonResponse) {
+            return $roleError;
         }
 
-        return [$targetUserId, $role];
-    }
-
-    /**
-     * Resolve the target user id from the wire body's `user_id` or
-     * `email` slot. Exactly one is required — the wire contract accepts
-     * either so the frontend can pick the friendlier input (email) while
-     * machine-to-machine callers keep their integer-id path.
-     *
-     * @param  array<string, mixed> $body
-     * @return int|JsonResponse
-     */
-    private function resolveAddMemberTargetUserId(array $body): int|JsonResponse
-    {
-        $hasUserId = isset($body['user_id']) && (int) $body['user_id'] > 0;
-        $hasEmail = isset($body['email']) && trim((string) $body['email']) !== '';
-
-        if ($hasUserId === $hasEmail) {
-            return $this->unprocessable(
-                'VALIDATION_ERROR',
-                'Provide exactly one of "user_id" (integer) or "email" (string).',
-            );
-        }
-        if ($hasUserId) {
-            return (int) $body['user_id'];
-        }
-
-        $email = strtolower(trim((string) $body['email']));
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'The "email" field must be a valid email address.');
-        }
-        $targetUserId = $this->userService->getUserIdByEmail($email);
-        if ($targetUserId === null) {
-            return $this->notFound(
-                'USER_NOT_FOUND',
-                sprintf('No user exists with email "%s".', $email),
-            );
-        }
-        return $targetUserId;
+        return [$targetUserId, $roleError];
     }
 
     /**

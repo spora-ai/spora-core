@@ -403,17 +403,37 @@ final class GroupController
      */
     private function profilePictureValidationError(array $picture, GroupPictureService $pictureService): ?JsonResponse
     {
+        $shapeError = self::profilePictureShapeError($picture, $this);
+        if ($shapeError !== null) {
+            return $shapeError;
+        }
+        return self::profilePictureEnumError($picture, $pictureService, $this);
+    }
+
+    /**
+     * @param  array<int|string, mixed> $picture
+     */
+    private static function profilePictureShapeError(array $picture, self $controller): ?JsonResponse
+    {
         $allowed = ['archetype', 'variant_key', 'palette_key'];
         foreach (array_keys($picture) as $key) {
             if (!in_array($key, $allowed, true)) {
-                return $this->unprocessable('PROFILE_PICTURE_UNKNOWN_KEY', "Unknown field 'profile_picture.{$key}'.");
+                return $controller->unprocessable('PROFILE_PICTURE_UNKNOWN_KEY', "Unknown field 'profile_picture.{$key}'.");
             }
         }
         foreach ($allowed as $key) {
             if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
-                return $this->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture.{$key}' must be a string.");
+                return $controller->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture.{$key}' must be a string.");
             }
         }
+        return null;
+    }
+
+    /**
+     * @param  array<int|string, mixed> $picture
+     */
+    private static function profilePictureEnumError(array $picture, GroupPictureService $pictureService, self $controller): ?JsonResponse
+    {
         try {
             if (isset($picture['archetype'])) {
                 $pictureService->normaliseArchetype((string) $picture['archetype']);
@@ -425,7 +445,7 @@ final class GroupController
                 $pictureService->normalisePalette((string) $picture['palette_key']);
             }
         } catch (InvalidArgumentException $e) {
-            return $this->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
+            return $controller->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
         }
         return null;
     }
