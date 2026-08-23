@@ -99,11 +99,18 @@ final class AgentTransferController
             return $targetPrincipalId;
         }
 
+        return $this->resolveTransferSetupWithTarget($targetPrincipalId);
+    }
+
+    /**
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    private function resolveTransferSetupWithTarget(int $targetPrincipalId): array|JsonResponse
+    {
         $callerUserId = $this->authService->currentUserId();
         if ($callerUserId === null) {
             return $this->unauthenticated();
         }
-
         return [$targetPrincipalId, $callerUserId];
     }
 

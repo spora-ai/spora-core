@@ -124,48 +124,7 @@ final class AgentController
      */
     private function resolvePrincipalFilter(?Request $request, int $userId): ?array
     {
-        $ids = $this->parsePrincipalIdsFromRequest($request);
-        if ($ids === null) {
-            return null;
-        }
-        $visible = $this->visiblePrincipalIdsOrFallback($userId);
-        return array_values(array_intersect($ids, $visible));
-    }
-
-    /**
-     * @return list<int>|null
-     */
-    private function parsePrincipalIdsFromRequest(?Request $request): ?array
-    {
-        if ($request === null) {
-            return null;
-        }
-        $raw = $request->query->all()['principal_id'] ?? null;
-        if ($raw === null) {
-            return null;
-        }
-        $values = is_array($raw) ? $raw : [$raw];
-        $ids = [];
-        foreach ($values as $v) {
-            if (is_int($v)) {
-                $ids[] = $v;
-            } elseif (is_string($v) && ctype_digit($v)) {
-                $ids[] = (int) $v;
-            }
-        }
-        return $ids === [] ? null : $ids;
-    }
-
-    /**
-     * @return list<int>
-     */
-    private function visiblePrincipalIdsOrFallback(int $userId): array
-    {
-        $visible = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
-        if ($visible !== [] || $this->principalService === null) {
-            return $visible;
-        }
-        return [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+        return AgentFilterParser::parsePrincipalFilter($request, $userId, $this->principalResolver, $this->principalService);
     }
 
     /**

@@ -379,10 +379,9 @@ final class GroupController
      * the groups-row write so an invalid picture never partially
      * overwrites the name / description.
      *
-     * Splitting the per-key validation into helpers keeps this orchestrator
-     * under SonarCloud's S1142 3-return cap and lets the helpers express
-     * each failure mode in its own focused signature. The orchestrator
-     * itself only ever returns the final 422-or-null verdict.
+     * The per-key failure modes are handled in
+     * {@see self::profilePictureValidationError()} so this orchestrator
+     * stays under SonarCloud's S1142 3-return cap.
      *
      * @param  array<string, mixed> $body
      */
@@ -393,55 +392,37 @@ final class GroupController
         }
         $picture = $body['profile_picture'];
         if (!is_array($picture)) {
-            return $this->unprocessable(
-                'PROFILE_PICTURE_TYPE',
-                "Field 'profile_picture' must be a JSON object.",
-            );
+            return $this->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture' must be a JSON object.");
         }
 
-        return $this->validateProfilePictureKeysAndTypes($picture)
-            ?? $this->validateProfilePictureEnums($picture);
+        return self::profilePictureValidationError($picture, $this->pictureService);
     }
 
     /**
      * @param  array<int|string, mixed> $picture
      */
-    private function validateProfilePictureKeysAndTypes(array $picture): ?JsonResponse
+    private function profilePictureValidationError(array $picture, GroupPictureService $pictureService): ?JsonResponse
     {
         $allowed = ['archetype', 'variant_key', 'palette_key'];
         foreach (array_keys($picture) as $key) {
             if (!in_array($key, $allowed, true)) {
-                return $this->unprocessable(
-                    'PROFILE_PICTURE_UNKNOWN_KEY',
-                    "Unknown field 'profile_picture.{$key}'.",
-                );
+                return $this->unprocessable('PROFILE_PICTURE_UNKNOWN_KEY', "Unknown field 'profile_picture.{$key}'.");
             }
         }
         foreach ($allowed as $key) {
             if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
-                return $this->unprocessable(
-                    'PROFILE_PICTURE_TYPE',
-                    "Field 'profile_picture.{$key}' must be a string.",
-                );
+                return $this->unprocessable('PROFILE_PICTURE_TYPE', "Field 'profile_picture.{$key}' must be a string.");
             }
         }
-        return null;
-    }
-
-    /**
-     * @param  array<int|string, mixed> $picture
-     */
-    private function validateProfilePictureEnums(array $picture): ?JsonResponse
-    {
         try {
             if (isset($picture['archetype'])) {
-                $this->pictureService->normaliseArchetype((string) $picture['archetype']);
+                $pictureService->normaliseArchetype((string) $picture['archetype']);
             }
             if (isset($picture['variant_key'])) {
-                $this->pictureService->normaliseVariantKey((string) $picture['variant_key']);
+                $pictureService->normaliseVariantKey((string) $picture['variant_key']);
             }
             if (isset($picture['palette_key'])) {
-                $this->pictureService->normalisePalette((string) $picture['palette_key']);
+                $pictureService->normalisePalette((string) $picture['palette_key']);
             }
         } catch (InvalidArgumentException $e) {
             return $this->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());

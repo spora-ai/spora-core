@@ -158,14 +158,20 @@ final class GroupMemberController
         return new JsonResponse(['data' => ['member' => $this->memberRow($userId, $newRole)]]);
     }
 
+    /**
+     * @return string|JsonResponse
+     */
     private function parseNewRole(Request $request): string|JsonResponse
     {
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
-
-        return $this->validateRole($body);
+        $newRole = (string) ($body['role'] ?? '');
+        if (!in_array($newRole, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
+            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$newRole}");
+        }
+        return $newRole;
     }
 
     private function attemptRoleChange(int $groupId, int $userId, string $newRole, int $callerUserId): ?JsonResponse
@@ -283,42 +289,43 @@ final class GroupMemberController
      */
     private function validateAddMemberBody(array $body): array|JsonResponse
     {
+        $targetUserId = $this->resolveAddMemberTargetUserId($body);
+        if ($targetUserId instanceof JsonResponse) {
+            return $targetUserId;
+        }
+
+        $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
+        if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
+            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$role}");
+        }
+
+        return [$targetUserId, $role];
+    }
+
+    /**
+     * Resolve the target user id from the wire body's `user_id` or
+     * `email` slot. Exactly one is required — the wire contract accepts
+     * either so the frontend can pick the friendlier input (email) while
+     * machine-to-machine callers keep their integer-id path.
+     *
+     * @param  array<string, mixed> $body
+     * @return int|JsonResponse
+     */
+    private function resolveAddMemberTargetUserId(array $body): int|JsonResponse
+    {
         $hasUserId = isset($body['user_id']) && (int) $body['user_id'] > 0;
         $hasEmail = isset($body['email']) && trim((string) $body['email']) !== '';
 
-        // Exactly one of `user_id` or `email` is required — the wire
-        // contract accepts either so the frontend can pick the friendlier
-        // input (email) while machine-to-machine callers keep their
-        // integer-id path.
         if ($hasUserId === $hasEmail) {
             return $this->unprocessable(
                 'VALIDATION_ERROR',
                 'Provide exactly one of "user_id" (integer) or "email" (string).',
             );
         }
-
-        $targetUserId = $hasUserId
-            ? (int) $body['user_id']
-            : $this->resolveUserIdByEmail($body);
-        if ($targetUserId instanceof JsonResponse) {
-            return $targetUserId;
+        if ($hasUserId) {
+            return (int) $body['user_id'];
         }
 
-        $role = (string) ($body['role'] ?? GroupMembership::ROLE_MEMBER);
-        $roleError = $this->validateRole(['role' => $role]);
-        if ($roleError instanceof JsonResponse) {
-            return $roleError;
-        }
-
-        return [$targetUserId, $roleError];
-    }
-
-    /**
-     * @param  array<string, mixed> $body
-     * @return int|JsonResponse
-     */
-    private function resolveUserIdByEmail(array $body): int|JsonResponse
-    {
         $email = strtolower(trim((string) $body['email']));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             return $this->unprocessable('VALIDATION_ERROR', 'The "email" field must be a valid email address.');
@@ -331,19 +338,6 @@ final class GroupMemberController
             );
         }
         return $targetUserId;
-    }
-
-    /**
-     * @param  array<string, mixed> $body
-     * @return string|JsonResponse (the validated role, or an error envelope)
-     */
-    private function validateRole(array $body): string|JsonResponse
-    {
-        $role = (string) ($body['role'] ?? '');
-        if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
-            return $this->unprocessable('VALIDATION_ERROR', "Unknown role: {$role}");
-        }
-        return $role;
     }
 
     /**
