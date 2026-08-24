@@ -7,9 +7,7 @@ namespace Spora\Http;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Models\Group;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Models\Principal;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalService;
@@ -47,7 +45,6 @@ final class GroupLlmConfigsController
     use GroupAuthorizationTrait;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
-    private const MSG_GROUP_NOT_FOUND = 'Group not found.';
     private const MSG_CONFIG_NOT_FOUND = 'Configuration not found.';
     private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
@@ -60,7 +57,7 @@ final class GroupLlmConfigsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveReadableGroup($id);
+        $resolved = $this->resolveReadableGroup($id, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -80,7 +77,7 @@ final class GroupLlmConfigsController
 
     public function store(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can create LLM configs.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can create LLM configs.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -96,7 +93,7 @@ final class GroupLlmConfigsController
 
     public function update(int $id, int $cid, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit LLM configs.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit LLM configs.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -107,7 +104,7 @@ final class GroupLlmConfigsController
 
     public function destroy(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete LLM configs.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete LLM configs.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -123,7 +120,7 @@ final class GroupLlmConfigsController
 
     public function setDefault(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can set the default LLM config.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can set the default LLM config.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -135,97 +132,6 @@ final class GroupLlmConfigsController
         }
 
         return new JsonResponse(['data' => ['config' => $this->llmConfigService->configResource($config)]]);
-    }
-
-    /**
-     * Auth + group visibility + principal lookup → `[principalId, userId]`,
-     * or a 401/404 short-circuit. Splits the visibility check into
-     * {@see loadGroupPrincipalIfVisible} so this method stays under the
-     * S1142 3-return cap.
-     *
-     * @return array{0: int, 1: int}|JsonResponse
-     */
-    private function resolveReadableGroup(int $id): array|JsonResponse
-    {
-        $userId = $this->requireCurrentUserIdOrFail();
-        if ($userId instanceof JsonResponse) {
-            return $userId;
-        }
-
-        $principal = $this->loadGroupPrincipalIfVisible($id, $userId);
-        if ($principal instanceof JsonResponse) {
-            return $principal;
-        }
-
-        return [(int) $principal->id, $userId];
-    }
-
-    /**
-     * Like {@see resolveReadableGroup()} but additionally enforces the
-     * manage role for write actions. The forbidden message is
-     * caller-supplied so each action can name the resource it gates.
-     *
-     * @return array{0: int, 1: int}|JsonResponse
-     */
-    private function resolveWritableGroup(int $id, string $denyMessage): array|JsonResponse
-    {
-        $resolved = $this->resolveReadableGroup($id);
-        if ($resolved instanceof JsonResponse) {
-            return $resolved;
-        }
-        [$principalId, $userId] = $resolved;
-
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', $denyMessage);
-        }
-
-        return [$principalId, $userId];
-    }
-
-    /**
-     * Returns the authenticated user id (as int) or a 401 JsonResponse.
-     *
-     * @return int|JsonResponse
-     */
-    private function requireCurrentUserIdOrFail(): int|JsonResponse
-    {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
-        }
-        return (int) $userId;
-    }
-
-    /**
-     * Group + visibility + principal existence in one pass. All three
-     * failures collapse to the same 404 (existence-hiding), and the
-     * principal itself is the success path — keeps the caller at one
-     * `instanceof` short-circuit instead of three.
-     */
-    private function loadGroupPrincipalIfVisible(int $id, int $userId): Principal|JsonResponse
-    {
-        $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        $principal = $this->principalService->principalForGroup($id);
-        if ($principal === null) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return $principal;
-    }
-
-    private function callerCanSeeGroup(int $groupId, int $userId): bool
-    {
-        if ($this->authService->isAdmin()) {
-            return true;
-        }
-        return Capsule::table('group_memberships')
-            ->where('group_id', $groupId)
-            ->where('user_id', $userId)
-            ->exists();
     }
 
     private function findScopedConfig(int $cid, int $principalId): ?LLMDriverConfiguration
@@ -325,9 +231,8 @@ final class GroupLlmConfigsController
     }
 
     /**
-     * Scope-check + delete in one helper. Returns the JsonResponse to
-     * surface when the cid is not in this group's principal, or `null`
-     * on a successful delete.
+     * Returns the JsonResponse to surface when the cid is not in
+     * this group's principal, or `null` on a successful delete.
      */
     private function deleteScopedConfigOrFail(int $cid, int $principalId): ?JsonResponse
     {

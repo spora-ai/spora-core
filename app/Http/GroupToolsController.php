@@ -4,11 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
-use Spora\Models\Group;
-use Spora\Models\Principal;
 use Spora\Models\ToolUserSetting;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
@@ -37,7 +34,6 @@ final class GroupToolsController
     use GroupAuthorizationTrait;
 
     private const MSG_INVALID_JSON = 'Request body must be valid JSON.';
-    private const MSG_GROUP_NOT_FOUND = 'Group not found.';
 
     public function __construct(
         private readonly AuthService $authService,
@@ -47,7 +43,7 @@ final class GroupToolsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveReadableGroup($id);
+        $resolved = $this->resolveReadableGroup($id, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -79,7 +75,7 @@ final class GroupToolsController
 
     public function upsert(int $id, string $toolClass, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit tool settings.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit tool settings.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -95,7 +91,7 @@ final class GroupToolsController
 
     public function destroy(int $id, string $toolClass): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete tool settings.');
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete tool settings.', $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -107,83 +103,9 @@ final class GroupToolsController
     }
 
     /**
-     * @return array{0: int, 1: int}|JsonResponse
-     */
-    private function resolveReadableGroup(int $id): array|JsonResponse
-    {
-        $userId = $this->requireCurrentUserIdOrFail();
-        if ($userId instanceof JsonResponse) {
-            return $userId;
-        }
-
-        $principal = $this->loadGroupPrincipalIfVisible($id, $userId);
-        if ($principal instanceof JsonResponse) {
-            return $principal;
-        }
-
-        return [(int) $principal->id, $userId];
-    }
-
-    /**
-     * @return array{0: int, 1: int}|JsonResponse
-     */
-    private function resolveWritableGroup(int $id, string $denyMessage): array|JsonResponse
-    {
-        $resolved = $this->resolveReadableGroup($id);
-        if ($resolved instanceof JsonResponse) {
-            return $resolved;
-        }
-        [$principalId, $userId] = $resolved;
-
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
-            return $this->forbidden('FORBIDDEN', $denyMessage);
-        }
-
-        return [$principalId, $userId];
-    }
-
-    /**
-     * @return int|JsonResponse
-     */
-    private function requireCurrentUserIdOrFail(): int|JsonResponse
-    {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->unauthenticated();
-        }
-        return (int) $userId;
-    }
-
-    private function loadGroupPrincipalIfVisible(int $id, int $userId): Principal|JsonResponse
-    {
-        $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        $principal = $this->principalService->principalForGroup($id);
-        if ($principal === null) {
-            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
-        }
-
-        return $principal;
-    }
-
-    private function callerCanSeeGroup(int $groupId, int $userId): bool
-    {
-        if ($this->authService->isAdmin()) {
-            return true;
-        }
-        return Capsule::table('group_memberships')
-            ->where('group_id', $groupId)
-            ->where('user_id', $userId)
-            ->exists();
-    }
-
-    /**
-     * Decode + unwrap the settings payload from the request body. Pass
-     * either `{settings: {…}}` or a bare object — both shapes are
-     * accepted (see {@see extractSettings}).
+     * Accepts either `{settings: {…}}` (the preferred shape) or the bare
+     * settings object. Always returns an array so callers don't have to
+     * distinguish "no body" from "empty settings".
      *
      * @return array<string, mixed>|JsonResponse
      */
@@ -210,9 +132,9 @@ final class GroupToolsController
     }
 
     /**
-     * Accepts either `{settings: {…}}` (the preferred shape) or the bare
-     * settings object. Always returns an array so callers don't have to
-     * distinguish "no body" from "empty settings".
+     * `principal_id` is explicitly ignored on the bare-object path so
+     * the caller can't redirect the write to a different principal
+     * (the principal is the group's, end of story).
      *
      * @param array<string, mixed> $body
      * @return array<string, mixed>|JsonResponse
@@ -226,9 +148,6 @@ final class GroupToolsController
             return $body['settings'];
         }
 
-        // Bare object — accept it as the settings payload. `principal_id` is
-        // explicitly ignored so the caller can't redirect the write to a
-        // different principal (the principal is the group's, end of story).
         unset($body['principal_id']);
         return $body;
     }

@@ -6,31 +6,46 @@ namespace Spora\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
+use Spora\Models\Group;
 use Spora\Models\GroupMembership;
+use Spora\Models\Principal;
+use Spora\Services\PrincipalService;
+use Symfony\Component\HttpFoundation\JsonResponse;
 
 /**
- * Shared per-group authorisation gate.
+ * Shared per-group authorisation gate and request-resolution helpers.
  *
- * `callerCanManageGroup()` is the locked rule for write access on the
- * group-settings pages: the caller is a global admin, or has the
- * `owner` / `admin` role inside the group. `member`-only callers see
- * the read-only view; non-members are 404-ed upstream by
+ * The two `callerCan*()` methods are the locked rules for write access
+ * on the group-settings pages: the caller is a global admin, or has
+ * the `owner` / `admin` role inside the group. `member`-only callers
+ * see the read-only view; non-members are 404-ed upstream by
  * `callerCanSeeGroup()` so existence-hiding is preserved.
  *
- * Lives as a trait because every group-settings controller
- * (GroupController, GroupMemberController, GroupPreferencesController,
- * GroupToolsController, GroupLlmConfigsController) needs both gates; a
- * trait keeps the lookup colocated with the rule instead of a
- * one-method service.
+ * The four `resolve*()` / `requireCurrentUserIdOrFail()` /
+ * `loadGroupPrincipalIfVisible()` helpers compose the canonical
+ * "401 → 404 → principal" short-circuit chain every group-settings
+ * controller needs. They live on the trait (rather than a base class
+ * or service) because they cross the boundary between HTTP response
+ * shaping (`JsonResponse` short-circuits via `JsonControllerHelpers`)
+ * and a small slice of business lookup (`principalForGroup`), which
+ * keeps the controllers reading as a flat list of actions.
+ *
+ * Lives as a trait because every group-settings controller needs the
+ * full set; a trait keeps the lookup colocated with the rules instead
+ * of a one-method service.
  */
 trait GroupAuthorizationTrait
 {
+    use JsonControllerHelpers;
+
+    private const MSG_GROUP_NOT_FOUND = 'Group not found.';
+
     /**
      * `true` when the caller can edit the group's settings pages:
      * global admin OR `role ∈ {owner, admin}` for the group. The
      * lookup uses the same role-tier strings
      * (`GroupMembership::ROLE_OWNER` / `ROLE_ADMIN`) that
-     * {@see GroupService} writes.
+     * {@see \Spora\Services\GroupService} writes.
      */
     protected function callerCanManageGroup(int $groupId, int $userId, AuthService $authService): bool
     {
@@ -61,5 +76,90 @@ trait GroupAuthorizationTrait
             ->where('group_id', $groupId)
             ->where('user_id', $userId)
             ->exists();
+    }
+
+    /**
+     * Auth → 401 short-circuit, then group visibility → 404 short-circuit
+     * (so non-members can't probe ids), then return `[principalId, userId]`
+     * for the caller. Controllers destructure the tuple and proceed.
+     *
+     * Visibility is collapsed into the principal lookup so the caller
+     * only has to check `instanceof JsonResponse` once.
+     *
+     * Requires the using class to expose `PrincipalService` as
+     * `$this->principalService` (the constructor-injected
+     * dependency every group-settings controller already has).
+     *
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    protected function resolveReadableGroup(int $id, PrincipalService $principalService): array|JsonResponse
+    {
+        $userId = $this->requireCurrentUserIdOrFail();
+        if ($userId instanceof JsonResponse) {
+            return $userId;
+        }
+
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $principalService);
+        if ($principal instanceof JsonResponse) {
+            return $principal;
+        }
+
+        return [(int) $principal->id, $userId];
+    }
+
+    /**
+     * Same as {@see resolveReadableGroup()} but additionally enforces
+     * the manage role for write actions. The forbidden message is
+     * caller-supplied so each action can name the resource it gates.
+     *
+     * @return array{0: int, 1: int}|JsonResponse
+     */
+    protected function resolveWritableGroup(int $id, string $denyMessage, PrincipalService $principalService): array|JsonResponse
+    {
+        $resolved = $this->resolveReadableGroup($id, $principalService);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        [$principalId, $userId] = $resolved;
+
+        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
+            return $this->forbidden('FORBIDDEN', $denyMessage);
+        }
+
+        return [$principalId, $userId];
+    }
+
+    /**
+     * @return int|JsonResponse
+     */
+    protected function requireCurrentUserIdOrFail(): int|JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+        return (int) $userId;
+    }
+
+    /**
+     * Group existence + caller visibility + group-principal existence
+     * in one pass — all three failures collapse to the same 404
+     * (existence-hiding) and the principal itself is the success path,
+     * which keeps the caller at one `instanceof` short-circuit instead
+     * of three.
+     */
+    protected function loadGroupPrincipalIfVisible(int $id, int $userId, PrincipalService $principalService): Principal|JsonResponse
+    {
+        $group = Group::find($id);
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $this->authService)) {
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
+
+        $principal = $principalService->principalForGroup($id);
+        if ($principal === null) {
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
+
+        return $principal;
     }
 }
