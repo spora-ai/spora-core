@@ -309,7 +309,32 @@ abstract class ProfilePictureService
                 "Field 'profile_picture' must be a JSON object.",
             );
         }
+        return $this->validatePictureShapeAndEnum($picture);
+    }
 
+    /**
+     * @param array<int|string, mixed> $picture
+     * @return array<string, string>|ProfilePictureValidationError
+     */
+    private function validatePictureShapeAndEnum(array $picture): array|ProfilePictureValidationError
+    {
+        $shapeError = $this->pictureShapeError($picture);
+        if ($shapeError !== null) {
+            return $shapeError;
+        }
+        $enumError = $this->pictureEnumError($picture);
+        if ($enumError !== null) {
+            return $enumError;
+        }
+        /** @var array<string, string> $picture */
+        return $picture;
+    }
+
+    /**
+     * @param array<int|string, mixed> $picture
+     */
+    private function pictureShapeError(array $picture): ?ProfilePictureValidationError
+    {
         foreach (array_keys($picture) as $key) {
             if (!in_array($key, self::PICTURE_PAYLOAD_KEYS, true)) {
                 return new ProfilePictureValidationError(
@@ -326,7 +351,14 @@ abstract class ProfilePictureService
                 );
             }
         }
+        return null;
+    }
 
+    /**
+     * @param array<int|string, mixed> $picture
+     */
+    private function pictureEnumError(array $picture): ?ProfilePictureValidationError
+    {
         try {
             if (isset($picture['archetype'])) {
                 $this->normaliseArchetype((string) $picture['archetype']);
@@ -340,9 +372,7 @@ abstract class ProfilePictureService
         } catch (InvalidArgumentException $e) {
             return new ProfilePictureValidationError('PROFILE_PICTURE_VALUE', $e->getMessage());
         }
-
-        /** @var array<string, string> $picture */
-        return $picture;
+        return null;
     }
 
     /**
