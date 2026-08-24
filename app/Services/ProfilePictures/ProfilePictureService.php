@@ -40,14 +40,6 @@ abstract class ProfilePictureService
 {
     public const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
-    /**
-     * Whitelisted keys of the wire-level `profile_picture` object.
-     * Centralised so the type/shape/enum validators and the PATCH
-     * writer agree on the same surface; adding a field here is a
-     * one-line change.
-     */
-    public const PICTURE_PAYLOAD_KEYS = ['archetype', 'variant_key', 'palette_key'];
-
     public function getOrCreate(int $subjectId): mixed
     {
         $existing = $this->pictureModel()::where($this->subjectKey(), $subjectId)->first();
@@ -279,10 +271,11 @@ abstract class ProfilePictureService
      * list, or assoc array) and returns either the normalised payload
      * or the first validation error.
      *
-     * Lives on the service rather than the controller so both
+     * Thin delegate to {@see ProfilePicturePayloadValidator::validate()}
+     * so the wire contract lives in one HTTP-free helper that both
      * {@see \Spora\Http\AgentController} and
-     * {@see \Spora\Http\GroupController} share one wire contract —
-     * the error codes (`PROFILE_PICTURE_TYPE`, `PROFILE_PICTURE_UNKNOWN_KEY`,
+     * {@see \Spora\Http\GroupController} share. The error codes
+     * (`PROFILE_PICTURE_TYPE`, `PROFILE_PICTURE_UNKNOWN_KEY`,
      * `PROFILE_PICTURE_VALUE`) are part of the public surface that
      * the operator UI keys off.
      *
@@ -293,86 +286,13 @@ abstract class ProfilePictureService
      * caller asked us to clear the picture and we can't clear what
      * wasn't an object to begin with.
      *
-     * The method is HTTP-free: the controller wraps the result via
-     * its `unprocessable()` envelope helper. Callers that don't
-     * speak HTTP (CLI, tests) can inspect the VO directly.
-     *
      * @param mixed $picture raw `$body['profile_picture']` value (caller
      *                       guarantees the key is present)
      * @return array<string, string>|ProfilePictureValidationError
      */
     public function validatePayload(mixed $picture): array|ProfilePictureValidationError
     {
-        if (!is_array($picture)) {
-            return new ProfilePictureValidationError(
-                'PROFILE_PICTURE_TYPE',
-                "Field 'profile_picture' must be a JSON object.",
-            );
-        }
-        return $this->validatePictureShapeAndEnum($picture);
-    }
-
-    /**
-     * @param array<int|string, mixed> $picture
-     * @return array<string, string>|ProfilePictureValidationError
-     */
-    private function validatePictureShapeAndEnum(array $picture): array|ProfilePictureValidationError
-    {
-        $shapeError = $this->pictureShapeError($picture);
-        if ($shapeError !== null) {
-            return $shapeError;
-        }
-        $enumError = $this->pictureEnumError($picture);
-        if ($enumError !== null) {
-            return $enumError;
-        }
-        /** @var array<string, string> $picture */
-        return $picture;
-    }
-
-    /**
-     * @param array<int|string, mixed> $picture
-     */
-    private function pictureShapeError(array $picture): ?ProfilePictureValidationError
-    {
-        foreach (array_keys($picture) as $key) {
-            if (!in_array($key, self::PICTURE_PAYLOAD_KEYS, true)) {
-                return new ProfilePictureValidationError(
-                    'PROFILE_PICTURE_UNKNOWN_KEY',
-                    "Unknown field 'profile_picture.{$key}'.",
-                );
-            }
-        }
-        foreach (self::PICTURE_PAYLOAD_KEYS as $key) {
-            if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
-                return new ProfilePictureValidationError(
-                    'PROFILE_PICTURE_TYPE',
-                    "Field 'profile_picture.{$key}' must be a string.",
-                );
-            }
-        }
-        return null;
-    }
-
-    /**
-     * @param array<int|string, mixed> $picture
-     */
-    private function pictureEnumError(array $picture): ?ProfilePictureValidationError
-    {
-        try {
-            if (isset($picture['archetype'])) {
-                $this->normaliseArchetype((string) $picture['archetype']);
-            }
-            if (isset($picture['variant_key'])) {
-                $this->normaliseVariantKey((string) $picture['variant_key']);
-            }
-            if (isset($picture['palette_key'])) {
-                $this->normalisePalette((string) $picture['palette_key']);
-            }
-        } catch (InvalidArgumentException $e) {
-            return new ProfilePictureValidationError('PROFILE_PICTURE_VALUE', $e->getMessage());
-        }
-        return null;
+        return ProfilePicturePayloadValidator::validate($picture, $this);
     }
 
     /**
