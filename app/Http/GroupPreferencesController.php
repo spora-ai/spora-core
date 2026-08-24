@@ -42,7 +42,7 @@ final class GroupPreferencesController
 
     public function show(int $id): JsonResponse
     {
-        $resolved = $this->resolveReadableGroup($id, $this->principalService);
+        $resolved = $this->resolveReadableGroup($id, $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -53,7 +53,7 @@ final class GroupPreferencesController
 
     public function update(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit preferences.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit preferences.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }

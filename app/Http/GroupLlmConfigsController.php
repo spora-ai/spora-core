@@ -57,7 +57,7 @@ final class GroupLlmConfigsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveReadableGroup($id, $this->principalService);
+        $resolved = $this->resolveReadableGroup($id, $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -77,7 +77,7 @@ final class GroupLlmConfigsController
 
     public function store(int $id, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can create LLM configs.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can create LLM configs.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -93,7 +93,7 @@ final class GroupLlmConfigsController
 
     public function update(int $id, int $cid, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit LLM configs.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit LLM configs.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -104,7 +104,7 @@ final class GroupLlmConfigsController
 
     public function destroy(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete LLM configs.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete LLM configs.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -120,7 +120,7 @@ final class GroupLlmConfigsController
 
     public function setDefault(int $id, int $cid): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can set the default LLM config.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can set the default LLM config.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }

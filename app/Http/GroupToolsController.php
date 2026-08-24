@@ -43,7 +43,7 @@ final class GroupToolsController
 
     public function index(int $id): JsonResponse
     {
-        $resolved = $this->resolveReadableGroup($id, $this->principalService);
+        $resolved = $this->resolveReadableGroup($id, $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -75,7 +75,7 @@ final class GroupToolsController
 
     public function upsert(int $id, string $toolClass, Request $request): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit tool settings.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can edit tool settings.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
@@ -91,7 +91,7 @@ final class GroupToolsController
 
     public function destroy(int $id, string $toolClass): JsonResponse
     {
-        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete tool settings.', $this->principalService);
+        $resolved = $this->resolveWritableGroup($id, 'Only group owners or admins can delete tool settings.', $this->authService, $this->principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }

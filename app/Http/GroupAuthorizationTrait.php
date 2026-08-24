@@ -32,7 +32,10 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  *
  * Lives as a trait because every group-settings controller needs the
  * full set; a trait keeps the lookup colocated with the rules instead
- * of a one-method service.
+ * of a one-method service. `AuthService` and `PrincipalService` are
+ * passed explicitly to every helper so the using class doesn't have
+ * to expose them as properties (which would tie the trait to a
+ * specific constructor signature).
  */
 trait GroupAuthorizationTrait
 {
@@ -86,20 +89,19 @@ trait GroupAuthorizationTrait
      * Visibility is collapsed into the principal lookup so the caller
      * only has to check `instanceof JsonResponse` once.
      *
-     * Requires the using class to expose `PrincipalService` as
-     * `$this->principalService` (the constructor-injected
-     * dependency every group-settings controller already has).
-     *
      * @return array{0: int, 1: int}|JsonResponse
      */
-    protected function resolveReadableGroup(int $id, PrincipalService $principalService): array|JsonResponse
-    {
-        $userId = $this->requireCurrentUserIdOrFail();
+    protected function resolveReadableGroup(
+        int $id,
+        AuthService $authService,
+        PrincipalService $principalService,
+    ): array|JsonResponse {
+        $userId = $this->requireCurrentUserIdOrFail($authService);
         if ($userId instanceof JsonResponse) {
             return $userId;
         }
 
-        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $principalService);
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $authService, $principalService);
         if ($principal instanceof JsonResponse) {
             return $principal;
         }
@@ -114,15 +116,19 @@ trait GroupAuthorizationTrait
      *
      * @return array{0: int, 1: int}|JsonResponse
      */
-    protected function resolveWritableGroup(int $id, string $denyMessage, PrincipalService $principalService): array|JsonResponse
-    {
-        $resolved = $this->resolveReadableGroup($id, $principalService);
+    protected function resolveWritableGroup(
+        int $id,
+        string $denyMessage,
+        AuthService $authService,
+        PrincipalService $principalService,
+    ): array|JsonResponse {
+        $resolved = $this->resolveReadableGroup($id, $authService, $principalService);
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
         [$principalId, $userId] = $resolved;
 
-        if (!$this->callerCanManageGroup($id, $userId, $this->authService)) {
+        if (!$this->callerCanManageGroup($id, $userId, $authService)) {
             return $this->forbidden('FORBIDDEN', $denyMessage);
         }
 
@@ -132,9 +138,9 @@ trait GroupAuthorizationTrait
     /**
      * @return int|JsonResponse
      */
-    protected function requireCurrentUserIdOrFail(): int|JsonResponse
+    protected function requireCurrentUserIdOrFail(AuthService $authService): int|JsonResponse
     {
-        $userId = $this->authService->currentUserId();
+        $userId = $authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
@@ -148,10 +154,14 @@ trait GroupAuthorizationTrait
      * which keeps the caller at one `instanceof` short-circuit instead
      * of three.
      */
-    protected function loadGroupPrincipalIfVisible(int $id, int $userId, PrincipalService $principalService): Principal|JsonResponse
-    {
+    protected function loadGroupPrincipalIfVisible(
+        int $id,
+        int $userId,
+        AuthService $authService,
+        PrincipalService $principalService,
+    ): Principal|JsonResponse {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $this->authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $authService)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
