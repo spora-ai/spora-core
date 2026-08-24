@@ -313,16 +313,11 @@ final class MediaArchiveController
         if ($raw === null || $raw === []) {
             return $query;
         }
-        if ($userId === null) {
-            // No caller → no visibility → no scope. Returning the query
-            // unchanged would let the service trust ids the resolver
-            // hasn't vetted, so we clear them and fall back to the legacy
-            // `agentOwnerUserId` ownership union (which itself is null
-            // when the caller isn't authenticated, so the listing ends
-            // up empty — the safe default).
-            return $this->withPrincipalIds($query, null);
-        }
-        $visible = $this->principalResolver->visiblePrincipalIds($userId);
+        // No caller, or no visible principals → clear the filter so the
+        // service falls back to the legacy `agentOwnerUserId` ownership
+        // union (which is itself null when unauthenticated, so the listing
+        // ends up empty — the safe default).
+        $visible = $userId !== null ? $this->principalResolver->visiblePrincipalIds($userId) : [];
         if ($visible === []) {
             return $this->withPrincipalIds($query, null);
         }

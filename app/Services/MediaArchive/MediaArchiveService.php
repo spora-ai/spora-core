@@ -182,26 +182,7 @@ final class MediaArchiveService
         //      versions that don't send `?principal_id=`.
         //   3. userId (direct callers / tests): plain `WHERE user_id = N`.
         if ($query->principalIds !== null && $query->principalIds !== []) {
-            $principalIds = array_values(array_unique(array_map('intval', $query->principalIds)));
-            // Resolve the caller's user-principal once. Materialising here
-            // is fine — the controller will have already materialised it
-            // when intersecting visible ids, and the user-principal is
-            // always present for any caller that issued this request.
-            $includeUploads = false;
-            if ($query->agentOwnerUserId !== null) {
-                $userPrincipalId = $this->principalService
-                    ->ensureUserPrincipal($query->agentOwnerUserId)
-                    ->id;
-                $includeUploads = in_array($userPrincipalId, $principalIds, true);
-            }
-            $builder->where(function (Builder $q) use ($principalIds, $query, $includeUploads): void {
-                if ($includeUploads && $query->agentOwnerUserId !== null) {
-                    $q->where('user_id', $query->agentOwnerUserId);
-                }
-                $q->orWhereIn('agent_id', Agent::query()
-                    ->select('id')
-                    ->whereIn('principal_id', $principalIds));
-            });
+            $this->applyPrincipalIdScope($builder, $query);
         } elseif ($query->agentOwnerUserId !== null) {
             // Migration 0067: agent ownership is via principal, not user_id.
             // Materialise the user-principal first, then match either:
@@ -288,6 +269,40 @@ final class MediaArchiveService
     public function countForAgent(int $agentId): int
     {
         return MediaAsset::query()->where('agent_id', $agentId)->count();
+    }
+
+    /**
+     * Apply the dashboard-style principal scope: media attached to any
+     * agent whose principal is in the list, plus direct uploads by the
+     * caller — but only when the caller's user-principal is in the list,
+     * so a group-scoped chip never leaks the user's direct uploads.
+     *
+     * Extracted from {@see list()} to drop the S3776 cognitive-complexity
+     * budget; the controller has already vetted every id against
+     * `visiblePrincipalIds()` so the service trusts the list as-is.
+     */
+    private function applyPrincipalIdScope(Builder $builder, ListMediaQuery $query): void
+    {
+        $principalIds = array_values(array_unique(array_map('intval', $query->principalIds ?? [])));
+        // Direct uploads surface only when the user-principal is in the
+        // scope list. Without this gate, every group chip would also
+        // surface the user's uploads (which belong to the user-principal,
+        // not the group-principal) — that's the bug the user reported.
+        $includeUploads = false;
+        if ($query->agentOwnerUserId !== null) {
+            $userPrincipalId = $this->principalService
+                ->ensureUserPrincipal($query->agentOwnerUserId)
+                ->id;
+            $includeUploads = in_array($userPrincipalId, $principalIds, true);
+        }
+        $builder->where(function (Builder $q) use ($principalIds, $query, $includeUploads): void {
+            if ($includeUploads && $query->agentOwnerUserId !== null) {
+                $q->where('user_id', $query->agentOwnerUserId);
+            }
+            $q->orWhereIn('agent_id', Agent::query()
+                ->select('id')
+                ->whereIn('principal_id', $principalIds));
+        });
     }
 
     /** Body of {@see ingest()} for the non-idempotent case. */
