@@ -184,17 +184,7 @@ final class MediaArchiveService
         if ($query->principalIds !== null && $query->principalIds !== []) {
             $this->applyPrincipalIdScope($builder, $query);
         } elseif ($query->agentOwnerUserId !== null) {
-            // Migration 0067: agent ownership is via principal, not user_id.
-            // Materialise the user-principal first, then match either:
-            //   (a) media uploaded by this user, OR
-            //   (b) media attached to an agent owned by this user-principal.
-            $principalId = $this->principalService->ensureUserPrincipal($query->agentOwnerUserId)->id;
-            $builder->where(function (Builder $q) use ($query, $principalId): void {
-                $q->where('user_id', $query->agentOwnerUserId)
-                  ->orWhereIn('agent_id', Agent::query()
-                      ->select('id')
-                      ->where('principal_id', $principalId));
-            });
+            $this->applyLegacyOwnershipScope($builder, $query);
         } elseif ($query->userId !== null) {
             $builder->where('user_id', $query->userId);
         }
@@ -302,6 +292,28 @@ final class MediaArchiveService
             $q->orWhereIn('agent_id', Agent::query()
                 ->select('id')
                 ->whereIn('principal_id', $principalIds));
+        });
+    }
+
+    /**
+     * Legacy `?ownership=mine` ownership union: media uploaded by the
+     * caller OR media attached to any agent owned by the caller's
+     * user-principal. Materialises the user-principal because migration
+     * 0067 moved ownership from `agents.user_id` to `agents.principal_id`.
+     *
+     * Kept for back-compat with older plugin versions that don't send
+     * `?principal_id=`. Newer plugin versions always hit
+     * {@see applyPrincipalIdScope()}.
+     */
+    private function applyLegacyOwnershipScope(Builder $builder, ListMediaQuery $query): void
+    {
+        $userId = (int) $query->agentOwnerUserId;
+        $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        $builder->where(function (Builder $q) use ($userId, $principalId): void {
+            $q->where('user_id', $userId)
+              ->orWhereIn('agent_id', Agent::query()
+                  ->select('id')
+                  ->where('principal_id', $principalId));
         });
     }
 
