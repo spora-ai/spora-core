@@ -7,9 +7,11 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\ListMediaQueryBuilder;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -38,12 +40,21 @@ final class MediaArchiveController
         private readonly MediaArchiveService $mediaArchive,
         private readonly AuthService $auth,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly PrincipalResolver $principalResolver = new PrincipalResolver(),
         private readonly array $config = [],
     ) {}
 
     public function index(Request $request): JsonResponse
     {
-        $query = ListMediaQueryBuilder::fromRequest($request, $this->auth->currentUserId());
+        $userId = $this->auth->currentUserId();
+        $query = ListMediaQueryBuilder::fromRequest($request, $userId);
+        // `?principal_id=` is the dashboard-style scope filter. We have
+        // to intersect the request values with the caller's visible
+        // principals here so the service never sees a principal the
+        // caller can't act as. An out-of-scope id is silently dropped;
+        // an empty intersection leaves the principalIds null so the
+        // service falls back to the legacy ownership union.
+        $query = $this->applyPrincipalScope($query, $userId);
         $page  = $this->mediaArchive->list($query);
 
         return new JsonResponse([
@@ -284,6 +295,66 @@ final class MediaArchiveController
     private function configUrl(): string
     {
         return (string) ($this->config['app_url'] ?? '');
+    }
+
+    /**
+     * Narrow the query's `principalIds` to the caller's visible
+     * principals — mirrors {@see AgentController::resolvePrincipalFilter()}
+     * so an out-of-scope id can never reach the SQL builder. The input is
+     * dropped silently (typo tolerance) rather than 400-ed; an authenticated
+     * listing endpoint must not surface filter-syntax errors.
+     *
+     * Returns a fresh DTO rather than mutating in place because
+     * {@see ListMediaQuery} is `readonly`.
+     */
+    private function applyPrincipalScope(ListMediaQuery $query, ?int $userId): ListMediaQuery
+    {
+        $raw = $query->principalIds;
+        if ($raw === null || $raw === []) {
+            return $query;
+        }
+        if ($userId === null) {
+            // No caller → no visibility → no scope. Returning the query
+            // unchanged would let the service trust ids the resolver
+            // hasn't vetted, so we clear them and fall back to the legacy
+            // `agentOwnerUserId` ownership union (which itself is null
+            // when the caller isn't authenticated, so the listing ends
+            // up empty — the safe default).
+            return $this->withPrincipalIds($query, null);
+        }
+        $visible = $this->principalResolver->visiblePrincipalIds($userId);
+        if ($visible === []) {
+            return $this->withPrincipalIds($query, null);
+        }
+        $intersection = array_values(array_intersect($raw, $visible));
+        return $this->withPrincipalIds($query, $intersection === [] ? null : $intersection);
+    }
+
+    /**
+     * Tiny DTO rebuilder so {@see applyPrincipalScope()} stays under the
+     * 3-return brain-overload ceiling. The other fields are passed
+     * through verbatim — the controller only ever replaces principalIds.
+     */
+    private function withPrincipalIds(ListMediaQuery $query, ?array $principalIds): ListMediaQuery
+    {
+        return new ListMediaQuery(
+            mediaType: $query->mediaType,
+            mediaTypes: $query->mediaTypes,
+            agentId: $query->agentId,
+            userId: $query->userId,
+            pluginSlug: $query->pluginSlug,
+            toolName: $query->toolName,
+            from: $query->from,
+            to: $query->to,
+            search: $query->search,
+            sort: $query->sort,
+            uploadSource: $query->uploadSource,
+            ownership: $query->ownership,
+            agentOwnerUserId: $query->agentOwnerUserId,
+            principalIds: $principalIds,
+            page: $query->page,
+            perPage: $query->perPage,
+        );
     }
 
 

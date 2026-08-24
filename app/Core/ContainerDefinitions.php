@@ -1064,6 +1064,7 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
                     new MediaAssetSerializer(),
+                    $c->get(PrincipalResolver::class),
                     $c->get('config'),
                 );
             },

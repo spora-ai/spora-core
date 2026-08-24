@@ -46,6 +46,12 @@ final class ListMediaQueryBuilder
             uploadSource: self::parseUploadSource($params->get('source')),
             ownership: $ownership ?? ListMediaQuery::OWNERSHIP_MINE,
             agentOwnerUserId: $userId,
+            // No intersection here — the controller runs the request
+            // values through `PrincipalResolver::visiblePrincipalIds()`
+            // before the service touches them, so the DTO only ever
+            // carries ids the caller can act as. See `MediaArchiveController
+            // ::resolvePrincipalFilter()`.
+            principalIds: self::parsePrincipalIds($params->all()['principal_id'] ?? null),
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
@@ -178,5 +184,40 @@ final class ListMediaQueryBuilder
     private static function parseInt(mixed $raw, int $default): int
     {
         return is_string($raw) && ctype_digit($raw) ? (int) $raw : $default;
+    }
+
+    /**
+     * Parse `?principal_id=` (repeatable) into a list<int>. Accepts all
+     * three syntaxes Symfony exposes:
+     *   `?principal_id=10`              — single value, scalar.
+     *   `?principal_id=10&principal_id=20` — repeated, becomes array.
+     *   `?principal_id[]=10&principal_id[]=20` — explicit array.
+     * `query->all()` returns scalar OR array depending on repetition, so we
+     * normalise through `is_array()` first.
+     *
+     * Unknown / non-integer tokens are silently dropped so a typo from an
+     * older client doesn't crash the listing endpoint. Empty / missing
+     * input returns null (no filter) so the controller can fall back to
+     * the legacy `agentOwnerUserId`-based ownership union.
+     *
+     * @return list<int>|null
+     */
+    private static function parsePrincipalIds(mixed $raw): ?array
+    {
+        if ($raw === null) {
+            return null;
+        }
+        $values = is_array($raw) ? $raw : [$raw];
+        $ids = [];
+        foreach ($values as $v) {
+            if (is_int($v)) {
+                $ids[] = $v;
+                continue;
+            }
+            if (is_string($v) && ctype_digit($v)) {
+                $ids[] = (int) $v;
+            }
+        }
+        return $ids === [] ? null : array_values(array_unique($ids));
     }
 }

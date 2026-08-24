@@ -112,6 +112,7 @@ function buildSharingController(bool $isAdmin = true, int $userId = 1): array
             $service,
             $auth,
             new \Spora\Services\MediaArchive\MediaAssetSerializer(),
+            new \Spora\Services\PrincipalResolver(),
             ['app_url' => 'https://test.example/'],
         ),
     ];

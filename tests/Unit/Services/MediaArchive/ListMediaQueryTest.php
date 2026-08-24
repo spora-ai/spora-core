@@ -28,6 +28,7 @@ describe('ListMediaQuery defaults', function (): void {
         expect($query->search)->toBeNull();
         expect($query->sort)->toBe(ListMediaQuery::SORT_CREATED_DESC);
         expect($query->uploadSource)->toBeNull();
+        expect($query->principalIds)->toBeNull();
         expect($query->page)->toBe(1);
         expect($query->perPage)->toBe(ListMediaQuery::PER_PAGE_DEFAULT);
     });
@@ -108,6 +109,7 @@ describe('ListMediaQuery::toArray()', function (): void {
             'uploadSource'     => null,
             'ownership'        => null,
             'agentOwnerUserId' => null,
+            'principalIds'     => null,
         ]);
     });
 
@@ -128,6 +130,11 @@ describe('ListMediaQuery::toArray()', function (): void {
     it('projects the uploadSource filter through toArray() when set', function (): void {
         $arr = (new ListMediaQuery(uploadSource: ListMediaQuery::UPLOAD_SOURCE_UPLOAD))->toArray();
         expect($arr['uploadSource'])->toBe('upload');
+    });
+
+    it('projects the principalIds filter through toArray() when set', function (): void {
+        $arr = (new ListMediaQuery(principalIds: [10, 20]))->toArray();
+        expect($arr['principalIds'])->toBe([10, 20]);
     });
 });
 

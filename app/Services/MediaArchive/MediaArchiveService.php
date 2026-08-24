@@ -169,10 +169,40 @@ final class MediaArchiveService
         if ($query->agentId !== null) {
             $builder->where('agent_id', $query->agentId);
         }
-        // Ownership union takes precedence over the direct userId filter.
-        // HTTP listings always use agentOwnerUserId; userId remains available
-        // for direct callers that explicitly request upload-only filtering.
-        if ($query->agentOwnerUserId !== null) {
+        // Scope filter — three modes in priority order:
+        //   1. principalIds (dashboard-style ALL / Mine / Group A / ...):
+        //      media attached to agents in any of the listed principals,
+        //      plus direct uploads by the caller but only when the caller's
+        //      user-principal is included. The controller has already
+        //      intersected the list with `visiblePrincipalIds`, so the
+        //      service trusts every value.
+        //   2. agentOwnerUserId (legacy `?ownership=mine`): uploads by the
+        //      caller OR media attached to agents owned by the caller's
+        //      user-principal. Kept for back-compat with older plugin
+        //      versions that don't send `?principal_id=`.
+        //   3. userId (direct callers / tests): plain `WHERE user_id = N`.
+        if ($query->principalIds !== null && $query->principalIds !== []) {
+            $principalIds = array_values(array_unique(array_map('intval', $query->principalIds)));
+            // Resolve the caller's user-principal once. Materialising here
+            // is fine — the controller will have already materialised it
+            // when intersecting visible ids, and the user-principal is
+            // always present for any caller that issued this request.
+            $includeUploads = false;
+            if ($query->agentOwnerUserId !== null) {
+                $userPrincipalId = $this->principalService
+                    ->ensureUserPrincipal($query->agentOwnerUserId)
+                    ->id;
+                $includeUploads = in_array($userPrincipalId, $principalIds, true);
+            }
+            $builder->where(function (Builder $q) use ($principalIds, $query, $includeUploads): void {
+                if ($includeUploads && $query->agentOwnerUserId !== null) {
+                    $q->where('user_id', $query->agentOwnerUserId);
+                }
+                $q->orWhereIn('agent_id', Agent::query()
+                    ->select('id')
+                    ->whereIn('principal_id', $principalIds));
+            });
+        } elseif ($query->agentOwnerUserId !== null) {
             // Migration 0067: agent ownership is via principal, not user_id.
             // Materialise the user-principal first, then match either:
             //   (a) media uploaded by this user, OR

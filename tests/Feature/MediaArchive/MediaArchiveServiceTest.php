@@ -6,6 +6,7 @@ namespace Tests\Feature\MediaArchive;
 
 use DateTimeImmutable;
 use FilesystemIterator;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Psr\Log\NullLogger;
 use RecursiveDirectoryIterator;
@@ -86,6 +87,33 @@ function mediaArchiveTestSetup(): array
 // makeMediaArchiveService() is autoloaded globally via composer.json
 // (autoload-dev.files -> tests/Support/CrossFileTestHelpers.php). Calls
 // inside this file resolve via PHP's namespace fallback to the global one.
+
+if (!function_exists('seedGroupPrincipal')) {
+    /**
+     * Insert a `groups` row + the matching `principals` row in one shot.
+     * Used by the principal-scoping list tests — the FK on
+     * `principals.group_id` requires the group row to exist first.
+     */
+    function seedGroupPrincipal(int $groupId, string $name): int
+    {
+        Capsule::table('groups')->updateOrInsert(
+            ['id' => $groupId],
+            [
+                'name' => $name,
+                'description' => null,
+                'created_by_user_id' => 1,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ],
+        );
+        return (int) Capsule::table('principals')->insertGetId([
+            'type' => 'group',
+            'group_id' => $groupId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+    }
+}
 
 // ----- Sniff -----------------------------------------------------------------
 
@@ -408,6 +436,178 @@ describe('MediaArchiveService::list', function (): void {
     it('clamps perPage to PER_PAGE_MAX', function (): void {
         $query = new ListMediaQuery(perPage: 999_999);
         expect($query->perPage())->toBe(ListMediaQuery::PER_PAGE_MAX);
+    });
+
+    it('scopes to principalIds when set: matches agent.media whose agent.principal_id is in the list', function (): void {
+        // Three principals: one user-principal for the caller, two
+        // group-principals. Three agents, each owned by a different
+        // principal. Filter on the two group principals must skip the
+        // user-owned agent's media.
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+
+            $callerId = bootAuthLayer()->register('principal-filter@example.com', 'Password1!', 'Owner');
+            $userPrincipalId = createUserPrincipalPublic($callerId);
+            $groupPrincipalAId = seedGroupPrincipal(901, 'PF Group A');
+            $groupPrincipalBId = seedGroupPrincipal(902, 'PF Group B');
+
+            $userAgent = Agent::create([
+                'principal_id' => $userPrincipalId,
+                'name' => 'pf-user-agent',
+                'llm_driver_config_id' => null,
+                'max_steps' => 10,
+                'is_active' => 1,
+            ]);
+            $groupAAgent = Agent::create([
+                'principal_id' => $groupPrincipalAId,
+                'name' => 'pf-group-a-agent',
+                'llm_driver_config_id' => null,
+                'max_steps' => 10,
+                'is_active' => 1,
+            ]);
+            $groupBAgent = Agent::create([
+                'principal_id' => $groupPrincipalBId,
+                'name' => 'pf-group-b-agent',
+                'llm_driver_config_id' => null,
+                'max_steps' => 10,
+                'is_active' => 1,
+            ]);
+
+            // Group A media (attached to groupAAgent)
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                agentId: $groupAAgent->id,
+            ));
+            // Group B media
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                agentId: $groupBAgent->id,
+            ));
+            // User-principal media (must be excluded when only the
+            // group principals are in scope)
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                agentId: $userAgent->id,
+            ));
+
+            $query = new ListMediaQuery(
+                agentOwnerUserId: $callerId,
+                principalIds: [$groupPrincipalAId, $groupPrincipalBId],
+            );
+            $page = $ctx['service']->list($query);
+            expect($page->total())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('scopes to principalIds: includes direct user uploads only when the user-principal is in the list', function (): void {
+        // Direct uploads (user_id set, agent_id null) are tied to the
+        // caller's user-principal. They must show up only when the
+        // user-principal is included in principalIds — otherwise the
+        // user accidentally sees their own uploads under every group
+        // chip, which would defeat the per-group scoping.
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+
+            $callerId = bootAuthLayer()->register('pf-uploads@example.com', 'Password1!', 'Uploader');
+            $userPrincipalId = createUserPrincipalPublic($callerId);
+            $groupPrincipalId = seedGroupPrincipal(903, 'PF Uploads Group');
+
+            // Direct upload by the caller (user_id = $callerId, agent_id = null).
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                userId: $callerId,
+                uploadSource: 'upload',
+            ));
+
+            // Group-scoped query — caller asked for a specific group
+            // only; the user-principal is NOT in principalIds.
+            $groupOnly = new ListMediaQuery(
+                agentOwnerUserId: $callerId,
+                principalIds: [$groupPrincipalId],
+            );
+            expect($ctx['service']->list($groupOnly)->total())->toBe(0);
+
+            // Now include the user-principal — the upload surfaces.
+            $withUser = new ListMediaQuery(
+                agentOwnerUserId: $callerId,
+                principalIds: [$userPrincipalId, $groupPrincipalId],
+            );
+            expect($ctx['service']->list($withUser)->total())->toBe(1);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
+    it('falls back to the agentOwnerUserId ownership union when principalIds is null (legacy behaviour)', function (): void {
+        // No `?principal_id=` requested — the legacy `?ownership=mine`
+        // semantic must still work so older plugin versions don't break.
+        // The caller uploads directly, and the same caller's
+        // user-principal owns a second agent whose media also surfaces.
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+
+            $callerId = bootAuthLayer()->register('pf-legacy@example.com', 'Password1!', 'Legacy');
+            $userPrincipalId = createUserPrincipalPublic($callerId);
+            $otherPrincipalId = seedGroupPrincipal(904, 'PF Legacy Other');
+            $ownAgent = Agent::create([
+                'principal_id' => $userPrincipalId,
+                'name' => 'pf-legacy-own',
+                'llm_driver_config_id' => null,
+                'max_steps' => 10,
+                'is_active' => 1,
+            ]);
+            $otherAgent = Agent::create([
+                'principal_id' => $otherPrincipalId,
+                'name' => 'pf-legacy-other',
+                'llm_driver_config_id' => null,
+                'max_steps' => 10,
+                'is_active' => 1,
+            ]);
+
+            // Direct upload by the caller.
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                userId: $callerId,
+                uploadSource: 'upload',
+            ));
+            // Media attached to the caller's own agent.
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                agentId: $ownAgent->id,
+            ));
+            // Media attached to an unrelated group principal — must NOT
+            // surface under the legacy ownership union.
+            $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+                agentId: $otherAgent->id,
+            ));
+
+            $page = $ctx['service']->list(new ListMediaQuery(agentOwnerUserId: $callerId));
+            expect($page->total())->toBe(2);
+        } finally {
+            $ctx['restore']();
+        }
     });
 });
 
