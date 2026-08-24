@@ -169,25 +169,7 @@ final class MediaArchiveService
         if ($query->agentId !== null) {
             $builder->where('agent_id', $query->agentId);
         }
-        // Scope filter — three modes in priority order:
-        //   1. principalIds (dashboard-style ALL / Mine / Group A / ...):
-        //      media attached to agents in any of the listed principals,
-        //      plus direct uploads by the caller but only when the caller's
-        //      user-principal is included. The controller has already
-        //      intersected the list with `visiblePrincipalIds`, so the
-        //      service trusts every value.
-        //   2. agentOwnerUserId (legacy `?ownership=mine`): uploads by the
-        //      caller OR media attached to agents owned by the caller's
-        //      user-principal. Kept for back-compat with older plugin
-        //      versions that don't send `?principal_id=`.
-        //   3. userId (direct callers / tests): plain `WHERE user_id = N`.
-        if ($query->principalIds !== null && $query->principalIds !== []) {
-            $this->applyPrincipalIdScope($builder, $query);
-        } elseif ($query->agentOwnerUserId !== null) {
-            $this->applyLegacyOwnershipScope($builder, $query);
-        } elseif ($query->userId !== null) {
-            $builder->where('user_id', $query->userId);
-        }
+        $this->applyOwnerScope($builder, $query);
         if ($query->pluginSlug !== null) {
             $builder->where('plugin_slug', $query->pluginSlug);
         }
@@ -293,6 +275,38 @@ final class MediaArchiveService
                 ->select('id')
                 ->whereIn('principal_id', $principalIds));
         });
+    }
+
+    /**
+     * Dispatch the ownership filter — three modes in priority order:
+     *   1. principalIds (dashboard-style ALL / Mine / Group A / ...):
+     *      media attached to agents in any of the listed principals,
+     *      plus direct uploads by the caller but only when the caller's
+     *      user-principal is included. The controller has already
+     *      intersected the list with `visiblePrincipalIds`, so the
+     *      service trusts every value.
+     *   2. agentOwnerUserId (legacy `?ownership=mine`): uploads by the
+     *      caller OR media attached to agents owned by the caller's
+     *      user-principal. Kept for back-compat with older plugin
+     *      versions that don't send `?principal_id=`.
+     *   3. userId (direct callers / tests): plain `WHERE user_id = N`.
+     *
+     * Extracted from {@see list()} to keep the dispatch under the
+     * S3776 cognitive-complexity budget; each branch has its own helper.
+     */
+    private function applyOwnerScope(Builder $builder, ListMediaQuery $query): void
+    {
+        if ($query->principalIds !== null && $query->principalIds !== []) {
+            $this->applyPrincipalIdScope($builder, $query);
+            return;
+        }
+        if ($query->agentOwnerUserId !== null) {
+            $this->applyLegacyOwnershipScope($builder, $query);
+            return;
+        }
+        if ($query->userId !== null) {
+            $builder->where('user_id', $query->userId);
+        }
     }
 
     /**
