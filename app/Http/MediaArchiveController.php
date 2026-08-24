@@ -148,82 +148,17 @@ final class MediaArchiveController
     private function validateUpdatableFields(array $body): ?JsonResponse
     {
         $messages = [
-            $this->validateFilenameField($body),
-            $this->validateArrayField($body, 'tags', 'tags must be an array of strings.'),
-            $this->validateArrayField($body, 'metadata', 'metadata must be an object.'),
-            $this->validateStringField($body, 'prompt', 'prompt must be a string.'),
-            $this->validateStringField($body, 'markdown_content', 'markdown_content must be a string.'),
-            $this->validateBoolField($body, 'public_access_enabled', 'public_access_enabled must be a boolean.'),
+            MediaArchiveUpdateValidator::validateFilename($body),
+            MediaArchiveUpdateValidator::validateArray($body, 'tags', 'tags must be an array of strings.'),
+            MediaArchiveUpdateValidator::validateArray($body, 'metadata', 'metadata must be an object.'),
+            MediaArchiveUpdateValidator::validateString($body, 'prompt', 'prompt must be a string.'),
+            MediaArchiveUpdateValidator::validateString($body, 'markdown_content', 'markdown_content must be a string.'),
+            MediaArchiveUpdateValidator::validateBool($body, 'public_access_enabled', 'public_access_enabled must be a boolean.'),
         ];
         foreach ($messages as $message) {
             if ($message !== null) {
                 return $this->badRequest($message);
             }
-        }
-        return null;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function validateFilenameField(array $body): ?string
-    {
-        if (!array_key_exists('filename', $body)) {
-            return null;
-        }
-        $filename = $body['filename'];
-        if ($filename !== null && (!is_string($filename) || strlen($filename) > 255)) {
-            return 'filename must be a string up to 255 characters.';
-        }
-        return null;
-    }
-
-    /**
-     * Shared validator for tags and metadata: both reject non-null
-     * non-array payloads.
-     *
-     * @param array<string, mixed> $body
-     */
-    private function validateArrayField(array $body, string $field, string $errorMessage): ?string
-    {
-        if (!array_key_exists($field, $body)) {
-            return null;
-        }
-        $value = $body[$field];
-        if ($value !== null && !is_array($value)) {
-            return $errorMessage;
-        }
-        return null;
-    }
-
-    /**
-     * Shared validator for prompt and markdown_content: both reject
-     * non-null non-string payloads.
-     *
-     * @param array<string, mixed> $body
-     */
-    private function validateStringField(array $body, string $field, string $errorMessage): ?string
-    {
-        if (!array_key_exists($field, $body)) {
-            return null;
-        }
-        $value = $body[$field];
-        if ($value !== null && !is_string($value)) {
-            return $errorMessage;
-        }
-        return null;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function validateBoolField(array $body, string $field, string $errorMessage): ?string
-    {
-        if (!array_key_exists($field, $body)) {
-            return null;
-        }
-        if (!is_bool($body[$field])) {
-            return $errorMessage;
         }
         return null;
     }
