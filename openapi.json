@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.17.0-51-g2751280"
+        "version": "0.17.0-69-gd5f3007"
     },
     "servers": [
         {
@@ -2268,7 +2268,20 @@
                     "Media"
                 ],
                 "summary": "Index MediaArchive",
-                "parameters": [],
+                "parameters": [
+                    {
+                        "name": "principal_id",
+                        "in": "query",
+                        "description": "Repeatable principal id to scope the listing by. Intersected with the caller's visible principals server-side; out-of-scope ids are silently dropped. Used by the Media Archive plugin's `ALL / My Media / Group X` chip row. Use the `principal_id[]=…` array-bracket form so repeated keys are preserved through PHP parse_str.",
+                        "required": false,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer"
+                            }
+                        }
+                    }
+                ],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

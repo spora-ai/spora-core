@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
@@ -44,6 +45,24 @@ final class MediaArchiveController
         private readonly array $config = [],
     ) {}
 
+    /**
+     * GET /api/v1/media — paginated list with filters.
+     *
+     * `?principal_id[]=` is the dashboard-style scope filter consumed by
+     * the Media Archive plugin's `ALL / My Media / Group X` chip row.
+     * Repeated keys (the array-bracket form so PHP's parse_str preserves
+     * every value) carry principal ids the caller wants to scope to.
+     * The controller intersects the values with the caller's
+     * `PrincipalResolver::visiblePrincipalIds()` so an out-of-scope id
+     * is silently dropped — typo tolerance + existence-hiding in one.
+     */
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'Repeatable principal id to scope the listing by. Intersected with the caller\'s visible principals server-side; out-of-scope ids are silently dropped. Used by the Media Archive plugin\'s `ALL / My Media / Group X` chip row. Use the `principal_id[]=…` array-bracket form so repeated keys are preserved through PHP parse_str.',
+        schema: new OA\Schema(type: 'array', items: new OA\Items(type: 'integer')),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
