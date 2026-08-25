@@ -121,6 +121,7 @@ use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaAssetReader;
@@ -591,12 +592,20 @@ final class ContainerDefinitions
 
             MediaArchiveService::class => static function (ContainerInterface $c): MediaArchiveService {
                 return new MediaArchiveService(
-                    $c->get(AssetStore::class),
+                    $c->get(MediaArchiveIngestPipeline::class),
+                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
+                );
+            },
+
+            MediaArchiveIngestPipeline::class => static function (ContainerInterface $c): MediaArchiveIngestPipeline {
+                return new MediaArchiveIngestPipeline(
+                    $c->get(MediaIngestDecoder::class),
                     $c->get(MediaArchiveUrlResolver::class),
                     $c->get(MimeSniffer::class),
                     $c->get(MetadataExtractor::class),
+                    $c->get(AssetStore::class),
                     $c->get(MediaConverterRegistry::class),
-                    $c->get(MediaIngestDecoder::class),
+                    $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
                 );
             },
 

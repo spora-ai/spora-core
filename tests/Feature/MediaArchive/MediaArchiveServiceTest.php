@@ -27,6 +27,7 @@ use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveException;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
@@ -928,14 +929,15 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
                 $ctx['sniffer'],
                 $ctx['logger'],
             );
-            $service = new MediaArchiveService(
-                $rejectingStore,
+            $pipeline = new MediaArchiveIngestPipeline(
+                new MediaIngestDecoder(),
                 $resolver,
                 $ctx['sniffer'],
                 $ctx['metadata'],
+                $rejectingStore,
                 \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
-                new MediaIngestDecoder(),
             );
+            $service = new MediaArchiveService($pipeline);
             $png = base64_decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
                 strict: true,

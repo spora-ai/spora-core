@@ -349,15 +349,16 @@ function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMa
         100 * 1024 * 1024,
     );
 
-    return new \Spora\Services\MediaArchive\MediaArchiveService(
-        new AutoAssetStore($database, $local, 1_048_576),
+    $pipeline = new \Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
+        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
         $resolver,
         $sniffer,
         $metadata,
+        new AutoAssetStore($database, $local, 1_048_576),
         $registry,
-        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
         $logger,
     );
+    return new \Spora\Services\MediaArchive\MediaArchiveService($pipeline);
 }
 
 test('PDF upload: parser returns text → markdown_content populated → LLM gets the text', function (): void {

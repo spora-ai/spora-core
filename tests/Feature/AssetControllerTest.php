@@ -18,6 +18,7 @@ use Spora\Http\AssetController;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
@@ -58,20 +59,23 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
 
     $sniffer = new MimeSniffer();
     $logger  = new \Psr\Log\NullLogger();
-    $archive = new MediaArchiveService(
-        $assetStore,
-        new MediaArchiveUrlResolver(
-            new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
-            $sniffer,
-            $logger,
-            true,
-            100 * 1024 * 1024,
-        ),
+    $resolver = new MediaArchiveUrlResolver(
+        new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
+        $sniffer,
+        $logger,
+        true,
+        100 * 1024 * 1024,
+    );
+    $pipeline = new MediaArchiveIngestPipeline(
+        new MediaIngestDecoder(),
+        $resolver,
         $sniffer,
         new MetadataExtractor($logger, false),
+        $assetStore,
         \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
-        new MediaIngestDecoder(),
+        $logger,
     );
+    $archive = new MediaArchiveService($pipeline);
 
     // Auth mock — by default, the test requester is treated as an admin
     // so the existing tests (which don't set up an owning user) still

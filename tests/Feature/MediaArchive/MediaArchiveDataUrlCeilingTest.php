@@ -7,6 +7,7 @@ use Psr\Log\NullLogger;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\MediaArchive\MediaArchiveException;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
@@ -46,15 +47,16 @@ function mediumblobTestArchiveService(AssetStore $store): MediaArchiveService
     // on the bare Mockery container and the parallel runner trips over
     // `Mockery_…_ContainerInterface::get(), but no expectations were specified`.
     MediaConverterDiscovery::reset();
-    return new MediaArchiveService(
-        $store,
+    $pipeline = new MediaArchiveIngestPipeline(
+        new MediaIngestDecoder(),
         $resolver,
         $sniffer,
         new MetadataExtractor($logger, false),
+        $store,
         new MediaConverterRegistry(M::mock(Psr\Container\ContainerInterface::class)),
-        new MediaIngestDecoder(),
         $logger,
     );
+    return new MediaArchiveService($pipeline);
 }
 
 test('data_url mode payload under DATA_URL_MAX_BYTES is accepted', function (): void {

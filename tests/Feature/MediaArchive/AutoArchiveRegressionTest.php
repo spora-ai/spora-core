@@ -11,6 +11,7 @@ use Psr\Log\NullLogger;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
@@ -100,15 +101,16 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $store    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $container = M::mock(\Psr\Container\ContainerInterface::class);
-    $service  = new MediaArchiveService(
-        $store,
+    $pipeline = new MediaArchiveIngestPipeline(
+        new MediaIngestDecoder(),
         $resolver,
         $sniffer,
         $meta,
+        $store,
         new MediaConverterRegistry($container),
-        new MediaIngestDecoder(),
         $logger,
     );
+    $service  = new MediaArchiveService($pipeline);
 
     $asset = $service->ingest(new MediaIngestRequest(
         url: 'https://cdn.example/song.mp3',

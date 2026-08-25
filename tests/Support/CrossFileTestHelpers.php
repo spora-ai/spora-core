@@ -270,17 +270,20 @@ if (!function_exists('makeMediaArchiveService')) {
             (int) ($overrides['maxPromoteBytes'] ?? 100 * 1024 * 1024),
         );
 
-        $service = new Spora\Services\MediaArchive\MediaArchiveService(
-            $ctx['assetStore'],
+        $pipeline = new Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
+            new Spora\Services\MediaArchive\MediaIngestDecoder(),
             $resolver,
             $ctx['sniffer'],
             $ctx['metadata'],
+            $ctx['assetStore'],
             Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
-            new Spora\Services\MediaArchive\MediaIngestDecoder(),
         );
+
+        $service = new Spora\Services\MediaArchive\MediaArchiveService($pipeline);
 
         return [
             'service'    => $service,
+            'pipeline'   => $pipeline,
             'assetStore' => $ctx['assetStore'],
             'sniffer'    => $ctx['sniffer'],
             'metadata'   => $ctx['metadata'],
