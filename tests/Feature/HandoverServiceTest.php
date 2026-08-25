@@ -80,7 +80,7 @@ describe('HandoverService::handover', function (): void {
         $newTask->user_prompt = 'ctx';
 
         $orchestrator->allows('start')
-            ->with($targetAgentId, 'ctx', 7, $source->id)
+            ->with($targetAgentId, 'ctx', 7, $source->id, null, [], $userId)
             ->andReturn($newTask);
 
         $returned = $service->handover(

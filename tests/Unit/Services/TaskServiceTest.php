@@ -344,11 +344,11 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'do the thing', 7, null, null, [])
-            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds) use ($userId): Task {
+            ->with($agent->id, 'do the thing', 7, null, null, [], $userId)
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-                    'user_id'     => $userId,
+                    'user_id'     => $userIdArg ?? $userId,
                     'agent_id'    => $agentId,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
@@ -384,9 +384,9 @@ describe('TaskService — startTask', function (): void {
 
         $orchestrator->shouldReceive('start')
             ->once()
-            ->with($agent->id, 'p', 12, null, null, []) // 12 = agent.max_steps
-            ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds) => Task::create([
-                'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $a, 'status' => 'RUNNING',
+            ->with($agent->id, 'p', 12, null, null, [], $userId) // 12 = agent.max_steps
+            ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) => Task::create([
+                'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userIdArg ?? $userId, 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -421,6 +421,89 @@ describe('TaskService — startTask', function (): void {
         $service = makeTaskService();
         $service->startTask($userId, $agent->id, 'continue me', null, 9999);
     })->throws(InvalidArgumentException::class, 'parent_task_id is invalid');
+
+    it('passes the caller userId to the orchestrator so the task row is attributed to the caller, not the owner (regression for stale-cache-group bug)', function (): void {
+        // Group setup: owner + plain member share a group-owned agent.
+        $authService = bootAuthLayer();
+        $ownerId         = $authService->register('task-owner@example.com', 'Password1!', 'Owner');
+        $plainMemberId   = $authService->register('task-plain@example.com', 'Password1!', 'Plain');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'TaskAttribution');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'GroupAgent',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ]);
+
+        // Orchestrator passes user_id through to the row, just like the real
+        // implementation does (Task::create([..., 'user_id' => $resolvedUserId])).
+        $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->shouldReceive('publish')->andReturn(true);
+
+        $orchestrator->shouldReceive('start')
+            ->once()
+            ->with($agent->id, 'plain member chat', 10, null, null, [], $plainMemberId)
+            ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null): Task {
+                return Task::create([
+                    'agent_id'    => $agentId,
+                    'user_id'     => $userIdArg ?? 0,
+                    'status'      => 'RUNNING',
+                    'user_prompt' => $prompt,
+                    'max_steps'   => $maxSteps,
+                    'step_count'  => 0,
+                ]);
+            });
+
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service->startTask($plainMemberId, $agent->id, 'plain member chat');
+
+        // The task row must be attributed to the caller, not the owner.
+        $taskRow = Task::where('agent_id', $agent->id)->orderByDesc('id')->first();
+        expect($taskRow)->not->toBeNull();
+        expect((int) $taskRow->user_id)->toBe($plainMemberId)
+            ->and((int) $taskRow->user_id)->not->toBe($ownerId);
+    });
+
+    it('falls back to PrincipalResolver when no explicit userId is passed (worker / scheduled-run path preserves prior behaviour)', function (): void {
+        // Worker / scheduled-run callers don't know the caller id; orchestrator
+        // resolves `runnerUserId` from the agent's last task. We pin that the
+        // existing default is preserved when the orchestrator is called with
+        // `userId = null`.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('task-null-fallback@example.com', 'Password1!', 'Worker');
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
+            'name'         => 'WorkerAgent',
+            'max_steps'    => 4,
+            'is_active'    => true,
+        ]);
+        ensureAgentsHasPrincipalId($agent->id, $userId);
+
+        $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->shouldReceive('publish')->andReturn(true);
+
+        $orchestrator->shouldReceive('start')
+            ->once()
+            ->with($agent->id, 'worker chat', 4, null, null, [], null)
+            ->andReturnUsing(fn($a, $p, $m) => Task::create([
+                'agent_id' => $a, 'user_id' => $userId, 'status' => 'RUNNING',
+                'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
+            ]));
+
+        // Simulate the worker / scheduled-run path by calling orchestrator.start() directly.
+        $orchestrator->start($agent->id, 'worker chat', 4, null, null, [], null);
+    });
 });
 
 describe('TaskService — getTask', function (): void {

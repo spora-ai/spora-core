@@ -65,6 +65,7 @@ final class HandoverService implements HandoverServiceInterface
             userPrompt: $summary,
             maxSteps: (int) ($targetAgent->max_steps ?? 10),
             parentTaskId: $source->id,
+            userId: $userId,
         );
 
         $source->update([

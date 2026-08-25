@@ -28,19 +28,25 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 {
     private const DB_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
+    public const VISIBILITY_READ = true;
+    public const VISIBILITY_WRITE = false;
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
         ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
     private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
 
     public function getRunsForAgent(int $agentId, int $userId): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_READ);
         if ($agent === null) {
             return null;
         }
@@ -56,7 +62,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     public function createRun(int $agentId, int $userId, array $data): array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             throw new AgentNotFoundException('Agent not found');
         }
@@ -115,7 +121,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     public function getRun(int $runId, int $agentId, int $userId): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_READ);
         if ($agent === null) {
             return null;
         }
@@ -130,7 +136,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     public function updateRun(int $runId, int $agentId, int $userId, array $data): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         $run = $agent !== null ? $this->findRun($runId, $agentId) : null;
 
         if ($agent === null || $run === null) {
@@ -221,7 +227,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     public function deleteRun(int $runId, int $agentId, int $userId): bool
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             return false;
         }
@@ -238,7 +244,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     public function triggerRun(int $runId, int $agentId, int $userId): array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             throw new AgentNotFoundException('Agent not found');
         }
@@ -355,18 +361,23 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         return ['scheduled_run' => $this->resource($run), 'task_id' => $task->id];
     }
 
-    private function findAgent(int $id, int $userId): ?Agent
+    private function findAgent(int $id, int $userId, bool $forRead): ?Agent
     {
         // Migration 0067: an agent is owned by a principal, not a user.
-        // We accept the agent if the caller can act as one of its principals.
+        // `forRead` widens visibility to any principal-membership row so a
+        // plain group `member` can list + read the schedule; `forWrite`
+        // keeps the destructive / configuration paths under the strict
+        // owner-or-admin gate.
         $agent = Agent::find($id);
         if ($agent === null) {
             return null;
         }
-        if (!$this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id)) {
-            return null;
+
+        if ($forRead) {
+            return $this->principalResolver->isVisibleTo($id, $userId) ? $agent : null;
         }
-        return $agent;
+
+        return $this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id) ? $agent : null;
     }
 
     private function findRun(int $id, int $agentId): ?ScheduledRun

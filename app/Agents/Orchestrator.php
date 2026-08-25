@@ -129,18 +129,32 @@ final class Orchestrator implements OrchestratorInterface
 
     // Public API
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task
     {
         Agent::findOrFail($agentId);
 
         $taskData = $runId !== null ? ['run_id' => $runId] : [];
 
-        $resolver = $this->principalResolver ?? new PrincipalResolver();
-        $runnerUserId = $resolver->runnerUserId($agentId) ?? $this->authService?->currentUserId();
+        // `tasks.user_id` has two meanings:
+        // - task attribution (who triggered the chat) → used by the UI to
+        //   decide which tasks show up under "My tasks" and to gate
+        //   per-task actions like approve / reject / abort / destroy
+        // - credential ownership → used by the orchestrator to pick whose
+        //   LLM driver config + tool overrides to load on each tick
+        // For interactive callers (`POST /tasks`) the HTTP controller knows
+        // exactly who triggered the request, so it passes `$userId` and we
+        // skip the runner fallback. Worker / scheduled-run paths leave it
+        // null and fall through to the runner (most-recent user) so the
+        // LLM still runs under a valid principal.
+        $resolvedUserId = $userId;
+        if ($resolvedUserId === null) {
+            $resolver = $this->principalResolver ?? new PrincipalResolver();
+            $resolvedUserId = $resolver->runnerUserId($agentId) ?? $this->authService?->currentUserId();
+        }
 
         $task = Task::create([
             'agent_id'      => $agentId,
-            'user_id'       => $runnerUserId,
+            'user_id'       => $resolvedUserId,
             'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
             'user_prompt'   => Utf8Sanitizer::scrubString($userPrompt),
             'step_count'    => 0,

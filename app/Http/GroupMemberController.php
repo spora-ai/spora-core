@@ -240,13 +240,18 @@ final class GroupMemberController
         ];
     }
 
+    /**
+     * Read side of the member list: every group member can see who's in
+     * the group alongside them, regardless of role (owner / admin / member).
+     * Management (add / change-role / remove) stays gated to admin OR role ∈
+     * {owner} in {@see requireCallerAndWriteAccess()} below.
+     */
     private function callerCanReadGroup(int $groupId, int $userId): bool
     {
         if ($this->authService->isAdmin()) {
             return true;
         }
-        $role = GroupService::fetchCallerRole($groupId, $userId);
-        return $role === GroupMembership::ROLE_OWNER || $role === GroupMembership::ROLE_ADMIN;
+        return GroupService::fetchCallerRole($groupId, $userId) !== null;
     }
 
     /**

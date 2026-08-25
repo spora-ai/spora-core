@@ -71,6 +71,39 @@ describe('GroupMemberController', function (): void {
         expect($body['data']['members'][0]['email'])->toBe('gmc1b-name@example.com');
     });
 
+    it('index returns members for a plain group member (regression for stale-cache-group bug)', function (): void {
+        // Group + principal + owner
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-memb-owner@example.com', GMC_TEST_PASSWORD, 'Owner User');
+        $group  = $groupService->createGroup($ownerId, 'GroupForMembers');
+
+        // Add a plain member (not owner / not admin)
+        $memberId = bootAuth($auth, 'gmc-memb-plain@example.com', GMC_TEST_PASSWORD, 'Plain Member');
+        $groupService->addMember((int) $group->id, (int) $memberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        // Sign in as that plain member and ask for the membership list
+        simulateLoggedInSession($memberId, 'gmc-memb-plain@example.com');
+        $response = $controller->index((int) $group->id);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect(count($body['data']['members']))->toBe(2);
+        $roles = array_column($body['data']['members'], 'role');
+        expect($roles)->toContain('owner');
+        expect($roles)->toContain('member');
+    });
+
+    it('index still returns 404 for a non-member (caller has zero principal rows for the group)', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-memb-stranger-owner@example.com', GMC_TEST_PASSWORD);
+        $group  = $groupService->createGroup($ownerId, 'StrangerTest');
+
+        $strangerId = bootAuth($auth, 'gmc-memb-stranger@example.com', GMC_TEST_PASSWORD);
+        simulateLoggedInSession($strangerId, 'gmc-memb-stranger@example.com');
+
+        $response = $controller->index((int) $group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
     it('returns 401 on store when not authenticated', function (): void {
         [$controller] = makeGroupMemberController();
         $request = jsonRequest('POST', '/api/v1/groups/1/members', ['user_id' => 1, 'role' => 'member']);

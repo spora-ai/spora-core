@@ -99,7 +99,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $steps = $maxSteps ?? $agent->max_steps;
-        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds);
+        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
 
         $resource = $this->taskResource($task);
         $this->mercure->publish($task->id, $userId, $resource);

@@ -100,3 +100,19 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
         }
     });
 });
+
+describe('GET /api/v1/llm-configs/global — read-side middleware (regression for stale-cache-group bug)', function (): void {
+    it('registers AuthMiddleware + CsrfMiddleware only (no AdminMiddleware)', function (): void {
+        // Non-admin users (incl. plain group members) need to read global
+        // LLM configs to choose a default at agent-creation time. The
+        // write paths (POST /llm-configs, /llm-configs/{id}/set-default)
+        // still admin-gate other behaviour downstream.
+        $routes = routeRegCollectRoutes([]);
+
+        $middleware = routeRegMiddleware($routes, 'GET', '/api/v1/llm-configs/global');
+        expect($middleware)->not->toBeNull();
+        expect($middleware)->toContain(Spora\Http\Middleware\AuthMiddleware::class);
+        expect($middleware)->toContain(Spora\Http\Middleware\CsrfMiddleware::class);
+        expect($middleware)->not->toContain(Spora\Http\Middleware\AdminMiddleware::class);
+    });
+});

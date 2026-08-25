@@ -310,7 +310,12 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/llm-drivers', [LLMConfigController::class, 'drivers'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/llm-configs', [LLMConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/llm-configs', [LLMConfigController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', '/api/v1/llm-configs/global', [LLMConfigController::class, 'globalConfigs'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        // GET /llm-configs/global is intentionally NOT admin-gated: the same
+        // payload is used by `LLMConfigController::index()` (which every
+        // authenticated caller already accesses) for default-config resolution
+        // on the agent composer. The write/management side stays admin-only via
+        // `POST /llm-configs/.../set-default` + `POST /llm-configs` semantics.
+        $r->addRoute('GET', '/api/v1/llm-configs/global', [LLMConfigController::class, 'globalConfigs'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_LLM_CONFIGS_ID, [LLMConfigController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);

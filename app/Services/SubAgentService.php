@@ -98,6 +98,7 @@ final class SubAgentService implements SubAgentServiceInterface
                 userPrompt: $prompt,
                 maxSteps: (int) ($targetAgent->max_steps ?? 10),
                 parentTaskId: $parent->id,
+                userId: $userId,
             );
         } catch (Throwable $e) {
             $recovered = Task::where('parent_task_id', $parent->id)
