@@ -213,6 +213,13 @@ final class ContainerDefinitions
                     'db_password'         => null,
                     'key_path'            => null,
                     'allow_registration'  => true,
+                    // Whether non-admin users can hit `POST /api/v1/groups`.
+                    // When `true` (default), every authenticated caller can
+                    // create groups — PATCH/DELETE stay admin-only and the
+                    // per-group owner/admin role check still governs them.
+                    // Set `SPORA_ALLOW_GROUP_CREATION=false` to restore the
+                    // admin-only create model.
+                    'allow_group_creation' => true,
                     'app_env'             => 'production',
                     'log_level'           => 'WARNING',
                     'log_path'            => $paths->storage('spora.log'),
@@ -359,6 +366,7 @@ final class ContainerDefinitions
         $apply('SPORA_SQLITE_BUSY_TIMEOUT', 'sqlite_busy_timeout', static fn($v) => (int) $v);
         $apply('SPORA_APP_ENV', 'app_env', static fn($v) => $v);
         $apply('SPORA_ALLOW_REGISTRATION', 'allow_registration', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $apply('SPORA_ALLOW_GROUP_CREATION', 'allow_group_creation', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_LOG_LEVEL', 'log_level', static fn($v) => $v);
         $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
         $apply('SPORA_SYNC_MODE', 'worker_mode', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));

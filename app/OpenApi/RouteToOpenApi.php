@@ -31,10 +31,14 @@ use Spora\Http\Middleware\CsrfMiddleware;
  */
 final class RouteToOpenApi
 {
-    public function build(): OpenApi
+    public function build(array $config = []): OpenApi
     {
         $collector = new RouteSpecCollector();
-        RouteDefinitions::register($collector);
+        // Pass the resolved config so {@see RouteDefinitions::register()}
+        // picks the open variant for routes whose middleware depends on
+        // a runtime flag (e.g. POST /api/v1/groups honours
+        // `allow_group_creation`).
+        RouteDefinitions::register($collector, $config);
 
         $openapi = new OpenApi([]);
         $openapi->openapi = OpenApi::VERSION_3_0_0;

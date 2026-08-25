@@ -486,3 +486,54 @@ describe('GroupController success paths', function (): void {
         expect($response->getStatusCode())->toBe(200);
     });
 });
+
+describe('GroupController index membership filter (regression for stale-cache bug)', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+    });
+
+    it('returns 200 with zero groups when a non-admin belongs to none', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+
+        // Owner creates a private group the non-admin will not be a member of.
+        $ownerId = bootAuth($auth, 'gimf-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gimf-owner@example.com');
+        $groupService->createGroup($ownerId, 'OwnerGroup');
+        clearSession();
+
+        // Non-admin user registered fresh — has no group memberships.
+        $nonAdminId = bootAuth($auth, 'gimf-nonadmin@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($nonAdminId, 'gimf-nonadmin@example.com');
+
+        $response = $controller->index();
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect(count($body['data']['groups']))->toBe(0);
+    });
+
+    it('returns only the caller\'s groups, not groups owned by other non-admin users', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+
+        // Owner creates "Other".
+        $ownerId = bootAuth($auth, 'gimf-other@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gimf-other@example.com');
+        $groupService->createGroup($ownerId, 'Other');
+        clearSession();
+
+        // Non-member creates "Mine" (so they belong to it, but never to "Other").
+        $nonAdminId = bootAuth($auth, 'gimf-mine@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($nonAdminId, 'gimf-mine@example.com');
+        $groupService->createGroup($nonAdminId, 'Mine');
+
+        $response = $controller->index();
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        $names = array_column($body['data']['groups'], 'name');
+        expect($names)->toContain('Mine');
+        expect($names)->not->toContain('Other');
+    });
+});

@@ -73,14 +73,14 @@ final class RouteDefinitions
     public const ROUTE_GROUPS_ID_LLM_CONFIGS_CID_SET_DEFAULT = self::ROUTE_GROUPS_ID_LLM_CONFIGS_CID . '/set-default';
     public const ROUTE_GROUPS_ID_PICTURE_IMAGE = self::ROUTE_GROUPS_ID . '/picture/image';
 
-    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r, array $config = []): void
     {
         self::registerCoreRoutes($r);
         self::registerAssetRoutes($r);
         self::registerPluginRoutes($r);
         self::registerAuthRoutes($r);
         self::registerAgentRoutes($r);
-        self::registerGroupRoutes($r);
+        self::registerGroupRoutes($r, $config);
         self::registerAgentPictureRoutes($r);
         self::registerToolRoutes($r);
         self::registerTaskRoutes($r);
@@ -168,12 +168,23 @@ final class RouteDefinitions
         $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
     }
 
-    private static function registerGroupRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    private static function registerGroupRoutes(MiddlewareRouteCollector | RouteSpecCollector $r, array $config = []): void
     {
         // Groups + members + principal-discovery. Group writes are admin-only;
         // member writes accept admin OR group-owner (the controller enforces
         // the owner branch via GroupService::fetchCallerRole).
-        $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        //
+        // POST opens up to every authenticated caller when
+        // `config#allow_group_creation` is true (default; env override
+        // `SPORA_ALLOW_GROUP_CREATION`). PATCH/DELETE stay admin-only —
+        // "create" is platform-wide governance, "modify" stays per-group
+        // RBAC. The SPA mirrors this via the `/api/v1/config` endpoint
+        // (`allow_group_creation`) so it knows whether to surface the
+        // Create-group button on MyGroupsPage.
+        $createMiddleware = ($config['allow_group_creation'] ?? true) === true
+            ? [AuthMiddleware::class, CsrfMiddleware::class]
+            : [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class];
+        $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], $createMiddleware);
         $r->addRoute('GET', self::ROUTE_GROUPS, [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_GROUPS_ID, [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
