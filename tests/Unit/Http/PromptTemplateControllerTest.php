@@ -10,7 +10,11 @@ use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\PromptTemplateController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
+use Spora\Models\GroupMembership;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\GroupService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\PromptTemplateService;
 
 function makePromptTemplateController(): array
@@ -269,5 +273,80 @@ describe('PromptTemplateController', function (): void {
 
         expect($response->getStatusCode())->toBe(404);
         expect(AgentPromptTemplate::find($template->id))->not->toBeNull();
+    });
+
+    it('index returns templates for a plain group member (regression for prompt-templates-404 bug)', function (): void {
+        // Owner creates the group + agent + one template.
+        $authService = bootAuthLayer();
+        $ownerId = $authService->register('pt-owner@example.com', TEMPLATE_TEST_PASSWORD, 'Owner');
+        $plainMemberId = $authService->register('pt-plain@example.com', TEMPLATE_TEST_PASSWORD, 'Plain');
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'PromptTemplateGroup');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'PT-GroupAgent',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ]);
+
+        AgentPromptTemplate::create([
+            'agent_id'        => $agent->id,
+            'name'            => 'Daily Report',
+            'prompt_template' => 'Generate a report for {{city}}',
+            'is_active'       => true,
+        ]);
+
+        // Sign in as the plain member and ask for the templates list.
+        simulateLoggedInSession($plainMemberId, 'pt-plain@example.com');
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
+        $request = jsonRequest('GET', "/api/v1/agents/{$agent->id}/templates");
+        $request->attributes->set('id', $agent->id);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['templates'])->toHaveCount(1);
+        expect($body['data']['templates'][0]['name'])->toBe('Daily Report');
+    });
+
+    it('store still denies a plain group member from creating a template (write-side gate)', function (): void {
+        // Owner creates the group + agent.
+        $authService = bootAuthLayer();
+        $ownerId = $authService->register('pt-w-owner@example.com', TEMPLATE_TEST_PASSWORD, 'Owner');
+        $plainMemberId = $authService->register('pt-w-plain@example.com', TEMPLATE_TEST_PASSWORD, 'Plain');
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'PromptTemplateWriteDeny');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'PT-WriteDenyAgent',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ]);
+
+        simulateLoggedInSession($plainMemberId, 'pt-w-plain@example.com');
+        [$controller, , , $authMiddleware] = makePromptTemplateController();
+        $body = json_encode(['name' => 'Plain attempt', 'prompt_template' => 'Hello']);
+        $request = jsonRequest('POST', "/api/v1/agents/{$agent->id}/templates", json_decode($body, true));
+        $request->attributes->set('id', $agent->id);
+        $response = callController($controller, 'store', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+        expect(AgentPromptTemplate::where('agent_id', $agent->id)->where('name', 'Plain attempt')->first())->toBeNull();
     });
 });
