@@ -213,7 +213,7 @@ Hard-delete the tool user settings row for the group principal.
 
 ## `GET /api/v1/groups/{id}/llm-configs`
 
-List `llm_driver_configurations` rows scoped to the group's group-principal. **Does not include** global configs (they live at `principal_id = null`) — use the existing `/api/v1/llm-configs/global` admin endpoint for those.
+List `llm_driver_configurations` rows scoped to the group's group-principal. **Does not include** global configs (they live at `principal_id = null`) — use the existing `/api/v1/llm-configs/global` endpoint for those.
 
 **Auth:** `callerCanSeeGroup`.
 
