@@ -47,9 +47,10 @@ final class ToolCallExecutor
         // would otherwise leave the gate stale and let the revoked tool run.
         // The snapshot is still used by {@see Orchestrator::buildToolDefinitions()}
         // for the LLM's offered tool set; here we trust the DB.
-        $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->all();
+        $currentEnabledClasses = AgentTool::where('agent_id', $agent->id)
+            ->pluck('tool_class')->all();
 
-        if (!in_array($toolClass, $enabledClasses, true)) {
+        if (!in_array($toolClass, $currentEnabledClasses, true)) {
             throw new ToolNotEnabledException(
                 "The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.",
             );
