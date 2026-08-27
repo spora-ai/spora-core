@@ -23,6 +23,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Tools\ToolInterface;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
+use Tests\Fixtures\StubOutputToolDisabledByDefaultOp;
 use Tests\Fixtures\StubOutputToolWithSchema;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
@@ -77,10 +78,11 @@ function resumeAuthSeedAgent(array $toolInstances): array
 
     foreach ($toolInstances as $instance) {
         $toolName = match (true) {
-            $instance instanceof StubOutputTool            => 'stub_output',
-            $instance instanceof StubOutputToolWithSchema  => 'stub_output_with_schema',
-            $instance instanceof StubInputTool             => 'stub_input',
-            default                                          => throw new InvalidArgumentException(
+            $instance instanceof StubOutputTool                    => 'stub_output',
+            $instance instanceof StubOutputToolDisabledByDefaultOp => 'stub_output_disabled_default',
+            $instance instanceof StubOutputToolWithSchema          => 'stub_output_with_schema',
+            $instance instanceof StubInputTool                     => 'stub_input',
+            default                                                 => throw new InvalidArgumentException(
                 'Unknown tool class: ' . get_class($instance),
             ),
         };
@@ -610,4 +612,182 @@ it('executeOrQueue re-loads enabledClasses so a mid-tick revocation is honoured'
     // passed the gate.
     expect(fn() => $executor->executeOrQueue($toolCall, $agent, $task))
         ->toThrow(Spora\Agents\Exceptions\ToolNotEnabledException::class, 'not enabled for this agent');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// 9. Operation-level default-disabled (no AgentToolOperationOverride row)
+// ---------------------------------------------------------------------------
+//
+// Exercises the fall-through branch in Orchestrator::isOperationEnabled():
+// no override exists, so resolution falls through to
+// `$toolInstance->isEnabledByDefault($operationName)`. With the fixture's
+// `#[ToolOperation(enabledByDefault: false)]`, the op is considered
+// disabled and the resume path rejects it.
+
+it('sync resume rejects when the operation is disabled by the tool default and no override row exists', function (): void {
+    [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputToolDisabledByDefaultOp()]);
+
+    $pendingTc = new DriverToolCall('call_disabled_default', 'stub_output_disabled_default', []);
+    $taskId = resumeAuthSeedPendingTask(
+        $userId,
+        $agentId,
+        [$pendingTc],
+        ['stub_output_disabled_default' => StubOutputToolDisabledByDefaultOp::class],
+    );
+
+    // No AgentToolOperationOverride inserted — the gate must fall through
+    // to the tool's `isEnabledByDefault()` and see `false`.
+
+    $executor = new ApprovedBatchExecutor(
+        orchestrator: makeResumeAuthOrchestrator([new StubOutputToolDisabledByDefaultOp()]),
+        workerMode: WorkerMode::Sync,
+        logger: new NullLogger(),
+    );
+
+    $executor->execute($taskId, [
+        ['provider_call_id' => 'call_disabled_default', 'arguments' => []],
+    ]);
+
+    $row = ToolCallModel::where('task_id', $taskId)
+        ->where('provider_call_id', 'call_disabled_default')
+        ->first();
+
+    expect($row->status)->toBe('REJECTED')
+        ->and($row->reject_reason)->toContain("operation 'default' of tool 'stub_output_disabled_default' was disabled")
+        ->and($row->result_content)->toBeNull();
+
+    $history = Spora\Models\TaskHistory::where('task_id', $taskId)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_disabled_default')
+        ->first();
+    expect($history)->not->toBeNull()
+        ->and($history->content)->toContain("operation 'default' of tool 'stub_output_disabled_default' was disabled")
+        ->and($history->content)->not->toContain('disabled_default_op_output_result');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// 10. Tool removed from the orchestrator's $toolInstances registry entirely
+// ---------------------------------------------------------------------------
+//
+// The plan claims: "Tool removed entirely from $toolInstances —
+// Orchestrator::resolveToolByName (line 699) throws
+// ToolNotRegisteredException, which propagates naturally." This test
+// documents that behaviour on the resume path: the whole resume fails
+// (not just the individual tool call), the task is marked FAILED with
+// RESUME_FAILED, and the exception propagates out of execute().
+//
+// This is a different disposition from a tool revocation (which
+// gracefully REJECTS the specific call). A plugin uninstall between
+// proposal and resume is an exceptional condition — the task can't
+// proceed and the operator must intervene.
+
+it('resume fails the entire task when the tool is no longer in the orchestrator registry', function (): void {
+    [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
+
+    $pendingTc = new DriverToolCall('call_removed', 'stub_output', []);
+    $taskId = resumeAuthSeedPendingTask(
+        $userId,
+        $agentId,
+        [$pendingTc],
+        ['stub_output' => StubOutputTool::class],
+    );
+
+    // Simulate a plugin uninstall: tool stays in agent_tools, but the
+    // orchestrator's $toolInstances no longer contains the tool class.
+    $executor = new ApprovedBatchExecutor(
+        orchestrator: makeResumeAuthOrchestrator([]),
+        workerMode: WorkerMode::Sync,
+        logger: new NullLogger(),
+    );
+
+    expect(fn() => $executor->execute($taskId, [
+        ['provider_call_id' => 'call_removed', 'arguments' => []],
+    ]))->toThrow(Spora\Agents\Exceptions\ToolNotRegisteredException::class, "No tool registered with name 'stub_output'.");
+
+    // The whole task is marked FAILED — distinct from the
+    // per-tool REJECTED disposition we use for agent_tools revocation.
+    $task = Task::find($taskId);
+    expect($task->status)->toBe('FAILED')
+        ->and($task->error_code)->toBe('RESUME_FAILED');
+
+    // The row stays PENDING_APPROVAL — no row update happened because
+    // the throw fired before the resume path's row-level helpers.
+    $row = ToolCallModel::where('task_id', $taskId)
+        ->where('provider_call_id', 'call_removed')
+        ->first();
+    expect($row->status)->toBe('PENDING_APPROVAL');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// 11. Re-enable the tool but the per-op override is still active
+// ---------------------------------------------------------------------------
+//
+// Tool re-add at the agent_tools level doesn't clear per-op overrides
+// stored in agent_tool_operation_overrides. If admin disables a specific
+// op (via override), then removes the tool, then re-adds the tool, the
+// override row persists. The resume path's op-level gate must still
+// fire — the re-add only restores tool-level access, not the disabled
+// op.
+
+it('sync resume rejects when the tool is re-added but the per-op override is still active', function (): void {
+    [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
+
+    $pendingTc = new DriverToolCall('call_persisted_override', 'stub_output', []);
+    $taskId = resumeAuthSeedPendingTask(
+        $userId,
+        $agentId,
+        [$pendingTc],
+        ['stub_output' => StubOutputTool::class],
+    );
+
+    // Step 1: admin disables the op via override.
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agentId,
+        'tool_class'                => StubOutputTool::class,
+        'operation'                 => 'default',
+        'enabled'                   => 0,
+        'default_requires_approval' => null,
+    ]);
+
+    // Step 2: admin removes the tool entirely.
+    AgentTool::where('agent_id', $agentId)
+        ->where('tool_class', StubOutputTool::class)
+        ->delete();
+
+    // Step 3: admin re-adds the tool — but the override row is still there.
+    AgentTool::insert([
+        'agent_id'   => $agentId,
+        'tool_class' => StubOutputTool::class,
+        'tool_name'  => 'stub_output',
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $executor = new ApprovedBatchExecutor(
+        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool()]),
+        workerMode: WorkerMode::Sync,
+        logger: new NullLogger(),
+    );
+
+    $executor->execute($taskId, [
+        ['provider_call_id' => 'call_persisted_override', 'arguments' => []],
+    ]);
+
+    $row = ToolCallModel::where('task_id', $taskId)
+        ->where('provider_call_id', 'call_persisted_override')
+        ->first();
+
+    // The tool-level check passes (tool is back in agent_tools), but the
+    // op-level override from step 1 is still active and gates the call.
+    expect($row->status)->toBe('REJECTED')
+        ->and($row->reject_reason)->toContain("operation 'default' of tool 'stub_output' was disabled")
+        ->and($row->result_content)->toBeNull();
+
+    $history = Spora\Models\TaskHistory::where('task_id', $taskId)
+        ->where('role', 'tool')
+        ->where('tool_call_id', 'call_persisted_override')
+        ->first();
+    expect($history)->not->toBeNull()
+        ->and($history->content)->toContain("operation 'default' of tool 'stub_output' was disabled")
+        ->and($history->content)->not->toContain('output_result');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
