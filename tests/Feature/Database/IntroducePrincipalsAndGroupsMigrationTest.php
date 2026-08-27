@@ -380,3 +380,184 @@ test('0067 migration rebuild preserves pre-existing indexes on settings tables',
     Capsule::schema()->drop('tool_user_settings');
     Capsule::schema()->rename('tool_user_settings_post0067', 'tool_user_settings');
 });
+
+test('0067 migration is idempotent — up() can be re-run against the post-0067 schema', function (): void {
+    // The Pest beforeEach already booted every migration including 0067,
+    // so the schema on entry is the post-0067 shape. The first up() call
+    // should be a no-op (every guard reports "exists"); the second up()
+    // exercises the same path again. On MariaDB this is the operator's
+    // recovery from the partial-state reported as errno 121 on
+    // fk_llm_driver_configurations_principal_id (the previous FK-add
+    // attempt had created the constraint, so the re-run used to error
+    // out trying to create it again).
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+
+    expect(fn() => $migration->up())->not()->toThrow(Throwable::class);
+    expect(fn() => $migration->up())->not()->toThrow(Throwable::class);
+
+    foreach (['llm_driver_configurations', 'tool_user_settings', 'principal_preferences'] as $t) {
+        expect(Capsule::schema()->hasColumn($t, 'user_id'))->toBeFalse("{$t} should not have user_id");
+        expect(Capsule::schema()->hasColumn($t, 'principal_id'))->toBeTrue("{$t} should have principal_id");
+    }
+    expect(Capsule::schema()->hasColumn('agents', 'user_id'))->toBeFalse();
+    expect(Capsule::schema()->hasColumn('agents', 'principal_id'))->toBeTrue();
+});
+
+test('0067 migration recovers from a partially-applied state on SQLite', function (): void {
+    // Simulate the operator's MariaDB partial state: the principal_id FK
+    // add step failed previously, so llm_driver_configurations has the
+    // column + index but no FK to principals. On SQLite ALTER TABLE
+    // cannot add or drop FKs, so the simulation drops the FK via a table
+    // rebuild (the same pattern the migration uses for the user_id
+    // drop). Re-running the migration must (a) detect the missing FK via
+    // foreignKeyExists() and add it, (b) detect the missing index via
+    // indexExists() — already added in the simulation, so this branch
+    // should be a no-op — and (c) keep the user_id drop a no-op since
+    // user_id is already gone after the first boot.
+
+    $conn = Capsule::connection();
+    $table = 'llm_driver_configurations';
+
+    // 1. Snapshot rows so we can restore them after the rebuild.
+    $rows = Capsule::table($table)->get()->all();
+
+    // 2. Read the current column structure and rebuild the CREATE TABLE
+    //    SQL without the principal_id → principals FK.
+    $columns = $conn->select("PRAGMA table_info('{$table}')");
+    $columnDefs = [];
+    foreach ($columns as $c) {
+        $isPk = ((int) $c->pk) > 0;
+        $dflt = ($c->dflt_value !== null && strtoupper((string) $c->dflt_value) !== 'NULL')
+            ? ' DEFAULT ' . $c->dflt_value
+            : '';
+        $columnDefs[] = sprintf(
+            '"%s" %s%s%s%s',
+            $c->name,
+            $c->type,
+            ($c->notnull && !$isPk ? ' NOT NULL' : ''),
+            $dflt,
+            ($isPk ? ' PRIMARY KEY' : ''),
+        );
+    }
+
+    $fks = $conn->select("PRAGMA foreign_key_list('{$table}')");
+    $fkDefs = [];
+    foreach ($fks as $fk) {
+        // Skip the principal_id FK we're simulating as missing.
+        if ($fk->from === 'principal_id') {
+            continue;
+        }
+        $key = $fk->id;
+        if (!isset($fkDefs[$key])) {
+            $fkDefs[$key] = ['table' => $fk->table, 'columns' => [], 'references' => []];
+        }
+        $fkDefs[$key]['columns'][] = $fk->from;
+        $fkDefs[$key]['references'][] = $fk->to;
+    }
+
+    $sql = "CREATE TABLE {$table} (\n  ";
+    $sql .= implode(",\n  ", $columnDefs);
+    foreach ($fkDefs as $def) {
+        $cols = implode(', ', array_map(static fn($c) => "\"{$c}\"", $def['columns']));
+        $refs = implode(', ', array_map(static fn($r) => "\"{$r}\"", $def['references']));
+        $sql .= ",\n  FOREIGN KEY ({$cols}) REFERENCES \"{$def['table']}\" ({$refs})";
+    }
+    $sql .= "\n)";
+
+    $conn->statement('PRAGMA foreign_keys = OFF');
+    $conn->statement("DROP TABLE {$table}");
+    $conn->statement($sql);
+    if ($rows !== []) {
+        $columnsToKeep = array_map(static fn($c) => $c->name, $columns);
+        $colsList = implode(', ', array_map(static fn($c) => "\"{$c}\"", $columnsToKeep));
+        $placeholders = '(' . implode(',', array_fill(0, count($columnsToKeep), '?')) . ')';
+        $bindings = [];
+        foreach ($rows as $row) {
+            foreach ($columnsToKeep as $c) {
+                $bindings[] = $row->{$c} ?? null;
+            }
+            $conn->insert("INSERT INTO {$table} ({$colsList}) VALUES {$placeholders}", $bindings);
+            $bindings = [];
+        }
+    }
+    $conn->statement('PRAGMA foreign_keys = ON');
+
+    // Sanity-check: the principal_id FK is gone before the re-run.
+    $fkNow = $conn->select("PRAGMA foreign_key_list('{$table}')");
+    $principalFkGone = true;
+    foreach ($fkNow as $fk) {
+        if ($fk->from === 'principal_id' && $fk->table === 'principals') {
+            $principalFkGone = false;
+        }
+    }
+    expect($principalFkGone)->toBeTrue('simulation must drop the principal_id FK');
+
+    // 3. Run the migration — the helper must detect the missing FK and
+    //    re-add it without throwing.
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+    expect(fn() => $migration->up())->not()->toThrow(Throwable::class);
+
+    // 4. The FK must now exist.
+    $fkAfter = $conn->select("PRAGMA foreign_key_list('{$table}')");
+    $hasPrincipalFk = false;
+    foreach ($fkAfter as $fk) {
+        if ($fk->from === 'principal_id' && $fk->table === 'principals') {
+            $hasPrincipalFk = true;
+        }
+    }
+    expect($hasPrincipalFk)->toBeTrue('up() must re-add the principal_id FK');
+});
+
+test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+    $migration->up();
+
+    // `setAccessible(true)` is deprecated in PHP 8.1+; bind a closure to
+    // the anonymous-class instance so the private helper can be called
+    // without triggering the deprecation.
+    $callHelper = Closure::bind(
+        static fn(string $table, string $name): bool => $migration->foreignKeyExists($table, $name),
+        null,
+        $migration::class,
+    );
+
+    // FK created by Phase 1 — name follows fk_<table>_<col>.
+    expect($callHelper('principals', 'fk_principals_user_id'))->toBeTrue();
+    expect($callHelper('principals', 'fk_principals_group_id'))->toBeTrue();
+    expect($callHelper('groups', 'fk_groups_created_by_user_id'))->toBeTrue();
+
+    // The migration's helper matches by `from` column when the constraint
+    // name's suffix matches a FK column on the table.
+    expect($callHelper('principals', 'fk_principals_type'))->toBeFalse();
+});
+
+test('0067 migration helper: indexExists on SQLite', function (): void {
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+    $migration->up();
+
+    $callHelper = Closure::bind(
+        static fn(string $table, string $name): bool => $migration->indexExists($table, $name),
+        null,
+        $migration::class,
+    );
+
+    expect($callHelper('principals', 'idx_principals_type'))->toBeTrue();
+    expect($callHelper('llm_driver_configurations', 'idx_llm_driver_configurations_principal_id'))->toBeTrue();
+    expect($callHelper('llm_driver_configurations', 'idx_nonexistent'))->toBeFalse();
+});
+
+test('0067 migration helper: findIndexOn on SQLite', function (): void {
+    $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
+    $migration->up();
+
+    $callHelper = Closure::bind(
+        static fn(string $table, string $column): ?string => $migration->findIndexOn($table, $column),
+        null,
+        $migration::class,
+    );
+
+    expect($callHelper('principals', 'type'))->toBe('idx_principals_type');
+    expect($callHelper('llm_driver_configurations', 'principal_id'))
+        ->toBe('idx_llm_driver_configurations_principal_id');
+    expect($callHelper('principals', 'nonexistent_column'))->toBeNull();
+});

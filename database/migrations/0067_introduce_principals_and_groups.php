@@ -164,13 +164,20 @@ return new class extends Migration
                 continue;
             }
             $hasUserId = $schema->hasColumn($effective, 'user_id');
+            $principalIdx = "idx_{$effective}_principal_id";
+            $principalFk = "fk_{$effective}_principal_id";
 
-            // 1) Add principal_id column nullable.
+            // 1) Add principal_id column nullable + supporting index. A
+            //    previous partial run may have added the column without the
+            //    index (or vice versa), so check both before mutating.
             if (!$schema->hasColumn($effective, 'principal_id')) {
-                $idxName = "idx_{$effective}_principal_id";
-                $schema->table($effective, static function (Blueprint $t) use ($idxName): void {
+                $schema->table($effective, static function (Blueprint $t) use ($principalIdx): void {
                     $t->unsignedBigInteger('principal_id')->nullable()->after('id');
-                    $t->index('principal_id', $idxName);
+                    $t->index('principal_id', $principalIdx);
+                });
+            } elseif (!$this->indexExists($effective, $principalIdx)) {
+                $schema->table($effective, static function (Blueprint $t) use ($principalIdx): void {
+                    $t->index('principal_id', $principalIdx);
                 });
             }
 
@@ -199,24 +206,41 @@ return new class extends Migration
 
             // 4) Add the principal_id FK. Done BEFORE the table rebuild so
             //    Phase 5's CREATE TABLE re-emits this FK alongside the
-            //    backfilled data.
-            $fkName = "fk_{$effective}_principal_id";
-            $schema->table($effective, static function (Blueprint $t) use ($fkName): void {
-                $t->foreign('principal_id', $fkName)
-                    ->references('id')->on('principals')
-                    ->cascadeOnDelete();
-            });
+            //    backfilled data. On MySQL/MariaDB, adding a FK that already
+            //    exists errors with errno 121 ("Duplicate key on write or
+            //    update") — the helper guards against re-run on a partial
+            //    state where the FK add already succeeded previously.
+            if (!$this->foreignKeyExists($effective, $principalFk)) {
+                $schema->table($effective, static function (Blueprint $t) use ($principalFk): void {
+                    $t->foreign('principal_id', $principalFk)
+                        ->references('id')->on('principals')
+                        ->cascadeOnDelete();
+                });
+            }
 
             // 5) Drop the user_id column + its FK. For SQLite, the column
             //    appears in a foreign key definition (`fk_…_user_id`) and
             //    `ALTER TABLE … DROP COLUMN` refuses to drop a column that's
             //    referenced by a FK; the only way is to rebuild the table
-            //    via DROP + CREATE. For MySQL/MariaDB we drop the FK + index
-            //    by name and then drop the column.
+            //    via DROP + CREATE. For MySQL/MariaDB we look up the actual
+            //    FK and index names (the original migrations used unnamed
+            //    FKs that Laravel resolves to `<table>_<col>_foreign`, NOT
+            //    the hardcoded `fk_<table>_<col>` pattern) and drop them.
             if ($hasUserId) {
                 if ($driver === 'mysql' || $driver === 'mariadb') {
-                    Capsule::statement("ALTER TABLE {$effective} DROP FOREIGN KEY fk_{$effective}_user_id");
-                    Capsule::statement("ALTER TABLE {$effective} DROP INDEX fk_{$effective}_user_id");
+                    // Drop the FK first — MariaDB removes the auto-created
+                    // supporting index (named identically to the FK) when
+                    // the FK is dropped. The explicit `idx_…_user_id`
+                    // index from migration 0011 survives, so the lookup
+                    // that follows only sees that one and drops it.
+                    $fkName = $this->findForeignKeyOn($effective, 'user_id');
+                    if ($fkName !== null) {
+                        Capsule::statement("ALTER TABLE {$effective} DROP FOREIGN KEY {$fkName}");
+                    }
+                    $idxName = $this->findIndexOn($effective, 'user_id');
+                    if ($idxName !== null) {
+                        Capsule::statement("ALTER TABLE {$effective} DROP INDEX {$idxName}");
+                    }
                     $schema->table($effective, static function (Blueprint $t): void {
                         $t->dropColumn('user_id');
                     });
@@ -230,6 +254,10 @@ return new class extends Migration
         if (!$schema->hasColumn('agents', 'principal_id')) {
             $schema->table('agents', static function (Blueprint $t): void {
                 $t->unsignedBigInteger('principal_id')->nullable()->after('id');
+                $t->index('principal_id', 'idx_agents_principal_id');
+            });
+        } elseif (!$this->indexExists('agents', 'idx_agents_principal_id')) {
+            $schema->table('agents', static function (Blueprint $t): void {
                 $t->index('principal_id', 'idx_agents_principal_id');
             });
         }
@@ -259,8 +287,14 @@ return new class extends Migration
 
         if ($schema->hasColumn('agents', 'user_id')) {
             if ($driver === 'mysql' || $driver === 'mariadb') {
-                Capsule::statement('ALTER TABLE agents DROP FOREIGN KEY fk_agents_user_id');
-                Capsule::statement('ALTER TABLE agents DROP INDEX fk_agents_user_id');
+                $fkName = $this->findForeignKeyOn('agents', 'user_id');
+                if ($fkName !== null) {
+                    Capsule::statement("ALTER TABLE agents DROP FOREIGN KEY {$fkName}");
+                }
+                $idxName = $this->findIndexOn('agents', 'user_id');
+                if ($idxName !== null) {
+                    Capsule::statement("ALTER TABLE agents DROP INDEX {$idxName}");
+                }
                 $schema->table('agents', static function (Blueprint $t): void {
                     $t->dropColumn('user_id');
                 });
@@ -269,11 +303,147 @@ return new class extends Migration
             }
         }
 
-        $schema->table('agents', static function (Blueprint $t): void {
-            $t->foreign('principal_id', 'fk_agents_principal_id')
-                ->references('id')->on('principals')
-                ->restrictOnDelete();
-        });
+        if (!$this->foreignKeyExists('agents', 'fk_agents_principal_id')) {
+            $schema->table('agents', static function (Blueprint $t): void {
+                $t->foreign('principal_id', 'fk_agents_principal_id')
+                    ->references('id')->on('principals')
+                    ->restrictOnDelete();
+            });
+        }
+    }
+
+    /** Driver-aware FK existence check used to gate re-runs of this
+     *  forward-only migration; the migration runs outside a transaction
+     *  (so `PRAGMA foreign_keys = OFF` can take effect during the
+     *  `user_id` drop) and a partial failure must be safe to replay. */
+    private function foreignKeyExists(string $table, string $constraintName): bool
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $row = Capsule::selectOne(
+                'SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS '
+                . 'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? '
+                . "AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
+                [$table, $constraintName]
+            );
+            return $row !== null;
+        }
+
+        // SQLite: PRAGMA foreign_key_list returns anonymous FKs (numeric id),
+        // and Laravel's SQLite grammar emits FK declarations WITHOUT a
+        // CONSTRAINT name in the CREATE TABLE, so a name match against the
+        // table's stored DDL would always miss. Match by the `from` column
+        // that the constraint name implies — derive it by stripping the
+        // `fk_<table>_` prefix. Falls back to the last segment for callers
+        // that pass a name that doesn't follow the convention.
+        $prefix = "fk_{$table}_";
+        if (str_starts_with($constraintName, $prefix)) {
+            $column = substr($constraintName, strlen($prefix));
+        } else {
+            $column = $this->columnFromConstraintName($constraintName);
+        }
+        $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
+        foreach ($fks as $fk) {
+            if ($fk->from === $column) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Driver-aware index existence check — mirrors foreignKeyExists for
+     *  the index side of every guarded step. */
+    private function indexExists(string $table, string $indexName): bool
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $row = Capsule::selectOne(
+                'SELECT INDEX_NAME FROM information_schema.STATISTICS '
+                . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? '
+                . 'AND INDEX_NAME = ? LIMIT 1',
+                [$table, $indexName]
+            );
+            return $row !== null;
+        }
+
+        $rows = Capsule::select("PRAGMA index_list('{$table}')");
+        foreach ($rows as $row) {
+            if ($row->name === $indexName) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Driver-aware lookup for the FK that references $column on $table.
+     *  Returns the constraint name, or null if none. */
+    private function findForeignKeyOn(string $table, string $column): ?string
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $row = Capsule::selectOne(
+                'SELECT kcu.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE kcu '
+                . 'INNER JOIN information_schema.TABLE_CONSTRAINTS tc '
+                . 'ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA '
+                . 'AND tc.TABLE_NAME = kcu.TABLE_NAME '
+                . 'AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME '
+                . 'WHERE kcu.TABLE_SCHEMA = DATABASE() '
+                . 'AND kcu.TABLE_NAME = ? '
+                . 'AND kcu.COLUMN_NAME = ? '
+                . "AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
+                [$table, $column]
+            );
+            return $row?->CONSTRAINT_NAME;
+        }
+
+        // SQLite: PRAGMA exposes the auto-assigned numeric FK id, not the
+        // constraint name. Returns null — the only caller (the MySQL/MariaDB
+        // user_id drop branch) never executes on SQLite.
+        return null;
+    }
+
+    /** Driver-aware lookup for the index whose leftmost column is $column.
+     *  Returns the index name, or null if none. */
+    private function findIndexOn(string $table, string $column): ?string
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            $row = Capsule::selectOne(
+                'SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS '
+                . 'WHERE TABLE_SCHEMA = DATABASE() '
+                . 'AND TABLE_NAME = ? '
+                . 'AND COLUMN_NAME = ? '
+                . 'AND SEQ_IN_INDEX = 1 '
+                . "AND INDEX_NAME <> 'PRIMARY' LIMIT 1",
+                [$table, $column]
+            );
+            return $row?->INDEX_NAME;
+        }
+
+        // SQLite: PRAGMA index_list exposes origin ('c' = user-created,
+        // 'pk' = PRIMARY KEY, 'f' = FK auto-index). Skip auto indexes so
+        // we never return the FK's anonymous id.
+        $rows = Capsule::select("PRAGMA index_list('{$table}')");
+        foreach ($rows as $row) {
+            if ($row->origin !== 'c') {
+                continue;
+            }
+            $cols = Capsule::select("PRAGMA index_info('{$row->name}')");
+            if ($cols !== [] && $cols[0]->name === $column) {
+                return $row->name;
+            }
+        }
+        return null;
+    }
+
+    /** Last `_`-separated segment of $constraintName. The migration's FK
+     *  names all follow `fk_<table>_<col>`, so the segment is the column.
+     *  Used by {@see foreignKeyExists()} on SQLite where the constraint
+     *  name is dropped by the Laravel grammar. */
+    private function columnFromConstraintName(string $constraintName): string
+    {
+        $segments = explode('_', $constraintName);
+        return (string) end($segments);
     }
 
     /**
