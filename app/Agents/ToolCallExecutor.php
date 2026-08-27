@@ -35,18 +35,16 @@ final class ToolCallExecutor
         DriverToolCall $toolCall,
         Agent           $agent,
         Task            $task,
-        array           $enabledClasses,
     ): ToolCallDisposition {
         $toolInstance = $this->orchestrator->resolveToolByName($toolCall->toolName);
         $toolClass    = get_class($toolInstance);
 
-        // Re-load the current allow-list at gate-check time. The
-        // `$enabledClasses` snapshot was captured by
-        // {@see TickPhaseRunner::prepareTickContext()} at tick start — an
-        // admin revoking the tool mid-tick (while the LLM is mid-round-trip)
-        // would otherwise leave the gate stale and let the revoked tool run.
-        // The snapshot is still used by {@see Orchestrator::buildToolDefinitions()}
-        // for the LLM's offered tool set; here we trust the DB.
+        // Re-load the current allow-list at gate-check time. The snapshot
+        // TickPhaseRunner::prepareTickContext() captured at tick start is
+        // still used by Orchestrator::buildToolDefinitions() for the LLM's
+        // offered tool set, but the gate itself must trust the DB so a
+        // revocation that landed while the LLM was mid-round-trip is
+        // honoured.
         $currentEnabledClasses = AgentTool::where('agent_id', $agent->id)
             ->pluck('tool_class')->all();
 

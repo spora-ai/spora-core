@@ -103,7 +103,7 @@ it('executor returns Executed for an auto-approved input tool and records the re
     $executor = new ToolCallExecutor($orch);
 
     $toolCall = new DriverToolCall('call_exec', 'stub_input', []);
-    $disposition = $executor->executeOrQueue($toolCall, $agent, $task, [StubInputTool::class]);
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
 
     expect($disposition)->toBe(ToolCallDisposition::Executed);
 
@@ -133,7 +133,7 @@ it('executor returns AwaitingApproval for an output tool and leaves the record P
     $executor = new ToolCallExecutor($orch);
 
     $toolCall = new DriverToolCall('call_out', 'stub_output', ['key' => 'val']);
-    $disposition = $executor->executeOrQueue($toolCall, $agent, $task, [StubOutputTool::class]);
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
 
     expect($disposition)->toBe(ToolCallDisposition::AwaitingApproval);
 
@@ -158,7 +158,7 @@ it('executor returns ValidationFailed and records the validation error atomicall
 
     // Missing required 'recipient' field triggers SchemaValidator.
     $toolCall = new DriverToolCall('call_val_fail', 'stub_output_with_schema', []);
-    $disposition = $executor->executeOrQueue($toolCall, $agent, $task, [StubOutputToolWithSchema::class]);
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
 
     expect($disposition)->toBe(ToolCallDisposition::ValidationFailed);
 
@@ -195,7 +195,7 @@ it('executor returns OperationDisabled and writes a DISABLED record when the ope
     $executor = new ToolCallExecutor($orch);
 
     $toolCall = new DriverToolCall('call_disabled', 'stub_input', ['action' => 'default']);
-    $disposition = $executor->executeOrQueue($toolCall, $agent, $task, [StubInputTool::class]);
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
 
     expect($disposition)->toBe(ToolCallDisposition::OperationDisabled);
 
@@ -224,7 +224,7 @@ it('executor still returns Executed when the tool throws — safeExecute convert
     $executor = new ToolCallExecutor($orch);
 
     $toolCall = new DriverToolCall('call_throw', 'throwing_tool', []);
-    $disposition = $executor->executeOrQueue($toolCall, $agent, $task, [ThrowingTool::class]);
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
 
     expect($disposition)->toBe(ToolCallDisposition::Executed);
 
@@ -255,7 +255,7 @@ it('executor throws when the LLM invokes a tool that is not enabled for the agen
 
     $toolCall = new DriverToolCall('call_unauth', 'stub_input', []);
 
-    expect(fn() => $executor->executeOrQueue($toolCall, $agent, $task, []))
+    expect(fn() => $executor->executeOrQueue($toolCall, $agent, $task))
         ->toThrow(RuntimeException::class, 'not enabled');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -283,7 +283,6 @@ it('time(action: "now") without epoch executes without validation failure', func
         $toolCall,
         $agent,
         $task,
-        [TimeTool::class],
     );
 
     expect($disposition)->toBe(ToolCallDisposition::Executed);
@@ -315,7 +314,6 @@ it('time(action: "format") without epoch still fails validation (epoch is requir
         $toolCall,
         $agent,
         $task,
-        [TimeTool::class],
     );
 
     expect($disposition)->toBe(ToolCallDisposition::ValidationFailed);

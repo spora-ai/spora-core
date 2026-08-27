@@ -369,19 +369,17 @@ final class TickPhaseRunner
     /**
      * @param array{
      *   task: Task,
-     *   agent: Agent,
-     *   enabledClasses: list<string>
+     *   agent: Agent
      * } $context
      */
     private function handleTickLlmResponse(array $context, LLMResponse $response): void
     {
-        $task           = $context['task'];
-        $agent          = $context['agent'];
-        $enabledClasses = $context['enabledClasses'];
+        $task  = $context['task'];
+        $agent = $context['agent'];
 
         if ($response->hasToolCalls()) {
             $this->recordAssistantToolCallBatch($task, $response);
-            $this->handleToolCalls($task, $agent, $response->toolCalls, $enabledClasses);
+            $this->handleToolCalls($task, $agent, $response->toolCalls);
             return;
         }
 
@@ -514,14 +512,14 @@ final class TickPhaseRunner
         }
     }
 
-    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls, array $enabledClasses): void
+    private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void
     {
         /** @var list<DriverToolCall> $pendingApproval */
         $pendingApproval = [];
 
         foreach ($toolCalls as $toolCall) {
             try {
-                $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task, $enabledClasses);
+                $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task);
 
                 if ($disposition === ToolCallDisposition::AwaitingApproval) {
                     $pendingApproval[] = $toolCall;
