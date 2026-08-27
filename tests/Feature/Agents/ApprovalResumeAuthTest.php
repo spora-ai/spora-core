@@ -7,6 +7,7 @@ use Spora\Agents\ApprovedBatchExecutor;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\TickPhaseRunner;
+use Spora\Agents\ToolCallExecutor;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
@@ -552,4 +553,80 @@ it('normal tick informs the LLM with a clear message when it proposes a non-enab
         ->and($history->content)->toContain("Tool 'stub_input' is not enabled for this agent.")
         ->and($history->content)->toContain('do not propose it again')
         ->and($history->content)->not->toContain('System Error');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// 8. Normal tick — gate re-loads enabledClasses so mid-tick revocation is honoured
+// ---------------------------------------------------------------------------
+//
+// Regression: the original gate at ToolCallExecutor.php:42 used the snapshot
+// of enabledClasses captured at tick start (TickPhaseRunner::prepareTickContext
+// loads it once, before the LLM round-trip). If an admin revoked the tool
+// mid-round-trip, the gate was stale and let the revoked tool run. The fix
+// re-loads enabledClasses INSIDE executeOrQueue() so the check sees the
+// current DB state, not the snapshot.
+//
+// This test simulates the scenario without an actual LLM round-trip: we
+// pass the stale snapshot in $enabledClasses but the AgentTool row is
+// already gone from the DB when executeOrQueue() fires the gate.
+
+it('executeOrQueue re-loads enabledClasses so a mid-tick revocation is honoured even with a stale snapshot', function (): void {
+    [$userId, $agentId] = resumeAuthSeedAgent([new StubInputTool()]);
+
+    $authService = bootAuthLayer();
+    $config      = LLMDriverConfiguration::create([
+        'principal_id'         => null,
+        'name'                 => 'Stale Snapshot Test Config',
+        'driver_class'         => Spora\Drivers\OpenAICompatibleDriver::class,
+        'settings'             => json_encode(['api_key' => 'test']),
+        'is_global'            => true,
+        'is_default'           => true,
+        'context_window'       => 128000,
+        'max_tokens_output'    => 4096,
+    ]);
+
+    $task = Task::create([
+        'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
+        'status'      => 'RUNNING',
+        'user_prompt' => 'stale snapshot test',
+        'step_count'  => 0,
+        'max_steps'   => 10,
+    ]);
+
+    // Snapshot the allow-list (simulating TickPhaseRunner::prepareTickContext
+    // at tick start — this is what gets passed all the way down to
+    // executeOrQueue).
+    $staleEnabledClasses = AgentTool::where('agent_id', $agentId)
+        ->pluck('tool_class')->all();
+    expect($staleEnabledClasses)->toBe([StubInputTool::class]);
+
+    // Mid-tick admin action: revoke StubInputTool from the agent.
+    AgentTool::where('agent_id', $agentId)
+        ->where('tool_class', StubInputTool::class)
+        ->delete();
+
+    // The LLM is still proposing stub_input (it was in the list sent to the
+    // LLM earlier in the tick) — the gate must still fire because the
+    // DB state has changed.
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('getProviderName')->andReturn('mock');
+    $mock->allows('getModelName')->andReturn('mock-model');
+
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn($mock);
+
+    $orch    = new Orchestrator($factory, new OrchestratorConfig(toolInstances: [new StubInputTool()]));
+    $executor = new ToolCallExecutor($orch);
+    $agent   = Agent::find($agentId);
+
+    $toolCall = new DriverToolCall('call_stale', 'stub_input', []);
+
+    // The stale snapshot still contains [StubInputTool::class] — if the gate
+    // trusted it, the check would pass. The re-load inside executeOrQueue()
+    // ensures the gate sees the empty current allow-list and throws.
+    expect($staleEnabledClasses)->toBe([StubInputTool::class])
+        ->and(fn() => $executor->executeOrQueue($toolCall, $agent, $task, $staleEnabledClasses))
+        ->toThrow(Spora\Agents\Exceptions\ToolNotEnabledException::class, 'not enabled for this agent');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

@@ -197,7 +197,7 @@ final class ApprovedBatchExecutor
             ->pluck('tool_class')->all();
 
         if (!in_array($toolClass, $enabledClasses, true)) {
-            $this->recordRevokedToolCall(
+            $this->orchestrator->recordRevokedToolCall(
                 task: $task,
                 providerCallId: $pendingToolCall->providerCallId,
                 toolName: $pendingToolCall->toolName,
@@ -210,7 +210,7 @@ final class ApprovedBatchExecutor
             && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
             && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $state->agentId)
         ) {
-            $this->recordRevokedToolCall(
+            $this->orchestrator->recordRevokedToolCall(
                 task: $task,
                 providerCallId: $pendingToolCall->providerCallId,
                 toolName: $pendingToolCall->toolName,
@@ -245,43 +245,6 @@ final class ApprovedBatchExecutor
                 'status'             => 'APPROVED',
                 'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
             ]);
-    }
-
-    /**
-     * Stamp the row REJECTED and append a history message describing the cause.
-     * Mirrors {@see AgentDecisionProcessor::markSingleRejection()}'s shape — we
-     * reuse the same status/columns so dashboards already filtering on
-     * `status = 'REJECTED'` pick this disposition up alongside user-rejected rows.
-     *
-     * `rejected_by` is left null: revocation is an admin/system action with no
-     * single user-actor in this column's model. The reason lives in
-     * `reject_reason` and in the appended `'tool'` history row, which is what
-     * the LLM sees on its next round-trip.
-     */
-    private function recordRevokedToolCall(
-        Task    $task,
-        string  $providerCallId,
-        string  $toolName,
-        string  $rejectReason,
-    ): void {
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'status'        => 'REJECTED',
-                'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-                'rejected_by'   => null,
-                'reject_reason' => $rejectReason,
-            ]);
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
     }
 
     private function reopenForRemainingPending(Task $task, AgentState $state, array $remaining): void

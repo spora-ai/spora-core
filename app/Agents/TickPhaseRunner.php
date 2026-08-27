@@ -210,7 +210,7 @@ final class TickPhaseRunner
             ->pluck('tool_class')->all();
 
         if (!in_array($toolClass, $enabledClasses, true)) {
-            $this->recordRevokedToolCall(
+            $this->orchestrator->recordRevokedToolCall(
                 task: $task,
                 providerCallId: $providerCallId,
                 toolName: $toolName,
@@ -223,7 +223,7 @@ final class TickPhaseRunner
             && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
             && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $task->agent_id)
         ) {
-            $this->recordRevokedToolCall(
+            $this->orchestrator->recordRevokedToolCall(
                 task: $task,
                 providerCallId: $providerCallId,
                 toolName: $toolName,
@@ -256,38 +256,6 @@ final class TickPhaseRunner
             taskId: $task->id,
             role: 'tool',
             content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
-    }
-
-    /**
-     * Stamp the worker-mode `APPROVED` row REJECTED and append a history message
-     * describing the cause. Same shape as
-     * {@see ApprovedBatchExecutor::recordRevokedToolCall()} — duplication is
-     * kept on purpose (two short blocks is clearer than a shared base).
-     */
-    private function recordRevokedToolCall(
-        Task   $task,
-        string $providerCallId,
-        string $toolName,
-        string $rejectReason,
-    ): void {
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'status'        => 'REJECTED',
-                'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-                'rejected_by'   => null,
-                'reject_reason' => $rejectReason,
-            ]);
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
             context: new HistoryMessageContext(
                 toolCallId: $providerCallId,
                 toolName: $toolName,

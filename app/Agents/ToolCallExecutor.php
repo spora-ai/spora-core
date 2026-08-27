@@ -8,6 +8,7 @@ use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
@@ -38,6 +39,15 @@ final class ToolCallExecutor
     ): ToolCallDisposition {
         $toolInstance = $this->orchestrator->resolveToolByName($toolCall->toolName);
         $toolClass    = get_class($toolInstance);
+
+        // Re-load the current allow-list at gate-check time. The
+        // `$enabledClasses` snapshot was captured by
+        // {@see TickPhaseRunner::prepareTickContext()} at tick start — an
+        // admin revoking the tool mid-tick (while the LLM is mid-round-trip)
+        // would otherwise leave the gate stale and let the revoked tool run.
+        // The snapshot is still used by {@see Orchestrator::buildToolDefinitions()}
+        // for the LLM's offered tool set; here we trust the DB.
+        $enabledClasses = AgentTool::where('agent_id', $agent->id)->pluck('tool_class')->all();
 
         if (!in_array($toolClass, $enabledClasses, true)) {
             throw new ToolNotEnabledException(
