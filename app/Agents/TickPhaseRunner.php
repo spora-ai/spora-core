@@ -7,6 +7,7 @@ namespace Spora\Agents;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\DriverFactory;
@@ -24,6 +25,7 @@ use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
+use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
 /**
@@ -198,6 +200,38 @@ final class TickPhaseRunner
     ): void {
         $toolInstance = $this->orchestrator->resolveToolByName($toolName);
 
+        // Re-check authorization at execution time: between the user approving
+        // the batch and the daemon picking it up here, an admin may have revoked
+        // this tool from the agent or disabled the specific op. The
+        // proposal-time gate in {@see ToolCallExecutor::executeOrQueue()} only
+        // runs at proposal time and cannot defend against drift.
+        $toolClass = get_class($toolInstance);
+        $enabledClasses = AgentTool::where('agent_id', $task->agent_id)
+            ->pluck('tool_class')->all();
+
+        if (!in_array($toolClass, $enabledClasses, true)) {
+            $this->recordRevokedToolCall(
+                task: $task,
+                providerCallId: $providerCallId,
+                toolName: $toolName,
+                rejectReason: "tool '{$toolName}' was revoked from this agent before approval was processed",
+            );
+            return;
+        }
+
+        if ($operationName !== null
+            && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
+            && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $task->agent_id)
+        ) {
+            $this->recordRevokedToolCall(
+                task: $task,
+                providerCallId: $providerCallId,
+                toolName: $toolName,
+                rejectReason: "operation '{$operationName}' of tool '{$toolName}' was disabled before approval was processed",
+            );
+            return;
+        }
+
         try {
             SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
         } catch (Throwable $e) {
@@ -222,6 +256,38 @@ final class TickPhaseRunner
             taskId: $task->id,
             role: 'tool',
             content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+            context: new HistoryMessageContext(
+                toolCallId: $providerCallId,
+                toolName: $toolName,
+            ),
+        );
+    }
+
+    /**
+     * Stamp the worker-mode `APPROVED` row REJECTED and append a history message
+     * describing the cause. Same shape as
+     * {@see ApprovedBatchExecutor::recordRevokedToolCall()} — duplication is
+     * kept on purpose (two short blocks is clearer than a shared base).
+     */
+    private function recordRevokedToolCall(
+        Task   $task,
+        string $providerCallId,
+        string $toolName,
+        string $rejectReason,
+    ): void {
+        ToolCallModel::where('task_id', $task->id)
+            ->where('provider_call_id', $providerCallId)
+            ->update([
+                'status'        => 'REJECTED',
+                'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+                'rejected_by'   => null,
+                'reject_reason' => $rejectReason,
+            ]);
+
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
             context: new HistoryMessageContext(
                 toolCallId: $providerCallId,
                 toolName: $toolName,
@@ -492,6 +558,24 @@ final class TickPhaseRunner
                 if ($disposition === ToolCallDisposition::AwaitingApproval) {
                     $pendingApproval[] = $toolCall;
                 }
+            } catch (ToolNotEnabledException $e) {
+                // Authorization drift: the LLM proposed a tool that is no longer
+                // (or never was) in this agent's allowed set. Surface it as an
+                // explicit authorization message so the LLM doesn't try again on
+                // its next turn — the next tick will also rebuild the tool list
+                // via {@see prepareTickContext()}, but the LLM needs the in-band
+                // signal so it doesn't waste a round-trip rediscovering it.
+                $this->orchestrator->appendHistory(
+                    taskId: $task->id,
+                    role: 'tool',
+                    content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString(
+                        "Tool '{$toolCall->toolName}' is not enabled for this agent. The tool may have been revoked; do not propose it again.",
+                    )),
+                    context: new HistoryMessageContext(
+                        toolCallId: $toolCall->providerCallId,
+                        toolName: $toolCall->toolName,
+                    ),
+                );
             } catch (Throwable $e) {
                 $this->orchestrator->appendHistory(
                     taskId: $task->id,

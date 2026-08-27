@@ -2210,13 +2210,16 @@ it('handleToolCalls writes a System Error ToolCall when LLM calls a tool that is
     expect($task->status)->toBe('COMPLETED');
 
     // The error message should be in the tool history (as a 'tool' role row).
+    // As of the resume-auth fix, the normal-tick catch block emits a clear
+    // authorization message instead of the misleading "System Error:" prefix
+    // — see TickPhaseRunner::handleToolCalls() for the wording.
     $errorHistory = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_unauth')
         ->first();
     expect($errorHistory)->not->toBeNull()
-        ->and($errorHistory->content)->toContain('System Error')
-        ->and($errorHistory->content)->toContain('not enabled');
+        ->and($errorHistory->content)->toContain("Tool 'stub_input' is not enabled for this agent.")
+        ->and($errorHistory->content)->not->toContain('System Error');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -3619,14 +3622,17 @@ describe('Orchestrator::handleToolCalls — disabled tool', function (): void {
         // The error is fed back to the LLM and the loop recovers.
         expect($task->status)->toBe('COMPLETED');
 
-        // The error message is recorded in a tool history row.
+        // The error message is recorded in a tool history row. The wording
+        // changed in the resume-auth fix to a clearer authorization message
+        // (no misleading "System Error:" prefix) — see
+        // TickPhaseRunner::handleToolCalls() catch block.
         $errorRow = TaskHistory::where('task_id', $task->id)
             ->where('role', 'tool')
             ->where('tool_call_id', 'call_unauth')
             ->first();
         expect($errorRow)->not()->toBeNull()
-            ->and($errorRow->content)->toContain('System Error')
-            ->and($errorRow->content)->toContain('not enabled');
+            ->and($errorRow->content)->toContain("Tool 'stub_input' is not enabled for this agent.")
+            ->and($errorRow->content)->not->toContain('System Error');
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
 });
 

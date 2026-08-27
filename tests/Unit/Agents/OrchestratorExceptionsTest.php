@@ -254,7 +254,8 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
         ->where('tool_call_id', 'call_unauth')
         ->first();
     expect($errorHistory)->not->toBeNull()
-        ->and($errorHistory->content)->toContain("The LLM attempted to call tool 'stub_input' which is not enabled for this agent.");
+        ->and($errorHistory->content)->toContain("Tool 'stub_input' is not enabled for this agent.")
+        ->and($errorHistory->content)->not->toContain('System Error');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
