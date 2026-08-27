@@ -8,6 +8,7 @@ use Spora\Agents\Exceptions\ToolNotEnabledException;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
+use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
@@ -34,12 +35,20 @@ final class ToolCallExecutor
         DriverToolCall $toolCall,
         Agent           $agent,
         Task            $task,
-        array           $enabledClasses,
     ): ToolCallDisposition {
         $toolInstance = $this->orchestrator->resolveToolByName($toolCall->toolName);
         $toolClass    = get_class($toolInstance);
 
-        if (!in_array($toolClass, $enabledClasses, true)) {
+        // Re-load the current allow-list at gate-check time. The snapshot
+        // TickPhaseRunner::prepareTickContext() captured at tick start is
+        // still used by Orchestrator::buildToolDefinitions() for the LLM's
+        // offered tool set, but the gate itself must trust the DB so a
+        // revocation that landed while the LLM was mid-round-trip is
+        // honoured.
+        $currentEnabledClasses = AgentTool::where('agent_id', $agent->id)
+            ->pluck('tool_class')->all();
+
+        if (!in_array($toolClass, $currentEnabledClasses, true)) {
             throw new ToolNotEnabledException(
                 "The LLM attempted to call tool '{$toolCall->toolName}' which is not enabled for this agent.",
             );

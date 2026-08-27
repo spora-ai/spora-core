@@ -12,10 +12,12 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
+use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
 use Spora\Services\Text\Utf8Sanitizer;
+use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -184,6 +186,38 @@ final class ApprovedBatchExecutor
         ?string $operationName,
     ): void {
         $toolInstance = $this->orchestrator->resolveToolByName($pendingToolCall->toolName);
+
+        // Re-check authorization at resume time: between the proposal tick
+        // and now, an admin may have revoked this tool from the agent, or an
+        // `AgentToolOperationOverride` row may have disabled the specific op.
+        // The proposal-time gate in {@see ToolCallExecutor::executeOrQueue()}
+        // only runs at proposal time and cannot defend against drift.
+        $toolClass = get_class($toolInstance);
+        $enabledClasses = AgentTool::where('agent_id', $state->agentId)
+            ->pluck('tool_class')->all();
+
+        if (!in_array($toolClass, $enabledClasses, true)) {
+            $this->orchestrator->recordRevokedToolCall(
+                task: $task,
+                providerCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+                rejectReason: "tool '{$pendingToolCall->toolName}' was revoked from this agent before approval was processed",
+            );
+            return;
+        }
+
+        if ($operationName !== null
+            && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
+            && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $state->agentId)
+        ) {
+            $this->orchestrator->recordRevokedToolCall(
+                task: $task,
+                providerCallId: $pendingToolCall->providerCallId,
+                toolName: $pendingToolCall->toolName,
+                rejectReason: "operation '{$operationName}' of tool '{$pendingToolCall->toolName}' was disabled before approval was processed",
+            );
+            return;
+        }
 
         try {
             SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
