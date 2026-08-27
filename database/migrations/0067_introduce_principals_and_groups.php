@@ -228,11 +228,11 @@ return new class extends Migration
             //    the hardcoded `fk_<table>_<col>` pattern) and drop them.
             if ($hasUserId) {
                 if ($driver === 'mysql' || $driver === 'mariadb') {
-                    // Drop the FK first — MariaDB removes the auto-created
-                    // supporting index (named identically to the FK) when
-                    // the FK is dropped. The explicit `idx_…_user_id`
-                    // index from migration 0011 survives, so the lookup
-                    // that follows only sees that one and drops it.
+                    // Drop the FK first — it owns the FK column constraint and must
+                    // come off before we look up the surviving index. In MariaDB the
+                    // explicit `idx_…_user_id` from migration 0011 was reused as the
+                    // FK's supporting index (no auto-named index exists), so the
+                    // `findIndexOn()` lookup after the drop finds exactly that one.
                     $fkName = $this->findForeignKeyOn($effective, 'user_id');
                     if ($fkName !== null) {
                         Capsule::statement("ALTER TABLE {$effective} DROP FOREIGN KEY {$fkName}");
@@ -287,6 +287,11 @@ return new class extends Migration
 
         if ($schema->hasColumn('agents', 'user_id')) {
             if ($driver === 'mysql' || $driver === 'mariadb') {
+                // Drop the FK first — it owns the FK column constraint and must
+                // come off before we look up the surviving index. In MariaDB the
+                // explicit `idx_agents_user_id` from migration 0012 was reused as
+                // the FK's supporting index (no auto-named index exists), so the
+                // `findIndexOn()` lookup after the drop finds exactly that one.
                 $fkName = $this->findForeignKeyOn('agents', 'user_id');
                 if ($fkName !== null) {
                     Capsule::statement("ALTER TABLE agents DROP FOREIGN KEY {$fkName}");
@@ -334,14 +339,8 @@ return new class extends Migration
         // CONSTRAINT name in the CREATE TABLE, so a name match against the
         // table's stored DDL would always miss. Match by the `from` column
         // that the constraint name implies — derive it by stripping the
-        // `fk_<table>_` prefix. Falls back to the last segment for callers
-        // that pass a name that doesn't follow the convention.
-        $prefix = "fk_{$table}_";
-        if (str_starts_with($constraintName, $prefix)) {
-            $column = substr($constraintName, strlen($prefix));
-        } else {
-            $column = $this->columnFromConstraintName($constraintName);
-        }
+        // `fk_<table>_` prefix.
+        $column = substr($constraintName, strlen("fk_{$table}_"));
         $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
         foreach ($fks as $fk) {
             if ($fk->from === $column) {
@@ -434,16 +433,6 @@ return new class extends Migration
             }
         }
         return null;
-    }
-
-    /** Last `_`-separated segment of $constraintName. The migration's FK
-     *  names all follow `fk_<table>_<col>`, so the segment is the column.
-     *  Used by {@see foreignKeyExists()} on SQLite where the constraint
-     *  name is dropped by the Laravel grammar. */
-    private function columnFromConstraintName(string $constraintName): string
-    {
-        $segments = explode('_', $constraintName);
-        return (string) end($segments);
     }
 
     /**

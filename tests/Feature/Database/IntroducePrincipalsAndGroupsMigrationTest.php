@@ -465,6 +465,19 @@ test('0067 migration recovers from a partially-applied state on SQLite', functio
     $sql .= "\n)";
 
     $conn->statement('PRAGMA foreign_keys = OFF');
+    $fkOff = (int) $conn->selectOne('PRAGMA foreign_keys')->foreign_keys;
+    if ($fkOff !== 0) {
+        throw new RuntimeException(sprintf(
+            'PRAGMA foreign_keys = OFF did not take effect on the %s connection '
+            . '(read back %d, expected 0). The DROP TABLE in the next step would '
+            . 'cascade-delete dependent rows; aborting the partial-state simulation '
+            . 'rather than risk silent data loss. This usually means Capsule handed '
+            . 'a different connection to the PRAGMA and the DROP — file an issue '
+            . 'with the full stack trace.',
+            $table,
+            $fkOff,
+        ));
+    }
     $conn->statement("DROP TABLE {$table}");
     $conn->statement($sql);
     if ($rows !== []) {
@@ -481,6 +494,16 @@ test('0067 migration recovers from a partially-applied state on SQLite', functio
         }
     }
     $conn->statement('PRAGMA foreign_keys = ON');
+    $fkOn = (int) $conn->selectOne('PRAGMA foreign_keys')->foreign_keys;
+    if ($fkOn !== 1) {
+        throw new RuntimeException(sprintf(
+            'PRAGMA foreign_keys = ON did not take effect on the %s connection '
+            . '(read back %d, expected 1). Aborting the partial-state simulation; '
+            . 're-run after the connection-pool issue is resolved.',
+            $table,
+            $fkOn,
+        ));
+    }
 
     // Sanity-check: the principal_id FK is gone before the re-run.
     $fkNow = $conn->select("PRAGMA foreign_key_list('{$table}')");
@@ -526,8 +549,6 @@ test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
     expect($callHelper('principals', 'fk_principals_group_id'))->toBeTrue();
     expect($callHelper('groups', 'fk_groups_created_by_user_id'))->toBeTrue();
 
-    // The migration's helper matches by `from` column when the constraint
-    // name's suffix matches a FK column on the table.
     expect($callHelper('principals', 'fk_principals_type'))->toBeFalse();
 });
 
