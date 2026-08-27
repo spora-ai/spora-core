@@ -48,7 +48,7 @@ function buildMarkdownPipelineAgent(int $userId): int
 {
     $authService = bootAuthLayer();
     $config = LLMDriverConfiguration::create([
-        'user_id'      => null,
+        'principal_id' => null,
         'name'         => 'Markdown Pipeline Config',
         'driver_class' => AnthropicCompatibleDriver::class,
         'settings'     => json_encode(['api_key' => 'test']),
@@ -56,7 +56,7 @@ function buildMarkdownPipelineAgent(int $userId): int
         'is_default'   => true,
     ]);
     $agent = \Spora\Models\Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'                 => 'Markdown Pipeline Agent',
         'llm_driver_config_id' => $config->id,
         'max_steps'            => 10,
@@ -93,6 +93,7 @@ test('attachment row + user prompt produce a single user message with extracted 
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Summarize this paper',
@@ -152,6 +153,7 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Summarize this paper',
@@ -218,6 +220,7 @@ test('multiple text attachments + prompt produces a single combined block', func
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Compare these notes',
@@ -346,15 +349,16 @@ function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMa
         100 * 1024 * 1024,
     );
 
-    return new \Spora\Services\MediaArchive\MediaArchiveService(
-        new AutoAssetStore($database, $local, 1_048_576),
+    $pipeline = new \Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
+        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
         $resolver,
         $sniffer,
         $metadata,
+        new AutoAssetStore($database, $local, 1_048_576),
         $registry,
-        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
         $logger,
     );
+    return new \Spora\Services\MediaArchive\MediaArchiveService($pipeline);
 }
 
 test('PDF upload: parser returns text → markdown_content populated → LLM gets the text', function (): void {
@@ -376,7 +380,8 @@ test('PDF upload: parser returns text → markdown_content populated → LLM get
     $userId = bootAuthLayer()->register('pdf-pipeline@example.com', 'Password1!', 'P');
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'user_id' => $userId,
+        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Summarize chapter 1',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -428,7 +433,8 @@ test('PDF upload: parser returns empty string → LLM gets [no extractable text]
     $userId = bootAuthLayer()->register('pdf-empty@example.com', 'Password1!', 'P');
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'user_id' => $userId,
+        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'What does this PDF say?',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -476,7 +482,8 @@ test('PDF upload: parser throws → conversion swallowed → LLM gets [no extrac
     $userId = bootAuthLayer()->register('pdf-corrupt@example.com', 'Password1!', 'P');
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'user_id' => $userId,
+        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Read this PDF',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -519,7 +526,8 @@ test('production row order: user row first, attachment row second collapses to o
     $userId = bootAuthLayer()->register('md-prod-order@example.com', 'Password1!', 'P');
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'user_id' => $userId,
+        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Summarize this paper',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -579,6 +587,7 @@ test('multiple text attachments in production row order: one user message with d
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Compare these notes',

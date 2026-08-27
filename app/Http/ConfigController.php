@@ -29,6 +29,13 @@ final class ConfigController
     {
         return new JsonResponse([
             'allow_registration'     => $this->boolFlag('allow_registration', true),
+            // Mirrors `config.php#allow_group_creation` (default true) +
+            // the `SPORA_ALLOW_GROUP_CREATION` env override. The SPA uses
+            // this to decide whether non-admin users see a "Create
+            // group" affordance on MyGroupsPage — the server enforces
+            // the gate independently via the route middleware list in
+            // {@see \Spora\Core\RouteDefinitions}.
+            'allow_group_creation'  => $this->boolFlag('allow_group_creation', true),
             'plugin_install_enabled' => $this->boolFlag('plugin_install_enabled', false),
             'plugin_catalog_enabled' => $this->boolFlag('plugin_catalog_enabled', true),
         ]);

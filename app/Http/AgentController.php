@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,7 +24,8 @@ use Throwable;
  * Agent CRUD endpoints.
  *
  * Tool enablement / status / overrides are handled by AgentToolController
- * and AgentOverrideController respectively.
+ * and AgentOverrideController respectively. Agent ownership transfer
+ * (POST /api/v1/agents/{id}/transfer) is handled by AgentTransferController.
  */
 final class AgentController
 {
@@ -44,6 +47,8 @@ final class AgentController
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
+        private readonly ?PrincipalService $principalService = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -59,6 +64,12 @@ final class AgentController
     {
         $userId = $this->authService->currentUserId();
 
+        // `?principal_id=` is repeatable and intersects with the user's
+        // visible principals — the caller can never scope to a principal
+        // they don't own. Empty list = "no filter, show every visible
+        // agent", matching the legacy behaviour.
+        $principalFilter = $this->resolvePrincipalFilter($request, $userId);
+
         $select = $request?->query->get('select');
         if (is_string($select) && $select !== '') {
             $requested = array_values(array_filter(
@@ -69,17 +80,50 @@ final class AgentController
             // else is silently dropped so future schema additions don't leak.
             $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
-                $agents = Agent::where('user_id', $userId)
-                    ->orderBy('name')
-                    ->get($columns)
-                    ->all();
+                $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+                // Caller may have no principals — likely a freshly-registered
+                // user whose principal hasn't been materialised yet. Materialise
+                // the user-principal on the fly so the picker doesn't render
+                // empty even though ownership will work going forward.
+                if ($principalIds === [] && $this->principalService !== null) {
+                    $principalIds = [(int) $this->principalService->ensureUserPrincipal($userId)->id];
+                }
+                $query = Agent::whereIn('principal_id', $principalIds);
+                if ($principalFilter !== null) {
+                    $query->whereIn('principal_id', $principalFilter);
+                }
+                $agents = $query->orderBy('name')->get($columns)->all();
                 return new JsonResponse(['data' => ['agents' => $agents]]);
             }
         }
 
-        $agents = $this->agentService->getAgentsForUser($userId);
+        $agents = $this->agentService->getAgentsForUser($userId, $principalFilter);
 
         return new JsonResponse(['data' => ['agents' => $agents]]);
+    }
+
+    /**
+     * Parse `?principal_id=` (single or repeated) and intersect with the
+     * user's visible principals. Returns null when the caller didn't ask
+     * for a filter (the agent service returns every visible agent in that
+     * case). Returns an empty list when the user asked for a filter
+     * but every requested principal is outside their visibility scope —
+     * the agent service then returns an empty payload without exposing
+     * the existence of out-of-scope principals.
+     *
+     * Accepts all three syntaxes Symfony exposes:
+     *   `?principal_id=10`              — single value, scalar.
+     *   `?principal_id=10&principal_id=20` — repeated, becomes array.
+     *   `?principal_id[]=10&principal_id[]=20` — explicit array.
+     * `query->all('principal_id')` throws on a single string, so we read
+     * the whole bag and pull the slot — that path yields scalar OR array
+     * without complaint.
+     *
+     * @return list<int>|null
+     */
+    private function resolvePrincipalFilter(?Request $request, int $userId): ?array
+    {
+        return AgentFilterParser::parsePrincipalFilter($request, $userId, $this->principalResolver, $this->principalService);
     }
 
     /**
@@ -100,6 +144,8 @@ final class AgentController
             return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        $principalId = $this->resolvePrincipalIdForCreate($userId, $body);
+
         $data = [
             'name'          => $name,
             'description'   => trim((string) ($body['description'] ?? '')) ?: null,
@@ -114,12 +160,45 @@ final class AgentController
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
         ];
 
-        $agent = $this->agentService->createAgent($userId, $data);
+        $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
-            ['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]],
+            ['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Resolve the owning principal for {@see store()}. Accepts an
+     * explicit `principal_id` in the body when the caller is admin or
+     * owns the target principal; otherwise defaults to the caller's
+     * user-principal. Returns null when the field is omitted and no
+     * PrincipalService is wired (legacy test path).
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
+    {
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return null;
+        }
+        $requested = (int) $requested;
+
+        if ($this->principalService === null) {
+            return null;
+        }
+
+        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+    }
+
+    private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
+    {
+        if ($this->authService->isAdmin()
+            || $this->principalService->callerControlsPrincipal($userId, $requested)) {
+            return $requested;
+        }
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
     }
 
     /**
@@ -136,7 +215,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
     }
 
     /**
@@ -158,7 +237,7 @@ final class AgentController
             return $agent;
         }
 
-        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->resolveSupportsImageInput($agent), $this->toolIconResolver, $this->pictureService)]]);
+        return new JsonResponse(['data' => ['agent' => AgentResource::toArray($agent, $this->agentResourceContext($agent))]]);
     }
 
     /**
@@ -179,9 +258,9 @@ final class AgentController
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
 
-        $pictureError = $this->validateProfilePicturePayload($body);
-        if ($pictureError !== null) {
-            return $pictureError;
+        $picturePayload = $this->validateProfilePicturePayload($body);
+        if ($picturePayload instanceof JsonResponse) {
+            return $picturePayload;
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
@@ -189,7 +268,7 @@ final class AgentController
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
 
-        $this->applyProfilePictureUpdate($agentId, $body);
+        $this->applyProfilePictureUpdate($agentId, $picturePayload);
 
         return $agent;
     }
@@ -214,68 +293,55 @@ final class AgentController
 
     /**
      * Validate the profile_picture nested payload (type + shape + enum
-     * values). Returns the first 422 JsonResponse on any failure, or null
-     * when the key is absent, the picture service isn't wired, or the
-     * payload is well-formed. Extracted from {@see applyAgentPatch()} so
-     * the controller body stays under the 15-cognitive-complexity ceiling.
+     * values). Returns the validated payload on success, or a 422
+     * JsonResponse on the first failure. Empty array means "no
+     * picture payload to apply". Delegates to
+     * {@see \Spora\Services\ProfilePictures\ProfilePictureService::validatePayload()}
+     * so the wire contract lives in one place — the same path runs
+     * for {@see GroupController}.
      *
      * The `profile_picture` payload is validated *before* the agents-row
      * write so an invalid picture never partially overwrites the name /
      * description / system_prompt.
      *
-     * @param array<string, mixed> $body
+     * @param  array<string, mixed> $body
+     * @return array<string, string>|JsonResponse
      */
-    private function validateProfilePicturePayload(array $body): ?JsonResponse
+    private function validateProfilePicturePayload(array $body): array|JsonResponse
     {
         if (!array_key_exists('profile_picture', $body) || $this->pictureService === null) {
-            return null;
+            return [];
         }
-        $pictureTypeError = $this->validateProfilePictureType($body['profile_picture']);
-        if ($pictureTypeError !== null) {
-            return $pictureTypeError;
+        $validated = $this->pictureService->validatePayload($body['profile_picture']);
+        if ($validated instanceof \Spora\Services\ProfilePictures\ProfilePictureValidationError) {
+            return $this->unprocessable($validated->code, $validated->message);
         }
-        return $this->validateProfilePicture($body['profile_picture']);
+        /** @var array<string, string> $validated */
+        return $validated;
     }
 
     /**
      * Write the profile_picture nested object (archetype / variant_key /
      * palette_key) when the payload is a well-formed object. No-op for
-     * missing / null / scalar / list payloads (the shape guard in
-     * {@see validateProfilePicturePayload()} ensures we never reach this
-     * helper with a non-object). Both writes share the agents table
-     * update, so a throw on the picture path surfaces a 5xx and the
-     * operator can re-issue the PATCH.
+     * missing / null / scalar / list payloads — the validator in
+     * {@see applyAgentPatch()} ensures we never reach this helper
+     * with anything else. Both writes share the agents table update,
+     * so a throw on the picture path surfaces a 5xx and the operator
+     * can re-issue the PATCH.
      *
-     * @param array<string, mixed> $body
+     * @param array<string, string> $picture
      */
-    private function applyProfilePictureUpdate(int $agentId, array $body): void
+    private function applyProfilePictureUpdate(int $agentId, array $picture): void
     {
-        if (!is_array($body['profile_picture'] ?? null) || $this->pictureService === null) {
+        if ($picture === [] || $this->pictureService === null) {
             return;
         }
         $this->pictureService->updateAvatar(
             $agentId,
-            isset($body['profile_picture']['archetype']) ? (string) $body['profile_picture']['archetype'] : null,
-            isset($body['profile_picture']['variant_key']) ? (string) $body['profile_picture']['variant_key'] : null,
-            isset($body['profile_picture']['palette_key']) ? (string) $body['profile_picture']['palette_key'] : null,
+            isset($picture['archetype']) ? (string) $picture['archetype'] : null,
+            isset($picture['variant_key']) ? (string) $picture['variant_key'] : null,
+            isset($picture['palette_key']) ? (string) $picture['palette_key'] : null,
         );
-    }
-
-    /**
-     * Reject non-object `profile_picture` payloads. Returns a 422 when the
-     * caller sent a scalar, list, or null under `profile_picture`; null
-     * when the payload is a JSON object. Called only when the key is
-     * present in the body, so a missing `profile_picture` is not a 422.
-     */
-    private function validateProfilePictureType(mixed $picture): ?JsonResponse
-    {
-        if (!is_array($picture)) {
-            return $this->unprocessable(
-                'PROFILE_PICTURE_TYPE',
-                "Field 'profile_picture' must be a JSON object.",
-            );
-        }
-        return null;
     }
 
     /**
@@ -292,67 +358,6 @@ final class AgentController
         } catch (JsonException) {
             return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);
         }
-    }
-
-    /**
-     * Validate the profile_picture nested payload shape. Returns a 422
-     * JsonResponse on the first invalid field, or null when the payload
-     * is well-formed. The shape guard (scalar/list/null rejection) is
-     * handled in {@see validateProfilePictureType()} before this runs.
-     */
-    private function validateProfilePicture(array $picture): ?JsonResponse
-    {
-        $allowed = ['archetype', 'variant_key', 'palette_key'];
-        foreach (array_keys($picture) as $key) {
-            if (!in_array($key, $allowed, true)) {
-                return $this->unprocessable(
-                    'PROFILE_PICTURE_UNKNOWN_KEY',
-                    "Unknown field 'profile_picture.{$key}'.",
-                );
-            }
-        }
-        $typeError = $this->validateProfilePictureTypes($picture);
-        if ($typeError !== null) {
-            return $typeError;
-        }
-        return $this->validateProfilePictureEnums($picture);
-    }
-
-    /**
-     * @param array<string, mixed> $picture
-     */
-    private function validateProfilePictureTypes(array $picture): ?JsonResponse
-    {
-        foreach (['archetype', 'variant_key', 'palette_key'] as $key) {
-            if (array_key_exists($key, $picture) && !is_string($picture[$key])) {
-                return $this->unprocessable(
-                    'PROFILE_PICTURE_TYPE',
-                    "Field 'profile_picture.{$key}' must be a string.",
-                );
-            }
-        }
-        return null;
-    }
-
-    /**
-     * @param array<string, mixed> $picture
-     */
-    private function validateProfilePictureEnums(array $picture): ?JsonResponse
-    {
-        try {
-            if (isset($picture['archetype'])) {
-                $this->pictureService->normaliseArchetype((string) $picture['archetype']);
-            }
-            if (isset($picture['variant_key'])) {
-                $this->pictureService->normaliseVariantKey((string) $picture['variant_key']);
-            }
-            if (isset($picture['palette_key'])) {
-                $this->pictureService->normalisePalette((string) $picture['palette_key']);
-            }
-        } catch (InvalidArgumentException $e) {
-            return $this->unprocessable('PROFILE_PICTURE_VALUE', $e->getMessage());
-        }
-        return null;
     }
 
     /**
@@ -383,5 +388,14 @@ final class AgentController
             return false;
         }
         return $driver->supportsImageInput();
+    }
+
+    private function agentResourceContext(Agent $agent): AgentResourceContext
+    {
+        return new AgentResourceContext(
+            supportsImageInput: $this->resolveSupportsImageInput($agent),
+            iconResolver: $this->toolIconResolver,
+            pictureService: $this->pictureService,
+        );
     }
 }

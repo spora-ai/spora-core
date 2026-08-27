@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use ReflectionClass;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,24 +18,31 @@ use Symfony\Component\HttpFoundation\Response;
  * twenty methods and lets every method here stay under the S1142
  * three-return limit.
  *
+ * Driver schema reflection + per-field value validation moved to
+ * {@see LlmConfigSchemaValidator} so this class stays under the
+ * twenty-method ceiling.
+ *
  * The class is intentionally framework-aware (it returns {@see JsonResponse}
  * for error paths) because every caller is a controller. Returning a generic
  * result type would just push the mapping code back into the controller.
  */
 final class LlmConfigValidator
 {
-    /**
-     * Upper bound on `context_window` and `max_tokens_output`. Covers every
-     * known provider ceiling with headroom (Anthropic 200k, OpenAI o-series
-     * 100k). Above this, we reject with a generic 422 — the cap is internal
-     * operator hygiene, not something the UI should advertise.
-     */
-    private const MAX_CONTEXT_WINDOW = 1_000_000;
-    private const MAX_OUTPUT_TOKENS = 1_000_000;
+    private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
+
+    private readonly LlmConfigSchemaValidator $schemaValidator;
 
     public function __construct(
         private readonly LLMConfigServiceInterface $service,
-    ) {}
+        ?LlmConfigSchemaValidator $schemaValidator = null,
+        ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->schemaValidator    = $schemaValidator ?? new LlmConfigSchemaValidator();
+        $this->principalService  = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
 
     // ---------------------------------------------------------------------
     // POST /llm-configs (create)
@@ -54,7 +59,7 @@ final class LlmConfigValidator
             [
                 $this->validateStoreName($body),
                 $this->validateStoreDriverClass($body),
-                $this->validateLimits($body),
+                $this->schemaValidator->validateLimits($body),
                 $this->validateStoreSettings($body),
             ] as $error
         ) {
@@ -79,7 +84,7 @@ final class LlmConfigValidator
             return $nameError;
         }
 
-        $limitsError = $this->validateLimits($body);
+        $limitsError = $this->schemaValidator->validateLimits($body);
         if ($limitsError !== null) {
             return $limitsError;
         }
@@ -88,53 +93,11 @@ final class LlmConfigValidator
     }
 
     /**
-     * Validate `context_window` and `max_tokens_output` if present.
-     * Absent keys are treated as "leave unchanged" / "use default" so a
-     * partial update payload can update one field without resetting the
-     * other. A present-but-invalid value is rejected with a generic 422.
-     *
      * @param array<string, mixed> $body
      */
     public function validateLimits(array $body): ?JsonResponse
     {
-        foreach (['context_window', 'max_tokens_output'] as $key) {
-            if (!array_key_exists($key, $body)) {
-                continue;
-            }
-            $value = $body[$key];
-            $max = $key === 'context_window' ? self::MAX_CONTEXT_WINDOW : self::MAX_OUTPUT_TOKENS;
-            if (!$this->isValidPositiveInteger($value, $max)) {
-                return $this->error(
-                    'VALIDATION_ERROR',
-                    "Value must be a positive integer up to {$max}.",
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Strict positive-integer check. Rejects strings with trailing junk
-     * (`"200000abc"`), floats (`1.5`), and any non-positive value. The
-     * `$max` cap exists to bound the wire `max_tokens` request and keep
-     * accidental DoS amplification in check.
-     *
-     * @param mixed $value
-     */
-    private function isValidPositiveInteger(mixed $value, int $max): bool
-    {
-        if (!is_numeric($value)) {
-            return false;
-        }
-        // String round-trip rejects "200000abc" — `(int) "200000abc"` would
-        // silently truncate to 200000 otherwise.
-        if ((string) (int) $value !== (string) $value) {
-            return false;
-        }
-        $intValue = (int) $value;
-        return $intValue > 0 && $intValue <= $max;
+        return $this->schemaValidator->validateLimits($body);
     }
 
     /**
@@ -170,7 +133,10 @@ final class LlmConfigValidator
     {
         $rawSettings = $body['settings'] ?? null;
         $settings = is_array($rawSettings) ? $rawSettings : [];
-        $validationError = $this->validateSettings($settings, $this->getSchemaForDriver(trim((string) ($body['driver_class'] ?? ''))));
+        $validationError = $this->schemaValidator->validateSettings(
+            $settings,
+            $this->schemaValidator->getSchemaForDriver(trim((string) ($body['driver_class'] ?? ''))),
+        );
 
         if ($validationError === null) {
             return null;
@@ -183,7 +149,7 @@ final class LlmConfigValidator
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    public function prepareStoreData(array $body): array
+    public function prepareStoreData(array $body, int $callerUserId, bool $isAdmin): array
     {
         $data = $body;
         $data['name'] = trim((string) ($body['name'] ?? ''));
@@ -199,7 +165,37 @@ final class LlmConfigValidator
             $data['max_tokens_output'] = (int) $body['max_tokens_output'];
         }
 
+        // Default principal_id to the caller's user-principal. Admin
+        // callers can target any group; non-admins can only target their
+        // own user-principal (or, by extension, a group they're an
+        // owner/admin of).
+        if (isset($body['principal_id']) && is_int($body['principal_id'])) {
+            $requestedPrincipalId = $body['principal_id'];
+            if (!$this->callerMayTargetPrincipal($callerUserId, $isAdmin, $requestedPrincipalId)) {
+                $data['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
+            } else {
+                $data['principal_id'] = $requestedPrincipalId;
+            }
+        } else {
+            $data['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
+        }
+
         return $data;
+    }
+
+    /**
+     * Auth gate for "who is allowed to write a config under principal X":
+     * admin always; otherwise the requested principal is the caller's
+     * own user-principal, or the caller is an owner/admin of the underlying
+     * group. The controller is responsible for the admin flag; this method
+     * only models the principal axis.
+     */
+    private function callerMayTargetPrincipal(int $callerUserId, bool $isAdmin, int $principalId): bool
+    {
+        if ($isAdmin) {
+            return true;
+        }
+        return $this->principalResolver->isPrincipalOwner($callerUserId, $principalId);
     }
 
     /**
@@ -242,7 +238,7 @@ final class LlmConfigValidator
         if (!$isAdmin && $config->is_global) {
             return $this->forbidden();
         }
-        if ($config->user_id !== null && $config->user_id !== $userId) {
+        if ($config->principal_id !== null && ($userId === null || !$this->principalResolver->isPrincipalOwner($userId, (int) $config->principal_id))) {
             return $this->notFound();
         }
 
@@ -273,10 +269,10 @@ final class LlmConfigValidator
             return null;
         }
 
-        $schema = $this->getSchemaForDriver($config->driver_class);
+        $schema = $this->schemaValidator->getSchemaForDriver($config->driver_class);
         $existing = $this->service->decodeSettings($config->driver_class, $config->getRawOriginal('settings') ?? '');
         $merged = array_merge($existing, $body['settings']);
-        $validationError = $this->validateSettings($merged, $schema);
+        $validationError = $this->schemaValidator->validateSettings($merged, $schema);
         if ($validationError === null) {
             return null;
         }
@@ -299,64 +295,6 @@ final class LlmConfigValidator
         }
 
         return $data;
-    }
-
-    // ---------------------------------------------------------------------
-    // Driver schema & settings validation
-    // ---------------------------------------------------------------------
-
-    /**
-     * @return list<array>
-     */
-    public function getSchemaForDriver(string $driverClass): array
-    {
-        if (! class_exists($driverClass)) {
-            return [];
-        }
-
-        $schema = [];
-        foreach ((new ReflectionClass($driverClass))->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $setting */
-            $setting = $attr->newInstance();
-            $schema[] = [
-                'key' => $setting->key,
-                'label' => $setting->label,
-                'type' => $setting->type,
-                'description' => $setting->description,
-                'default' => $setting->default,
-                'required' => $setting->required,
-                'options' => $setting->options,
-                'validation' => $setting->validation,
-            ];
-        }
-
-        return $schema;
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     * @param list<array> $schema
-     */
-    public function validateSettings(array $settings, array $schema): ?string
-    {
-        foreach ($schema as $field) {
-            $key = $field['key'];
-            $required = $field['required'] ?? false;
-
-            if ($required && (! array_key_exists($key, $settings) || $settings[$key] === '')) {
-                return "Field '{$field['label']}' is required.";
-            }
-
-            if (array_key_exists($key, $settings) && $settings[$key] !== '') {
-                $value = (string) $settings[$key];
-                $validation = $field['validation'] ?? '';
-                if ($validation !== '' && !preg_match($validation, $value)) {
-                    return "Field '{$field['label']}' has an invalid value.";
-                }
-            }
-        }
-
-        return null;
     }
 
     // ---------------------------------------------------------------------

@@ -22,7 +22,7 @@ it('clears the agent override when the form is saved with an empty multi-select'
     $userId = $auth->register('clear@example.com', 'Password1!', 'Clear');
 
     $agent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -30,7 +30,7 @@ it('clears the agent override when the form is saved with an empty multi-select'
         'is_active'    => true,
     ]);
     $allowed = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',

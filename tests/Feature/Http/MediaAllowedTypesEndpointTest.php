@@ -80,7 +80,7 @@ function seedAllowedLlmConfig(int $id, int $userId, string $driverClass, string 
     }
     \Spora\Models\LLMDriverConfiguration::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "cfg-{$id}",
         'driver_class' => $driverClass,
         'settings' => json_encode([
@@ -102,7 +102,7 @@ function seedAllowedAgent(int $id, int $userId): void
     }
     \Spora\Models\Agent::query()->insert([
         'id' => $id,
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name' => "agent-{$id}",
         'description' => '',
         'system_prompt' => '',

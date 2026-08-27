@@ -9,6 +9,7 @@ use Spora\Auth\AuthService;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -35,7 +36,12 @@ final class LLMConfigController
         private readonly AuthService $authService,
         private readonly LLMConfigServiceInterface $llmConfigService,
         private readonly LlmConfigValidator $validator,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
+
+    private PrincipalResolver $principalResolver;
 
     /**
      * GET /llm-drivers
@@ -139,7 +145,7 @@ final class LLMConfigController
 
         // Check if config exists and belongs to another user (return 404 to avoid enumeration)
         $existingConfig = $this->llmConfigService->findConfiguration($id);
-        if ($existingConfig !== null && !$isAdmin && !$existingConfig->is_global && $existingConfig->user_id !== $userId) {
+        if ($existingConfig !== null && !$isAdmin && !$existingConfig->is_global && !$this->principalResolver->isPrincipalOwner($userId, (int) $existingConfig->principal_id)) {
             return $this->validator->notFound();
         }
 
@@ -179,7 +185,7 @@ final class LLMConfigController
     {
         $userId = $this->authService->currentUserId();
         $isAdmin = $this->authService->isAdmin();
-        $data = $this->validator->prepareStoreData($body);
+        $data = $this->validator->prepareStoreData($body, $userId, $isAdmin);
         $config = $this->llmConfigService->createConfiguration($userId, $data, $isAdmin);
         if ($config === null) {
             return $this->validator->storeCreationError($data, $isAdmin);

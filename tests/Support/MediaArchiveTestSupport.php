@@ -11,6 +11,7 @@ use ReflectionClass;
 use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Services\AssetStore;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
@@ -62,15 +63,17 @@ final class MediaArchiveTestSupport
             $maxPromoteBytes,
         );
 
-        return new MediaArchiveService(
-            $assetStore,
+        $pipeline = new MediaArchiveIngestPipeline(
+            new MediaIngestDecoder(),
             $resolver,
             $sniffer,
             $metadata,
+            $assetStore,
             self::buildConverterRegistry(),
-            new MediaIngestDecoder(),
             $logger,
         );
+
+        return new MediaArchiveService($pipeline);
     }
 
     public static function buildConverterRegistry(): MediaConverterRegistry

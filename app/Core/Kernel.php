@@ -161,10 +161,16 @@ final class Kernel implements KernelInterface
 
     private function buildRouter(): Router
     {
+        // Pass the resolved config down so {@see RouteDefinitions} can
+        // pick conditional middleware on boot (e.g. POST /api/v1/groups
+        // honours `allow_group_creation` — admin-only when the operator
+        // sets `SPORA_ALLOW_GROUP_CREATION=false`, open to all callers
+        // otherwise).
+        $config = $this->container->get('config');
         return new Router(
             $this->container,
-            function (MiddlewareRouteCollector $r): void {
-                RouteDefinitions::register($r);
+            function (MiddlewareRouteCollector $r) use ($config): void {
+                RouteDefinitions::register($r, is_array($config) ? $config : []);
                 $this->appLoader->registerRoutes($r);
                 // Plugin::routes() runs after App::routes() so plugin authors
                 // can override or extend App-registered routes.

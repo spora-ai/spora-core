@@ -59,17 +59,25 @@ final class SubAgentService implements SubAgentServiceInterface
         private readonly Closure $orchestratorFactory,
         private readonly ?MercurePublisherInterface $mercure = null,
         private readonly WorkerMode $workerMode = WorkerMode::Sync,
-    ) {}
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
+
+    private readonly PrincipalService $principalService;
 
     public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId): Task
     {
         $parent = Task::where('id', $parentTaskId)
             ->where('user_id', $userId)
             ->first();
-        $targetAgent = Agent::where('id', $targetAgentId)
-            ->where('user_id', $userId)
-            ->first();
+        // Migration 0067: agents are owned by a principal. Look up the
+        // target agent and verify the caller controls its principal.
+        $targetAgent = Agent::find($targetAgentId);
         if ($parent === null || $targetAgent === null) {
+            throw new InvalidArgumentException('Parent task or target agent not found.');
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, (int) $targetAgent->principal_id)) {
             throw new InvalidArgumentException('Parent task or target agent not found.');
         }
 
@@ -90,6 +98,7 @@ final class SubAgentService implements SubAgentServiceInterface
                 userPrompt: $prompt,
                 maxSteps: (int) ($targetAgent->max_steps ?? 10),
                 parentTaskId: $parent->id,
+                userId: $userId,
             );
         } catch (Throwable $e) {
             $recovered = Task::where('parent_task_id', $parent->id)

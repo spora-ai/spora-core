@@ -40,7 +40,7 @@ final class OpenApiGenerateCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $path = (string) $input->getArgument('output');
         if ($path !== '' && $path[0] !== '/') {
-            $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
+            $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
             $path = rtrim((string) $base, '/') . '/' . ltrim($path, '/');
         }
         $wrote = Generate::regenerate($path);

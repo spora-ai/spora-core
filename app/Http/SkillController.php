@@ -18,7 +18,6 @@ use Symfony\Component\HttpFoundation\Request;
 final class SkillController
 {
     use JsonControllerHelpers;
-    private const MSG_AUTH_REQUIRED = 'Authentication required.';
 
     public function __construct(
         private readonly AuthService $auth,
@@ -64,11 +63,6 @@ final class SkillController
         }
 
         return $this->notFound('SKILL_NOT_FOUND', "Skill '{$slug}' not found.");
-    }
-
-    private function unauthenticated(): JsonResponse
-    {
-        return $this->unprocessable('UNAUTHENTICATED', self::MSG_AUTH_REQUIRED);
     }
 
     /**

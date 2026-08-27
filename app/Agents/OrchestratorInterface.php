@@ -21,9 +21,15 @@ interface OrchestratorInterface
      * @param  int     $maxSteps     Hard iteration cap. Copied to Task at creation.
      * @param  int|null $parentTaskId Optional parent task for follow-up chaining.
      * @param  int|null $runId       Optional scheduled run ID for tracking.
+     * @param  int|null $userId      Optional explicit caller id for task
+     *                                attribution (`tasks.user_id`). When
+     *                                omitted, the orchestrator falls back
+     *                                to the agent's runner (used by worker
+     *                                and scheduled-run paths that legitimately
+     *                                run as the most-recent credential owner).
      * @return Task                  The newly created Task (status: RUNNING).
      */
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = []): Task;
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task;
 
     /**
      * One iteration of the loop. Called by the Symfony Messenger handler.

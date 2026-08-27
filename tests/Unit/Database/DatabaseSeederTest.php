@@ -37,6 +37,8 @@ function makeSeeder(): DatabaseSeeder
         $toolConfig,
         new PluginLoader([]),
         new Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
 
     return new DatabaseSeeder($authService, $mailTemplateSync, $importer);
@@ -61,7 +63,10 @@ it('seeds the admin user and agent successfully', function () {
     $user = User::where('email', 'admin@spora.local')->first();
     expect($user)->not->toBeNull();
 
-    $agent = Agent::where('user_id', $user->id)->first();
+    $principal = Spora\Models\Principal::where('user_id', $user->id)->first();
+    expect($principal)->not->toBeNull();
+
+    $agent = Agent::where('principal_id', $principal->id)->first();
     expect($agent)->not->toBeNull()
         ->and($agent->name)->toBe('Spora Core Agent');
 
@@ -106,8 +111,11 @@ it('does not modify an existing admin row (security)', function () {
     ]);
 
     $existingUserId = (int) Capsule::table('users')->where('email', 'admin@spora.local')->value('id');
+    $existingPrincipalId = (int) (new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()))
+        ->ensureUserPrincipal($existingUserId)
+        ->id;
     Agent::create([
-        'user_id'   => $existingUserId,
+        'principal_id' => $existingPrincipalId,
         'name'      => 'Spora Core Agent',
         'max_steps' => 5,
         'is_active' => true,

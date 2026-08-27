@@ -8,6 +8,7 @@ use Illuminate\Support\Collection;
 use ReflectionClass;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Schema\OperationSchemaFilter;
@@ -38,7 +39,7 @@ final class ToolDefinitionBuilder
      * @param  list<string>  $enabledClasses
      * @return list<array<string, mixed>>
      */
-    public function buildToolDefinitions(array $enabledClasses, int $agentId, ?int $userId = null): array
+    public function buildToolDefinitions(array $enabledClasses, int $agentId, ?PrincipalContext $context = null): array
     {
         $defs = [];
         $overrides = $this->loadOperationOverrides($agentId, $enabledClasses);
@@ -56,8 +57,8 @@ final class ToolDefinitionBuilder
             }
 
             $def = $this->usesOperationsTrait($toolClass)
-                ? $this->buildOperationToolDefinition($instance, $toolClass, $toolAttr, $overrides, $agentId, $userId)
-                : $this->buildSimpleToolDefinition($instance, $toolClass, $toolAttr, $agentId, $userId);
+                ? $this->buildOperationToolDefinition($instance, $toolClass, $toolAttr, $overrides, $agentId, $context)
+                : $this->buildSimpleToolDefinition($instance, $toolClass, $toolAttr, $agentId, $context);
 
             if ($def !== null) {
                 $defs[] = $def;
@@ -98,7 +99,7 @@ final class ToolDefinitionBuilder
         Tool $toolAttr,
         Collection $overrides,
         int $agentId,
-        ?int $userId,
+        ?PrincipalContext $context,
     ): ?array {
         $allowedOps = $this->resolveAllowedOperations($instance, $toolClass, $overrides);
         if ($allowedOps === []) {
@@ -114,7 +115,7 @@ final class ToolDefinitionBuilder
             'type'     => 'function',
             'function' => [
                 'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
+                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $context),
                 'parameters'  => $filteredSchema,
             ],
         ];
@@ -125,7 +126,7 @@ final class ToolDefinitionBuilder
         string $toolClass,
         Tool $toolAttr,
         int $agentId,
-        ?int $userId,
+        ?PrincipalContext $context,
     ): array {
         $schema = $instance->getParametersSchema();
 
@@ -137,7 +138,7 @@ final class ToolDefinitionBuilder
             'type'     => 'function',
             'function' => [
                 'name'        => $this->qualifiedToolName($toolClass, $toolAttr->name),
-                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $userId),
+                'description' => $toolAttr->description . $this->buildConfigBlockFor($toolClass, $agentId, $context),
                 'parameters'  => $schema,
             ],
         ];
@@ -172,10 +173,10 @@ final class ToolDefinitionBuilder
         return $allowedOps;
     }
 
-    private function buildConfigBlockFor(string $toolClass, int $agentId, ?int $userId): string
+    private function buildConfigBlockFor(string $toolClass, int $agentId, ?PrincipalContext $context): string
     {
         $llmSettings = $this->toolConfigService !== null
-            ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $userId)
+            ? $this->toolConfigService->getLlmToolSettings($toolClass, $agentId, $context?->ownerUserId, $context)
             : [];
 
         if ($this->buildLlmConfigBlock !== null) {

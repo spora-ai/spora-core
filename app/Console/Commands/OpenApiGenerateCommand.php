@@ -32,10 +32,10 @@ final class OpenApiGenerateCommand extends Command
 {
     private readonly RouteToOpenApi $builder;
 
-    public function __construct()
+    public function __construct(?RouteToOpenApi $builder = null)
     {
         parent::__construct();
-        $this->builder = new RouteToOpenApi();
+        $this->builder = $builder ?? new RouteToOpenApi();
     }
 
     protected function configure(): void
@@ -153,10 +153,10 @@ final class OpenApiGenerateCommand extends Command
      *
      * @return int Command::SUCCESS on write, Command::FAILURE on I/O or encode failure.
      */
-    public static function regenerate(string $outputPath): int
+    public static function regenerate(string $outputPath, array $config = []): int
     {
         try {
-            $json = (new RouteToOpenApi())->build();
+            $json = (new RouteToOpenApi())->build(self::resolveConfigForBuild($config));
             $serialised = self::encode($json);
         } catch (JsonException $e) {
             fwrite(STDERR, sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage()));
@@ -187,7 +187,7 @@ final class OpenApiGenerateCommand extends Command
         $serialised = '';
         $error      = null;
         try {
-            $serialised = self::encode((new RouteToOpenApi())->build());
+            $serialised = self::encode((new RouteToOpenApi())->build(self::resolveConfigForBuild()));
         } catch (JsonException $e) {
             $error = sprintf("Failed to encode OpenAPI document as JSON: %s\n", $e->getMessage());
         }
@@ -220,5 +220,27 @@ final class OpenApiGenerateCommand extends Command
             $openapi,
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
         );
+    }
+
+    /**
+     * Reconcile the build-time config snapshot with the runtime env vars
+     * read by `bin/spora-build` (which skips Kernel boot).
+     *
+     * The build variant defaults `allow_group_creation` to `true`
+     * (matching `config.php`) — operators who set
+     * `SPORA_ALLOW_GROUP_CREATION=false` re-run `bin/spora spora:openapi`
+     * (full Kernel) to refresh the spec under their config.
+     *
+     * @param array<string, mixed> $callerConfig
+     * @return array<string, mixed>
+     */
+    private static function resolveConfigForBuild(array $callerConfig = []): array
+    {
+        $envValue = getenv('SPORA_ALLOW_GROUP_CREATION');
+        if ($envValue === false || $envValue === '') {
+            return $callerConfig;
+        }
+        $callerConfig['allow_group_creation'] = filter_var($envValue, FILTER_VALIDATE_BOOLEAN);
+        return $callerConfig;
     }
 }

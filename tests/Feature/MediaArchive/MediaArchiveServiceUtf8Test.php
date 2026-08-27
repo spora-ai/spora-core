@@ -68,11 +68,12 @@ test('applyFieldsToExisting sanitises Latin-1 bytes in filename to valid UTF-8',
             uploadSource: 'tool',
         );
 
-        // applyFieldsToExisting is private; reach it via reflection so
-        // we exercise the exact line that wraps the assignment in
+        // applyFieldsToExisting lives on the ingest pipeline now
+        // (extracted from MediaArchiveService). Reach it via reflection
+        // so we exercise the exact line that wraps the assignment in
         // Utf8Sanitizer::scrubString().
-        $ref = new ReflectionMethod(MediaArchiveService::class, 'applyFieldsToExisting');
-        $ref->invoke($ctx['service'], $asset, $fields);
+        $ref = new ReflectionMethod(\Spora\Services\MediaArchive\MediaArchiveIngestPipeline::class, 'applyFieldsToExisting');
+        $ref->invoke($ctx['pipeline'], $asset, $fields);
 
         // Reload from the DB so the assertion sees the persisted value,
         // not the in-memory copy that fill() mutated.
@@ -120,10 +121,11 @@ test('insertNew sanitises Latin-1 bytes in nested metadata to valid UTF-8', func
             uploadSource: 'tool',
         );
 
-        // insertNew is private; invoke via reflection so we test the
+        // insertNew lives on the ingest pipeline now (extracted from
+        // MediaArchiveService). Invoke via reflection so we test the
         // exact Utf8Sanitizer::scrub() call at the metadata slot.
-        $ref = new ReflectionMethod(MediaArchiveService::class, 'insertNew');
-        $asset = $ref->invoke($ctx['service'], $request, $fields);
+        $ref = new ReflectionMethod(\Spora\Services\MediaArchive\MediaArchiveIngestPipeline::class, 'insertNew');
+        $asset = $ref->invoke($ctx['pipeline'], $request, $fields);
 
         $persisted = MediaAsset::find($asset->id);
 

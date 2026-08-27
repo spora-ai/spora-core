@@ -6,6 +6,7 @@ namespace Spora\Models;
 
 use Delight\Auth\Role;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -73,6 +74,23 @@ final class User extends Model
     public function locations(): HasMany
     {
         return $this->hasMany(UserLocation::class);
+    }
+
+    public function principal(): HasOne
+    {
+        return $this->hasOne(Principal::class);
+    }
+
+    public function groups(): BelongsToMany
+    {
+        return $this->belongsToMany(Group::class, 'group_memberships')
+            ->withPivot('role')
+            ->withTimestamps();
+    }
+
+    public function memberships(): HasMany
+    {
+        return $this->hasMany(GroupMembership::class);
     }
 
     public function hasRole(int $role): bool

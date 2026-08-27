@@ -252,12 +252,12 @@ test('show() returns 404 for unknown id', function (): void {
 
 test('update() modifies a config', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
-    bootAuth($authService);
+    $userId = bootAuth($authService);
 
     $config = createTestConfig('Update Test', OpenAICompatibleDriver::class, [
         'api_key' => 'sk-old',
         'model' => 'gpt-4o',
-    ], false, null, $llmConfigService);
+    ], false, $userId, $llmConfigService);
 
     $body = ['name' => 'Updated Name'];
     $request = jsonRequest('PUT', LLM_CONFIGS_URI . "/{$config->id}", $body);
@@ -274,9 +274,9 @@ test('update() modifies a config', function (): void {
 
 test('destroy() deletes a config', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
-    bootAuth($authService);
+    $userId = bootAuth($authService);
 
-    $config = createTestConfig('Delete Test', OpenAICompatibleDriver::class, ['api_key' => 'sk-del'], false, null, $llmConfigService);
+    $config = createTestConfig('Delete Test', OpenAICompatibleDriver::class, ['api_key' => 'sk-del'], false, $userId, $llmConfigService);
 
     $request = new Symfony\Component\HttpFoundation\Request();
     $request->attributes->set('id', $config->id);
@@ -375,13 +375,13 @@ test('index() returns all configs', function (): void {
 
 test('index() only returns configs belonging to the current user', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
-    bootAuth($authService, EMAIL_USER_A);
+    $userA = bootAuth($authService, EMAIL_USER_A);
 
-    createTestConfig(NAME_USER_A_CONFIG, OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, null, $llmConfigService);
+    createTestConfig(NAME_USER_A_CONFIG, OpenAICompatibleDriver::class, ['api_key' => 'sk-usera'], false, $userA, $llmConfigService);
 
     // Register and log in as a different user
-    bootAuth($authService, EMAIL_USER_B);
-    createTestConfig(NAME_USER_B_CONFIG, AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false, null, $llmConfigService);
+    $userB = bootAuth($authService, EMAIL_USER_B);
+    createTestConfig(NAME_USER_B_CONFIG, AnthropicCompatibleDriver::class, ['api_key' => 'sk-userb'], false, $userB, $llmConfigService);
 
     // User B should only see their own config
     $request = new Symfony\Component\HttpFoundation\Request();
@@ -398,9 +398,9 @@ test('index() only returns configs belonging to the current user', function (): 
 
 test('show() returns 404 when fetching another user\'s config', function (): void {
     [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
-    bootAuth($authService, EMAIL_USER_A);
+    $userA = bootAuth($authService, EMAIL_USER_A);
 
-    $configA = createTestConfig('UserA Private', OpenAICompatibleDriver::class, ['api_key' => 'sk-private'], false, null, $llmConfigService);
+    $configA = createTestConfig('UserA Private', OpenAICompatibleDriver::class, ['api_key' => 'sk-private'], false, $userA, $llmConfigService);
 
     // Log in as a different user
     bootAuth($authService, EMAIL_USER_B);
@@ -598,7 +598,7 @@ test('store() creates a config owned by the current user', function (): void {
 
     $result = json_decode($response->getContent(), true)['data']['config'];
     $savedConfig = LLMDriverConfiguration::find($result['id']);
-    expect($savedConfig->user_id)->toBe((int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]);
+    expect((int) $savedConfig->principal_id)->toBe((int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]);
 
     LLMDriverConfiguration::where('id', $result['id'])->delete();
 });
@@ -630,7 +630,7 @@ test('admin can create a global config with is_global=true', function (): void {
     expect($result['is_global'])->toBe(true);
 
     $savedConfig = LLMDriverConfiguration::find($result['id']);
-    expect($savedConfig->user_id)->toBeNull();
+    expect($savedConfig->principal_id)->toBeNull();
     expect($savedConfig->is_global)->toBe(true);
 
     LLMDriverConfiguration::where('id', $result['id'])->delete();
@@ -721,7 +721,7 @@ test('global configs are not included in other user\'s personal configs', functi
     expect(count($globalConfigs))->toBe(1);
     // The global config should belong to no user (user_id is null)
     $firstGlobal = array_values($globalConfigs)[0];
-    expect($firstGlobal['user_id'])->toBeNull();
+    expect($firstGlobal['principal_id'])->toBeNull();
 
     // User B's personal configs should not include the global
     $names = array_column($nonGlobalConfigs, 'name');

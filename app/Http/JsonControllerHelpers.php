@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use JsonException;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +20,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 trait JsonControllerHelpers
 {
+    private const MSG_AUTHENTICATION_REQUIRED = 'Authentication required.';
+
     /**
      * @return array<string, mixed>
      */
@@ -35,6 +38,29 @@ trait JsonControllerHelpers
     private function error(string $code, string $message, int $status): JsonResponse
     {
         return new JsonResponse(['error' => ['code' => $code, 'message' => $message]], $status);
+    }
+
+    /**
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function safeDecodeJson(Request $request): array|JsonResponse
+    {
+        try {
+            return $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * The standard 401 envelope. The wire-format `error.code` and
+     * message literals are kept here in lockstep — adding new
+     * consuming controllers that ask for the unified envelope will
+     * stay in sync with the others by construction.
+     */
+    private function unauthenticated(): JsonResponse
+    {
+        return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
     }
 
     private function notFound(string $code, string $message): JsonResponse

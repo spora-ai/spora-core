@@ -124,7 +124,7 @@ function registerAgentInWorkerDb(): array
     $userId = $authService->register('worker-test@example.com', WORKER_TEST_PASSWORD, 'Workertest');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'WorkerTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -155,7 +155,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily check',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -187,7 +187,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Future task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -219,7 +219,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -258,7 +258,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring from last_run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -301,7 +301,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Deactivated task',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -333,7 +333,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Berlin daily at 09:00',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'Europe/Berlin',
@@ -371,7 +371,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Concurrent test',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -414,13 +414,13 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $userId = $authService->register('claim-race@example.com', WORKER_TEST_PASSWORD, 'ClaimRace');
 
         $agentA = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'WorkerTestAgentA',
             'max_steps' => 10,
             'is_active' => true,
         ]);
         $agentB = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'WorkerTestAgentB',
             'max_steps' => 10,
             'is_active' => true,
@@ -428,7 +428,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $runA = ScheduledRun::create([
             'agent_id'        => $agentA->id,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Stale run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -438,7 +438,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $runB = ScheduledRun::create([
             'agent_id'        => $agentB->id,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Live run',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -528,7 +528,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily briefing',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -570,7 +570,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Atomic test',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -634,7 +634,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
             $run = ScheduledRun::create([
                 'agent_id'        => $agentId,
-                'user_id'         => $userId,
+                'user_id' => $userId,
                 'raw_prompt'      => 'UTC-poll test',
                 'cron_expression' => DAILY_9AM_CRON,
                 'timezone'        => 'UTC',
@@ -695,7 +695,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Recurring with throwing orchestrator',
             'cron_expression' => DAILY_9AM_CRON,
             'timezone'        => 'UTC',
@@ -763,7 +763,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'One-shot with throwing orchestrator',
             'cron_expression' => null,
             'run_at'          => WORKER_TEST_PAST_DUE_AT,
@@ -843,7 +843,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $userId = $authService->register('worker-test@example.com', WORKER_TEST_PASSWORD, 'Workertest');
 
         $agent = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'WorkerTestAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -851,6 +851,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Test prompt',
@@ -906,7 +907,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $authService = bootAuthLayer();
         $userId = $authService->register('reaponly-test@example.com', WORKER_TEST_PASSWORD, 'ReapOnlyTest');
         $agent = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'ReapOnlyTestAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -915,6 +916,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         // Create a QUEUED task — it should NOT be processed in --reap-only mode
         Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Should not run',
@@ -969,7 +971,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $authService = bootAuthLayer();
         $userId = $authService->register('reaponly2-test@example.com', WORKER_TEST_PASSWORD, 'ReapOnly2Test');
         $agent = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'ReapOnly2TestAgent',
             'max_steps' => 10,
             'is_active' => true,
@@ -978,6 +980,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         // Create a task stuck in RUNNING for longer than stale-minutes
         $orphanedTask = Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Orphaned',
@@ -1272,13 +1275,14 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         $auth = bootAuthLayer();
         $userId = $auth->register('retry-skip@example.com', WORKER_TEST_PASSWORD, 'RetrySkip');
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RetrySkipAgent',
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetrySkipAgent',
             'max_steps' => 5, 'is_active' => true,
         ]);
 
         // FAILED task whose retry_after is in the future — worker must skip.
         $failed = Task::create([
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',
@@ -1309,13 +1313,14 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         $auth = bootAuthLayer();
         $userId = $auth->register('retry-ok2@example.com', WORKER_TEST_PASSWORD, 'RetryOk2');
         $agent = Agent::create([
-            'user_id' => $userId, 'name' => 'RetryOk2Agent',
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetryOk2Agent',
             'max_steps' => 5, 'max_retries' => 3, 'is_active' => true,
         ]);
         // In-place retry: the failed task itself is the retry target. It has
         // retry_of_task_id pointing to itself and retry_after in the past.
         $failed = Task::create([
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'     => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',

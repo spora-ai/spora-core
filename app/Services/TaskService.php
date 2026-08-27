@@ -27,6 +27,7 @@ final class TaskService implements TaskServiceInterface
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -75,7 +76,17 @@ final class TaskService implements TaskServiceInterface
      */
     public function startTask(int $userId, int $agentId, string $prompt, ?int $maxSteps = null, ?int $parentTaskId = null, array $mediaIds = []): array
     {
-        $agent = Agent::where('id', $agentId)->where('user_id', $userId)->first();
+        // Migration 0067 cut `agents.user_id`; ownership now lives on
+        // `agents.principal_id`. The check routes through PrincipalResolver so
+        // shared/group-owned agents are reachable by group members.
+        $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $agentQuery = Agent::where('id', $agentId);
+        if ($principalIds === []) {
+            $agentQuery->whereRaw('1 = 0');
+        } else {
+            $agentQuery->whereIn('principal_id', $principalIds);
+        }
+        $agent = $agentQuery->first();
         if ($agent === null) {
             throw new InvalidArgumentException('Agent not found.');
         }
@@ -88,7 +99,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $steps = $maxSteps ?? $agent->max_steps;
-        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds);
+        $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
 
         $resource = $this->taskResource($task);
         $this->mercure->publish($task->id, $userId, $resource);

@@ -5,13 +5,14 @@ declare(strict_types=1);
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentResource;
+use Spora\Services\AgentResourceContext;
 use Spora\Services\ToolIconResolver;
 
 it('maps every wire-format field for an agent', function (): void {
     $userId = bootAuthLayer()->register('agent-resource@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'              => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Mapped Agent',
         'description'          => 'desc',
         'system_prompt'        => 'sp',
@@ -74,7 +75,7 @@ it('formats created_at as ATOM and emits an empty tools list when the relationsh
     $userId = bootAuthLayer()->register('agent-resource-atom@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Atom Agent',
         'max_steps' => 10,
     ]);
@@ -104,7 +105,7 @@ it('resolves per-tool icon via the supplied ToolIconResolver', function (): void
     $userId = bootAuthLayer()->register('agent-resource-icon@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'Icon Agent',
         'max_steps' => 10,
     ]);
@@ -128,7 +129,7 @@ it('resolves per-tool icon via the supplied ToolIconResolver', function (): void
         }
     };
 
-    $array = AgentResource::toArray($agent, null, $resolver);
+    $array = AgentResource::toArray($agent, new AgentResourceContext(iconResolver: $resolver));
 
     expect($array['tools'])->toHaveCount(1)
         ->and($array['tools'][0]['tool_class'])->toBe('Tests\\Fixtures\\Icons\\TestCalendarTool')
@@ -140,7 +141,7 @@ it('emits icon: null when the resolver returns null (frontend falls back to puzz
     $userId = bootAuthLayer()->register('agent-resource-noicon@example.com', 'Password1!', 'AR');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'      => 'No-Icon Agent',
         'max_steps' => 10,
     ]);
@@ -160,7 +161,7 @@ it('emits icon: null when the resolver returns null (frontend falls back to puzz
         }
     };
 
-    $array = AgentResource::toArray($agent, null, $resolver);
+    $array = AgentResource::toArray($agent, new AgentResourceContext(iconResolver: $resolver));
 
     expect($array['tools'])->toHaveCount(1)
         ->and($array['tools'][0])->toHaveKey('icon')

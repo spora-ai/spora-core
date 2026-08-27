@@ -78,7 +78,7 @@ test('LLMConfigService uses the injected persistence (encodeSettings routes thro
 
     // Round-tripping through the real persistence collaborator proves
     // the facade is delegating encode/decode rather than re-implementing.
-    $encoded = $service->encodeSettings(OpenAICompatibleDriver::class, [
+    $encoded = $persistence->encodeSettings(OpenAICompatibleDriver::class, [
         'api_key' => 'sk-wiring-test',
         'model' => 'gpt-4o',
     ]);

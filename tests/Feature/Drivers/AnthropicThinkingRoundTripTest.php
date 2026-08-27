@@ -120,13 +120,14 @@ test('Anthropic thinking signature is replayed byte-identical on the next outbou
     $auth = bootAuthLayer();
     $userId = $auth->register('roundtrip@example.com', 'Password1!', 'RoundTrip');
     $agent = \Spora\Models\Agent::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'RoundTripAgent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
     $task = \Spora\Models\Task::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'round-trip',

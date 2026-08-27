@@ -9,6 +9,7 @@ use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Throwable;
 
@@ -28,15 +29,20 @@ use Throwable;
  */
 class DriverFactory
 {
+    private readonly LLMConfigPreferences $preferences;
+
     public function __construct(
         private readonly LoggerInterface    $logger,
         private readonly LLMConfigService $llmConfigService,
         private readonly int               $llmTimeout = 300,
-    ) {}
+        ?LLMConfigPreferences $preferences = null,
+    ) {
+        $this->preferences = $preferences ?? new LLMConfigPreferences();
+    }
 
     public function makeFromAgent(Agent $agent): LLMDriverInterface
     {
-        $config = $this->llmConfigService->getEffectiveConfigForAgent($agent);
+        $config = $this->preferences->getEffectiveConfigForAgent($agent);
 
         if ($config !== null) {
             return $this->makeDriverFromConfig($config);

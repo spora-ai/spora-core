@@ -36,13 +36,14 @@ test('TickPhaseRunner persists contentBlocks and Usage into the DB', function ()
     simulateLoggedInSession($userId, 'usage@example.com');
 
     $agent = Agent::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'UsageAgent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
     $task = Task::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'hi',
@@ -116,13 +117,14 @@ test('Orchestrator::appendHistory persists a plain assistant message without a r
     simulateLoggedInSession($userId, 'nores@example.com');
 
     $agent = Agent::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'NoResAgent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
     $task = Task::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'hi',

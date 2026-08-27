@@ -105,7 +105,8 @@ final class ToolController
             return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
-        $settings = $this->toolConfigService->getUserSettings($toolClass, $userId);
+        $principalId = $this->resolveCallerPrincipalId($userId);
+        $settings = $this->toolConfigService->getPrincipalSettings($toolClass, $principalId);
         $masked = $this->toolConfigService->maskForApi($settings, $toolClass);
 
         return new JsonResponse(['data' => ['settings' => $masked]]);
@@ -131,7 +132,8 @@ final class ToolController
 
         $settings = isset($body['settings']) && is_array($body['settings']) ? $body['settings'] : [];
 
-        $saved = $this->toolConfigService->putUserSettings($toolClass, $userId, $settings);
+        $principalId = $this->resolveCallerPrincipalId($userId);
+        $saved = $this->toolConfigService->putPrincipalSettings($toolClass, $principalId, $settings);
         $masked = $this->toolConfigService->maskForApi($saved, $toolClass);
 
         return new JsonResponse(['data' => ['settings' => $masked]]);
@@ -146,9 +148,26 @@ final class ToolController
             return new JsonResponse(['error' => ['code' => self::ERR_TOOL_NOT_FOUND_CODE, 'message' => self::ERR_TOOL_NOT_FOUND_MSG]], 404);
         }
 
-        $this->toolConfigService->deleteUserSettings($toolClass, $userId);
+        $principalId = $this->resolveCallerPrincipalId($userId);
+        $this->toolConfigService->deletePrincipalSettings($toolClass, $principalId);
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * Resolve the caller's user-principal id. The user-settings endpoint
+     * is bound to the caller's own principal; an admin targeting a
+     * group-principal should use the GroupController endpoints instead.
+     */
+    private function resolveCallerPrincipalId(?int $userId): int
+    {
+        if ($userId === null) {
+            return 0;
+        }
+        $principal = \Spora\Models\Principal::where('type', \Spora\Models\Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->first();
+        return $principal !== null ? (int) $principal->id : 0;
     }
 
     private function toolSchemaResource(string $toolClass): array

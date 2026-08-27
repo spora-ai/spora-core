@@ -9,7 +9,10 @@ use Spora\Models\Agent;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
+use Spora\Services\GroupService;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\ScheduledRunService;
 
 defined('SCHEDULED_RUN_TEST_PASSWORD') || define('SCHEDULED_RUN_TEST_PASSWORD', 'Password1!');
@@ -49,7 +52,7 @@ function createScheduledRunUserAgent(): array
     $userId = bootAuth($auth, "scheduled-run-{$seq}@example.com", SCHEDULED_RUN_TEST_PASSWORD);
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'SRTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -79,7 +82,7 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
 
         ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'Daily',
             'cron_expression' => SCHEDULED_RUN_TEST_CRON,
             'timezone'        => 'UTC',
@@ -96,7 +99,7 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
         [$userId, $agentA] = createScheduledRunUserAgent();
 
         $agentB = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'AgentB',
             'max_steps' => 10,
             'is_active' => true,
@@ -104,7 +107,7 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
 
         ScheduledRun::create([
             'agent_id'   => $agentB->id,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'B only',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -112,6 +115,78 @@ describe('ScheduledRunService::getRunsForAgent', function (): void {
 
         $result = $service->getRunsForAgent($agentA, $userId);
         expect($result)->toBe([]);
+    });
+
+    it('lets a plain group member read scheduled runs (regression for stale-cache-group bug)', function (): void {
+        // Owner / group / agent setup
+        $service = makeScheduledRunService();
+        $auth = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'sr-owner@example.com', SCHEDULED_RUN_TEST_PASSWORD);
+        $plainMemberId = bootAuth($auth, 'sr-plain@example.com', SCHEDULED_RUN_TEST_PASSWORD);
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        // Both users need their user-principal materialised for the resolver
+        // to count them as part of any visible-principal set.
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'SR-ReadGroup');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'      => 'SR-GroupAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        ScheduledRun::create([
+            'agent_id'        => $agent->id,
+            'user_id'         => $ownerId,
+            'raw_prompt'      => 'shared daily',
+            'cron_expression' => SCHEDULED_RUN_TEST_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+
+        // Owner creates the run with cron — already done above. Now a plain
+        // group member (no owner/admin role) requests the list.
+        $result = $service->getRunsForAgent($agent->id, $plainMemberId);
+        expect($result)->not->toBeNull();
+        expect($result)->toHaveCount(1);
+        expect($result[0]['cron_expression'])->toBe(SCHEDULED_RUN_TEST_CRON);
+    });
+
+    it('still denies a plain member from creating a scheduled run (write-side gate)', function (): void {
+        $service = makeScheduledRunService();
+        $auth = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'sr-w-owner@example.com', SCHEDULED_RUN_TEST_PASSWORD);
+        $plainMemberId = bootAuth($auth, 'sr-w-plain@example.com', SCHEDULED_RUN_TEST_PASSWORD);
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'SR-WriteDeny');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'      => 'SR-WriteDenyAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        expect(fn() => $service->createRun($agent->id, $plainMemberId, [
+            'raw_prompt'      => 'plain member attempt',
+            'cron_expression' => SCHEDULED_RUN_TEST_CRON,
+            'timezone'        => 'UTC',
+        ]))->toThrow(Spora\Services\Exceptions\AgentNotFoundException::class);
     });
 });
 
@@ -304,7 +379,7 @@ describe('ScheduledRunService::getRun', function (): void {
         [$userId, $agentA] = createScheduledRunUserAgent();
 
         $agentB = Agent::create([
-            'user_id'   => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'AgentB',
             'max_steps' => 10,
             'is_active' => true,
@@ -312,7 +387,7 @@ describe('ScheduledRunService::getRun', function (): void {
 
         $runB = ScheduledRun::create([
             'agent_id'   => $agentB->id,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'B',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -337,7 +412,7 @@ describe('ScheduledRunService::updateRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'before',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -358,7 +433,7 @@ describe('ScheduledRunService::updateRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'pause me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -388,7 +463,7 @@ describe('ScheduledRunService::deleteRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'delete me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -438,7 +513,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'   => $agentId,
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'raw_prompt' => 'trigger me',
             'timezone'   => 'UTC',
             'is_active'  => true,
@@ -473,7 +548,7 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
         $run = ScheduledRun::create([
             'agent_id'        => $agentId,
-            'user_id'         => $userId,
+            'user_id' => $userId,
             'raw_prompt'      => 'recurring trigger',
             'cron_expression' => SCHEDULED_RUN_TEST_CRON,
             'timezone'        => 'UTC',

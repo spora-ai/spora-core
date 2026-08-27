@@ -22,7 +22,7 @@ beforeEach(function (): void {
     $this->service = new AgentPictureService();
     $this->userId = bootAuth(bootAuthLayer());
     Capsule::table('agents')->insert([
-        'id' => 1, 'user_id' => $this->userId, 'name' => 'Test', 'max_steps' => 10,
+        'id' => 1, 'principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Test', 'max_steps' => 10,
         'is_active' => 1, 'allow_followup' => 1, 'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);

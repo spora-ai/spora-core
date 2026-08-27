@@ -77,6 +77,18 @@ final readonly class ListMediaQuery
      *        (`MediaUploadController`); `'tool'` restricts to rows generated
      *        by tool calls. Anything else should be normalised to null by
      *        the builder.
+     * @param list<int>|null $principalIds Restricts the listing to media
+     *        attached to agents whose `principal_id` is in this list, plus
+     *        direct uploads by the caller's user — but only when the
+     *        caller's user-principal is included. Drives the dashboard-
+     *        style "ALL / My Media / Group A / Group B" scope row in the
+     *        Media Archive plugin: `My Media` is `principalIds = [user
+     *        principal id]`, `Group A` is `principalIds = [group-A
+     *        principal id]`, `ALL` is the union of all the user's visible
+     *        principal ids. The HTTP layer intersects this list with the
+     *        caller's {@see PrincipalResolver::visiblePrincipalIds()} so
+     *        an out-of-scope id is silently dropped. When null, falls back
+     *        to the legacy `agentOwnerUserId`-based ownership union.
      */
     public function __construct(
         public ?MediaType $mediaType = null,
@@ -98,6 +110,7 @@ final readonly class ListMediaQuery
         // that explicitly need an upload-only filter.
         public ?string $ownership = null,
         public ?int $agentOwnerUserId = null,
+        public ?array $principalIds = null,
         public int $page = 1,
         public int $perPage = self::PER_PAGE_DEFAULT,
     ) {}
@@ -134,6 +147,7 @@ final readonly class ListMediaQuery
             'uploadSource' => $this->uploadSource,
             'ownership'    => $this->ownership,
             'agentOwnerUserId' => $this->agentOwnerUserId,
+            'principalIds'     => $this->principalIds,
         ];
     }
 

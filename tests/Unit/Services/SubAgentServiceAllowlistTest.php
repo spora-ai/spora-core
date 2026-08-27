@@ -38,7 +38,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         simulateLoggedInSession($userId, 'subagent-allowlist@example.com');
 
         Agent::create([
-            'user_id' => $userId,
+            'principal_id' => $this->createUserPrincipal($userId),
             'name' => 'Allowlist Agent',
             'max_steps' => 5,
             'is_active' => true,
@@ -47,7 +47,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         $captured = [];
         $publisher = Mockery::mock(MercurePublisherInterface::class);
         $publisher->shouldReceive('publish')->andReturnUsing(function (int $taskId, int $userId, array $payload) use (&$captured) {
-            $captured[] = ['task_id' => $taskId, 'user_id' => $userId, 'data' => $payload['data'] ?? []];
+            $captured[] = ['task_id' => $taskId, 'principal_id' => createUserPrincipalPublic($userId), 'data' => $payload['data'] ?? []];
             return true;
         });
 
@@ -84,11 +84,12 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         $userId = $GLOBALS['__allowlist_user_id']
             ?? ($GLOBALS['__allowlist_user_id'] = $authService->currentUserId());
         $agent = Agent::query()->first() ?? Agent::create([
-            'user_id' => $userId, 'name' => 'Allowlist Agent', 'max_steps' => 5, 'is_active' => true,
+            'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Allowlist Agent', 'max_steps' => 5, 'is_active' => true,
         ]);
 
         $parent = Task::create([
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'     => $userId,
             'agent_id' => $agent->id,
             'status' => 'AWAITING_SUB_AGENTS',
             'user_prompt' => 'parent',

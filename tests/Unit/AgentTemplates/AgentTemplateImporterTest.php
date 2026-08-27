@@ -162,19 +162,20 @@ test('opt-in export settings round-trip through the importer without secrets', f
     $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Tests\Fixtures\TestTool::class]);
     $plugins = new Spora\Plugins\PluginLoader([]);
+    $settingsApplier = new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, null);
     $importer = new Spora\AgentTemplates\AgentTemplateImporter(
         $toolConfig,
         $plugins,
         new Spora\Core\Paths(BASE_PATH),
-        null,
-        new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, null),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig, $settingsApplier),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $exporter = new Spora\AgentTemplates\AgentTemplateExporter(
         $plugins,
         $toolConfig,
         new Spora\Services\ToolConfigSchemaInspector(),
     );
-    $source = Agent::create(['user_id' => $this->userId, 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
+    $source = Agent::create(['principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Settings Source', 'max_steps' => 5, 'is_active' => true]);
     AgentTool::create(['agent_id' => $source->id, 'tool_class' => Tests\Fixtures\TestTool::class, 'tool_name' => 'test']);
     $toolConfig->putAgentOverride(Tests\Fixtures\TestTool::class, (int) $source->id, [
         'api_key' => 'secret',
@@ -195,12 +196,13 @@ test('missing skill slugs warn and are dropped from imported settings', function
     $scanner = new Spora\Skills\SkillScanner([]);
     $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Spora\Tools\SkillTool::class], $scanner);
+    $settingsApplier = new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, $scanner);
     $importer = new Spora\AgentTemplates\AgentTemplateImporter(
         $toolConfig,
         new Spora\Plugins\PluginLoader([]),
         new Spora\Core\Paths(BASE_PATH),
-        null,
-        new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, $scanner),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig, $settingsApplier),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $raw = [
         'id' => 'skills', 'name' => 'Skills', 'version' => '1.0.0',

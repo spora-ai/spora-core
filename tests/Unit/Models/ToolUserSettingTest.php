@@ -12,16 +12,17 @@ it('uses the tool_user_settings table', function (): void {
     expect($setting->getTable())->toBe('tool_user_settings');
 });
 
-it('allows mass assignment of user_id, tool_class, settings', function (): void {
+it('allows mass assignment of principal_id, tool_class, settings', function (): void {
     $userId = bootAuthLayer()->register('usersetting@example.com', TOOL_USER_SETTING_TEST_PASSWORD, 'US');
+    $principalId = createUserPrincipalPublic($userId);
 
     $setting = ToolUserSetting::create([
-        'user_id'    => $userId,
+        'principal_id' => $principalId,
         'tool_class' => 'Spora\Tools\StubOutputTool',
         'settings'   => 'encrypted-blob',
     ]);
 
-    expect($setting->getAttribute('user_id'))->toBe($userId)
+    expect($setting->getAttribute('principal_id'))->toBe($principalId)
         ->and($setting->getAttribute('tool_class'))->toBe('Spora\Tools\StubOutputTool')
         ->and($setting->getAttributes())->toHaveKey('settings');
 });

@@ -32,11 +32,24 @@ interface LLMConfigServiceInterface
 
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration;
 
-    public function getUserPreferredConfig(int $userId): ?LLMDriverConfiguration;
+    /**
+     * Read a principal's preferred LLM configuration. The user-id-keyed
+     * legacy aliases (`getUserPreferredConfig` / `setUserPreferredConfig`
+     * / `unsetUserPreferredConfig`) moved to {@see LLMConfigPreferences}
+     * during the S1448 split.
+     */
+    public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration;
 
-    public function setUserPreferredConfig(int $userId, int $configId): bool;
+    /**
+     * Persist a principal's preferred LLM configuration. The caller
+     * must own the principal; admins short-circuit.
+     */
+    public function setPrincipalPreferredConfig(int $principalId, int $configId, int $callerUserId): bool;
 
-    public function unsetUserPreferredConfig(int $userId): void;
+    /**
+     * Clear a principal's preferred LLM configuration.
+     */
+    public function unsetPrincipalPreferredConfig(int $principalId): void;
 
     /**
      * Find a configuration by ID (for authorization checks).

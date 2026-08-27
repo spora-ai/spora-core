@@ -173,7 +173,7 @@ test('confirmEmail() sends the welcome email for an initial-signup confirmation 
     // Confirmation row whose email matches the user's current email —
     // delight-im collapses $oldEmail to null in this case.
     Capsule::table('users_confirmations')->insert([
-        'user_id'  => $userId,
+        'user_id' => (int) $userId,
         'email'    => 'welcome-ok@example.com',
         'selector' => $selector,
         'token'    => $hashedToken,
@@ -208,7 +208,7 @@ test('confirmEmail() does NOT send the welcome email for an address-change confi
     // Confirmation row pointing at a NEW email — delight-im returns the
     // previous email as $oldEmail, which is non-null.
     Capsule::table('users_confirmations')->insert([
-        'user_id'  => $userId,
+        'user_id' => (int) $userId,
         'email'    => 'welcome-skip-new@example.com',
         'selector' => $selector,
         'token'    => $hashedToken,

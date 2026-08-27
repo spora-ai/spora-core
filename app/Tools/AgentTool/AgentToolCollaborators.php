@@ -7,6 +7,7 @@ namespace Spora\Tools\AgentTool;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolIconResolver;
 
 /**
@@ -21,6 +22,7 @@ final class AgentToolCollaborators
     public function __construct(
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
+        private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?NotesHandler $notesHandler = null,
         private readonly ?CatalogPresenter $catalogPresenter = null,
         private readonly ?ConfigurePlanner $configurePlanner = null,
@@ -36,9 +38,16 @@ final class AgentToolCollaborators
     public function catalogPresenter(
         AgentServiceInterface $agentService,
         AgentToolSettingsServiceInterface $toolSettings,
+        ?PrincipalResolver $principalResolver = null,
     ): CatalogPresenter {
         return $this->catalogPresenter
-            ?? new CatalogPresenter($agentService, $toolSettings, $this->pluginLoader, $this->iconResolver);
+            ?? new CatalogPresenter(
+                $agentService,
+                $toolSettings,
+                $principalResolver ?? $this->principalResolver,
+                $this->pluginLoader,
+                $this->iconResolver,
+            );
     }
 
     public function configurePlanner(AgentToolSettingsServiceInterface $toolSettings): ConfigurePlanner

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Orchestrator;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Tools\HandoverTool;
@@ -86,7 +87,7 @@ it('renders a real HandoverTool LLM projection end-to-end', function (): void {
     $userId = $auth->register('orch-llm@example.com', 'Password1!', 'OrchLlm');
 
     $agent = Spora\Models\Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Legal Agent',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -94,7 +95,17 @@ it('renders a real HandoverTool LLM projection end-to-end', function (): void {
         'is_active'    => true,
     ]);
 
-    $inspector = new ToolConfigSchemaInspector();
+    // Migration 0067 cut agents.user_id but ToolConfigSchemaInspector still
+    // queries Agent::where('user_id', …). Bridge the gap so the projection
+    // can resolve the just-created agent's name.
+    if (!Capsule::schema()->hasColumn('agents', 'user_id')) {
+        Capsule::schema()->table('agents', function ($table): void {
+            $table->unsignedBigInteger('user_id')->nullable();
+        });
+    }
+    Capsule::table('agents')->where('id', $agent->id)->update(['user_id' => $userId]);
+
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $llm = $inspector->getLlmToolSettings(
         HandoverTool::class,
         ['allowed_target_agents' => [$agent->id]],

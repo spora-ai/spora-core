@@ -34,7 +34,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     $userId = $auth->register('realcfg@example.com', 'Password1!', 'RealCfg');
 
     $sourceAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -42,7 +42,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
         'is_active'    => true,
     ]);
     $targetAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Target',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -73,6 +73,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
@@ -96,7 +97,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
     $userId = $auth->register('realcfg2@example.com', 'Password1!', 'RealCfg2');
 
     $sourceAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source2',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -104,7 +105,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
         'is_active'    => true,
     ]);
     $allowedAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -112,7 +113,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
         'is_active'    => true,
     ]);
     $otherAgent = Agent::create([
-        'user_id'      => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Other',
         'llm_provider' => 'mock',
         'llm_model'    => 'mock',
@@ -136,6 +137,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
     $tool = new HandoverTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
         'user_id'     => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',

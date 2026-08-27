@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Services\AgentPictures;
 
-use DateTimeInterface;
-use Illuminate\Database\Capsule\Manager as Capsule;
-use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Services\Exceptions\AgentPictureNotOwnedException;
+use Spora\Services\ProfilePictures\ProfilePictureService;
 
 /**
  * Picture editor for Agents — owns the CRUD surface and the wire-format
@@ -35,10 +33,8 @@ use Spora\Services\Exceptions\AgentPictureNotOwnedException;
  * `Agent.profile_picture` JSON contract — the enum colours are resolved
  * server-side, so the frontend never has to know the palette map.
  */
-final class AgentPictureService
+final class AgentPictureService extends ProfilePictureService
 {
-    private const DATETIME_FORMAT = 'Y-m-d H:i:s';
-
     /**
      * Default picture for new agents / backfilled existing agents. Used
      * by `getOrCreate()` and the backfill migration so the dashboard
@@ -47,86 +43,18 @@ final class AgentPictureService
     public const DEFAULT_ARCHETYPE = Archetype::Assistant;
     public const DEFAULT_PALETTE = Palette::Slate;
 
-    public function getOrCreate(int $agentId): AgentPicture
-    {
-        $existing = AgentPicture::where('agent_id', $agentId)->first();
-        if ($existing instanceof AgentPicture) {
-            return $existing;
-        }
-
-        return $this->createDefaultPicture($agentId);
-    }
-
     /**
-     * Insert the default picture row for an agent. Idempotent — looks up
-     * the existing row first and returns it when one is already present.
-     * Centralised so creation paths (service, importer, template apply)
-     * share the same defaults.
-     */
-    public function createDefaultPicture(int $agentId): AgentPicture
-    {
-        $existing = AgentPicture::where('agent_id', $agentId)->first();
-        if ($existing instanceof AgentPicture) {
-            return $existing;
-        }
-
-        $now = date(self::DATETIME_FORMAT);
-        $id = Capsule::table('agent_pictures')->insertGetId([
-            'agent_id'       => $agentId,
-            'archetype'      => self::DEFAULT_ARCHETYPE->value,
-            'variant_key'    => null,
-            'palette_key'    => self::DEFAULT_PALETTE->value,
-            'media_asset_id' => null,
-            'created_at'     => $now,
-            'updated_at'     => $now,
-        ]);
-
-        $created = AgentPicture::find($id);
-        if ($created === null) {
-            throw new InvalidArgumentException("Failed to create default picture for agent {$agentId}.");
-        }
-        return $created;
-    }
-
-    /**
-     * Apply an archetype avatar selection. Any null argument leaves the
-     * existing value untouched (partial update). Non-null values are
-     * normalised: `archetype`/`palette_key` against the enum, `variant_key`
-     * against the `v0|v1|v2` regex.
+     * Build the wire-format `profile_picture` payload for an agent.
+     * Returns the default avatar shape when the agent has no persisted
+     * row — callers (HTTP list/create/show) get a uniform contract and
+     * the dashboard renders the deterministic default everywhere instead
+     * of falling back to initials.
      *
-     * @throws InvalidArgumentException on unknown archetype or palette.
+     * @return array<string, mixed>
      */
-    public function updateAvatar(
-        int $agentId,
-        ?string $archetype,
-        ?string $variantKey,
-        ?string $paletteKey,
-    ): AgentPicture {
-        $picture = $this->getOrCreate($agentId);
-
-        $updates = [];
-        if ($archetype !== null) {
-            $updates['archetype'] = $this->normaliseArchetype($archetype);
-        }
-        if ($variantKey !== null) {
-            $updates['variant_key'] = $this->normaliseVariantKey($variantKey);
-        }
-        if ($paletteKey !== null) {
-            $updates['palette_key'] = $this->normalisePalette($paletteKey);
-        }
-        if ($updates === []) {
-            return $picture;
-        }
-
-        // Switching to an archetype avatar always clears any uploaded image.
-        $updates['media_asset_id'] = null;
-        $updates['updated_at'] = date(self::DATETIME_FORMAT);
-
-        Capsule::table('agent_pictures')
-            ->where('id', $picture->id)
-            ->update($updates);
-        $picture->refresh();
-        return $picture;
+    public function toWireShape(int $agentId): array
+    {
+        return parent::toWireShape($agentId);
     }
 
     /**
@@ -152,7 +80,7 @@ final class AgentPictureService
 
         $picture = $this->getOrCreate((int) $agent->id);
 
-        Capsule::table('agent_pictures')
+        \Illuminate\Database\Capsule\Manager::table('agent_pictures')
             ->where('id', $picture->id)
             ->update([
                 'media_asset_id' => $asset->id,
@@ -166,31 +94,17 @@ final class AgentPictureService
     }
 
     /**
-     * Clear the uploaded image and fall back to the previously selected
-     * archetype avatar (or the defaults when none was ever picked). The
-     * underlying `media_assets` row is NOT deleted — binary GC is a
-     * separate ops concern (see backlog).
+     * Build the wire-format shape from an in-memory picture + (optionally)
+     * pre-loaded media-asset. Use this when the caller has already eager-
+     * loaded the picture + media relation, so {@see pictureToWire()} does
+     * not re-query.
      */
-    public function detachImage(int $agentId): AgentPicture
+    public function pictureToWireWithAsset(AgentPicture $picture, ?MediaAsset $asset): array
     {
-        $picture = $this->getOrCreate($agentId);
-
-        // When an archetype was set previously, preserve it. When only an
-        // image was ever attached, fall back to the service defaults so
-        // the agent always renders something meaningful.
-        $hasArchetype = $picture->archetype !== null || $picture->palette_key !== null;
-
-        Capsule::table('agent_pictures')
-            ->where('id', $picture->id)
-            ->update([
-                'media_asset_id' => null,
-                'archetype'      => $hasArchetype ? $picture->archetype : self::DEFAULT_ARCHETYPE->value,
-                'variant_key'    => $hasArchetype ? $picture->variant_key : null,
-                'palette_key'    => $hasArchetype ? $picture->palette_key : self::DEFAULT_PALETTE->value,
-                'updated_at'     => date(self::DATETIME_FORMAT),
-            ]);
-        $picture->refresh();
-        return $picture;
+        if ($picture->media_asset_id !== null && $asset instanceof MediaAsset) {
+            return $this->imageWireShape($asset);
+        }
+        return $this->avatarWireShape($picture);
     }
 
     /**
@@ -229,7 +143,7 @@ final class AgentPictureService
         }
 
         $updates['updated_at'] = date(self::DATETIME_FORMAT);
-        Capsule::table('agent_pictures')
+        \Illuminate\Database\Capsule\Manager::table('agent_pictures')
             ->where('id', $picture->id)
             ->update($updates);
         $picture->refresh();
@@ -247,91 +161,9 @@ final class AgentPictureService
     }
 
     /**
-     * Build the wire-format `profile_picture` payload for an agent.
-     * Returns the default avatar shape when the agent has no persisted
-     * row — callers (HTTP list/create/show) get a uniform contract and
-     * the dashboard renders the deterministic default everywhere instead
-     * of falling back to initials.
-     *
      * @return array<string, mixed>
      */
-    public function toWireShape(int $agentId): array
-    {
-        $picture = AgentPicture::where('agent_id', $agentId)->first();
-        if ($picture instanceof AgentPicture) {
-            return $this->pictureToWire($picture);
-        }
-        return $this->defaultWireShape($agentId);
-    }
-
-    /**
-     * Build the wire-format shape from an in-memory picture + (optionally)
-     * pre-loaded media-asset. Use this when the caller has already eager-
-     * loaded the picture + media relation, so {@see pictureToWire()} does
-     * not re-query.
-     */
-    public function pictureToWireWithAsset(AgentPicture $picture, ?MediaAsset $asset): array
-    {
-        if ($picture->media_asset_id !== null && $asset instanceof MediaAsset) {
-            return $this->imageWireShape($asset);
-        }
-        return $this->avatarWireShape($picture);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function defaultWireShape(int $agentId): array
-    {
-        $variantKey = $this->resolveVariantKey($agentId);
-        return [
-            'kind'             => 'avatar',
-            'archetype'        => self::DEFAULT_ARCHETYPE->value,
-            'variant_key'      => $variantKey,
-            'palette_key'      => self::DEFAULT_PALETTE->value,
-            'fg_color'         => self::DEFAULT_PALETTE->foreground(),
-            'bg_color'         => self::DEFAULT_PALETTE->background(),
-            'image_url'        => null,
-            'image_updated_at' => null,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function pictureToWire(AgentPicture $picture): array
-    {
-        if ($picture->media_asset_id !== null) {
-            $asset = MediaAsset::find($picture->media_asset_id);
-            return $this->imageWireShape($asset instanceof MediaAsset ? $asset : null);
-        }
-
-        return $this->avatarWireShape($picture);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function imageWireShape(?MediaAsset $asset): array
-    {
-        return [
-            'kind'             => 'image',
-            'archetype'        => null,
-            'variant_key'      => null,
-            'palette_key'      => null,
-            'fg_color'         => null,
-            'bg_color'         => null,
-            'image_url'        => $asset !== null ? $asset->asset_url : null,
-            'image_updated_at' => $asset !== null && $asset->updated_at !== null
-                ? $asset->updated_at->format(DateTimeInterface::ATOM)
-                : null,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function avatarWireShape(AgentPicture $picture): array
+    protected function avatarWireShape(mixed $picture): array
     {
         $archetype = $picture->archetype !== null
             ? Archetype::tryFrom($picture->archetype) ?? self::DEFAULT_ARCHETYPE
@@ -367,77 +199,31 @@ final class AgentPictureService
         }
     }
 
-    private function resolveVariantKey(int $agentId): string
+    protected function defaultArchetype(): Archetype
     {
-        $hash = $this->fnv1a((string) $agentId);
-        $index = $hash % 3;
-        return 'v' . $index;
+        return self::DEFAULT_ARCHETYPE;
+    }
+
+    protected function defaultPalette(): Palette
+    {
+        return self::DEFAULT_PALETTE;
     }
 
     /**
-     * Validate an archetype string against the enum. Throws on unknown
-     * values so the controller can surface a 422 with a clear field path.
+     * @return class-string<AgentPicture>
      */
-    public function normaliseArchetype(string $value): string
+    protected function pictureModel(): string
     {
-        $archetype = Archetype::tryFrom($value);
-        if ($archetype === null) {
-            throw new InvalidArgumentException(sprintf(
-                "Unknown archetype '%s'. Expected one of: %s.",
-                $value,
-                implode(', ', array_map(static fn(Archetype $a): string => $a->value, Archetype::cases())),
-            ));
-        }
-        return $archetype->value;
+        return AgentPicture::class;
     }
 
-    /**
-     * Validate a palette_key string against the enum. Throws on unknown
-     * values so the controller can surface a 422 with a clear field path.
-     */
-    public function normalisePalette(string $value): string
+    protected function pictureTable(): string
     {
-        $palette = Palette::tryFrom($value);
-        if ($palette === null) {
-            throw new InvalidArgumentException(sprintf(
-                "Unknown palette_key '%s'. Expected one of: %s.",
-                $value,
-                implode(', ', array_map(static fn(Palette $p): string => $p->value, Palette::cases())),
-            ));
-        }
-        return $palette->value;
+        return 'agent_pictures';
     }
 
-    /**
-     * Validate a variant_key string. Accepts `v0|v1|v2` only — three
-     * variants per archetype is the first-cut budget (see
-     * `backlog/agent-profile-picture.md`).
-     */
-    public function normaliseVariantKey(string $value): string
+    protected function subjectKey(): string
     {
-        if (!preg_match('/^v[0-2]$/', $value)) {
-            throw new InvalidArgumentException(sprintf(
-                "Unknown variant_key '%s'. Expected one of: v0, v1, v2.",
-                $value,
-            ));
-        }
-        return $value;
-    }
-
-    /**
-     * 32-bit FNV-1a hash. Same algorithm as the frontend's variant
-     * selection so the resolved variant_key is identical on both sides
-     * (defence-in-depth — the server is the source of truth, but the
-     * frontend can render the same tile before the API responds).
-     */
-    private function fnv1a(string $s): int
-    {
-        $h = 0x811c9dc5;
-        $len = strlen($s);
-        for ($i = 0; $i < $len; $i++) {
-            $h ^= ord($s[$i]);
-            $h = ($h * 0x01000193) & 0xFFFFFFFF;
-        }
-        return $h;
+        return 'agent_id';
     }
 }

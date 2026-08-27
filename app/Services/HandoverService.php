@@ -29,7 +29,12 @@ final class HandoverService implements HandoverServiceInterface
      */
     public function __construct(
         private readonly Closure $orchestratorFactory,
-    ) {}
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+    }
+
+    private readonly PrincipalService $principalService;
 
     public function handover(
         int $sourceTaskId,
@@ -44,10 +49,11 @@ final class HandoverService implements HandoverServiceInterface
             throw new InvalidArgumentException('Source task not found.');
         }
 
-        $targetAgent = Agent::where('id', $targetAgentId)
-            ->where('user_id', $userId)
-            ->first();
-        if ($targetAgent === null) {
+        // Migration 0067: agents are owned by a principal, not a user_id
+        // column directly. Look up the agent and verify the caller controls
+        // its principal.
+        $targetAgent = Agent::find($targetAgentId);
+        if ($targetAgent === null || !$this->principalService->callerControlsPrincipal($userId, (int) $targetAgent->principal_id)) {
             throw new InvalidArgumentException('Target agent not found.');
         }
 
@@ -59,6 +65,7 @@ final class HandoverService implements HandoverServiceInterface
             userPrompt: $summary,
             maxSteps: (int) ($targetAgent->max_steps ?? 10),
             parentTaskId: $source->id,
+            userId: $userId,
         );
 
         $source->update([

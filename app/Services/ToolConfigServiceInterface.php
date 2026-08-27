@@ -11,6 +11,11 @@ namespace Spora\Services;
  * tests (Mockery cannot mock final classes). All real callers depend on
  * the implementation via this interface; tests can substitute a mock
  * implementation that satisfies the same contract.
+ *
+ * Migration 0067 cut the wire format over to `principal_id`. The
+ * legacy `(string, int $userId)` signatures remain as thin adapters so
+ * `ToolController` (whose refactor is a separate task) doesn't break;
+ * new callers should use the principal-typed methods directly.
  */
 interface ToolConfigServiceInterface
 {
@@ -26,14 +31,14 @@ interface ToolConfigServiceInterface
     /**
      * @return array<string, mixed>
      */
-    public function getUserSettings(string $toolClass, int $userId): array;
+    public function getPrincipalSettings(string $toolClass, int $principalId): array;
 
     /**
      * @return array<string, mixed>
      */
-    public function putUserSettings(string $toolClass, int $userId, array $settings): array;
+    public function putPrincipalSettings(string $toolClass, int $principalId, array $settings): array;
 
-    public function deleteUserSettings(string $toolClass, int $userId): void;
+    public function deletePrincipalSettings(string $toolClass, int $principalId): void;
 
     public function putAgentOverride(string $toolClass, int $agentId, array $settings): void;
 
@@ -47,12 +52,12 @@ interface ToolConfigServiceInterface
     /**
      * @return array<string, mixed>
      */
-    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null): array;
+    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 
     /**
-     * @return array<string, array{value: mixed, source: 'global'|'user'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'global'|'principal'|'agent'|'default'}>
      */
-    public function getEffectiveSettingsWithSource(string $toolClass, int $agentId): array;
+    public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 
     /**
      * @param  array<string, mixed> $settings
@@ -91,5 +96,5 @@ interface ToolConfigServiceInterface
     /**
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null): array;
+    public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 }

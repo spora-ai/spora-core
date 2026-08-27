@@ -30,13 +30,14 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
     simulateLoggedInSession($userId, 'taskusage@example.com');
 
     $agent = Agent::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'TaskUsageAgent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
     $task = Task::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id' => $agent->id,
         'status' => 'COMPLETED',
         'user_prompt' => 'hi',
@@ -130,13 +131,14 @@ test('task detail resource strips redacted_thinking data payload', function (): 
     simulateLoggedInSession($userId, 'redacted@example.com');
 
     $agent = Agent::create([
-        'user_id' => $userId,
+        'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'RedactedAgent',
         'max_steps' => 5,
         'is_active' => true,
     ]);
     $task = Task::create([
-        'user_id' => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
+        'user_id'     => $userId,
         'agent_id' => $agent->id,
         'status' => 'COMPLETED',
         'user_prompt' => 'hi',

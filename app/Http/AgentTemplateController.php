@@ -13,6 +13,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Auth\AuthService;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,8 +33,6 @@ final class AgentTemplateController
 {
     use JsonControllerHelpers;
 
-    private const MSG_AUTH_REQUIRED = 'Authentication required.';
-
     public function __construct(
         private readonly AuthService $auth,
         private readonly AgentTemplateScanner $scanner,
@@ -41,6 +40,7 @@ final class AgentTemplateController
         private readonly AgentTemplateImporter $importer,
         private readonly AgentTemplateExporter $exporter,
         private readonly AgentServiceInterface $agentService,
+        private readonly ?PrincipalService $principalService = null,
     ) {}
 
     /**
@@ -128,9 +128,19 @@ final class AgentTemplateController
             if ($body === null) {
                 $response = $this->invalidJson();
             } else {
-                $validation = $this->validator->validate($body);
+                // `principal_id` is API-level metadata used to attribute
+                // the imported agent to a group. It is not part of the
+                // template schema, so the validator would (correctly)
+                // reject it under UNKNOWN_TOP_LEVEL_KEY. Pull it off
+                // before validation so the template body arrives at
+                // validator + importer as a clean template payload.
+                $resolvedPrincipalId = $this->resolvePrincipalIdForImport($userId, $body);
+                $templateBody = $body;
+                unset($templateBody['principal_id']);
+
+                $validation = $this->validator->validate($templateBody);
                 $response = $validation->isValid()
-                    ? $this->buildImportSuccess($userId, $body)
+                    ? $this->buildImportSuccess($userId, $templateBody, $resolvedPrincipalId)
                     : $this->buildImportValidationError($validation);
             }
         }
@@ -141,9 +151,9 @@ final class AgentTemplateController
     /**
      * @param array<string, mixed> $body
      */
-    private function buildImportSuccess(int $userId, array $body): JsonResponse
+    private function buildImportSuccess(int $userId, array $body, ?int $principalId = null): JsonResponse
     {
-        $import = $this->importer->importPayload($userId, $body);
+        $import = $this->importer->importPayload($userId, $body, $principalId);
         return new JsonResponse(
             [
                 'data' => [
@@ -154,6 +164,41 @@ final class AgentTemplateController
             ],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Authorise the `principal_id` field on an import request the same way
+     * {@see AgentController::resolvePrincipalIdForCreate()} does for
+     * direct agent creation: caller must be admin OR control the named
+     * principal. Falls back to the caller's user-principal when the
+     * PrincipalService is unwired (legacy test path) or the caller
+     * fails the authorisation check.
+     *
+     * @param  array<string, mixed> $body
+     */
+    private function resolvePrincipalIdForImport(int $userId, array $body): ?int
+    {
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return null;
+        }
+        $requested = (int) $requested;
+
+        if ($this->principalService === null) {
+            return null;
+        }
+
+        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+    }
+
+    private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
+    {
+        if ($this->auth->isAdmin()
+            || $this->principalService->callerControlsPrincipal($userId, $requested)) {
+            return $requested;
+        }
+
+        return (int) $this->principalService->ensureUserPrincipal($userId)->id;
     }
 
     private function buildImportValidationError(\Spora\AgentTemplates\ValidationResult $validation): JsonResponse
@@ -208,11 +253,6 @@ final class AgentTemplateController
         }
 
         return new JsonResponse(['data' => $data]);
-    }
-
-    private function unauthenticated(): JsonResponse
-    {
-        return $this->unprocessable('UNAUTHENTICATED', self::MSG_AUTH_REQUIRED);
     }
 
     private function invalidJson(): JsonResponse

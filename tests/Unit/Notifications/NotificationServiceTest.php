@@ -45,7 +45,7 @@ function seedUserAndAgentForNotification(): array
     simulateLoggedInSession($userId, 'notify@example.com');
 
     $agent = Agent::create([
-        'user_id'   => $userId,
+        'principal_id' => createUserPrincipalPublic($userId),
         'name'      => 'NotifTestAgent',
         'max_steps' => 10,
         'is_active' => true,
@@ -72,6 +72,7 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Hello',
@@ -101,7 +102,8 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'       => $agent->id,
-            'user_id'        => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'     => $userId,
             'status'         => 'FAILED',
             'user_prompt'    => 'Fail me',
             'max_steps'      => 10,
@@ -133,6 +135,7 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'PENDING_APPROVAL',
             'user_prompt' => 'Approve me',
@@ -157,6 +160,7 @@ describe('NotificationService', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Scheduled task',
@@ -176,13 +180,13 @@ describe('NotificationService', function (): void {
         [$userId] = seedUserAndAgentForNotification();
 
         $older = Notification::create([
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'type'       => 'task_completed',
             'title'      => 'First',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-2 hours')),
         ]);
         $newer = Notification::create([
-            'user_id'    => $userId,
+            'user_id' => $userId,
             'type'       => 'task_failed',
             'title'      => 'Second',
             'created_at' => date(TEST_TIMESTAMP_FORMAT, strtotime('-1 hour')),

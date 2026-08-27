@@ -23,13 +23,16 @@ function makeAgentTool(): array
     // AgentTemplateImporter + AgentTemplateValidator are final and cannot
     // be mocked directly; use real instances. Validator is parameter-less,
     // importer needs a real ToolConfigService + PluginLoader + Paths.
+    $toolConfig = new Spora\Services\ToolConfigService(
+        new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        new Psr\Log\NullLogger(),
+    );
     $importer = new AgentTemplateImporter(
-        new Spora\Services\ToolConfigService(
-            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new Psr\Log\NullLogger(),
-        ),
+        $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
         new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $agentService */
@@ -61,13 +64,16 @@ function makeAgentTool(): array
  */
 function makeAgentToolWithPlugins(): array
 {
+    $toolConfig = new Spora\Services\ToolConfigService(
+        new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        new Psr\Log\NullLogger(),
+    );
     $importer = new AgentTemplateImporter(
-        new Spora\Services\ToolConfigService(
-            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new Psr\Log\NullLogger(),
-        ),
+        $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
         new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $service */
@@ -98,7 +104,7 @@ function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = nu
     $agent->id      = $id;
     $agent->name    = $name;
     $agent->notes   = $notes;
-    $agent->user_id = 99;
+    $agent->principal_id = createUserPrincipalPublic(99);
     return $agent;
 }
 
@@ -112,7 +118,7 @@ function stubManifestAgent(int $id, string $name = 'Test'): Agent
 {
     $agent = new Agent();
     $agent->id                  = $id;
-    $agent->user_id             = 99;
+    $agent->principal_id = createUserPrincipalPublic(99);
     $agent->name                = $name;
     $agent->description         = null;
     $agent->system_prompt       = null;
@@ -147,7 +153,7 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Alpha',
             'description'          => null,
             'system_prompt'        => null,
@@ -218,7 +224,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent = new Agent();
         $agent->id = 7;
-        $agent->user_id = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name = 'Alpha';
         $agent->notes = null;
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -235,7 +241,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent = new Agent();
         $agent->id = 7;
-        $agent->user_id = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name = 'Alpha';
         $agent->notes = null;
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -258,7 +264,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $agent->notes    = 'preserved';
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -282,7 +288,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $agent->notes    = 'pre-existing';
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -311,7 +317,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $agent->notes    = 'existing';
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -343,7 +349,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $agent->notes    = 'existing';
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -393,7 +399,7 @@ describe('AgentTool::execute — read_notes', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $agent->notes    = '# runbook';
         $service->allows('getAgentByAgentId')->andReturn($agent);
@@ -427,7 +433,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
         $toolSettings->allows("getAllToolsStatus")->andReturn([
@@ -483,7 +489,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
         $toolSettings->allows("getAllToolsStatus")->andReturn([
@@ -516,7 +522,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var Spora\Services\ToolIconResolver&MockInterface $iconResolver */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
         // We use a real Spora core class as the target so the
@@ -579,7 +585,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
         $toolSettings->allows('getAllToolsStatus')->andReturn([
@@ -631,7 +637,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $agent           = new Agent();
         $agent->id       = 7;
-        $agent->user_id  = 99;
+        $agent->principal_id = createUserPrincipalPublic(99);
         $agent->name     = 'Alpha';
         $service->allows('getAgentByAgentId')->andReturn($agent);
         $toolSettings->allows('getAllToolsStatus')->andReturn([
@@ -798,7 +804,7 @@ describe('AgentTool::execute — create_agent', function (): void {
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7, name: 'Caller'));
         $service->shouldReceive('createAgent')
             ->once()
-            ->withArgs(function (int $userIdArg, array $data): bool {
+            ->withArgs(function (int $userIdArg, array $data, ?int $principalIdArg = null): bool {
                 return $userIdArg === 99
                     && $data['retry_after_minutes'] === 30
                     && $data['max_retries'] === 2;
@@ -837,11 +843,12 @@ describe('AgentTool::execute — create_agent', function (): void {
         $agent->max_steps = 12;
         $service->shouldReceive('createAgent')
             ->once()
-            ->with(99, Mockery::on(static function (array $data): bool {
-                return ($data['name'] ?? null) === 'New Agent'
+            ->withArgs(function (int $userIdArg, array $data, ?int $principalIdArg = null): bool {
+                return $userIdArg === 99
+                    && ($data['name'] ?? null) === 'New Agent'
                     && ($data['max_steps'] ?? null) === 12
                     && ($data['allow_followup'] ?? null) === true;
-            }))
+            })
             ->andReturn($agent);
         // AgentManifest reads the per-agent status + ops; empty lists
         // are fine when the test is asserting shape, not tool contents.
@@ -1011,7 +1018,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Calling',
             'description'          => null,
             'system_prompt'        => null,
@@ -1069,7 +1076,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Calling',
             'description'          => null,
             'system_prompt'        => null,
@@ -1110,7 +1117,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Calling',
             'description'          => null,
             'system_prompt'        => null,
@@ -1181,7 +1188,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $callingId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Calling',
             'description'          => null,
             'system_prompt'        => null,
@@ -1223,7 +1230,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
         $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Alpha',
             'description'          => null,
             'system_prompt'        => null,
@@ -1264,7 +1271,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         [$tool] = makeAgentTool();
 
         $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id'              => $ownerId,
+            'principal_id' => createUserPrincipalPublic($ownerId),
             'name'                 => 'Owned',
             'description'          => null,
             'system_prompt'        => null,
@@ -1337,13 +1344,13 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Target',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Target',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1383,7 +1390,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Owned',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Owned',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1513,7 +1520,7 @@ test('update_agent silently drops unknown keys (confirmed via read_agent_configu
     // (which is what actually drops them against the allowlist).
     $agent = new Agent();
     $agent->id = 7;
-    $agent->user_id = 99;
+    $agent->principal_id = createUserPrincipalPublic(99);
     $agent->name = 'New Name';
     $agent->notes = 'pre-existing notes';
     $agent->system_prompt = 'updated';
@@ -1570,7 +1577,7 @@ test('update_agent silently drops unknown keys (confirmed via read_agent_configu
     $ownerId = bootAuth($auth, 'write-then-read@example.com');
     Illuminate\Database\Capsule\Manager::table('agents')->insert([
         'id'                  => 7,
-        'user_id'              => $ownerId,
+        'principal_id' => createUserPrincipalPublic($ownerId),
         'name'                 => 'New Name',
         'description'          => 'pre-existing',
         'system_prompt'        => 'updated',
@@ -1612,13 +1619,13 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Target',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Target',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1661,13 +1668,13 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Target',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Target',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1712,7 +1719,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1770,7 +1777,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1851,13 +1858,13 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
         /** @var AgentServiceInterface&MockInterface $service */
 
         $callerId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Caller',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Caller',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
         ]);
         $targetId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Target',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Target',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -1923,7 +1930,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
-            $agent->user_id = 99;
+            $agent->principal_id = createUserPrincipalPublic(99);
             $service->allows('getAgentByAgentId')->andReturn($agent);
             $service->shouldReceive('getAgentsForUser')
                 ->once()
@@ -1945,7 +1952,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
-            $agent->user_id = 99;
+            $agent->principal_id = createUserPrincipalPublic(99);
             $service->allows('getAgentByAgentId')->andReturn($agent);
             // Mirrors the AgentResource shape produced by AgentService::agentResource,
             // minus the rest. The handler strips unrelated keys before exposing the
@@ -2000,7 +2007,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
             $agent->id = 7;
-            $agent->user_id = 99;
+            $agent->principal_id = createUserPrincipalPublic(99);
             $service->allows('getAgentByAgentId')->andReturn($agent);
             $service->shouldReceive('getAgentsForUser')
                 ->once()
@@ -2034,7 +2041,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
         /** @var AgentServiceInterface&MockInterface $service */
 
         $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Owned',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Owned',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
@@ -2086,7 +2093,7 @@ describe('AgentTool::execute — update_agent (canonical)', function (): void {
         $ownerId = bootAuth($auth, 'red-owner@example.com');
         $otherId = bootAuth($auth, 'red-other@example.com');
         $otherAgent = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
-            'user_id' => $ownerId, 'name' => 'Owned',
+            'principal_id' => createUserPrincipalPublic($ownerId), 'name' => 'Owned',
             'max_steps' => 10, 'allow_followup' => 1,
             'retry_after_minutes' => 0, 'max_retries' => 0,
             'is_active' => 1,

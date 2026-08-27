@@ -9,8 +9,10 @@ declare(strict_types=1);
  * (env mutations, Monolog buffers) across the suite.
  */
 
+use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
+use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
@@ -44,12 +46,16 @@ function makeImporter(): AgentTemplateImporter
     $toolConfig = new ToolConfigService($security, $logger, $toolClasses);
     $plugins = new PluginLoader([]);
     $paths = new Paths(BASE_PATH);
+    $settingsApplier = new AgentTemplateSettingsApplier($toolConfig, null);
+    $toolsApplier = new AgentTemplateToolsApplier($toolConfig, $settingsApplier);
+    $agentCreator = new AgentTemplateAgentCreator();
 
     return new AgentTemplateImporter(
         $toolConfig,
         $plugins,
         $paths,
+        $toolsApplier,
+        $agentCreator,
         null,
-        new AgentTemplateSettingsApplier($toolConfig, null),
     );
 }

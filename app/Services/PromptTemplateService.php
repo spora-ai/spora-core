@@ -15,11 +15,22 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  */
 final class PromptTemplateService implements PromptTemplateServiceInterface
 {
+    private readonly PrincipalService $principalService;
+
+    public const VISIBILITY_READ = true;
+    public const VISIBILITY_WRITE = false;
+
+    public function __construct(?PrincipalService $principalService = null, ?PrincipalResolver $principalResolver = null)
+    {
+        $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
+    private readonly PrincipalResolver $principalResolver;
     private const DATE_FORMAT = 'Y-m-d H:i:s';
 
     public function getTemplatesForAgent(int $agentId, int $userId): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_READ);
         if ($agent === null) {
             return null;
         }
@@ -34,7 +45,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
     public function createTemplate(int $agentId, int $userId, array $data): array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             throw new AgentNotFoundException('Agent not found');
         }
@@ -58,7 +69,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
     public function getTemplate(int $templateId, int $agentId, int $userId): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_READ);
         if ($agent === null) {
             return null;
         }
@@ -73,7 +84,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
     public function updateTemplate(int $templateId, int $agentId, int $userId, array $data): ?array
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             return null;
         }
@@ -104,7 +115,7 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
 
     public function deleteTemplate(int $templateId, int $agentId, int $userId): bool
     {
-        $agent = $this->findAgent($agentId, $userId);
+        $agent = $this->findAgent($agentId, $userId, self::VISIBILITY_WRITE);
         if ($agent === null) {
             return false;
         }
@@ -119,9 +130,24 @@ final class PromptTemplateService implements PromptTemplateServiceInterface
         return true;
     }
 
-    private function findAgent(int $id, int $userId): ?Agent
+    private function findAgent(int $id, int $userId, bool $forRead): ?Agent
     {
-        return Agent::where('id', $id)->where('user_id', $userId)->first();
+        // Migration 0067: agent ownership is via principal, not user_id.
+        // Reads (`getTemplatesForAgent`, `getTemplate`) widen visibility
+        // to any principal-membership row so plain group members can see
+        // the templates associated with a group agent. Writes stay gated
+        // by `callerControlsPrincipal` (owner|admin) so a plain member
+        // can't author or destroy templates on a group agent.
+        $agent = Agent::find($id);
+        if ($agent === null) {
+            return null;
+        }
+
+        if ($forRead) {
+            return $this->principalResolver->isVisibleTo($id, $userId) ? $agent : null;
+        }
+
+        return $this->principalService->callerControlsPrincipal($userId, (int) $agent->principal_id) ? $agent : null;
     }
 
     private function resolveIsActive(mixed $value): int

@@ -36,6 +36,7 @@ set_error_handler(static function (int $errno, string $_errstr, string $errfile)
 // Shared test helpers (available to all test files)
 
 require_once __DIR__ . '/Support/AgentTemplateTestSupport.php';
+require_once __DIR__ . '/Support/ToolConfigUserShims.php';
 
 /**
  * Boot a fresh in-memory SQLite database and return a ready-to-use AuthService.
@@ -165,7 +166,7 @@ function callController(object $controller, string $method, Symfony\Component\Ht
     return $next();
 }
 
-uses()
+uses(Tests\Concerns\CreatesPrincipal::class)
     ->beforeEach(function () {
         Spora\Core\Database::resetBootState();
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);

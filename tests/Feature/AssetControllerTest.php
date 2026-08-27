@@ -15,15 +15,21 @@ use Spora\Core\Paths;
 use Spora\Core\Router;
 use Spora\Core\SecurityManager;
 use Spora\Http\AssetController;
+use Spora\Models\Agent;
+use Spora\Models\GroupMembership;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
+use Spora\Services\GroupService;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -58,20 +64,23 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
 
     $sniffer = new MimeSniffer();
     $logger  = new \Psr\Log\NullLogger();
-    $archive = new MediaArchiveService(
-        $assetStore,
-        new MediaArchiveUrlResolver(
-            new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
-            $sniffer,
-            $logger,
-            true,
-            100 * 1024 * 1024,
-        ),
+    $resolver = new MediaArchiveUrlResolver(
+        new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
+        $sniffer,
+        $logger,
+        true,
+        100 * 1024 * 1024,
+    );
+    $pipeline = new MediaArchiveIngestPipeline(
+        new MediaIngestDecoder(),
+        $resolver,
         $sniffer,
         new MetadataExtractor($logger, false),
+        $assetStore,
         \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
-        new MediaIngestDecoder(),
+        $logger,
     );
+    $archive = new MediaArchiveService($pipeline);
 
     // Auth mock — by default, the test requester is treated as an admin
     // so the existing tests (which don't set up an owning user) still
@@ -288,13 +297,14 @@ test('GET /api/v1/assets/{uuid} lets the owning user through', function (): void
         // and lets the request through.
         $userId = \bootAuthLayer()->register('asset-owner@example.com', 'Password1!', 'Owner');
 
-        $agent = \Spora\Models\Agent::create([
-            'user_id'   => $userId,
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'asset-owner-test',
             'max_steps' => 5,
             'is_active' => true,
         ]);
         $task = \Spora\Models\Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
             'user_id'     => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
@@ -360,8 +370,8 @@ test('GET /api/v1/assets/{uuid} lets a non-admin user fetch media produced by an
     [$router, $archive, $tmp, $restore] = assetTestSetup(asAdmin: false, userId: $userId);
 
     try {
-        $agent = \Spora\Models\Agent::create([
-            'user_id'   => $userId,
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
             'name'      => 'agent-owner-test',
             'max_steps' => 5,
             'is_active' => true,
@@ -432,6 +442,99 @@ test('GET /api/v1/assets/{uuid} returns 404 when storage_mode is unsupported', f
         $response = $router->dispatch($request);
 
         expect($response->getStatusCode())->toBe(404);
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} lets a plain group member fetch media produced by a group-owned agent (regression for assets-404 bug)', function (): void {
+    // Owner creates the group + plain member + group-owned agent; the
+    // agent ingests a media asset whose URL surfaces in the chat
+    // bubble. The plain member must reach the bytes — otherwise the
+    // asset URLs the dashboard renders for them 404, exactly the
+    // operator-visible bug the regression name captures.
+    $authLayer = \bootAuthLayer();
+    $ownerId       = $authLayer->register('asset-go@example.com', 'Password1!', 'GOwner');
+    $plainMemberId = $authLayer->register('asset-gm@example.com', 'Password1!', 'GMember');
+
+    $principalService = new PrincipalService(new PrincipalResolver());
+    $principalService->ensureUserPrincipal($ownerId);
+    $principalService->ensureUserPrincipal($plainMemberId);
+
+    $groupService = new GroupService($principalService);
+    $group = $groupService->createGroup($ownerId, 'AssetGroup');
+    $groupService->addMember((int) $group->id, (int) $plainMemberId, GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+    $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+    $agent = Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'Asset-GroupAgent',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+
+    [$router, $archive, $tmp, $restore] = assetTestSetup(asAdmin: false, userId: $plainMemberId);
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: "\x89PNG\r\n\x1a\n" . 'group-asset-bytes',
+            mime: 'image/png',
+            filename: 'group.png',
+            agentId: $agent->id,
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(200);
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} returns 404 to a non-member (caller has no principal row for the asset agent)', function (): void {
+    // Owner creates the group + group-owned agent; a stranger (no
+    // group_memberships row at all) gets 404 — same envelope as a
+    // missing UUID, to avoid leaking which UUIDs exist.
+    $authLayer = \bootAuthLayer();
+    $ownerId   = $authLayer->register('asset-stranger-owner@example.com', 'Password1!', 'SOwner');
+    $strangerId = $authLayer->register('asset-stranger@example.com', 'Password1!', 'Stranger');
+
+    $principalService = new PrincipalService(new PrincipalResolver());
+    $principalService->ensureUserPrincipal($ownerId);
+    $principalService->ensureUserPrincipal($strangerId);
+
+    $groupService = new GroupService($principalService);
+    $group = $groupService->createGroup($ownerId, 'AssetStrangerGroup');
+    $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+    $agent = Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'Asset-StrangerAgent',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+
+    [$router, $archive, $tmp, $restore] = assetTestSetup(asAdmin: false, userId: $strangerId);
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: "\x89PNG\r\n\x1a\n" . 'stranger-test-bytes',
+            mime: 'image/png',
+            filename: 'stranger.png',
+            agentId: $agent->id,
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+
+        $request  = Request::create($path, 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(404);
+        expect($response->headers->get('Content-Type'))->toContain('application/json');
     } finally {
         assetTestTeardown($tmp);
         $restore();

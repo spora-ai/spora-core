@@ -166,3 +166,70 @@ describe('ListMediaQueryBuilder ownership field', function (): void {
         expect($query->userId)->toBeNull();
     });
 });
+
+describe('ListMediaQueryBuilder principal_ids field', function (): void {
+    it('returns null for missing principal_id', function (): void {
+        $request = Request::create('/');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBeNull();
+    });
+
+    it('parses a single principal_id into a one-element list', function (): void {
+        $request = Request::create('/?principal_id=10');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBe([10]);
+    });
+
+    it('parses repeated principal_id (array form) into a list', function (): void {
+        // Real HTTP clients can send repeated query keys either as
+        // `?principal_id=10&principal_id=20` or `?principal_id[]=10&principal_id[]=20`.
+        // We exercise both shapes — the array form is the one
+        // Symfony's `Request::create()` factory surfaces, the scalar
+        // form is what a hand-crafted query string produces when run
+        // through `parse_str()`.
+        $request = Request::create('/?principal_id[]=10&principal_id[]=20');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBe([10, 20]);
+    });
+
+    it('deduplicates repeated ids while preserving first-seen order', function (): void {
+        $request = Request::create('/?principal_id[]=10&principal_id[]=20&principal_id[]=10');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBe([10, 20]);
+    });
+
+    it('silently drops non-integer values (typo tolerance)', function (): void {
+        $request = Request::create('/?principal_id[]=abc&principal_id[]=10&principal_id[]=foo');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBe([10]);
+    });
+
+    it('returns null when every token is invalid (caller falls back to legacy ownership union)', function (): void {
+        $request = Request::create('/?principal_id=abc');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBeNull();
+    });
+
+    it('keeps the ownership default when principal_id is supplied alongside ownership=mine', function (): void {
+        // The builder leaves both fields populated; the controller does
+        // the intersection. This test pins the builder contract so a
+        // future refactor doesn't silently drop one or the other.
+        $request = Request::create('/?principal_id[]=10&ownership=mine');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->ownership)->toBe('mine');
+        expect($query->agentOwnerUserId)->toBe(7);
+        expect($query->principalIds)->toBe([10]);
+    });
+
+    it('accepts repeated scalar-form keys (Symfony parses real HTTP QUERY_STRINGs this way)', function (): void {
+        // Real HTTP requests parse `?principal_id=10&principal_id=20` as
+        // an array via Symfony's URL decoder; only `Request::create()`'s
+        // factory collapses to the last value. We construct the request
+        // directly so the assertion exercises the parser the way the
+        // production router does.
+        $request = new Request();
+        $request->query->add(['principal_id' => ['10', '20']]);
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->principalIds)->toBe([10, 20]);
+    });
+});

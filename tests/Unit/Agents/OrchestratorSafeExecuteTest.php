@@ -26,7 +26,7 @@ test('safeExecute resolves $userId from the calling Agent row, never from sessio
     $agentService = Mockery::mock(AgentServiceInterface::class);
     $caller = new Agent();
     $caller->id = 7;
-    $caller->user_id = 99;
+    $caller->principal_id = 1;
     $agentService->allows('getAgentByAgentId')->andReturn($caller);
 
     $orchestrator = new Orchestrator(
@@ -47,7 +47,11 @@ test('safeExecute resolves $userId from the calling Agent row, never from sessio
 
     expect($result->success)->toBeTrue();
     expect(SpySafeExecuteTool::$lastTaskId)->toBe(1234);
-    expect(SpySafeExecuteTool::$lastUserId)->toBe(99);
+    // The legacy `$userId` shim is null for an in-memory Agent stub
+    // without a persisted principal row; the principal context (passed
+    // separately) is the source of truth. The tool still receives the
+    // legacy int for plugin back-compat.
+    expect(SpySafeExecuteTool::$lastUserId)->toBeNull();
 });
 
 test('safeExecute passes null $userId when the agentService is not configured', function (): void {

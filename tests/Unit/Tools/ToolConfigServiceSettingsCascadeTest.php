@@ -219,7 +219,8 @@ test('effective settings falls back to global when user and agent layers are cle
         'api_key' => 'global-key',
         'max_results' => '20',
     ]);
-    $toolConfig->putUserSettings(TestTool::class, $userId, [
+    $userAdapter = makeUserAdapter($toolConfig);
+    $userAdapter->putUserSettings(TestTool::class, $userId, [
         'api_key' => 'user-key',
     ]);
     $toolConfig->putAgentOverride(TestTool::class, $agentId, [
@@ -227,7 +228,7 @@ test('effective settings falls back to global when user and agent layers are cle
     ]);
 
     // Clear user settings
-    $toolConfig->deleteUserSettings(TestTool::class, $userId);
+    $userAdapter->deleteUserSettings(TestTool::class, $userId);
     // Clear agent override
     $toolConfig->deleteAgentOverride(TestTool::class, $agentId);
 
@@ -279,7 +280,7 @@ function makeToolConfigService(): ToolConfigService
 function createAgentForUser(int $userId): int
 {
     $agent = new Agent();
-    $agent->user_id = $userId;
+    $agent->principal_id = createUserPrincipalPublic($userId);
     $agent->name = 'Test Agent for Cascade';
     $agent->save();
 
