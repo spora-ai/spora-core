@@ -1138,6 +1138,7 @@ final class ContainerDefinitions
                     $c->get(DbRateLimiter::class),
                     $c->get(MercurePublisherInterface::class),
                     $c->get(OrchestratorInterface::class),
+                    $c->get(LoggerInterface::class),
                     (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );
             },

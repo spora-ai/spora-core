@@ -56,6 +56,7 @@ function makeTickGroupController(): array
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new NullLogger(),
         600,
     );
 

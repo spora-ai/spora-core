@@ -10,6 +10,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
+use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\TaskLifecyclePolicy;
@@ -47,6 +48,7 @@ final class TaskTickController
         private readonly DbRateLimiter $rateLimiter,
         private readonly MercurePublisherInterface $mercure,
         private readonly OrchestratorInterface $orchestrator,
+        private readonly LoggerInterface $logger,
         private readonly int $tickLeaseSeconds,
     ) {}
 
@@ -161,6 +163,18 @@ final class TaskTickController
         $leaseUntilCarbon = Carbon::instance($now)->modify('+' . $this->tickLeaseSeconds . ' seconds');
         $leaseOwner = self::LEASE_OWNER_PREFIX . $userId;
 
+        // Server-side counterpart to the browser's [client-worker] log lines:
+        // the operator's `storage/spora.log` should show one entry per tick
+        // so a multi-step task is visibly N ticks, not "one big run".
+        // Mirrors `WorkerQueueProcessor::processQueuedTaskSync()`'s format
+        // so the operator's log greps look the same across worker modes.
+        $startedAt = microtime(true);
+        $this->logger->info('Processing task (client-worker /tick)', [
+            'task_id' => $taskId,
+            'lease_owner' => $leaseOwner,
+            'lease_seconds' => $this->tickLeaseSeconds,
+        ]);
+
         // CAS-claim the row inside a transaction so two browsers can't both
         // observe QUEUED + no live lease and flip the same task to RUNNING.
         $claimed = Capsule::connection()->transaction(function () use ($task, $leaseOwner, $leaseUntilCarbon, $now): ?Task {
@@ -213,6 +227,13 @@ final class TaskTickController
                 'task_id' => $claimed->id,
                 'status'  => 'FAILED',
             ]);
+            $this->logger->error('Task failed during /tick', [
+                'task_id' => $claimed->id,
+                'lease_owner' => $leaseOwner,
+                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+                'exception_class' => get_class($e),
+                'message' => $e->getMessage(),
+            ]);
         }
 
         $fresh = Task::find($claimed->id);
@@ -221,6 +242,14 @@ final class TaskTickController
             $fresh->lease_expires_at = null;
             $fresh->save();
         }
+
+        $this->logger->info('Task tick completed', [
+            'task_id' => $claimed->id,
+            'lease_owner' => $leaseOwner,
+            'status' => $fresh->status ?? 'unknown',
+            'step_count' => $fresh->step_count ?? 0,
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ]);
 
         return new JsonResponse(['data' => ['task' => $this->taskService->getTask($claimed->id, $userId)]]);
     }

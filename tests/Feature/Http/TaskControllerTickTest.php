@@ -76,6 +76,7 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new NullLogger(),
         600,
     );
 
@@ -129,6 +130,7 @@ function makeRawTickController(
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new NullLogger(),
         600,
     );
 
@@ -182,6 +184,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $harness['mercure'],
             $harness['orchestrator'],
+            new NullLogger(),
             600,
         );
 
@@ -257,6 +260,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $mercure,
             $orchestrator,
+            new NullLogger(),
             600,
         );
 
@@ -312,6 +316,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $mercure,
             $orchestrator,
+            new NullLogger(),
             600,
         );
 
