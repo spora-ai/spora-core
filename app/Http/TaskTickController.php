@@ -211,7 +211,16 @@ final class TaskTickController
         // Mirror WorkerQueueProcessor::processQueuedTaskSync()'s exception path:
         // any thrown error from the orchestrator flips the row to FAILED so the
         // operator's UI surfaces the cause instead of leaving a phantom RUNNING.
-        $orchestratorConfig = (new OrchestratorConfig())->withLease($leaseOwner, $this->tickLeaseSeconds);
+        //
+        // `singleStep: true` breaks the orchestrator's recursive tick chain
+        // after one LLM turn — see OrchestratorConfig. Server-mode workers
+        // leave it false so the daemon still drains each task in a single
+        // recursive run; client-mode forces true so the SPA sees one step
+        // per tick (tool calls appear progressively as the browser's tick
+        // loop fires the next /tick when the row is still QUEUED).
+        $orchestratorConfig = (new OrchestratorConfig())
+            ->withLease($leaseOwner, $this->tickLeaseSeconds)
+            ->withSingleStep(true);
         try {
             $this->orchestrator->tick($claimed->id, $orchestratorConfig);
         } catch (Throwable $e) {

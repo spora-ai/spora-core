@@ -4144,3 +4144,67 @@ it('retry throws when the task is not in FAILED status', function (): void {
     expect(fn() => $orch->retry($task->id))
         ->toThrow(InvalidTaskTransitionException::class, 'Can only retry failed tasks');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('singleStep=true breaks the post-tool-batch recursive tick so client-worker mode shows one LLM turn per call', function (): void {
+    // Stub driver mirrors the "Run input tool" pattern: first turn returns
+    // a tool_call, second turn returns the final text response. The
+    // orchestrator's recursive-tick chain would normally consume both
+    // turns inside a single Orchestrator::tick() call. With singleStep
+    // (the client-worker /tick controller sets it), the chain is broken
+    // after turn 1 so the SPA's per-tick rendering shows the tool call
+    // landing before the final answer.
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+        if ($callCount === 1) {
+            return new LLMResponse(null, [new DriverToolCall('call_1', 'stub_input', [])], 10, 5, 'cmp_1');
+        }
+        return new LLMResponse('Done via input tool.', [], 10, 5, 'cmp_2');
+    });
+    $mock->allows('getProviderName')->andReturn('mock');
+    $mock->allows('getModelName')->andReturn('mock-model');
+    $mock->allows('supportsImageInput')->andReturn(false);
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Run input tool', maxSteps: 10);
+
+    // Manually claim the row to RUNNING so the recursive-tick gate at the
+    // start of runTick() doesn't bail — mirrors TaskTickController's CAS
+    // claim path.
+    Task::where('id', $task->id)
+        ->where('status', 'QUEUED')
+        ->update(['status' => 'RUNNING']);
+
+    $orch->tick($task->id, (new OrchestratorConfig())->withSingleStep(true));
+
+    $task->refresh();
+    // Turn 1 ran: tool_call persisted, status back to QUEUED, no final
+    // answer. step_count = 1 because dispatchLlmTurn incremented it once.
+    expect($task->status)->toBe('QUEUED')
+        ->and($task->step_count)->toBe(1)
+        ->and($task->final_response)->toBeNull();
+
+    $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+    expect($toolCallRecord)->not->toBeNull()
+        ->and($toolCallRecord->status)->toBe('APPROVED')
+        ->and($toolCallRecord->result_content)->toBe('input_result');
+
+    // Re-claim (the reaper would have cleared RUNNING to FAILED on lease
+    // expiry — in practice the browser fires the next /tick fast enough
+    // that the row stays QUEUED). Second tick: turn 2 returns text,
+    // task completes.
+    Task::where('id', $task->id)
+        ->where('status', 'QUEUED')
+        ->update(['status' => 'RUNNING']);
+    $orch->tick($task->id, (new OrchestratorConfig())->withSingleStep(true));
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->step_count)->toBe(2)
+        ->and($task->final_response)->toBe('Done via input tool.');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

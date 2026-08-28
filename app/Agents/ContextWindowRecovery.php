@@ -68,6 +68,16 @@ final class ContextWindowRecovery
             throw $originalError;
         }
 
+        // In client-worker mode the recursive tick would run another
+        // LLM turn inside the same HTTP `/tick` request, hiding the
+        // compaction-and-retry event from the SPA. Skip the retry
+        // here — the row is left RUNNING with a live lease; the
+        // reaper flips it to FAILED once the lease expires so the
+        // SPA surfaces a clean error rather than a silent stall.
+        if ($this->orchestrator->currentTickConfig()?->singleStep === true) {
+            throw $originalError;
+        }
+
         try {
             $this->orchestrator->tick($taskId);
         } catch (Throwable) {

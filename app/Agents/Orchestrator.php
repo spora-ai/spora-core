@@ -67,6 +67,16 @@ final class Orchestrator implements OrchestratorInterface
      *  exception does not leak the config into the next request. */
     private ?OrchestratorConfig $currentTickConfig = null;
 
+    /**
+     * Read-only accessor for collaborators (e.g. ContextWindowRecovery)
+     * that need to know whether the current tick is in single-step
+     * mode without poking at the orchestrator's internals.
+     */
+    public function currentTickConfig(): ?OrchestratorConfig
+    {
+        return $this->currentTickConfig;
+    }
+
     /** @var list<object> */
     public readonly array $toolInstances;
     public readonly ?LoggerInterface $logger;
@@ -431,6 +441,14 @@ final class Orchestrator implements OrchestratorInterface
             $this->currentTickConfig = $config;
         } else {
             $config = $this->currentTickConfig;
+        }
+
+        // TickPhaseRunner reads singleStep off the stored config so the
+        // post-tool-batch recursive tick can be gated per call-site.
+        if ($config !== null && $config->singleStep) {
+            $this->tickPhaseRunner->singleStep = true;
+        } else {
+            $this->tickPhaseRunner->singleStep = false;
         }
 
         $leaseOwner = $config?->leaseOwner;

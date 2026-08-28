@@ -53,6 +53,21 @@ final class TickPhaseRunner
         public readonly LeaseGuard $leaseGuard = new LeaseGuard(),
     ) {}
 
+    /**
+     * Set by Orchestrator::tick from the per-call OrchestratorConfig.
+     * When `true`, the post-tool-batch recursive tick in
+     * {@see handleToolCalls()} is suppressed — the orchestrator stops
+     * after one LLM turn so the SPA sees the intermediate tool-call
+     * batch. The browser's tick loop fires the next `/tick` when the
+     * row is still QUEUED, picking up from where this tick stopped.
+     *
+     * Field (not method) so the orchestrator can flip it cheaply on
+     * every outer tick call without a setter, and so the recursive
+     * `Orchestrator::tick()` inherits it from the outermost call
+     * automatically.
+     */
+    public bool $singleStep = false;
+
     public function runTick(int $taskId): void
     {
         $task = $this->lockRunningTaskForTick($taskId);
@@ -613,6 +628,26 @@ final class TickPhaseRunner
             // tool batch + LLM round-trip so the reaper does not flip the
             // row mid-batch.
             $this->leaseGuard->extend($task->id);
+
+            if ($this->singleStep) {
+                // Client-worker mode: stop after one LLM turn so the SPA
+                // sees this batch of tool calls. Flip status back to
+                // QUEUED so the browser's next /tick can CAS-claim the
+                // row (the orchestrator's claim path rejects rows that
+                // are still RUNNING, which is where the outer tick left
+                // them). Clear the lease so the reaper doesn't pick up
+                // the row while the browser is preparing the next tick —
+                // the browser re-claims it with its own lease_owner.
+                Task::where('id', $task->id)
+                    ->where('status', 'RUNNING')
+                    ->update([
+                        'status'           => 'QUEUED',
+                        'lease_owner'      => null,
+                        'lease_expires_at' => null,
+                    ]);
+                $this->publishIntermediateState(Task::find($task->id) ?? $task);
+                return;
+            }
 
             $this->orchestrator->tick($task->id);
         } else {
