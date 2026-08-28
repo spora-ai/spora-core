@@ -189,23 +189,25 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Resumes a task from a non-terminal state. Accepted source states:
+     * Resumes a task from a non-terminal state by appending the user's
+     * follow-up prompt and flipping the row back to `QUEUED`. Accepted
+     * source states:
      *
      *   - `RUNNING`           — auto-abort: flip to `ABORTED`, persist
-     *                            the wall-clock stamp, append an abort-marker
-     *                            system row, append the user's prompt, and
-     *                            return WITHOUT calling `tick()`. The next
-     *                            resume (with a fresh prompt) is what
-     *                            actually drives the LLM. Done atomically
-     *                            inside a `lockForUpdate` transaction so a
-     *                            racing tick cannot observe a half-applied
-     *                            state.
-     *   - `ABORTED`           — drop `data.aborted_at`, flip to
-     *                            `RUNNING`/`QUEUED`, append the user's
-     *                            prompt, then either tick (Sync) or queue
-     *                            (Worker).
-     *   - `COMPLETED`/`FAILED` — append the user's prompt, flip to
-     *                            `RUNNING`/`QUEUED`, tick or queue.
+     *                            the wall-clock stamp, append an
+     *                            abort-marker system row, append the
+     *                            user's prompt, then transition to
+     *                            `QUEUED`. The LLM is not driven here —
+     *                            the next tick from the worker (server-
+     *                            side daemon or browser SharedWorker) is
+     *                            what actually advances the loop. Done
+     *                            inside a `lockForUpdate` transaction so
+     *                            a racing tick cannot observe a half-
+     *                            applied state.
+     *   - `ABORTED`           — drop `data.aborted_at`, append the
+     *                            user's prompt, transition to `QUEUED`.
+     *   - `COMPLETED`/`FAILED` — append the user's prompt, transition
+     *                            to `QUEUED`.
      *
      * Throws {@see InvalidTaskTransitionException} for any other source
      * state. The marker row carries `role=system`, `content=JSON`
@@ -724,13 +726,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return "\n[Effective Configuration]\n" . implode("\n", $lines);
-    }
-
-    public function callTraitMethod(object $object, string $method, array $args): mixed
-    {
-        /** @var callable */
-        $callable = [$object, $method];
-        return $callable(...$args);
     }
 
     public function resolveToolByName(string $toolName): ToolInterface

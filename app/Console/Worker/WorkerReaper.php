@@ -58,11 +58,12 @@ final class WorkerReaper
             return;
         }
 
-        // WORKER_DISCONNECTED distinguishes "the lease holder vanished" (browser tab
-        // closed, housekeeping request dropped, server worker SIGKILL'd) from the
-        // legacy ORPHANED code emitted by other paths for explicit server crashes.
-        // Same row shape regardless of runtime — the operator UI reads error_code to
-        // decide whether to suggest re-opening the browser or just retrying.
+        // WORKER_DISCONNECTED is the reaper's marker for "the lease holder
+        // vanished" — browser tab closed, housekeeping request dropped,
+        // server worker SIGKILL'd. The legacy `ORPHANED` code is reserved in
+        // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
+        // any historical row that still carries it, but no code path emits
+        // it anymore.
         $updated = Task::whereIn('id', $orphanedIds)->update([
             'status'         => 'FAILED',
             'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",

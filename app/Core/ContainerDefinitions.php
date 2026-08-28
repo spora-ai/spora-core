@@ -1138,6 +1138,9 @@ final class ContainerDefinitions
                     $c->get(DbRateLimiter::class),
                     $c->get(MercurePublisherInterface::class),
                     $c->get(OrchestratorInterface::class),
+                    $c->get(\Spora\Agents\ErrorClassifier::class),
+                    $c->get(\Spora\Agents\RetryScheduler::class),
+                    $c->get(NotificationService::class),
                     $c->get(LoggerInterface::class),
                     (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );

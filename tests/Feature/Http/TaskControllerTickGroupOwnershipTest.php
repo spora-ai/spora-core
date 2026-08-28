@@ -56,6 +56,9 @@ function makeTickGroupController(): array
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new Spora\Agents\ErrorClassifier(),
+        new Spora\Agents\RetryScheduler(),
+        null,
         new NullLogger(),
         600,
     );

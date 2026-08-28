@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Psr\Log\NullLogger;
+use Spora\Agents\ErrorClassifier;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
+use Spora\Agents\RetryScheduler;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
@@ -76,6 +78,9 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new ErrorClassifier(),
+        new RetryScheduler(),
+        null,
         new NullLogger(),
         600,
     );
@@ -130,6 +135,9 @@ function makeRawTickController(
         new DbRateLimiter(),
         $mercure,
         $orchestrator,
+        new ErrorClassifier(),
+        new RetryScheduler(),
+        null,
         new NullLogger(),
         600,
     );
@@ -184,6 +192,9 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $harness['mercure'],
             $harness['orchestrator'],
+            new ErrorClassifier(),
+            new RetryScheduler(),
+            null,
             new NullLogger(),
             600,
         );
@@ -260,6 +271,9 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $mercure,
             $orchestrator,
+            new ErrorClassifier(),
+            new RetryScheduler(),
+            null,
             new NullLogger(),
             600,
         );
@@ -316,6 +330,9 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             new DbRateLimiter(),
             $mercure,
             $orchestrator,
+            new ErrorClassifier(),
+            new RetryScheduler(),
+            null,
             new NullLogger(),
             600,
         );

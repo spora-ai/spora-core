@@ -57,8 +57,16 @@ final class ToolCallExecutor
         $operationName        = 'default';
         $operationDescription = null;
         if (in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
-            $operationName        = $this->orchestrator->callTraitMethod($toolInstance, 'getOperationName', [$toolCall->arguments]);
-            $operationDescription = $this->orchestrator->callTraitMethod($toolInstance, 'getOperationDescription', [$operationName]);
+            // The orchestrator previously wrapped the [$object, $method] callable
+            // in a `callTraitMethod` helper, but the body was a literal one-liner
+            // — the indirection just kept the variadic-spread call away from
+            // ToolCallExecutor. Inlining keeps the call site adjacent to the
+            // `HasOperations` trait it dispatches into.
+            /** @var callable */
+            $nameGetter = [$toolInstance, 'getOperationName'];
+            $descGetter = [$toolInstance, 'getOperationDescription'];
+            $operationName        = $nameGetter($toolCall->arguments);
+            $operationDescription = $descGetter($operationName);
 
             if (!$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $agent->id)) {
                 $this->persistDisabledOperation($task, $agent, $toolCall, $toolClass, $operationName, $operationDescription);

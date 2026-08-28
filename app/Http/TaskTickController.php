@@ -11,8 +11,10 @@ use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\ErrorClassifier;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\RetryScheduler;
 use Spora\Agents\TaskLifecyclePolicy;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Auth\AuthService;
@@ -20,7 +22,9 @@ use Spora\Http\Exceptions\TooManyRequestsException;
 use Spora\Models\Task;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\NotificationService;
 use Spora\Services\TaskServiceInterface;
+use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -48,6 +52,9 @@ final class TaskTickController
         private readonly DbRateLimiter $rateLimiter,
         private readonly MercurePublisherInterface $mercure,
         private readonly OrchestratorInterface $orchestrator,
+        private readonly ErrorClassifier $errorClassifier,
+        private readonly RetryScheduler $retryScheduler,
+        private readonly ?NotificationService $notificationService,
         private readonly LoggerInterface $logger,
         private readonly int $tickLeaseSeconds,
     ) {}
@@ -218,30 +225,58 @@ final class TaskTickController
         // recursive run; client-mode forces true so the SPA sees one step
         // per tick (tool calls appear progressively as the browser's tick
         // loop fires the next /tick when the row is still QUEUED).
+        //
+        // The catch block mirrors TickPhaseRunner::handleTickFailure() so
+        // client-mode failures get the same classification, notification,
+        // and auto-retry treatment as server-mode failures — `error_code`
+        // is no longer hardcoded to `UNKNOWN`. Context-window errors take
+        // the same recovery path as in server mode.
         $orchestratorConfig = (new OrchestratorConfig())
             ->withLease($leaseOwner, $this->tickLeaseSeconds)
             ->withSingleStep(true);
         try {
             $this->orchestrator->tick($claimed->id, $orchestratorConfig);
         } catch (Throwable $e) {
-            Task::where('id', $claimed->id)->where('status', 'RUNNING')->update([
-                'status'           => 'FAILED',
-                'failure_reason'   => $e->getMessage(),
-                'error_code'       => 'UNKNOWN',
-                'error_message'    => $e->getMessage(),
-                'lease_owner'      => null,
-                'lease_expires_at' => null,
-            ]);
-            $this->mercure->publish($claimed->id, $userId, [
-                'task_id' => $claimed->id,
-                'status'  => 'FAILED',
-            ]);
             $this->logger->error('Task failed during /tick', [
                 'task_id' => $claimed->id,
                 'lease_owner' => $leaseOwner,
                 'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
                 'exception_class' => get_class($e),
                 'message' => $e->getMessage(),
+            ]);
+
+            if ($this->errorClassifier->isContextWindowError($e)) {
+                // Mirror TickPhaseRunner::handleTickFailure's context-window
+                // short-circuit — the recovery path drives its own LLM turn,
+                // which (in singleStep mode) won't recurse, so the reaper
+                // will eventually flip the row to FAILED with the original
+                // error. We still notify so the operator sees the failure.
+                $this->notificationService?->notifyTaskFailed(Task::find($claimed->id));
+            } else {
+                $errorCode = $this->errorClassifier->classifyError($e);
+                $friendlyMsg = $this->errorClassifier->friendlyMessageForError($e, $errorCode);
+                $updated = Task::where('id', $claimed->id)
+                    ->where('status', 'RUNNING')
+                    ->update([
+                        'status'           => 'FAILED',
+                        'failure_reason'   => Utf8Sanitizer::scrubString($e->getMessage()),
+                        'error_code'       => $errorCode,
+                        'error_message'    => Utf8Sanitizer::scrubString($friendlyMsg),
+                        'lease_owner'      => null,
+                        'lease_expires_at' => null,
+                    ]);
+
+                if ($updated > 0) {
+                    $failedTask = Task::find($claimed->id);
+                    if ($failedTask !== null) {
+                        $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
+                    }
+                }
+            }
+
+            $this->mercure->publish($claimed->id, $userId, [
+                'task_id' => $claimed->id,
+                'status'  => 'FAILED',
             ]);
         }
 
@@ -272,6 +307,35 @@ final class TaskTickController
             ['error' => ['code' => 'INVALID_STATE', 'message' => $e->getMessage()]],
             Response::HTTP_CONFLICT,
         );
+    }
+
+    /**
+     * Mirror TickPhaseRunner::notifyFailedAndScheduleRetry() so the
+     * client-mode /tick path triggers the same downstream side-effects
+     * (notification + auto-retry scheduling) as the server-mode daemon.
+     * Both `notifyTaskFailed` and `scheduleAutoRetry` swallow their own
+     * exceptions — the operator-facing `Task failed during /tick` log
+     * line above is the source of truth for the failure itself.
+     */
+    private function notifyFailedAndScheduleRetry(Task $failedTask, string $errorCode): void
+    {
+        try {
+            $this->notificationService?->notifyTaskFailed($failedTask);
+        } catch (Throwable $e) {
+            $this->logger->warning('Notification failed', [
+                'task_id'   => $failedTask->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $this->retryScheduler->scheduleAutoRetry($failedTask, $errorCode);
+        } catch (Throwable $e) {
+            $this->logger->warning('Auto-retry scheduling failed', [
+                'task_id'   => $failedTask->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function notFoundResponse(): JsonResponse
