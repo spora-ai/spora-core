@@ -1544,7 +1544,6 @@ final class ContainerDefinitions
                 $c->get(PluginLoader::class),
                 $c->get(ToolConfigService::class),
                 $c->get(ToolConfigSchemaInspector::class),
-                $c->get(PrincipalResolver::class),
             ),
 
             MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {
