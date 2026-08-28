@@ -11,9 +11,7 @@ use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
-use Spora\Http\ContinueTaskDispatcher;
-use Spora\Http\DecisionsRequestValidator;
-use Spora\Http\TaskController;
+use Spora\Http\TaskTickController;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
@@ -28,12 +26,12 @@ defined('TICK_GROUP_PASSWORD') || define('TICK_GROUP_PASSWORD', 'Password1!');
 const TICK_GROUP_DT = 'Y-m-d H:i:s';
 
 /**
- * Build a TaskController wired to a fake LLM that returns "Done." on
+ * Build a TaskTickController wired to a fake LLM that returns "Done." on
  * every complete() call. Used by the group-ownership tests so the tick
  * itself never throws — the assertions are about the controller's
  * runner-scoping rule, not the LLM.
  *
- * @return array{controller: TaskController, auth: AuthService, orchestrator: Orchestrator, mercure: MercurePublisherInterface}
+ * @return array{controller: TaskTickController, auth: AuthService, orchestrator: Orchestrator, mercure: MercurePublisherInterface}
  */
 function makeTickGroupController(): array
 {
@@ -51,13 +49,9 @@ function makeTickGroupController(): array
     $mercure->allows('publish')->andReturn(true);
 
     $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
-    $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
-    $controller = new TaskController(
+    $controller = new TaskTickController(
         $authService,
         $service,
-        $mediaCapability,
-        new ContinueTaskDispatcher($service, $mediaCapability),
-        new DecisionsRequestValidator($service),
         WorkerRuntimeMode::Client,
         new DbRateLimiter(),
         $mercure,

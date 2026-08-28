@@ -58,7 +58,9 @@ final class ApprovedBatchExecutor
             $remaining = [];
 
             foreach ($state->pendingToolCalls as $pendingToolCall) {
-                $operationName = $operationMap[$pendingToolCall->providerCallId] ?? null;
+                // $operationMap is built here for tests/diagnostic use; the executor
+                // currently does not narrow per-op via this map. Future per-op
+                // validation will read it from $operationMap[$pendingToolCall->providerCallId].
                 $approvedArgs  = $approvedMap[$pendingToolCall->providerCallId] ?? null;
 
                 // Partial-approval guard: absent from the batch = not approved, stays pending.

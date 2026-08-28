@@ -35,10 +35,12 @@ use Spora\Http\PluginsController;
 use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
+use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SkillController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
+use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
@@ -95,7 +97,6 @@ final class RouteDefinitions
         self::registerMailRoutes($r);
         self::registerPromptTemplateRoutes($r);
         self::registerScheduledRunRoutes($r);
-        self::registerWorkerRoutes($r);
     }
 
     private static function registerCoreRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
@@ -261,16 +262,14 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort', [TaskController::class, 'abort'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort-sub-agent', [TaskController::class, 'abortSubAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/tasks/{taskId}/tick', [TaskController::class, 'tick'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/tasks/{taskId}/tick', [TaskTickController::class, 'tick'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [RetryChainController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
-    }
 
-    private static function registerWorkerRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
-    {
-        // Client-worker mode housekeeping. Gated inline on worker_runtime_mode
-        // (matches PluginsController::catalog's pattern) so server-mode installs
-        // get a clean 404 instead of an empty middleware list.
+        // Client-worker mode housekeeping lives with the task routes since
+        // it drives task ticks on the worker's behalf. Gated inline on
+        // worker_runtime_mode (matches PluginsController::catalog's pattern)
+        // so server-mode installs get a clean 404.
         $r->addRoute('POST', '/api/v1/worker/housekeeping', [WorkerController::class, 'housekeeping'], [AuthMiddleware::class, CsrfMiddleware::class]);
     }
 

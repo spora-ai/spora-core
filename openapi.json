@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.18.1"
+        "version": "0.18.1-1-gc5a876b"
     },
     "servers": [
         {
@@ -2236,7 +2236,7 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "Tick Task",
+                "summary": "Tick TaskTick",
                 "parameters": [
                     {
                         "name": "taskId",
@@ -2267,7 +2267,7 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "CancelRetryChain Task",
+                "summary": "CancelRetryChain RetryChain",
                 "parameters": [
                     {
                         "name": "taskId",
@@ -2278,6 +2278,28 @@
                         }
                     }
                 ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/worker/housekeeping": {
+            "post": {
+                "tags": [
+                    "Worker"
+                ],
+                "summary": "Housekeeping Worker",
+                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
@@ -4054,28 +4076,6 @@
                         }
                     }
                 ],
-                "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    },
-                    {
-                        "csrfToken": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/worker/housekeeping": {
-            "post": {
-                "tags": [
-                    "Worker"
-                ],
-                "summary": "Housekeeping Worker",
-                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

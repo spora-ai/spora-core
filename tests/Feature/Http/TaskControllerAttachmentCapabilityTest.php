@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
-use Mockery;
 use Psr\Log\NullLogger;
-use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
@@ -22,14 +19,12 @@ use Spora\Models\MediaAsset;
 use Spora\Models\Task;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
-use Spora\Services\DbRateLimiter;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
-use Spora\Services\MercurePublisherInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
@@ -175,7 +170,6 @@ function buildCapabilityController(string $model, string $driverClass): array
 
     $stub = new StubTaskService();
     $mediaCapability = new TaskMediaCapabilityService($factory);
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
     return [
         new TaskController(
             $authService,
@@ -183,11 +177,6 @@ function buildCapabilityController(string $model, string $driverClass): array
             $mediaCapability,
             new ContinueTaskDispatcher($stub, $mediaCapability),
             new DecisionsRequestValidator($stub),
-            WorkerRuntimeMode::Server,
-            new DbRateLimiter(),
-            $mercure,
-            Mockery::mock(OrchestratorInterface::class),
-            600,
         ),
         $stub,
     ];

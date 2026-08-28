@@ -13,7 +13,6 @@ use Spora\Services\DbRateLimiter;
 use Spora\Services\HousekeepingLock;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -60,13 +59,10 @@ final class WorkerController
      *   - 200 with `{reaped, scheduled_dispatched, ran_by}` on success.
      *   - 500 with a HOUSEKEEPING_FAILED envelope if anything throws.
      */
-    public function housekeeping(Request $request): Response
+    public function housekeeping(): Response
     {
         if ($this->workerRuntimeMode !== WorkerRuntimeMode::Client) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => 'Not found.']],
-                Response::HTTP_NOT_FOUND,
-            );
+            return $this->notFound();
         }
 
         $userId = (int) $this->authService->currentUserId();
@@ -78,6 +74,19 @@ final class WorkerController
             throw new TooManyRequestsException('Housekeeping rate limit exceeded.');
         }
 
+        return $this->runHousekeeping($userId);
+    }
+
+    private function notFound(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'NOT_FOUND', 'message' => 'Not found.']],
+            Response::HTTP_NOT_FOUND,
+        );
+    }
+
+    private function runHousekeeping(int $userId): Response
+    {
         // The synchronous scheduled-run tick below blocks for the full duration
         // of one LLM call. Lift PHP-FPM's per-request time limit so we don't
         // hit it mid-tick (and so the FAILED-flip exception path can finish).
@@ -92,9 +101,9 @@ final class WorkerController
             return new Response('', Response::HTTP_NO_CONTENT);
         }
 
-        try {
-            $buffer = new BufferedOutput();
+        $buffer = new BufferedOutput();
 
+        try {
             // Reap orphans regardless of who's calling — the reaper only
             // flips RUNNING tasks with expired leases, not caller-scoped state.
             $this->workerReaper->reapStaleTasks($buffer, $this->staleMinutes);
@@ -110,19 +119,29 @@ final class WorkerController
                 $this->tickLeaseSeconds,
             );
 
-            return new JsonResponse([
-                'reaped'               => $reaped,
-                'scheduled_dispatched' => $this->scheduledProcessor->lastProcessed,
-                'ran_by'               => $userId,
-            ]);
+            return $this->successResponse($reaped, $this->scheduledProcessor->lastProcessed, $userId);
         } catch (Throwable $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'HOUSEKEEPING_FAILED', 'message' => $e->getMessage()]],
-                Response::HTTP_INTERNAL_SERVER_ERROR,
-            );
+            return $this->errorResponse($e);
         } finally {
             $this->housekeepingLock->release();
         }
+    }
+
+    private function successResponse(int $reaped, int $scheduled, int $userId): JsonResponse
+    {
+        return new JsonResponse([
+            'reaped'               => $reaped,
+            'scheduled_dispatched' => $scheduled,
+            'ran_by'               => $userId,
+        ]);
+    }
+
+    private function errorResponse(Throwable $e): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'HOUSEKEEPING_FAILED', 'message' => $e->getMessage()]],
+            Response::HTTP_INTERNAL_SERVER_ERROR,
+        );
     }
 
     /**

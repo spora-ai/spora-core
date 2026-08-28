@@ -141,11 +141,6 @@ function approvalFeatureHarness(
         $mediaCapability,
         new ContinueTaskDispatcher($taskService, $mediaCapability),
         new Spora\Http\DecisionsRequestValidator($taskService),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        $mercure,
-        $orchestrator,
-        600,
     );
 
     return [

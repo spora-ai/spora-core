@@ -30,37 +30,44 @@ final class HousekeepingLock
     {
         $now = gmdate(self::DB_DATETIME_FORMAT);
         $until = gmdate(self::DB_DATETIME_FORMAT, time() + $seconds);
-        // caller_id not currently threaded through; placeholder for analytics.
-        $claimedBy = 0;
 
         try {
             $row = Capsule::table('worker_housekeeping_locks')->where('id', self::SINGLETON_ID)->first();
             if ($row === null) {
-                // First-ever call — insert the singleton row.
-                Capsule::table('worker_housekeeping_locks')->insert([
-                    'id'            => self::SINGLETON_ID,
-                    'claimed_until' => $until,
-                    'claimed_by'    => $claimedBy,
-                ]);
-                return true;
+                return $this->insertInitialLock($until);
             }
 
-            // CAS: update only if the existing lock has expired.
-            $existing = (string) $row->claimed_until;
-            if ($existing > $now) {
-                return false;
-            }
-            $affected = Capsule::table('worker_housekeeping_locks')
-                ->where('id', self::SINGLETON_ID)
-                ->where('claimed_until', '<=', $now)
-                ->update([
-                    'claimed_until' => $until,
-                    'claimed_by'    => $claimedBy,
-                ]);
-            return $affected > 0;
+            return $this->casUpdateLock($row, $now, $until);
         } catch (Throwable) {
             return false;
         }
+    }
+
+    private function insertInitialLock(string $until): bool
+    {
+        // caller_id not currently threaded through; placeholder for analytics.
+        Capsule::table('worker_housekeeping_locks')->insert([
+            'id'            => self::SINGLETON_ID,
+            'claimed_until' => $until,
+            'claimed_by'    => 0,
+        ]);
+        return true;
+    }
+
+    private function casUpdateLock(object $row, string $now, string $until): bool
+    {
+        $existing = (string) $row->claimed_until;
+        if ($existing > $now) {
+            return false;
+        }
+        $affected = Capsule::table('worker_housekeeping_locks')
+            ->where('id', self::SINGLETON_ID)
+            ->where('claimed_until', '<=', $now)
+            ->update([
+                'claimed_until' => $until,
+                'claimed_by'    => 0,
+            ]);
+        return $affected > 0;
     }
 
     /**

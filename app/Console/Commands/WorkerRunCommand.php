@@ -93,12 +93,22 @@ final class WorkerRunCommand extends Command
         // Exit before touching the DB so operators who run it manually see a
         // clear explanation instead of a silent no-op or confusing empty daemon.
         if ($this->workerRuntimeMode === WorkerRuntimeMode::Client) {
-            $output->writeln('<error>Server-side worker disabled: Spora is running in client-worker mode.</error>');
-            $output->writeln('<comment>Tasks are driven by your browser via POST /api/v1/tasks/{id}/tick.</comment>');
-            $output->writeln('<comment>See https://docs.spora.example/client-worker-mode</comment>');
+            $this->writeClientModeError($output);
             return Command::FAILURE;
         }
 
+        return $this->runWorker($input, $output);
+    }
+
+    private function writeClientModeError(OutputInterface $output): void
+    {
+        $output->writeln('<error>Server-side worker disabled: Spora is running in client-worker mode.</error>');
+        $output->writeln('<comment>Tasks are driven by your browser via POST /api/v1/tasks/{id}/tick.</comment>');
+        $output->writeln('<comment>See https://docs.spora.example/client-worker-mode</comment>');
+    }
+
+    private function runWorker(InputInterface $input, OutputInterface $output): int
+    {
         $this->database->bootDatabaseConnectionOnly();
 
         // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,

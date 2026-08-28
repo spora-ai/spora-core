@@ -321,6 +321,96 @@ describe('TaskService — getTasksForUser', function (): void {
         expect($result['tasks'])->toHaveCount(2);
         expect($result['meta']['current_page'])->toBe(2);
     });
+
+    it('filters by status when status is provided', function (): void {
+        // Powers GET /api/v1/tasks?status=QUEUED. Three rows in distinct
+        // statuses; only the matching one comes back.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('statusfilter@example.com', 'Password1!', 'StatusFilter');
+        simulateLoggedInSession($userId, 'statusfilter@example.com');
+
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
+            'name'         => 'StatusFilterAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        $queued = Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'      => $userId,
+            'agent_id'     => $agent->id,
+            'status'       => 'QUEUED',
+            'user_prompt'  => 'queued task',
+            'max_steps'    => 5,
+        ]);
+        Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'      => $userId,
+            'agent_id'     => $agent->id,
+            'status'       => 'RUNNING',
+            'user_prompt'  => 'running task',
+            'max_steps'    => 5,
+        ]);
+        Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'      => $userId,
+            'agent_id'     => $agent->id,
+            'status'       => 'COMPLETED',
+            'user_prompt'  => 'completed task',
+            'max_steps'    => 5,
+        ]);
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId, null, null, null, null, 'QUEUED');
+
+        expect($result)->toHaveCount(1);
+        expect($result[0]['id'])->toBe($queued->id)
+            ->and($result[0]['status'])->toBe('QUEUED');
+    });
+
+    it('treats an empty status string the same as null (no filter)', function (): void {
+        // The controller guards `$status !== ''` before passing it down,
+        // so an empty string at the service boundary means "no filter" —
+        // we shouldn't add a `where('status', '')` clause that returns
+        // zero rows.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('statusempty@example.com', 'Password1!', 'StatusEmpty');
+        simulateLoggedInSession($userId, 'statusempty@example.com');
+
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
+            'name'         => 'StatusEmptyAgent',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'      => $userId,
+            'agent_id'     => $agent->id,
+            'status'       => 'QUEUED',
+            'user_prompt'  => 'q',
+            'max_steps'    => 5,
+        ]);
+        Task::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'user_id'      => $userId,
+            'agent_id'     => $agent->id,
+            'status'       => 'RUNNING',
+            'user_prompt'  => 'r',
+            'max_steps'    => 5,
+        ]);
+
+        $service = makeTaskService();
+        $result = $service->getTasksForUser($userId, null, null, null, null, '');
+
+        expect($result)->toHaveCount(2);
+    });
 });
 
 describe('TaskService — startTask', function (): void {

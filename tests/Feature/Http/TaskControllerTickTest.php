@@ -10,9 +10,7 @@ use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
-use Spora\Http\ContinueTaskDispatcher;
-use Spora\Http\DecisionsRequestValidator;
-use Spora\Http\TaskController;
+use Spora\Http\TaskTickController;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
@@ -27,11 +25,11 @@ defined('TICK_TEST_PASSWORD') || define('TICK_TEST_PASSWORD', 'Password1!');
 const TICK_DT = 'Y-m-d H:i:s';
 
 /**
- * Build a TaskController wired to a mocked orchestrator + mercure.
+ * Build a TaskTickController wired to a mocked orchestrator + mercure.
  *
  * @param  WorkerRuntimeMode  $runtimeMode
  * @param  ?LLMDriverInterface  $llm
- * @return array{controller: TaskController, orchestrator: Orchestrator, mercure: MercurePublisherInterface, userId: int, agentId: int}
+ * @return array{controller: TaskTickController, orchestrator: Orchestrator, mercure: MercurePublisherInterface, userId: int, agentId: int}
  */
 function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface $llm = null): array
 {
@@ -70,14 +68,10 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
     $mercure->allows('publish')->andReturn(true);
 
     $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
-    $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
 
-    $controller = new TaskController(
+    $controller = new TaskTickController(
         $authService,
         $service,
-        $mediaCapability,
-        new ContinueTaskDispatcher($service, $mediaCapability),
-        new DecisionsRequestValidator($service),
         $runtimeMode,
         new DbRateLimiter(),
         $mercure,
@@ -113,12 +107,12 @@ function seedTickTask(int $userId, int $agentId, array $overrides = []): Task
 }
 
 /**
- * Build a TaskController with custom auth + collaborators. Returns the
+ * Build a TaskTickController with custom auth + collaborators. Returns the
  * pieces the tests need (service, orchestrator, mercure) alongside the
  * controller so callers can hand-roll a sibling controller for the
  * not-owned / Mercure-publish tests without re-deriving the wiring.
  *
- * @return array{controller: TaskController, orchestrator: Orchestrator, mercure: MercurePublisherInterface, service: TaskService, authService: AuthService}
+ * @return array{controller: TaskTickController, orchestrator: Orchestrator, mercure: MercurePublisherInterface, service: TaskService, authService: AuthService}
  */
 function makeRawTickController(
     AuthService $authService,
@@ -127,14 +121,10 @@ function makeRawTickController(
     MercurePublisherInterface $mercure,
 ): array {
     $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
-    $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
 
-    $controller = new TaskController(
+    $controller = new TaskTickController(
         $authService,
         $service,
-        $mediaCapability,
-        new ContinueTaskDispatcher($service, $mediaCapability),
-        new DecisionsRequestValidator($service),
         $runtimeMode,
         new DbRateLimiter(),
         $mercure,
@@ -184,14 +174,10 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $otherId = $otherAuth->register('tick-other@example.com', TICK_TEST_PASSWORD, 'Other');
         simulateLoggedInSession($otherId, 'tick-other@example.com');
 
-        $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
         $otherService = new TaskService($harness['orchestrator'], $harness['mercure'], new ToolCallSerializer([]));
-        $controller = new TaskController(
+        $controller = new TaskTickController(
             $otherAuth,
             $otherService,
-            $mediaCapability,
-            new ContinueTaskDispatcher($otherService, $mediaCapability),
-            new DecisionsRequestValidator($otherService),
             WorkerRuntimeMode::Client,
             new DbRateLimiter(),
             $harness['mercure'],
@@ -264,13 +250,9 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $mercure->shouldReceive('publish')->andReturn(true);
 
         $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
-        $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
-        $controller = new TaskController(
+        $controller = new TaskTickController(
             $authService,
             $service,
-            $mediaCapability,
-            new ContinueTaskDispatcher($service, $mediaCapability),
-            new DecisionsRequestValidator($service),
             WorkerRuntimeMode::Client,
             new DbRateLimiter(),
             $mercure,
@@ -323,13 +305,9 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $mercure->allows('publish')->andReturn(true);
 
         $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
-        $mediaCapability = new Spora\Services\MediaArchive\TaskMediaCapabilityService();
-        $controller = new TaskController(
+        $controller = new TaskTickController(
             $authService,
             $service,
-            $mediaCapability,
-            new ContinueTaskDispatcher($service, $mediaCapability),
-            new DecisionsRequestValidator($service),
             WorkerRuntimeMode::Client,
             new DbRateLimiter(),
             $mercure,

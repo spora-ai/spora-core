@@ -65,11 +65,6 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        $mercure,
-        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
-        600,
     );
 
     $req = new Request();
@@ -107,11 +102,6 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        $mercure,
-        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
-        600,
     );
 
     $req = new Request();
@@ -140,11 +130,6 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        $mercure,
-        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
-        600,
     );
 
     $req = new Request();
@@ -183,11 +168,6 @@ it('POST /abort with no body works (no-body call)', function (): void {
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        $mercure,
-        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
-        600,
     );
 
     $req = new Request([], [], [], [], [], ['CONTENT_TYPE' => 'application/json'], '');

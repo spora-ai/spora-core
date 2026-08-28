@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\Http\RetryChainController;
 use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -33,17 +34,21 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
         $mediaCapability,
         new ContinueTaskDispatcher($taskService, $mediaCapability),
         new DecisionsRequestValidator($taskService),
-        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
-        new Spora\Services\DbRateLimiter(),
-        Mockery::mock(Spora\Services\MercurePublisherInterface::class),
-        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
-        600,
     );
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();
     $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);
 
     return [$controller, $authService, $taskService, $authMiddleware, $csrfMiddleware];
+}
+
+function makeRetryChainController(?TaskServiceInterface $taskService = null): array
+{
+    $authService = bootAuthLayer();
+    $taskService ??= Mockery::mock(TaskServiceInterface::class);
+    $controller  = new RetryChainController($authService, $taskService);
+
+    return [$controller, $authService, $taskService];
 }
 
 function seedUserAndAgent(mixed $authService): array
@@ -251,6 +256,47 @@ it('index uses default per_page of 20 when per_page is not provided', function (
     seedUserAndAgent($authService);
 
     $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?page=1&per_page=20'));
+    expect($resp->getStatusCode())->toBe(200);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index with status query param passes status through to the service', function (): void {
+    // Powers GET /api/v1/tasks?status=QUEUED — the controller must
+    // forward the query string as the 6th positional arg of
+    // getTasksForUser(). The actual filter behaviour is exercised by
+    // TaskServiceTest; here we only assert the wiring.
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage, $status) => $userId === 1
+            && $agentId === null
+            && $since === null
+            && $page === null
+            && $perPage === null
+            && $status === 'QUEUED')
+        ->andReturn([]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks?status=QUEUED'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['data']['tasks'])->toBeEmpty();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('index without status query param leaves the 6th arg null', function (): void {
+    // The controller's `query->has('status')` check means an absent
+    // ?status= translates to null (no filter) — not '' and not missing.
+    $taskService = Mockery::mock(TaskServiceInterface::class);
+    $taskService->expects('getTasksForUser')
+        ->once()
+        ->withArgs(fn(int $userId, $agentId, $since, $page, $perPage, $status) => $status === null)
+        ->andReturn([]);
+
+    [$controller, $authService] = makeTaskController($taskService);
+    seedUserAndAgent($authService);
+
+    $resp = $controller->index(jsonRequest('GET', '/api/v1/tasks'));
     expect($resp->getStatusCode())->toBe(200);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1170,7 +1216,8 @@ it('continue returns 404 for unknown task', function (): void {
     expect($resp->getStatusCode())->toBe(404);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// cancelRetryChain()
+// cancelRetryChain() — lives on RetryChainController, which is wired via
+// makeRetryChainController() above.
 
 it('cancelRetryChain returns 404 for unknown task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
@@ -1179,7 +1226,7 @@ it('cancelRetryChain returns 404 for unknown task', function (): void {
         ->with(99999, 1)
         ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
-    [$controller, $authService] = makeTaskController($taskService);
+    [$controller, $authService] = makeRetryChainController($taskService);
     seedUserAndAgent($authService);
 
     $req = jsonRequest('DELETE', '/api/v1/tasks/99999/cancel-retry-chain');
@@ -1196,7 +1243,7 @@ it('cancelRetryChain returns 409 when task is not in a retry chain', function ()
         ->with(1, 1)
         ->andThrow(new InvalidArgumentException('This task is not part of a retry chain.'));
 
-    [$controller, $authService] = makeTaskController($taskService);
+    [$controller, $authService] = makeRetryChainController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $task = Task::create([
@@ -1217,7 +1264,7 @@ it('cancelRetryChain returns 409 when task is not in a retry chain', function ()
     expect($resp->getStatusCode())->toBe(409);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-it('cancelRetryChain returns 204 and cancels chain for valid retry task', function (): void {
+it('cancelRetryChain returns 200 and cancels chain for valid retry task', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('cancelRetryChain')
         ->once()
@@ -1226,7 +1273,7 @@ it('cancelRetryChain returns 204 and cancels chain for valid retry task', functi
         })
         ->andReturn(true);
 
-    [$controller, $authService] = makeTaskController($taskService);
+    [$controller, $authService] = makeRetryChainController($taskService);
     [$userId, $agent] = seedUserAndAgent($authService);
 
     $root = Task::create([
@@ -1282,7 +1329,7 @@ it('cancelRetryChain returns 404 when trying to cancel another users retry chain
         ->with(Mockery::any(), Mockery::any())
         ->andThrow(new InvalidArgumentException(TASK_NOT_FOUND_MESSAGE));
 
-    [$controller, $authService] = makeTaskController($taskService);
+    [$controller, $authService] = makeRetryChainController($taskService);
     [, $agent] = seedUserAndAgent($authService);
 
     $authService->register(OTHER_EMAIL, TEST_PASSWORD, 'Other');

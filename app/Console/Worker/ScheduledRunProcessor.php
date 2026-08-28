@@ -115,18 +115,16 @@ final class ScheduledRunProcessor
         int $userId,
         int $tickLeaseSeconds,
     ): bool {
-        $resolver = new PrincipalResolver();
         // Auth guarantees the user-principal row exists by the time we get here
         // (login/register flows call PrincipalService::ensureUserPrincipal($userId)
         // before issuing the session token). If for any reason it doesn't — e.g.
         // a mid-flight logout or a manual SQL poke — visiblePrincipalIds() returns
         // [] and we skip the call without erroring. The next /housekeeping call
         // (within 5 min) will retry once auth has settled.
+        $resolver = new PrincipalResolver();
         $visiblePrincipalIds = $resolver->visiblePrincipalIds($userId);
         if ($visiblePrincipalIds === []) {
-            $this->logger->warning('Scheduled-run dispatch skipped: caller has no visible principals', [
-                'caller_user_id' => $userId,
-            ]);
+            $this->logNoVisiblePrincipals($userId);
             return false;
         }
 
@@ -135,6 +133,18 @@ final class ScheduledRunProcessor
             return false;
         }
 
+        return $this->dispatchAndTick($context, $userId, $tickLeaseSeconds, $output);
+    }
+
+    private function logNoVisiblePrincipals(int $userId): void
+    {
+        $this->logger->warning('Scheduled-run dispatch skipped: caller has no visible principals', [
+            'caller_user_id' => $userId,
+        ]);
+    }
+
+    private function dispatchAndTick(array $context, int $userId, int $tickLeaseSeconds, OutputInterface $output): bool
+    {
         $entry = $context['entry'];
         $run = $context['run'];
         $agent = $context['agent'];

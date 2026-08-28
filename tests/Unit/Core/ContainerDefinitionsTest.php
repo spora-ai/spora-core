@@ -446,6 +446,8 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
     $def = callContainerMethod('apiTaskControllerDefinitions');
 
     expect($def)->toHaveKey(Spora\Http\TaskController::class);
+    expect($def)->toHaveKey(Spora\Http\TaskTickController::class);
+    expect($def)->toHaveKey(Spora\Http\RetryChainController::class);
     expect($def)->toHaveKey(Spora\Services\TaskServiceInterface::class);
     expect($def)->toHaveKey(Spora\Http\AgentTemplateController::class);
     expect($def)->toHaveKey(Spora\Http\PromptTemplateController::class);

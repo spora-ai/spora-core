@@ -435,7 +435,7 @@ final class Orchestrator implements OrchestratorInterface
 
         $leaseOwner = $config?->leaseOwner;
         $leaseSeconds = $config !== null ? $config->tickLeaseSeconds : 600;
-        $this->tickPhaseRunner->setLeaseConfig($leaseOwner, $leaseSeconds);
+        $this->tickPhaseRunner->leaseGuard->configure($leaseOwner, $leaseSeconds);
 
         try {
             $this->tickPhaseRunner->runTick($taskId);

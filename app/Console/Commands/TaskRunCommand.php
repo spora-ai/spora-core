@@ -68,11 +68,21 @@ final class TaskRunCommand extends Command
         // that path is unreachable. Gate here as defense-in-depth for operators
         // who invoke it manually from the CLI.
         if ($this->workerRuntimeMode === WorkerRuntimeMode::Client) {
-            $output->writeln('<error>task:run disabled: Spora is running in client-worker mode.</error>');
-            $output->writeln('<comment>Tasks are driven by your browser. Use Retry from the UI instead.</comment>');
+            $this->writeClientModeError($output);
             return Command::FAILURE;
         }
 
+        return $this->runTask($input, $output);
+    }
+
+    private function writeClientModeError(OutputInterface $output): void
+    {
+        $output->writeln('<error>task:run disabled: Spora is running in client-worker mode.</error>');
+        $output->writeln('<comment>Tasks are driven by your browser. Use Retry from the UI instead.</comment>');
+    }
+
+    private function runTask(InputInterface $input, OutputInterface $output): int
+    {
         $taskId = (int) $input->getArgument('taskId');
 
         $this->database->bootDatabaseConnectionOnly();
