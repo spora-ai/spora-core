@@ -49,19 +49,13 @@ final class ApprovedBatchExecutor
                 'pending_count'  => count($state->pendingToolCalls),
             ]);
 
-            $approvedMap  = $this->indexApprovedBatch($approvedBatch);
-            // Operation-per-call narrows per-op `required[]` against the op the call was
-            // actually dispatched on — see ToolCallExecutor::createPendingRecord.
-            $operationMap = $this->indexPersistedOperations($taskId);
+            $approvedMap = $this->indexApprovedBatch($approvedBatch);
 
             /** @var list<DriverToolCall> $remaining */
             $remaining = [];
 
             foreach ($state->pendingToolCalls as $pendingToolCall) {
-                // $operationMap is built here for tests/diagnostic use; the executor
-                // currently does not narrow per-op via this map. Future per-op
-                // validation will read it from $operationMap[$pendingToolCall->providerCallId].
-                $approvedArgs  = $approvedMap[$pendingToolCall->providerCallId] ?? null;
+                $approvedArgs = $approvedMap[$pendingToolCall->providerCallId] ?? null;
 
                 // Partial-approval guard: absent from the batch = not approved, stays pending.
                 if ($approvedArgs === null) {
@@ -144,25 +138,6 @@ final class ApprovedBatchExecutor
             $approvedMap[$item['provider_call_id']] = $item['arguments'];
         }
         return $approvedMap;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function indexPersistedOperations(int $taskId): array
-    {
-        $rows = ToolCallModel::where('task_id', $taskId)
-            ->whereIn('status', ['PENDING_APPROVAL', 'AWAITING_FINAL_APPROVAL'])
-            ->get(['provider_call_id', 'operation']);
-
-        $map = [];
-        foreach ($rows as $row) {
-            $op = $row->getAttribute('operation');
-            if (is_string($op) && $op !== '') {
-                $map[$row->getAttribute('provider_call_id')] = $op;
-            }
-        }
-        return $map;
     }
 
     /**

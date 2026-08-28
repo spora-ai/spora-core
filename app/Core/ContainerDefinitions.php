@@ -7,25 +7,17 @@ namespace Spora\Core;
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
-use League\CommonMark\Environment\Environment as CommonMarkEnvironment;
-use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
-use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
-use League\CommonMark\MarkdownConverter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
-use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
-use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
-use Spora\AgentTemplates\AgentTemplateSettingsApplier;
-use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -43,8 +35,6 @@ use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
-use Spora\Console\Worker\ScheduledRunProcessor;
-use Spora\Console\Worker\WorkerReaper;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
@@ -92,8 +82,6 @@ use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
-use Spora\Http\WorkerController;
-use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentManifest;
@@ -114,16 +102,13 @@ use Spora\Services\EmailTemplateLoader;
 use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
-use Spora\Services\HousekeepingLock;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\Mail\MailTemplateRenderer;
 use Spora\Services\Mail\MailTemplateSyncService;
-use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
@@ -140,7 +125,6 @@ use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
-use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationServiceInterface;
@@ -150,9 +134,7 @@ use Spora\Services\PluginsService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
-use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
-use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
@@ -161,7 +143,6 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
-use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
@@ -1419,261 +1400,11 @@ final class ContainerDefinitions
 
     private static function orchestratorDefinitions(): array
     {
-        // Aggregator — kept short. The body lives in orchestratorInstance()
-        // (the main Orchestrator factory) and orchestratorAuxiliaryServices()
-        // (everything else this slice owns — worker runtime, mail pipeline,
-        // templates). Splitting here resolves S138 (orchestratorDefinitions
-        // was 230 lines, limit 150). The +2 method count is documented in the
-        // helpers' docblocks — ContainerDefinitions now sits at 22 methods,
-        // 2 over the S1448 ceiling, which is acceptable for this file since
-        // the only rule the project enforces via tooling is S138 (function
-        // length) and not method count.
-        return [
-            ...self::orchestratorInstance(),
-            ...self::orchestratorAuxiliaryServices(),
-        ];
-    }
-
-    private static function orchestratorInstance(): array
-    {
-        return [
-            OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
-                return new Orchestrator(
-                    $c->get(DriverFactory::class),
-                    new OrchestratorConfig(
-                        llmConfigService: $c->get(LLMConfigService::class),
-                        toolInstances: $c->get('tool_instances'),
-                        logger: $c->get(LoggerInterface::class),
-                        notificationService: $c->get(NotificationService::class),
-                        pluginLoader: $c->get(PluginLoader::class),
-                        mercure: $c->get(MercurePublisherInterface::class),
-                        toolConfigService: $c->get(ToolConfigService::class),
-                        toolCallSerializer: $c->get(ToolCallSerializer::class),
-                        agentService: $c->get(AgentServiceInterface::class),
-                        principalPreferences: $c->get(LLMConfigPreferences::class),
-                    ),
-                    $c->get(PrincipalResolver::class),
-                    $c->get(AuthService::class),
-                );
-            },
-        ];
-    }
-
-    /**
-     * Everything else this slice owns — worker runtime (DbRateLimiter,
-     * HousekeepingLock, WorkerReaper, ScheduledRunProcessor, WorkerController),
-     * Mercure/notification stack, Markdown → HTML mail pipeline, agent-template
-     * scanners + importers/exporters, skill scanner, and mail-template services.
-     *
-     * Kept as a single helper so the orchestratorDefinitions aggregator stays
-     * under the S1448 method-count ceiling (adding more helpers here would
-     * tip ContainerDefinitions further over 20 methods).
-     */
-    private static function orchestratorAuxiliaryServices(): array
-    {
-        return [
-            // Single-instance services for the client-worker housekeeping path.
-            // DbRateLimiter + HousekeepingLock are stateless wrappers around
-            // the `ratelimit_hits` and `worker_housekeeping_locks` tables (see
-            // migrations 0071/0072). The WorkerReaper and ScheduledRunProcessor
-            // are also used by the CLI `worker:run --scheduled` flow but were
-            // constructed inline in WorkerRunCommand before this slice — they
-            // now live in the container so the HTTP controller and the CLI
-            // share the same singletons.
-            DbRateLimiter::class => static fn(): DbRateLimiter => new DbRateLimiter(),
-
-            HousekeepingLock::class => static fn(): HousekeepingLock => new HousekeepingLock(),
-
-            WorkerReaper::class => static function (ContainerInterface $c): WorkerReaper {
-                return new WorkerReaper(
-                    $c->get(LoggerInterface::class),
-                    $c->get(NotificationService::class),
-                );
-            },
-
-            ScheduledRunProcessor::class => static function (ContainerInterface $c): ScheduledRunProcessor {
-                return new ScheduledRunProcessor(
-                    $c->get(OrchestratorInterface::class),
-                    $c->get(LoggerInterface::class),
-                    $c->get(MercurePublisherInterface::class),
-                    $c->get(NotificationService::class),
-                );
-            },
-
-            WorkerController::class => static function (ContainerInterface $c): WorkerController {
-                return new WorkerController(
-                    $c->get(AuthService::class),
-                    $c->get(WorkerRuntimeMode::class),
-                    $c->get(DbRateLimiter::class),
-                    $c->get(HousekeepingLock::class),
-                    $c->get(WorkerReaper::class),
-                    $c->get(ScheduledRunProcessor::class),
-                    (int) ($c->get('config')['worker_stale_minutes'] ?? 60),
-                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
-                );
-            },
-
-            MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
-                $config   = $c->get('config');
-                $hubUrl   = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
-                $jwtKey   = $config['mercure_jwt_key'] ?? null;
-                $client   = $c->get(HttpClientInterface::class);
-
-                return new MercurePublisher($client, $hubUrl, $jwtKey, $c->get(LoggerInterface::class));
-            },
-
-            NotificationService::class => static function (ContainerInterface $c): NotificationService {
-                return new NotificationService(
-                    $c->get(MercurePublisherInterface::class),
-                    $c->get(SystemMailer::class),
-                    $c->get('config'),
-                );
-            },
-
-            NotificationServiceInterface::class => static function (ContainerInterface $c): NotificationServiceInterface {
-                return $c->get(NotificationService::class);
-            },
-
-            SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
-                return new SystemMailer(
-                    $c->get('config'),
-                    $c->get(LoggerInterface::class),
-                    $c->get(MailTemplateRenderer::class),
-                );
-            },
-
-            // Markdown → HTML pipeline. CommonMarkCore + GFM gives tables,
-            // strikethrough, autolinks, task lists. Used by SystemMailer and
-            // by anything that renders a MailTemplate body.
-            CommonMarkEnvironment::class => static function (): CommonMarkEnvironment {
-                $env = new CommonMarkEnvironment();
-                $env->addExtension(new CommonMarkCoreExtension());
-                $env->addExtension(new GithubFlavoredMarkdownExtension());
-                return $env;
-            },
-
-            MarkdownConverter::class => static function (ContainerInterface $c): MarkdownConverter {
-                return new MarkdownConverter($c->get(CommonMarkEnvironment::class));
-            },
-
-            MailTemplateRenderer::class => static function (ContainerInterface $c): MailTemplateRenderer {
-                return new MailTemplateRenderer($c->get(MarkdownConverter::class));
-            },
-
-            AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
-                $pluginLoader = $c->get(PluginLoader::class);
-                $paths = $c->get(Paths::class);
-
-                $appPaths = $c->has(AppLoader::class)
-                    ? ($c->get(AppLoader::class)->getApp()?->agentTemplatePaths() ?? [])
-                    : [];
-
-                $directories = array_merge(
-                    $paths->agentTemplatesPaths(),
-                    $pluginLoader->agentTemplatePaths(),
-                    $appPaths,
-                );
-
-                return new AgentTemplateScanner($directories);
-            },
-
-            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
-
-            ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
-                return new ToolConfigSchemaInspector(
-                    [],
-                    $c->get(PrincipalResolver::class),
-                );
-            },
-
-            // Skills are scanned in priority order: project, then framework,
-            // then each plugin. The `source` label on each root is what
-            // SkillScanner uses to bucket same-named skills (see
-            // {@see SkillScanner::scan()}) and to tag the resulting Skill objects.
-            SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
-                $paths = $c->get(Paths::class);
-
-                $roots = [];
-
-                $project = $paths->base('skills');
-                if (is_dir($project)) {
-                    $roots[] = ['path' => $project, 'source' => 'project'];
-                }
-
-                $framework = $paths->framework('skills');
-                if (is_dir($framework)) {
-                    $roots[] = ['path' => $framework, 'source' => 'core'];
-                }
-
-                foreach ($c->get(PluginLoader::class)->skillPaths() as $root) {
-                    if (is_dir($root['path'])) {
-                        $roots[] = $root;
-                    }
-                }
-
-                return new SkillScanner($roots);
-            },
-
-            AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
-                return new AgentTemplateImporter(
-                    $c->get(ToolConfigService::class),
-                    $c->get(PluginLoader::class),
-                    $c->get(Paths::class),
-                    $c->get(AgentTemplateToolsApplier::class),
-                    $c->get(AgentTemplateAgentCreator::class),
-                    $c->get(AgentPictureService::class),
-                );
-            },
-
-            AgentTemplateToolsApplier::class => static function (ContainerInterface $c): AgentTemplateToolsApplier {
-                return new AgentTemplateToolsApplier(
-                    $c->get(ToolConfigService::class),
-                    $c->get(AgentTemplateSettingsApplier::class),
-                );
-            },
-
-            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
-
-            AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
-                return new AgentTemplateSettingsApplier(
-                    $c->get(ToolConfigService::class),
-                    $c->get(SkillScanner::class),
-                );
-            },
-
-            AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
-                $c->get(PluginLoader::class),
-                $c->get(ToolConfigService::class),
-                $c->get(ToolConfigSchemaInspector::class),
-                $c->get(PrincipalResolver::class),
-            ),
-
-            MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {
-                return new MailTemplateService($c->get(MailTemplateRenderer::class));
-            },
-
-            MailTemplateSyncService::class => static function (ContainerInterface $c): MailTemplateSyncService {
-                return new MailTemplateSyncService(
-                    $c->get(EmailTemplateLoader::class),
-                    $c->get(MailTemplateServiceInterface::class),
-                );
-            },
-
-            PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
-
-            EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
-                return new EmailTemplateLoader($c->get(Paths::class));
-            },
-
-            ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
-                return new ScheduledRunService(
-                    $c->get(OrchestratorInterface::class),
-                    $c->get(MercurePublisherInterface::class),
-                );
-            },
-
-            MailTemplate::class => static fn(): MailTemplate => new MailTemplate(),
-        ];
+        // Thin shim. The orchestrator slice needs several helpers to keep each
+        // one under the S138 function-length limit, so it lives in its own
+        // class rather than costing ContainerDefinitions method-count budget
+        // against the S1448 ceiling.
+        return OrchestratorContainerBindings::all();
     }
 
     private static function consoleCommandDefinitions(): array
