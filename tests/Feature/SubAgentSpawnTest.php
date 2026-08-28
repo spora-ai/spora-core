@@ -11,7 +11,6 @@ use RuntimeException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -141,7 +140,6 @@ function subAgentBuildOrchestrator(
     $realSubAgent = new SubAgentService(
         static fn(): OrchestratorInterface => $probeOuter,
         null,
-        WorkerMode::Sync,
     );
 
     $handoverTool = new HandoverTool($handoverService, $realSubAgent, $toolConfig);
@@ -161,10 +159,27 @@ function subAgentBuildOrchestrator(
     $finalSubAgent = new SubAgentService(
         static fn(): OrchestratorInterface => $outer,
         null,
-        WorkerMode::Sync,
     );
 
     return ['outer' => $outer, 'llm' => $llm, 'subAgent' => $finalSubAgent];
+}
+
+/**
+ * Drive the queue the way the worker daemon does: claim the oldest QUEUED
+ * row, tick it, repeat until nothing is queued. Sub-agent flows need this
+ * because the parent, each spawned child, and the post-child parent resume
+ * all land in the queue in turn — no tick dispatches another inline.
+ */
+function subAgentDrainQueue(OrchestratorInterface $orchestrator, int $maxTicks = 12): void
+{
+    for ($i = 0; $i < $maxTicks; $i++) {
+        $taskId = Task::where('status', 'QUEUED')->orderBy('id')->value('id');
+        if ($taskId === null) {
+            return;
+        }
+
+        claimAndTick($orchestrator, (int) $taskId);
+    }
 }
 
 describe('SubAgentService::spawn', function (): void {
@@ -215,6 +230,7 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
         expect($parent->status)->toBe('PENDING_APPROVAL');
 
@@ -227,11 +243,12 @@ describe('SubAgentService::spawn', function (): void {
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
+        subAgentDrainQueue($orch);
 
-        // In Sync mode the child ticks inline and may complete before
-        // resume() returns. The parent therefore reaches COMPLETED in
-        // a single call — there's no observable AWAITING_SUB_AGENTS
-        // window because the child's LLM response is scripted to text.
+        // The approval only queues the batch: the next tick runs the
+        // sub_agent call (child created QUEUED, parent AWAITING_SUB_AGENTS),
+        // the tick after that completes the child, and the child's
+        // completion re-queues the parent for its closing turn.
         $child = Task::where('parent_task_id', $parent->id)->first();
         expect($child)->not->toBeNull();
         expect($child->agent_id)->toBe($childAgentId);
@@ -264,7 +281,7 @@ describe('SubAgentService::spawn', function (): void {
         expect($toolRow->content)->toContain('Sub-agent task #' . $child->id);
     });
 
-    it('resumes the parent in sync mode when sub_agent runs inline via auto-approve (no ApprovedBatchExecutor)', function (): void {
+    it('resumes the parent when an auto-approved sub_agent runs inline in the tick (no ApprovedBatchExecutor)', function (): void {
         // Regression: when `default_requires_approval = 0` for the sub_agent op,
         // the tool executes inline through handleToolCalls — bypassing
         // ApprovedBatchExecutor::execute and its triggerBatchBoundaryResume hook.
@@ -324,6 +341,7 @@ describe('SubAgentService::spawn', function (): void {
         // inline. The parent must still resume from AWAITING_SUB_AGENTS once
         // the child terminates.
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
 
         expect($parent->status)->toBe('COMPLETED');
@@ -384,6 +402,8 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
+
         $orch->resume($parent->id, [[
             'provider_call_id' => SUB_AGENT_PARENT_PROVIDER_CALL_ID,
             'decision' => 'approve',
@@ -393,6 +413,7 @@ describe('SubAgentService::spawn', function (): void {
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
+        subAgentDrainQueue($orch);
 
         $childCount = Task::where('agent_id', $childAgentId)->count();
         expect($childCount)->toBe(0);
@@ -484,7 +505,6 @@ describe('SubAgentService::spawn', function (): void {
         $realSubAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $probeOuter,
             null,
-            WorkerMode::Sync,
         );
 
         $handoverTool = new HandoverTool($handoverService, $realSubAgent, $toolConfig);
@@ -501,7 +521,6 @@ describe('SubAgentService::spawn', function (): void {
         $finalSubAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $outer,
             null,
-            WorkerMode::Sync,
         );
         $outer = new Orchestrator(
             $driverFactory,
@@ -513,6 +532,7 @@ describe('SubAgentService::spawn', function (): void {
         );
 
         $parent = $outer->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($outer);
         $parent->refresh();
         expect($parent->status)->toBe('PENDING_APPROVAL');
 
@@ -532,6 +552,12 @@ describe('SubAgentService::spawn', function (): void {
             ]]);
         } catch (RuntimeException $e) {
             // expected — the parent's subsequent LLM call also throws.
+        }
+
+        try {
+            subAgentDrainQueue($outer);
+        } catch (RuntimeException $e) {
+            // expected — the exploding driver also kills the parent's turn.
         }
 
         $child = Task::where('parent_task_id', $parent->id)->first();
@@ -608,6 +634,7 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
         expect($parent->status)->toBe('PENDING_APPROVAL');
 
@@ -631,6 +658,7 @@ describe('SubAgentService::spawn', function (): void {
                 ],
             ],
         ]);
+        subAgentDrainQueue($orch);
 
         $children = Task::where('parent_task_id', $parent->id)
             ->orderBy('id')
@@ -725,32 +753,27 @@ describe('SubAgentService::spawn', function (): void {
             new OrchestratorConfig(
                 toolInstances: [new StubInputTool()],
                 agentService: new AgentService(),
-                workerMode: WorkerMode::Worker,
             ),
         );
 
         $placeholderSubAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $probeOuter,
             null,
-            WorkerMode::Worker,
         );
 
-        // Outer (parent) orchestrator — WorkerMode::Worker so spawn() creates
-        // QUEUED children (the bug-like behavior we're testing around).
+        // Outer (parent) orchestrator — the only WorkerMode case now.
         $outer = new Orchestrator(
             $driverFactory,
             new OrchestratorConfig(
                 toolInstances: [new StubInputTool()],
                 agentService: new AgentService(),
                 subAgent: $placeholderSubAgent,
-                workerMode: WorkerMode::Worker,
             ),
         );
 
         $realSubAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $outer,
             null,
-            WorkerMode::Worker,
         );
 
         // Create parent + child manually so we can place them in exactly
@@ -894,7 +917,6 @@ describe('SubAgentService::spawn', function (): void {
         $toolConfig = Mockery::mock(ToolConfigServiceInterface::class);
         $toolConfig->allows('getEffectiveSettings')
             ->andReturn(['allowed_target_agents' => [$childAgentId]]);
-
         // Probe orchestrator so the SubAgentService closure can target it
         // during the circular-dep dance.
         $probeOuter = new Orchestrator(
@@ -902,14 +924,13 @@ describe('SubAgentService::spawn', function (): void {
             new OrchestratorConfig(
                 toolInstances: [new StubInputTool()],
                 agentService: new AgentService(),
-                workerMode: WorkerMode::Worker,
             ),
         );
+
 
         $subAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $probeOuter,
             null,
-            WorkerMode::Worker,
         );
 
         $handoverTool = new HandoverTool(
@@ -924,7 +945,6 @@ describe('SubAgentService::spawn', function (): void {
                 toolInstances: [new StubInputTool(), $handoverTool],
                 agentService: new AgentService(),
                 subAgent: $subAgent,
-                workerMode: WorkerMode::Worker,
             ),
         );
 
@@ -975,7 +995,7 @@ describe('SubAgentService::spawn', function (): void {
         expect(Task::where('parent_task_id', $parent->id)->exists())->toBeTrue();
     });
 
-    it('writes exactly one role=tool row per provider_call_id in the approval-required sync flow', function (): void {
+    it('writes exactly one role=tool row per provider_call_id in the approval-required flow', function (): void {
         // Regression for the pre-fix double-write: the immediate sub_agent
         // result from HandoverTool.executeSubAgent lands a role=tool row in
         // task_history, and SubAgentService::resumeParent then APPENDED
@@ -1020,6 +1040,7 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
         expect($parent->status)->toBe('PENDING_APPROVAL');
 
@@ -1032,6 +1053,7 @@ describe('SubAgentService::spawn', function (): void {
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
+        subAgentDrainQueue($orch);
 
         $child = Task::where('parent_task_id', $parent->id)->first();
         expect($child)->not->toBeNull();
@@ -1056,7 +1078,7 @@ describe('SubAgentService::spawn', function (): void {
         expect($toolMessages[0]['content'])->toContain('Sub-agent task #' . $child->id . ' completed');
     });
 
-    it('writes exactly one role=tool row per provider_call_id in the auto-approved sync flow', function (): void {
+    it('writes exactly one role=tool row per provider_call_id in the auto-approved flow', function (): void {
         // Same regression as the approval-required path, exercised on the
         // auto-approve branch where executeAndRecordResult is the writer
         // of the immediate row. The provider_call_id is the same in both
@@ -1106,6 +1128,7 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
 
         expect($parent->status)->toBe('COMPLETED');
@@ -1176,6 +1199,7 @@ describe('SubAgentService::spawn', function (): void {
         $orch = $built['outer'];
 
         $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
         $parent->refresh();
         expect($parent->status)->toBe('PENDING_APPROVAL');
 
@@ -1195,6 +1219,7 @@ describe('SubAgentService::spawn', function (): void {
                 ],
             ],
         ]);
+        subAgentDrainQueue($orch);
 
         // Raw row count per provider_call_id: one each.
         $countByCallId = TaskHistory::where('task_id', $parent->id)
@@ -1312,13 +1337,11 @@ describe('SubAgentService::spawn', function (): void {
         expect($toolRows->count())->toBe(1);
 
         // Drive the resume — the per-child hook must replace not append.
-        // WorkerMode::Worker so the resume skips the post-tick LLM call;
-        // the orchestrator proxy exists only so the optional appendHistory
+        // The orchestrator proxy exists only so the optional appendHistory
         // fallback path has a callable factory.
         $subAgent = new SubAgentService(
             static fn(): OrchestratorInterface => $orch,
             null,
-            WorkerMode::Worker,
         );
         $subAgent->maybeResumeParent($child->id);
 

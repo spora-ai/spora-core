@@ -239,6 +239,8 @@ it('Orchestrator::continue on ABORTED source clears aborted_at and re-prompts', 
 
     $orch = makeAbortOrchestrator();
     $continued = $orch->continue($task->id, 'try again');
+    claimAndTick($orch, $continued->id);
+    $continued->refresh();
 
     expect($continued->status)->toBe('COMPLETED')
         ->and($continued->user_prompt)->toBe('try again')
@@ -316,6 +318,7 @@ it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the wor
 
     $orch = makeAbortOrchestrator();
     $orch->continue($task->id, 'pick this up');
+    claimAndTick($orch, $task->id);
 
     $fresh = Task::find($task->id);
     // The worker can now match the row.

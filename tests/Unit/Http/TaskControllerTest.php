@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Http;
 
+use Mockery;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\TaskController;
@@ -15,7 +16,20 @@ function makeTaskController(): array
 {
     $authService = bootAuthLayer();
     $service = new StubTaskService();
-    $controller = new TaskController($authService, $service, new TaskMediaCapabilityService(), new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()), new DecisionsRequestValidator($service));
+    $mercure = Mockery::mock(\Spora\Services\MercurePublisherInterface::class);
+    $mercure->shouldReceive('publish')->andReturn(true);
+    $controller = new TaskController(
+        $authService,
+        $service,
+        new TaskMediaCapabilityService(),
+        new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()),
+        new DecisionsRequestValidator($service),
+        \Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new \Spora\Services\DbRateLimiter(),
+        $mercure,
+        Mockery::mock(\Spora\Agents\OrchestratorInterface::class),
+        600,
+    );
 
     return [$controller, $authService, $service];
 }

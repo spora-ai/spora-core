@@ -19,7 +19,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
@@ -43,6 +43,8 @@ use Spora\Console\Commands\SeedCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Console\Commands\WorkerRunCommand;
+use Spora\Console\Worker\ScheduledRunProcessor;
+use Spora\Console\Worker\WorkerReaper;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
@@ -88,6 +90,7 @@ use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
+use Spora\Http\WorkerController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
@@ -104,10 +107,12 @@ use Spora\Services\AuthWorkflow;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
+use Spora\Services\DbRateLimiter;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\HousekeepingLock;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
@@ -223,13 +228,15 @@ final class ContainerDefinitions
                     'app_env'             => 'production',
                     'log_level'           => 'WARNING',
                     'log_path'            => $paths->storage('spora.log'),
-                    // Sync mode when no env is set. The shipped spora/.env.example
-                    // overrides this to `false` (queue mode) for operators who
-                    // run a worker. The dual defaults are intentional — see
-                    // env-vars.md in spora-docs: the safe fallback for env-less
-                    // LAMP/FTP deploys is sync (no worker); the safe choice for
-                    // .env-using deploys is queue (worker drains it).
-                    'worker_mode'         => true,
+                    // Worker runtime mode. Default 'server' — `bin/spora worker:run`
+                    // drains the QUEUED backlog. Set `SPORA_WORKER_RUNTIME_MODE=client`
+                    // for browser SharedWorker + `/worker/housekeeping` operators
+                    // (no daemon required). Unknown values fall back to 'server'.
+                    'worker_runtime_mode' => 'server',
+                    // Seconds the reaper should wait past the last heartbeat
+                    // before flipping a RUNNING row to FAILED. Configurable via
+                    // `SPORA_TICK_LEASE_SECONDS`.
+                    'tick_lease_seconds'  => 600,
                     'worker_stale_minutes' => 60,
                     'max_workers'         => 0,
                     'llm_timeout'         => 300,
@@ -369,7 +376,8 @@ final class ContainerDefinitions
         $apply('SPORA_ALLOW_GROUP_CREATION', 'allow_group_creation', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_LOG_LEVEL', 'log_level', static fn($v) => $v);
         $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
-        $apply('SPORA_SYNC_MODE', 'worker_mode', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $apply('SPORA_WORKER_RUNTIME_MODE', 'worker_runtime_mode', static fn($v) => $v);
+        $apply('SPORA_TICK_LEASE_SECONDS', 'tick_lease_seconds', static fn($v) => (int) $v);
         $apply('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes', static fn($v) => (int) $v);
         $apply('SPORA_MAX_WORKERS', 'max_workers', static fn($v) => (int) $v);
         $apply('SPORA_LLM_TIMEOUT', 'llm_timeout', static fn($v) => (int) $v);
@@ -890,6 +898,8 @@ final class ContainerDefinitions
             ConfigController::class => static function (ContainerInterface $c): ConfigController {
                 return new ConfigController(
                     $c->get('config'),
+                    $c->get(WorkerRuntimeMode::class),
+                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );
             },
 
@@ -1134,6 +1144,11 @@ final class ContainerDefinitions
                     $c->get(TaskMediaCapabilityService::class),
                     $c->get(ContinueTaskDispatcher::class),
                     $c->get(DecisionsRequestValidator::class),
+                    $c->get(WorkerRuntimeMode::class),
+                    $c->get(DbRateLimiter::class),
+                    $c->get(MercurePublisherInterface::class),
+                    $c->get(OrchestratorInterface::class),
+                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );
             },
 
@@ -1340,13 +1355,9 @@ final class ContainerDefinitions
                 // Same circular-dependency avoidance as HandoverService: the
                 // Orchestrator takes the tool instance list (which includes
                 // HandoverTool), so we resolve it lazily when spawn() is called.
-                $config = $c->get('config');
-                $workerMode = ($config['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker;
-
                 return new SubAgentService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->has(MercurePublisherInterface::class) ? $c->get(MercurePublisherInterface::class) : null,
-                    $workerMode,
                 );
             },
         ];
@@ -1377,6 +1388,16 @@ final class ContainerDefinitions
                     $composerBinary,
                 );
             },
+
+            // `worker_runtime_mode` is read as a raw string by the env-binding
+            // above; parse it into the enum here so consumers can inject
+            // WorkerRuntimeMode directly without re-validating. Unknown
+            // values fall back to Server — operators can fix the env later
+            // without bringing the app down.
+            WorkerRuntimeMode::class => static function (ContainerInterface $c): WorkerRuntimeMode {
+                $raw = $c->get('config')['worker_runtime_mode'] ?? 'server';
+                return WorkerRuntimeMode::tryFrom((string) $raw) ?? WorkerRuntimeMode::Server;
+            },
         ];
     }
 
@@ -1390,7 +1411,6 @@ final class ContainerDefinitions
                         llmConfigService: $c->get(LLMConfigService::class),
                         toolInstances: $c->get('tool_instances'),
                         logger: $c->get(LoggerInterface::class),
-                        workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
                         notificationService: $c->get(NotificationService::class),
                         pluginLoader: $c->get(PluginLoader::class),
                         mercure: $c->get(MercurePublisherInterface::class),
@@ -1401,6 +1421,47 @@ final class ContainerDefinitions
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
+                );
+            },
+
+            // Single-instance services for the client-worker housekeeping path.
+            // DbRateLimiter + HousekeepingLock are stateless wrappers around
+            // the `ratelimit_hits` and `worker_housekeeping_locks` tables (see
+            // migrations 0071/0072). The WorkerReaper and ScheduledRunProcessor
+            // are also used by the CLI `worker:run --scheduled` flow but were
+            // constructed inline in WorkerRunCommand before this slice — they
+            // now live in the container so the HTTP controller and the CLI
+            // share the same singletons.
+            DbRateLimiter::class => static fn(): DbRateLimiter => new DbRateLimiter(),
+
+            HousekeepingLock::class => static fn(): HousekeepingLock => new HousekeepingLock(),
+
+            WorkerReaper::class => static function (ContainerInterface $c): WorkerReaper {
+                return new WorkerReaper(
+                    $c->get(LoggerInterface::class),
+                    $c->get(NotificationService::class),
+                );
+            },
+
+            ScheduledRunProcessor::class => static function (ContainerInterface $c): ScheduledRunProcessor {
+                return new ScheduledRunProcessor(
+                    $c->get(OrchestratorInterface::class),
+                    $c->get(LoggerInterface::class),
+                    $c->get(MercurePublisherInterface::class),
+                    $c->get(NotificationService::class),
+                );
+            },
+
+            WorkerController::class => static function (ContainerInterface $c): WorkerController {
+                return new WorkerController(
+                    $c->get(AuthService::class),
+                    $c->get(WorkerRuntimeMode::class),
+                    $c->get(DbRateLimiter::class),
+                    $c->get(HousekeepingLock::class),
+                    $c->get(WorkerReaper::class),
+                    $c->get(ScheduledRunProcessor::class),
+                    (int) ($c->get('config')['worker_stale_minutes'] ?? 60),
+                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );
             },
 
@@ -1613,6 +1674,7 @@ final class ContainerDefinitions
                     $c->get(MercurePublisherInterface::class),
                     $c->get(NotificationService::class),
                     $c->get(Paths::class),
+                    $c->get(WorkerRuntimeMode::class),
                 );
             },
 
@@ -1621,6 +1683,7 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     $c,
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(WorkerRuntimeMode::class),
                 );
             },
 

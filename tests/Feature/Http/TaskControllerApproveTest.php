@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\AgentState;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -31,12 +30,11 @@ use Tests\Fixtures\StubOutputToolWithSchema;
 
 /**
  * @param list<string> $providerCallIds
- * @return array{controller: TaskController, task: Task, principal_id: int, observed_statuses: array<int, string>}
+ * @return array{controller: TaskController, orchestrator: Orchestrator, task: Task, principal_id: int, observed_statuses: array<int, string>}
  */
 function approvalFeatureHarness(
     array $providerCallIds,
     ?ToolInterface $tool = null,
-    WorkerMode $workerMode = WorkerMode::Sync,
 ): array {
     $tool ??= new StubOutputTool();
     $authService = bootAuthLayer();
@@ -119,14 +117,10 @@ function approvalFeatureHarness(
     $observedStatuses = [];
     $taskId = $task->id;
     $llm = Mockery::mock(LLMDriverInterface::class);
-    if ($workerMode === WorkerMode::Sync) {
-        $llm->allows('complete')->andReturnUsing(function () use (&$observedStatuses, $taskId): LLMResponse {
-            $observedStatuses[] = (string) Task::where('id', $taskId)->value('status');
-            return new LLMResponse('Continued after decisions.', [], 5, 3, 'cmp_decisions');
-        });
-    } else {
-        $llm->shouldNotReceive('complete');
-    }
+    $llm->allows('complete')->andReturnUsing(function () use (&$observedStatuses, $taskId): LLMResponse {
+        $observedStatuses[] = (string) Task::where('id', $taskId)->value('status');
+        return new LLMResponse('Continued after decisions.', [], 5, 3, 'cmp_decisions');
+    });
     $llm->allows('getProviderName')->andReturn('mock');
     $llm->allows('getModelName')->andReturn('mock-model');
     $llm->allows('supportsImageInput')->andReturn(false);
@@ -135,7 +129,7 @@ function approvalFeatureHarness(
     $driverFactory->allows('makeFromAgent')->andReturn($llm);
     $orchestrator = new Orchestrator(
         $driverFactory,
-        new OrchestratorConfig(toolInstances: [$tool], workerMode: $workerMode),
+        new OrchestratorConfig(toolInstances: [$tool]),
     );
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish');
@@ -147,10 +141,16 @@ function approvalFeatureHarness(
         $mediaCapability,
         new ContinueTaskDispatcher($taskService, $mediaCapability),
         new Spora\Http\DecisionsRequestValidator($taskService),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        $mercure,
+        $orchestrator,
+        600,
     );
 
     return [
         'controller' => $controller,
+        'orchestrator' => $orchestrator,
         'task' => $task,
         'principal_id' => createUserPrincipalPublic($userId),
         'observed_statuses' => &$observedStatuses,
@@ -175,6 +175,8 @@ it('applies a mixed approve and reject batch', function (): void {
         ['provider_call_id' => 'pc_approve', 'decision' => 'approve', 'arguments' => ['value' => 'approved']],
         ['provider_call_id' => 'pc_reject', 'decision' => 'reject', 'reason' => 'wrong recipient'],
     ]);
+    // approve() only records the decisions — the approved call runs on the next tick.
+    claimAndTick($harness['orchestrator'], $harness['task']->id);
 
     $approved = ToolCall::where('provider_call_id', 'pc_approve')->first();
     $rejected = ToolCall::where('provider_call_id', 'pc_reject')->first();
@@ -194,6 +196,7 @@ it('continues after every pending call is rejected', function (): void {
         ['provider_call_id' => 'pc_reject_1', 'decision' => 'reject', 'reason' => 'No'],
         ['provider_call_id' => 'pc_reject_2', 'decision' => 'reject', 'reason' => 'Also no'],
     ]);
+    claimAndTick($harness['orchestrator'], $harness['task']->id);
 
     expect($response->getStatusCode())->toBe(Response::HTTP_OK)
         ->and($harness['observed_statuses'])->toBe(['RUNNING'])
@@ -303,7 +306,7 @@ it('returns 422 when a rejection reason is not a string', function (): void {
 });
 
 it('records worker approvals for pickup while keeping undecided calls pending', function (): void {
-    $harness = approvalFeatureHarness(['pc_worker_approve', 'pc_worker_reject', 'pc_worker_pending'], workerMode: WorkerMode::Worker);
+    $harness = approvalFeatureHarness(['pc_worker_approve', 'pc_worker_reject', 'pc_worker_pending']);
 
     $response = approvalFeatureRequest($harness['controller'], $harness['task']->id, [
         ['provider_call_id' => 'pc_worker_approve', 'decision' => 'approve', 'arguments' => ['value' => 'approved']],

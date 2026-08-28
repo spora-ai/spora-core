@@ -27,7 +27,18 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
     $authService = bootAuthLayer();
     $taskService ??= Mockery::mock(TaskServiceInterface::class);
     $mediaCapability = new TaskMediaCapabilityService();
-    $controller  = new TaskController($authService, $taskService, $mediaCapability, new ContinueTaskDispatcher($taskService, $mediaCapability), new DecisionsRequestValidator($taskService));
+    $controller  = new TaskController(
+        $authService,
+        $taskService,
+        $mediaCapability,
+        new ContinueTaskDispatcher($taskService, $mediaCapability),
+        new DecisionsRequestValidator($taskService),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        Mockery::mock(Spora\Services\MercurePublisherInterface::class),
+        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+        600,
+    );
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();
     $csrfMiddleware = new Spora\Http\Middleware\CsrfMiddleware($csrfService);

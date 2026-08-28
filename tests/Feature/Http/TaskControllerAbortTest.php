@@ -65,6 +65,11 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        $mercure,
+        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+        600,
     );
 
     $req = new Request();
@@ -95,12 +100,18 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         ->with($task->id, $userId)
         ->andThrow(new InvalidArgumentException('Cannot abort a task in status PENDING_APPROVAL.'));
 
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        $mercure,
+        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+        600,
     );
 
     $req = new Request();
@@ -122,12 +133,18 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         ->with(99999, $userId)
         ->andThrow(new InvalidArgumentException('Task not found.'));
 
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        $mercure,
+        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+        600,
     );
 
     $req = new Request();
@@ -166,6 +183,11 @@ it('POST /abort with no body works (no-body call)', function (): void {
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
         new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
         new Spora\Http\DecisionsRequestValidator($service),
+        Spora\Agents\ValueObjects\WorkerRuntimeMode::Server,
+        new Spora\Services\DbRateLimiter(),
+        $mercure,
+        Mockery::mock(Spora\Agents\OrchestratorInterface::class),
+        600,
     );
 
     $req = new Request([], [], [], [], [], ['CONTENT_TYPE' => 'application/json'], '');

@@ -104,6 +104,24 @@ function bootAuth(Spora\Auth\AuthService $authService, string $email = 'test@exa
 }
 
 /**
+ * Claim a QUEUED task and run one orchestrator tick on it.
+ *
+ * `start()`, `continue()`, `retry()` and `resume()` only enqueue — they leave
+ * the row QUEUED. `Orchestrator::tick()` only advances RUNNING rows, so the
+ * caller (the worker daemon's `WorkerQueueProcessor`, or `TaskController::tick`
+ * in client mode) is what flips QUEUED → RUNNING. This helper stands in for
+ * that claim so tests can drive a task the same way production does.
+ */
+function claimAndTick(Spora\Agents\OrchestratorInterface $orchestrator, int $taskId): void
+{
+    Spora\Models\Task::where('id', $taskId)
+        ->where('status', 'QUEUED')
+        ->update(['status' => 'RUNNING']);
+
+    $orchestrator->tick($taskId);
+}
+
+/**
  * Invoke a controller method through the middleware pipeline (for testing).
  * This mimics what Router::handleFound() does at runtime.
  *

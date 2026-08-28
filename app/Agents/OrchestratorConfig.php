@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigPreferences;
@@ -19,6 +18,11 @@ use Spora\Services\ToolConfigService;
 /**
  * Bundles the optional LLM-plumbing collaborators that the Orchestrator
  * threads through to its extracted services.
+ *
+ * Lease fields (`$leaseOwner`, `$tickLeaseSeconds`) are deliberately NOT
+ * readonly so `withLease()` can write them on a cloned instance — the
+ * orchestrator's recursive tick uses this to thread a lease owner through
+ * the call stack without rebuilding the full config.
  */
 final class OrchestratorConfig
 {
@@ -39,7 +43,16 @@ final class OrchestratorConfig
         // — tools never receive a session-derived userId.
         public readonly ?AgentServiceInterface $agentService = null,
         public readonly ?SubAgentServiceInterface $subAgent = null,
-        public readonly WorkerMode $workerMode = WorkerMode::Sync,
         public readonly ?LLMConfigPreferences $principalPreferences = null,
+        public ?string $leaseOwner = null,
+        public int $tickLeaseSeconds = 600,
     ) {}
+
+    public function withLease(string $leaseOwner, int $tickLeaseSeconds): self
+    {
+        $clone = clone $this;
+        $clone->leaseOwner = $leaseOwner;
+        $clone->tickLeaseSeconds = $tickLeaseSeconds;
+        return $clone;
+    }
 }

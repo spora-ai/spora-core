@@ -51,6 +51,22 @@ final class TickPhaseRunner
         private readonly ?SubAgentServiceInterface $subAgent = null,
         private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
+
+    /** Owner of the in-flight lease; null when this tick has no lease (the
+     *  messenger daemon path — no lease needed because the reaper is
+     *  gated on `lease_expires_at IS NULL` in addition to `updated_at`). */
+    private ?string $leaseOwner = null;
+
+    /** Lease TTL in seconds — how far into the future each extendLease()
+     *  bumps `tasks.lease_expires_at`. */
+    private int $leaseSeconds = 600;
+
+    public function setLeaseConfig(?string $leaseOwner, int $leaseSeconds): void
+    {
+        $this->leaseOwner = $leaseOwner;
+        $this->leaseSeconds = $leaseSeconds;
+    }
+
     public function runTick(int $taskId): void
     {
         $task = $this->lockRunningTaskForTick($taskId);
@@ -61,6 +77,10 @@ final class TickPhaseRunner
         // Worker-mode pickup: run approved tools persisted with `executed_at IS NULL`
         // before the LLM round-trip so the next assistant message sees the results.
         $this->executeApprovedPendingToolsForTask($task);
+
+        // After tool batch write — a slow tool batch must not let the lease
+        // expire before the LLM turn starts.
+        $this->extendLease($taskId);
 
         // The tool above may have flipped the task out of RUNNING — the
         // `sub_agent` op suspends the parent (`status = AWAITING_SUB_AGENTS`)
@@ -77,6 +97,32 @@ final class TickPhaseRunner
         }
 
         $this->dispatchLlmTurn($taskId, $task);
+
+        // After LLM response — extend so the next recursive tick (or the
+        // post-approval pickup on the next daemon tick) does not race the
+        // reaper.
+        $this->extendLease($taskId);
+    }
+
+    /**
+     * Bumps `tasks.lease_expires_at` for the in-flight row iff this tick
+     * holds a lease and the row is still RUNNING with the same owner.
+     * The `status = RUNNING` predicate makes this a no-op once the reaper
+     * has flipped the row — no resurrection race.
+     */
+    private function extendLease(int $taskId): void
+    {
+        if ($this->leaseOwner === null) {
+            return;
+        }
+
+        Capsule::table('tasks')
+            ->where('id', $taskId)
+            ->where('lease_owner', $this->leaseOwner)
+            ->where('status', 'RUNNING')
+            ->update([
+                'lease_expires_at' => gmdate('Y-m-d H:i:s', time() + $this->leaseSeconds),
+            ]);
     }
 
     /**
@@ -597,6 +643,11 @@ final class TickPhaseRunner
             if ($latestStatus === 'ABORTED') {
                 return;
             }
+
+            // Before recursive tick — keep the lease alive across the next
+            // tool batch + LLM round-trip so the reaper does not flip the
+            // row mid-batch.
+            $this->extendLease($task->id);
 
             $this->orchestrator->tick($task->id);
         } else {

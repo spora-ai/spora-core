@@ -9,7 +9,6 @@ use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\TickPhaseRunner;
 use Spora\Agents\ToolCallExecutor;
 use Spora\Agents\ValueObjects\AgentState;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -28,11 +27,12 @@ use Tests\Fixtures\StubOutputToolWithSchema;
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
 /**
- * Coverage for the authorization re-check at resume time on both resume
- * paths (sync `ApprovedBatchExecutor::execute` and worker
- * `TickPhaseRunner::executeApprovedPendingToolsForTask`) plus the wording
- * of the normal-tick `ToolNotEnabledException` history message that the
- * LLM sees on its next round-trip.
+ * Coverage for the authorization re-check that runs when an approved batch
+ * is executed ({@see TickPhaseRunner::executeApprovedPendingToolsForTask}),
+ * reached either through `ApprovedBatchExecutor::execute` + the following
+ * tick or straight from the daemon's tick, plus the wording of the
+ * normal-tick `ToolNotEnabledException` history message that the LLM sees
+ * on its next round-trip.
  *
  * Each scenario seeds a real PENDING_APPROVAL row + AgentTool row, then
  * mutates the AgentTool row (or adds an `AgentToolOperationOverride`) to
@@ -180,10 +180,10 @@ function makeResumeAuthOrchestrator(array $toolInstances = []): Orchestrator
 }
 
 // ---------------------------------------------------------------------------
-// 1. Sync path — tool revoked mid-approval is NOT executed
+// 1. Approval path — tool revoked mid-approval is NOT executed
 // ---------------------------------------------------------------------------
 
-it('sync resume rejects a tool revoked from the agent and does not execute it', function (): void {
+it('resume rejects a tool revoked from the agent and does not execute it', function (): void {
     [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
 
     $pendingTc = new DriverToolCall('call_a', 'stub_output', []);
@@ -199,15 +199,16 @@ it('sync resume rejects a tool revoked from the agent and does not execute it', 
         ->where('tool_class', StubOutputTool::class)
         ->delete();
 
+    $orch = makeResumeAuthOrchestrator([new StubOutputTool()]);
     $executor = new ApprovedBatchExecutor(
-        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool()]),
-        workerMode: WorkerMode::Sync,
+        orchestrator: $orch,
         logger: new NullLogger(),
     );
 
     $executor->execute($taskId, [
         ['provider_call_id' => 'call_a', 'arguments' => []],
     ]);
+    claimAndTick($orch, $taskId);
 
     $row = ToolCallModel::where('task_id', $taskId)
         ->where('provider_call_id', 'call_a')
@@ -311,10 +312,10 @@ it('worker resume rejects a tool revoked from the agent and does not execute it'
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
-// 3. Operation-level revocation on sync resume
+// 3. Operation-level revocation on resume
 // ---------------------------------------------------------------------------
 
-it('sync resume rejects when a specific operation is disabled before approval is processed', function (): void {
+it('resume rejects when a specific operation is disabled before approval is processed', function (): void {
     [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
 
     $pendingTc = new DriverToolCall('call_c', 'stub_output', []);
@@ -335,15 +336,16 @@ it('sync resume rejects when a specific operation is disabled before approval is
         'default_requires_approval' => null,
     ]);
 
+    $orch = makeResumeAuthOrchestrator([new StubOutputTool()]);
     $executor = new ApprovedBatchExecutor(
-        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool()]),
-        workerMode: WorkerMode::Sync,
+        orchestrator: $orch,
         logger: new NullLogger(),
     );
 
     $executor->execute($taskId, [
         ['provider_call_id' => 'call_c', 'arguments' => []],
     ]);
+    claimAndTick($orch, $taskId);
 
     $row = ToolCallModel::where('task_id', $taskId)
         ->where('provider_call_id', 'call_c')
@@ -365,7 +367,7 @@ it('sync resume rejects when a specific operation is disabled before approval is
 // 4. Regression — tool still enabled, resume runs the tool
 // ---------------------------------------------------------------------------
 
-it('sync resume executes the tool when it is still enabled (regression for accidental always-reject)', function (): void {
+it('resume executes the tool when it is still enabled (regression for accidental always-reject)', function (): void {
     [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
 
     $pendingTc = new DriverToolCall('call_d', 'stub_output', []);
@@ -376,15 +378,16 @@ it('sync resume executes the tool when it is still enabled (regression for accid
         ['stub_output' => StubOutputTool::class],
     );
 
+    $orch = makeResumeAuthOrchestrator([new StubOutputTool()]);
     $executor = new ApprovedBatchExecutor(
-        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool()]),
-        workerMode: WorkerMode::Sync,
+        orchestrator: $orch,
         logger: new NullLogger(),
     );
 
     $executor->execute($taskId, [
         ['provider_call_id' => 'call_d', 'arguments' => []],
     ]);
+    claimAndTick($orch, $taskId);
 
     $row = ToolCallModel::where('task_id', $taskId)
         ->where('provider_call_id', 'call_d')
@@ -407,7 +410,7 @@ it('sync resume executes the tool when it is still enabled (regression for accid
 // 5. Boundary — tool revoked then re-enabled before approval succeeds
 // ---------------------------------------------------------------------------
 
-it('sync resume succeeds when the tool is re-enabled before the approval batch lands', function (): void {
+it('resume succeeds when the tool is re-enabled before the approval batch lands', function (): void {
     [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool()]);
 
     $pendingTc = new DriverToolCall('call_e', 'stub_output', []);
@@ -428,15 +431,16 @@ it('sync resume succeeds when the tool is re-enabled before the approval batch l
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
+    $orch = makeResumeAuthOrchestrator([new StubOutputTool()]);
     $executor = new ApprovedBatchExecutor(
-        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool()]),
-        workerMode: WorkerMode::Sync,
+        orchestrator: $orch,
         logger: new NullLogger(),
     );
 
     $executor->execute($taskId, [
         ['provider_call_id' => 'call_e', 'arguments' => []],
     ]);
+    claimAndTick($orch, $taskId);
 
     $row = ToolCallModel::where('task_id', $taskId)
         ->where('provider_call_id', 'call_e')
@@ -451,7 +455,7 @@ it('sync resume succeeds when the tool is re-enabled before the approval batch l
 // 6. Partial-failure — revoked tool does not block other approved tools
 // ---------------------------------------------------------------------------
 
-it('sync resume rejects the revoked tool but still executes the other approved tools in the same batch', function (): void {
+it('resume rejects the revoked tool but still executes the other approved tools in the same batch', function (): void {
     [$userId, $agentId] = resumeAuthSeedAgent([new StubOutputTool(), new StubOutputToolWithSchema()]);
 
     $tcRevoked = new DriverToolCall('call_f1', 'stub_output', []);
@@ -470,9 +474,9 @@ it('sync resume rejects the revoked tool but still executes the other approved t
     // Admin revokes ONLY stub_output.
     AgentTool::where('agent_id', $agentId)->where('tool_class', StubOutputTool::class)->delete();
 
+    $orch = makeResumeAuthOrchestrator([new StubOutputTool(), new StubOutputToolWithSchema()]);
     $executor = new ApprovedBatchExecutor(
-        orchestrator: makeResumeAuthOrchestrator([new StubOutputTool(), new StubOutputToolWithSchema()]),
-        workerMode: WorkerMode::Sync,
+        orchestrator: $orch,
         logger: new NullLogger(),
     );
 
@@ -480,6 +484,7 @@ it('sync resume rejects the revoked tool but still executes the other approved t
         ['provider_call_id' => 'call_f1', 'arguments' => []],
         ['provider_call_id' => 'call_f2', 'arguments' => ['recipient' => 'alice@example.com']],
     ]);
+    claimAndTick($orch, $taskId);
 
     $revokedRow = ToolCallModel::where('task_id', $taskId)->where('provider_call_id', 'call_f1')->first();
     $keptRow    = ToolCallModel::where('task_id', $taskId)->where('provider_call_id', 'call_f2')->first();
@@ -541,6 +546,7 @@ it('normal tick informs the LLM with a clear message when it proposes a non-enab
     );
 
     $task = $orch->start($agent->id, 'Tool not enabled test', maxSteps: 3);
+    claimAndTick($orch, $task->id);
 
     $history = Spora\Models\TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')

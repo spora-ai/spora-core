@@ -7,6 +7,7 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Commands\TaskRunCommand;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
@@ -23,6 +24,7 @@ use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 // Helpers
@@ -235,7 +237,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishUpdate')->andReturnNull();
 
-        $command = new TaskRunCommand($db, $container, $mercure);
+        $command = new TaskRunCommand($db, $container, $mercure, WorkerRuntimeMode::Server);
         $command->setName('task:run');
         $tester = new CommandTester($command);
 
@@ -316,7 +318,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publishUpdate')->andReturnNull();
 
-        $command = new TaskRunCommand($db, $container, $mercure);
+        $command = new TaskRunCommand($db, $container, $mercure, WorkerRuntimeMode::Server);
         $command->setName('task:run');
         $tester = new CommandTester($command);
 
@@ -559,8 +561,8 @@ describe('TaskRunCommand — abort handling', function (): void {
         // deployment scripts distinguish it from both success and failure. A
         // regression here is a major operator-visible break.
         expect(TaskRunCommand::TASK_RUN_COMMAND_ABORTED_EXIT)->toBe(2);
-        expect(Symfony\Component\Console\Command\Command::FAILURE)->toBe(1);
-        expect(Symfony\Component\Console\Command\Command::SUCCESS)->toBe(0);
+        expect(Command::FAILURE)->toBe(1);
+        expect(Command::SUCCESS)->toBe(0);
     });
 });
 
@@ -725,4 +727,33 @@ describe('TaskRunCommand — tool config injection', function (): void {
         expect($emailDef['function']['description'])->toContain('Allowed target agents: (not configured)');
         expect($emailDef['function']['description'])->toContain('Allowed target agents: (not configured)');
     })->afterEach(fn() => Database::resetBootState());
+});
+
+// TaskRunCommand — client-mode guard
+
+describe('TaskRunCommand — client-mode guard', function (): void {
+
+    it('exits with error in client mode', function (): void {
+        // The server-mode daemon spawns task:run via proc_open; in client mode
+        // that path is unreachable. Defense-in-depth: even an operator who
+        // shells in and runs the command by hand must see a clear refusal.
+        // Database is final, but the runtime-mode gate runs BEFORE the DB
+        // is touched, so we pass a real Database instance and never boot it.
+        $container = Mockery::mock(ContainerInterface::class);
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+
+        $command = new TaskRunCommand(
+            new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]),
+            $container,
+            $mercure,
+            WorkerRuntimeMode::Client,
+        );
+        $command->setName('task:run');
+
+        $tester = new CommandTester($command);
+        $tester->execute(['taskId' => 1]);
+
+        expect($tester->getStatusCode())->toBe(Command::FAILURE)
+            ->and($tester->getDisplay())->toContain('client-worker mode');
+    });
 });

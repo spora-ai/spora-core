@@ -8,7 +8,9 @@ use Cron\CronExpression;
 use DateTimeImmutable;
 use DateTimeZone;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Support\Carbon;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
@@ -101,6 +103,176 @@ final class ScheduledRunProcessor
     }
 
     /**
+     * Client-mode counterpart to {@see process()}: claim a scheduled run the
+     * caller is allowed to see, dispatch it, AND drive the orchestrator to
+     * completion in this request — so the browser that hit /worker/housekeeping
+     * never has to poll the result task separately.
+     *
+     * @return bool  true iff a scheduled run was claimed and dispatched
+     */
+    public function processSynchronously(
+        OutputInterface $output,
+        int $userId,
+        int $tickLeaseSeconds,
+    ): bool {
+        $resolver = new PrincipalResolver();
+        // Auth guarantees the user-principal row exists by the time we get here
+        // (login/register flows call PrincipalService::ensureUserPrincipal($userId)
+        // before issuing the session token). If for any reason it doesn't — e.g.
+        // a mid-flight logout or a manual SQL poke — visiblePrincipalIds() returns
+        // [] and we skip the call without erroring. The next /housekeeping call
+        // (within 5 min) will retry once auth has settled.
+        $visiblePrincipalIds = $resolver->visiblePrincipalIds($userId);
+        if ($visiblePrincipalIds === []) {
+            $this->logger->warning('Scheduled-run dispatch skipped: caller has no visible principals', [
+                'caller_user_id' => $userId,
+            ]);
+            return false;
+        }
+
+        $context = $this->claimNextScheduledRunForPrincipals($visiblePrincipalIds);
+        if ($context === null) {
+            return false;
+        }
+
+        $entry = $context['entry'];
+        $run = $context['run'];
+        $agent = $context['agent'];
+
+        $template = null;
+        if ($run->template_id !== null) {
+            $template = AgentPromptTemplate::find($run->template_id);
+        }
+
+        $prompt = $this->buildPrompt($run, $template, $agent);
+        $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+
+        $this->logger->info('Triggering scheduled run (client mode)', [
+            'run_id'         => $run->id,
+            'agent_id'       => $run->agent_id,
+            'caller_user_id' => $userId,
+        ]);
+        $output->writeln(sprintf(
+            '<info>Triggering scheduled run %d for agent %d...</info>',
+            $run->id,
+            $run->agent_id,
+        ));
+
+        $leaseOwner = 'server:housekeeping';
+        $task = null;
+
+        try {
+            // Pass userId = the housekeeping caller so tasks.user_id = caller.
+            // If the synchronous tick fails partway and the task is left in
+            // RUNNING/QUEUED, only the caller's browser would try to tick it
+            // (and the reaper would flip it after the lease expires). Other
+            // group members' browsers do not race because their user_id filter
+            // does not match.
+            $task = $this->orchestrator->start(
+                agentId: (int) $run->agent_id,
+                userPrompt: $prompt,
+                maxSteps: (int) $maxSteps,
+                parentTaskId: null,
+                runId: $run->id,
+                userId: $userId,
+            );
+
+            // CAS-claim the row inside a transaction so two /housekeeping calls
+            // (or a call racing with a browser tick on tasks.user_id = $userId)
+            // can't both observe QUEUED + no live lease and flip the same row
+            // to RUNNING. Without this claim `tick()` is a no-op on QUEUED rows
+            // (Phase 1 always-QUEUE invariant).
+            $leaseUntil = Carbon::now()->modify('+' . $tickLeaseSeconds . ' seconds');
+            $claimed = Capsule::connection()->transaction(function () use ($task, $leaseOwner, $leaseUntil): ?Task {
+                $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+                $row = Task::where('id', $task->id)
+                    ->where('status', 'QUEUED')
+                    ->where(function ($q) use ($now): void {
+                        $q->whereNull('lease_expires_at')->orWhere('lease_expires_at', '<=', $now);
+                    })
+                    ->lockForUpdate()
+                    ->first();
+                if ($row === null) {
+                    return null;
+                }
+                $row->status = 'RUNNING';
+                $row->lease_owner = $leaseOwner;
+                $row->lease_expires_at = $leaseUntil;
+                $row->save();
+                return $row;
+            });
+            if ($claimed === null) {
+                $this->logger->warning('Scheduled-run tick skipped: claim lost', ['task_id' => $task->id]);
+                return false;
+            }
+            $task = $claimed;
+
+            $config = (new OrchestratorConfig())
+                ->withLease($leaseOwner, $tickLeaseSeconds);
+
+            $this->orchestrator->tick($task->id, $config);
+        } catch (Throwable $e) {
+            $this->logger->error('Scheduled run (client mode) failed', [
+                'run_id'          => $run->id,
+                'task_id'         => $task?->id,
+                'exception_class' => get_class($e),
+                'message'         => $e->getMessage(),
+            ]);
+            $output->writeln(sprintf(
+                '<error>Scheduled run %d failed: %s</error>',
+                $run->id,
+                $e->getMessage(),
+            ));
+
+            // Mirror TaskController::tick's exception path: flip to FAILED,
+            // clear the lease, publish Mercure for the caller's UI.
+            if ($task !== null) {
+                Task::where('id', $task->id)
+                    ->where('status', 'RUNNING')
+                    ->update([
+                        'status'           => 'FAILED',
+                        'failure_reason'   => $e->getMessage(),
+                        'error_code'       => 'UNKNOWN',
+                        'error_message'    => $e->getMessage(),
+                        'lease_owner'      => null,
+                        'lease_expires_at' => null,
+                    ]);
+                $this->mercure->publish($task->id, $userId, [
+                    'task_id'    => $task->id,
+                    'status'     => 'FAILED',
+                    'error_code' => 'UNKNOWN',
+                ]);
+            }
+
+            // Symmetric with server-mode failure: mark SKIPPED, queue next
+            // PENDING (recurring) or deactivate (one-shot).
+            $completedAt = gmdate(self::DB_DATETIME_FORMAT);
+            $nextDueAt = $this->computeNextDueAt($run);
+            Capsule::connection()->transaction(function () use ($entry, $completedAt, $nextDueAt, $run): void {
+                Capsule::table('scheduled_runs_next')
+                    ->where('id', $entry->id)
+                    ->update([
+                        'status'       => ScheduledRunNext::STATUS_SKIPPED,
+                        'completed_at' => $completedAt,
+                    ]);
+                if ($nextDueAt !== null) {
+                    $this->insertRecurringEntry($run, $nextDueAt, $completedAt);
+                    $this->updateRecurringRun($run, $completedAt, $nextDueAt);
+                } else {
+                    $this->deactivateRun($run, $completedAt);
+                }
+            });
+
+            $this->lastProcessed = 0;
+            return false;
+        }
+
+        $this->finalizeScheduledRun($run, $entry, $task);
+        $this->lastProcessed = 1;
+        return true;
+    }
+
+    /**
      * Atomically claim the next due scheduled run and resolve its run/agent.
      *
      * Uses SELECT … FOR UPDATE inside a transaction so the row we read is the
@@ -121,6 +293,53 @@ final class ScheduledRunProcessor
                 ->where('due_at', '<=', $now)
                 ->orderBy('due_at')
                 ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($entry === null) {
+                return null;
+            }
+
+            Capsule::table('scheduled_runs_next')
+                ->where('id', $entry->id)
+                ->update([
+                    'status'     => ScheduledRunNext::STATUS_CLAIMED,
+                    'claimed_at' => $now,
+                ]);
+
+            return $this->resolveClaimedRun($entry);
+        });
+    }
+
+    /**
+     * Principal-scoped claim (replaces the pre-v0.18.0 user-scoped claim).
+     * Returns the next due scheduled run whose agent is owned by any of the
+     * given principals. Multiple callers' claims race-safely via lockForUpdate
+     * + status flip; only one call across the whole install wins a given
+     * scheduled_runs_next row.
+     *
+     * @param list<int> $principalIds  result of PrincipalResolver::visiblePrincipalIds()
+     *
+     * @return array{entry: object, run: ScheduledRun, agent: Agent}|null
+     */
+    private function claimNextScheduledRunForPrincipals(array $principalIds): ?array
+    {
+        if ($principalIds === []) {
+            return null;
+        }
+
+        $now = gmdate(self::DB_DATETIME_FORMAT);
+
+        return Capsule::connection()->transaction(function () use ($now, $principalIds) {
+            $entry = Capsule::table('scheduled_runs_next')
+                ->join('scheduled_runs', 'scheduled_runs.id', '=', 'scheduled_runs_next.scheduled_run_id')
+                ->join('agents', 'agents.id', '=', 'scheduled_runs.agent_id')
+                ->where('scheduled_runs_next.status', ScheduledRunNext::STATUS_PENDING)
+                ->where('due_at', '<=', $now)
+                ->whereIn('agents.principal_id', $principalIds)
+                ->orderBy('due_at')
+                ->orderBy('scheduled_runs_next.id')
+                ->select('scheduled_runs_next.*')
                 ->lockForUpdate()
                 ->first();
 

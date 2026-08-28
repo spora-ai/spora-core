@@ -1,8 +1,6 @@
 <?php
 
 declare(strict_types=1);
-
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
@@ -59,7 +57,6 @@ describe('SubAgentService::publishParentState data projection', function (): voi
                 throw new RuntimeException('not used');
             },
             $publisher,
-            WorkerMode::Sync,
         );
     });
 

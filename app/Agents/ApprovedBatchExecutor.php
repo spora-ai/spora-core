@@ -10,25 +10,19 @@ use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Exceptions\TaskStateMissingException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
-use Spora\Models\AgentTool;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\Text\Utf8Sanitizer;
-use Spora\Tools\Traits\HasOperations;
-use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
  * Resumes a task paused for human approval.
  *
- * Worker-mode contracts:
- *   - Sync: approved tools run inline.
- *   - Worker: the approval is persisted with `executed_at=NULL`; the daemon's
- *     next `runTick()` runs the tool (so long-running tools don't block the
- *     HTTP response).
+ * The approval is persisted with `executed_at=NULL`; the daemon's next
+ * `runTick()` runs the tool (so long-running tools don't block the HTTP
+ * response). The shared daemon + browser-worker runtime both pick up the
+ * persisted batch via {@see TickPhaseRunner::executeApprovedPendingToolsForTask()}.
  *
  * Partial approval: tool calls in `pending_state` that the user did NOT
  * include in the approval batch stay PENDING_APPROVAL — never silently
@@ -38,7 +32,6 @@ final class ApprovedBatchExecutor
 {
     public function __construct(
         private readonly Orchestrator $orchestrator,
-        private readonly WorkerMode $workerMode,
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
@@ -54,7 +47,6 @@ final class ApprovedBatchExecutor
                 'task_id'        => $task->id,
                 'approved_count' => count($approvedBatch),
                 'pending_count'  => count($state->pendingToolCalls),
-                'worker_mode'    => $this->workerMode === WorkerMode::Sync ? 'sync' : 'worker',
             ]);
 
             $approvedMap  = $this->indexApprovedBatch($approvedBatch);
@@ -75,11 +67,9 @@ final class ApprovedBatchExecutor
                     continue;
                 }
 
-                if ($this->workerMode === WorkerMode::Sync) {
-                    $this->executeOneApprovedToolCall($pendingToolCall, $approvedArgs, $task, $state, $taskId, $operationName);
-                } else {
-                    $this->recordApprovalOnly($taskId, $pendingToolCall->providerCallId, $approvedArgs);
-                }
+                // Sync path is gone: every approved tool call is persisted with
+                // `executed_at=NULL` and picked up by the daemon's next tick.
+                $this->recordApprovalOnly($taskId, $pendingToolCall->providerCallId, $approvedArgs);
             }
 
             if ($remaining !== []) {
@@ -90,7 +80,6 @@ final class ApprovedBatchExecutor
             // Any PENDING_APPROVAL rows left in the DB here are dangling (in DB but not
             // in saved state) — a state/DB-drift case, distinct from partial approval.
             $this->cleanupStrandedApprovals($task, $taskId);
-            $this->triggerBatchBoundaryResume($taskId);
             $this->completeResume($taskId);
         } catch (Throwable $e) {
             $this->markResumeFailed($taskId, $e);
@@ -175,65 +164,10 @@ final class ApprovedBatchExecutor
     }
 
     /**
-     * @param array<string, mixed> $approvedArgs
-     */
-    private function executeOneApprovedToolCall(
-        DriverToolCall $pendingToolCall,
-        array $approvedArgs,
-        Task $task,
-        AgentState $state,
-        int $taskId,
-        ?string $operationName,
-    ): void {
-        $toolInstance = $this->orchestrator->resolveToolByName($pendingToolCall->toolName);
-
-        // Re-check authorization at resume time: between the proposal tick
-        // and now, an admin may have revoked this tool from the agent, or an
-        // `AgentToolOperationOverride` row may have disabled the specific op.
-        // The proposal-time gate in {@see ToolCallExecutor::executeOrQueue()}
-        // only runs at proposal time and cannot defend against drift.
-        $toolClass = get_class($toolInstance);
-        $enabledClasses = AgentTool::where('agent_id', $state->agentId)
-            ->pluck('tool_class')->all();
-
-        if (!in_array($toolClass, $enabledClasses, true)) {
-            $this->orchestrator->recordRevokedToolCall(
-                task: $task,
-                providerCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-                rejectReason: "tool '{$pendingToolCall->toolName}' was revoked from this agent before approval was processed",
-            );
-            return;
-        }
-
-        if ($operationName !== null
-            && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
-            && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $state->agentId)
-        ) {
-            $this->orchestrator->recordRevokedToolCall(
-                task: $task,
-                providerCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-                rejectReason: "operation '{$operationName}' of tool '{$pendingToolCall->toolName}' was disabled before approval was processed",
-            );
-            return;
-        }
-
-        try {
-            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
-        } catch (Throwable $e) {
-            $this->recordResumeValidationFailure($task, $taskId, $pendingToolCall, $e);
-            return;
-        }
-
-        $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $state->agentId, $taskId);
-        $this->recordResumeExecutionResult($task, $taskId, $pendingToolCall, $approvedArgs, $result);
-    }
-
-    /**
-     * Worker-mode: persist the approval only. `executed_at IS NULL` is the
+     * Persist the approval only — `executed_at IS NULL` is the
      * "approved, awaiting execution" sentinel that {@see TickPhaseRunner::runTick()}
-     * picks up — don't set executed_at here.
+     * picks up. The daemon (or browser worker) runs the approved tool with
+     * its updated arguments on the next tick.
      *
      * @param array<string, mixed> $approvedArgs
      */
@@ -271,70 +205,7 @@ final class ApprovedBatchExecutor
                 static fn(DriverToolCall $tc): string => $tc->toolName,
                 $remaining,
             ))),
-            'worker_mode'     => $this->workerMode === WorkerMode::Sync ? 'sync' : 'worker',
         ]);
-    }
-
-    private function recordResumeValidationFailure(
-        Task $task,
-        int $taskId,
-        DriverToolCall $pendingToolCall,
-        Throwable $e,
-    ): void {
-        $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            ),
-        );
-
-        ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $pendingToolCall->providerCallId)
-            ->update([
-                'status'         => 'APPROVED',
-                'result_content' => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
-    }
-
-    private function recordResumeExecutionResult(
-        Task $task,
-        int $taskId,
-        DriverToolCall $pendingToolCall,
-        array $approvedArgs,
-        ToolResult $result,
-    ): void {
-        // Query-builder update() intentionally bypasses Eloquent casts
-        // — writing the JSON string here lands the right shape on disk
-        // and the `array` cast decodes it back to an array on read.
-        // Do NOT 'simplify' this to ToolCall::create()/update(): those
-        // paths re-encode through the cast and would double-encode the
-        // value (the same anti-pattern PR #150 fixed in
-        // Orchestrator::appendHistory and ToolCallExecutor).
-        ToolCallModel::where('task_id', $taskId)
-            ->where('provider_call_id', $pendingToolCall->providerCallId)
-            ->update([
-                'status'             => 'APPROVED',
-                'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-                'result_content'     => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-                'result_data'        => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'        => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $pendingToolCall->providerCallId,
-                toolName: $pendingToolCall->toolName,
-            ),
-        );
     }
 
     /**
@@ -376,40 +247,7 @@ final class ApprovedBatchExecutor
             return;
         }
 
-        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        Task::where('id', $taskId)->update(['status' => $taskStatus]);
-    }
-
-    /**
-     * Sync-mode batch boundary: every approved tool in the batch has run
-     * inline, so if any of them spawned a sub-agent the children have all
-     * ticked to completion. Check whether the parent is now ready to wake
-     * up; {@see SubAgentService::maybeResumeParentForParent()} is a no-op when no
-     * sub-agent calls were approved, so calling it unconditionally is safe.
-     *
-     * Worker mode skips this hook — the sub-agent spawns happen later, on
-     * the daemon's tick, and the worker's equivalent boundary lives in
-     * {@see TickPhaseRunner::executeApprovedPendingToolsForTask()}.
-     */
-    private function triggerBatchBoundaryResume(int $taskId): void
-    {
-        if ($this->workerMode !== WorkerMode::Sync) {
-            return;
-        }
-
-        $subAgent = $this->orchestrator->subAgent ?? null;
-        if ($subAgent === null) {
-            return;
-        }
-
-        try {
-            $subAgent->maybeResumeParentForParent($taskId);
-        } catch (Throwable $e) {
-            $this->logger?->warning('SubAgentService::maybeResumeParentForParent failed at batch boundary', [
-                'task_id'   => $taskId,
-                'exception' => $e->getMessage(),
-            ]);
-        }
+        Task::where('id', $taskId)->update(['status' => 'QUEUED']);
     }
 
     private function markResumeFailed(int $taskId, Throwable $e): void

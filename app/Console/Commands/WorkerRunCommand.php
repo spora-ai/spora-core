@@ -7,6 +7,7 @@ namespace Spora\Console\Commands;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
@@ -53,6 +54,7 @@ final class WorkerRunCommand extends Command
         MercurePublisherInterface            $mercure,
         NotificationService                  $notificationService,
         private readonly Paths                $paths,
+        private readonly WorkerRuntimeMode    $workerRuntimeMode,
     ) {
         $this->reaper = new WorkerReaper($logger, $notificationService);
         $this->queueProcessor = new WorkerQueueProcessor(
@@ -86,6 +88,17 @@ final class WorkerRunCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // Client mode drives ticks via /api/v1/tasks/{id}/tick and the reaper
+        // via /worker/housekeeping — bin/spora worker:run has no work to do.
+        // Exit before touching the DB so operators who run it manually see a
+        // clear explanation instead of a silent no-op or confusing empty daemon.
+        if ($this->workerRuntimeMode === WorkerRuntimeMode::Client) {
+            $output->writeln('<error>Server-side worker disabled: Spora is running in client-worker mode.</error>');
+            $output->writeln('<comment>Tasks are driven by your browser via POST /api/v1/tasks/{id}/tick.</comment>');
+            $output->writeln('<comment>See https://docs.spora.example/client-worker-mode</comment>');
+            return Command::FAILURE;
+        }
+
         $this->database->bootDatabaseConnectionOnly();
 
         // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,

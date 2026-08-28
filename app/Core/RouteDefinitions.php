@@ -43,6 +43,7 @@ use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
+use Spora\Http\WorkerController;
 use Spora\OpenApi\RouteSpecCollector;
 
 final class RouteDefinitions
@@ -94,6 +95,7 @@ final class RouteDefinitions
         self::registerMailRoutes($r);
         self::registerPromptTemplateRoutes($r);
         self::registerScheduledRunRoutes($r);
+        self::registerWorkerRoutes($r);
     }
 
     private static function registerCoreRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
@@ -259,8 +261,17 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort', [TaskController::class, 'abort'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort-sub-agent', [TaskController::class, 'abortSubAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/tasks/{taskId}/tick', [TaskController::class, 'tick'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}/retry-chain', [TaskController::class, 'cancelRetryChain'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/tasks/{taskId}', [TaskController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
+
+    private static function registerWorkerRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
+        // Client-worker mode housekeeping. Gated inline on worker_runtime_mode
+        // (matches PluginsController::catalog's pattern) so server-mode installs
+        // get a clean 404 instead of an empty middleware list.
+        $r->addRoute('POST', '/api/v1/worker/housekeeping', [WorkerController::class, 'housekeeping'], [AuthMiddleware::class, CsrfMiddleware::class]);
     }
 
     private static function registerMediaRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void

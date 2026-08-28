@@ -289,7 +289,6 @@ describe('SubAgentService::spawn', function (): void {
         $subAgent = new Spora\Services\SubAgentService(
             static fn(): OrchestratorInterface => $orchestrator,
             null,
-            Spora\Agents\ValueObjects\WorkerMode::Sync,
         );
 
         $orchestrator->shouldNotReceive('start');

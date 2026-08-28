@@ -156,7 +156,6 @@ final class ApprovedBatchExecutorOperationMapTest extends TestCase
 
         return new ApprovedBatchExecutor(
             orchestrator: $orch,
-            workerMode: Spora\Agents\ValueObjects\WorkerMode::Sync,
         );
     }
 

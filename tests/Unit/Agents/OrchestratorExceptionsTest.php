@@ -248,6 +248,7 @@ it('handleToolCalls throws ToolNotEnabledException when LLM calls a tool that is
         new OrchestratorConfig(toolInstances: [new Tests\Fixtures\StubInputTool()]),
     );
     $task = $orch->start($agent->id, 'Tool not enabled test', maxSteps: 3);
+    claimAndTick($orch, $task->id);
 
     $errorHistory = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
@@ -318,10 +319,10 @@ it('resolveToolByName throws ToolNotRegisteredException for an unknown tool name
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
-// LlmConfigurationMissingException — start() with no config and no global default
+// LlmConfigurationMissingException — tick() with no config and no global default
 // ---------------------------------------------------------------------------
 
-it('start() throws LlmConfigurationMissingException when no config and no global default exist', function (): void {
+it('tick() throws LlmConfigurationMissingException when no config and no global default exist', function (): void {
     $authService = bootAuthLayer();
     $userId      = $authService->register('llm-exc@example.com', TEST_PASSWORD, 'Llm');
     $agent       = Agent::create([
@@ -334,6 +335,9 @@ it('start() throws LlmConfigurationMissingException when no config and no global
 
     $orch = makeBareOrchestrator();
 
-    expect(fn() => $orch->start($agent->id, 'Hello', maxSteps: 5))
+    // start() only enqueues — the config is resolved on the first tick.
+    $task = $orch->start($agent->id, 'Hello', maxSteps: 5);
+
+    expect(fn() => claimAndTick($orch, $task->id))
         ->toThrow(LlmConfigurationMissingException::class, 'No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
