@@ -148,6 +148,66 @@ final class TaskTickController
 
     private function runTick(int $taskId, int $userId): JsonResponse
     {
+        $task = $this->loadDrivableTask($taskId, $userId);
+
+        // RUNNING rows can't be re-claimed; the controller returns a
+        // dedicated 409 TICK_ALREADY_RUNNING so the browser can back off
+        // without trying to interpret TICK_LOST_RACE for this case.
+        if ($task->status === 'RUNNING') {
+            return $this->tickAlreadyRunningResponse();
+        }
+
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $leaseUntilCarbon = Carbon::instance($now)->modify('+' . $this->tickLeaseSeconds . ' seconds');
+        $leaseOwner = self::LEASE_OWNER_PREFIX . $userId;
+        $startedAt = microtime(true);
+
+        // Server-side counterpart to the browser's [client-worker] log lines:
+        // the operator's `storage/spora.log` should show one entry per tick
+        // so a multi-step task is visibly N ticks, not "one big run".
+        // Mirrors `WorkerQueueProcessor::processQueuedTaskSync()`'s format
+        // so the operator's log greps look the same across worker modes.
+        $this->logger->info('Processing task (client-worker /tick)', [
+            'task_id' => $taskId,
+            'lease_owner' => $leaseOwner,
+            'lease_seconds' => $this->tickLeaseSeconds,
+        ]);
+
+        $claimed = $this->claimTaskForTick($task, $leaseOwner, $leaseUntilCarbon, $now);
+        if ($claimed === null) {
+            return $this->tickLostRaceResponse();
+        }
+
+        // Mercure publish BEFORE the LLM call so the UI sees QUEUED → RUNNING immediately.
+        $this->mercure->publish($claimed->id, $claimed->user_id, [
+            'task_id' => $claimed->id,
+            'status'  => 'RUNNING',
+        ]);
+
+        $this->runOrchestratorTickAndHandleFailure($claimed, $leaseOwner, $startedAt, $userId);
+        $this->clearLeaseIfTerminal($claimed->id);
+
+        $fresh = Task::find($claimed->id);
+        $this->logger->info('Task tick completed', [
+            'task_id' => $claimed->id,
+            'lease_owner' => $leaseOwner,
+            'status' => $fresh->status ?? 'unknown',
+            'step_count' => $fresh->step_count ?? 0,
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ]);
+
+        return new JsonResponse(['data' => ['task' => $this->taskService->getTask($claimed->id, $userId)]]);
+    }
+
+    /**
+     * Ownership + drivability check. Throws {@see InvalidArgumentException}
+     * with a stable message for not-found (mapped to 404 by the caller)
+     * and for terminal / quiescent sources (mapped to 409). RUNNING
+     * sources return the task itself; the caller returns the dedicated
+     * 409 TICK_ALREADY_RUNNING before attempting a CAS-claim.
+     */
+    private function loadDrivableTask(int $taskId, int $userId): Task
+    {
         $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
@@ -159,32 +219,22 @@ final class TaskTickController
                 'Task is not drivable in status "' . $task->status . '".',
             );
         }
-        if ($task->status === 'RUNNING') {
-            return new JsonResponse(
-                ['error' => ['code' => 'TICK_ALREADY_RUNNING', 'message' => 'Task is already being ticked.']],
-                Response::HTTP_CONFLICT,
-            );
-        }
 
-        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $leaseUntilCarbon = Carbon::instance($now)->modify('+' . $this->tickLeaseSeconds . ' seconds');
-        $leaseOwner = self::LEASE_OWNER_PREFIX . $userId;
+        return $task;
+    }
 
-        // Server-side counterpart to the browser's [client-worker] log lines:
-        // the operator's `storage/spora.log` should show one entry per tick
-        // so a multi-step task is visibly N ticks, not "one big run".
-        // Mirrors `WorkerQueueProcessor::processQueuedTaskSync()`'s format
-        // so the operator's log greps look the same across worker modes.
-        $startedAt = microtime(true);
-        $this->logger->info('Processing task (client-worker /tick)', [
-            'task_id' => $taskId,
-            'lease_owner' => $leaseOwner,
-            'lease_seconds' => $this->tickLeaseSeconds,
-        ]);
-
-        // CAS-claim the row inside a transaction so two browsers can't both
-        // observe QUEUED + no live lease and flip the same task to RUNNING.
-        $claimed = Capsule::connection()->transaction(function () use ($task, $leaseOwner, $leaseUntilCarbon, $now): ?Task {
+    /**
+     * CAS-claim the row inside a transaction so two browsers can't both
+     * observe QUEUED + no live lease and flip the same task to RUNNING.
+     * Returns null when the claim fails — the caller emits the 409.
+     */
+    private function claimTaskForTick(
+        Task $task,
+        string $leaseOwner,
+        Carbon $leaseUntilCarbon,
+        DateTimeImmutable $now,
+    ): ?Task {
+        return Capsule::connection()->transaction(function () use ($task, $leaseOwner, $leaseUntilCarbon, $now): ?Task {
             $row = Task::where('id', $task->id)
                 ->where('status', 'QUEUED')
                 ->where(function ($q) use ($now): void {
@@ -201,101 +251,121 @@ final class TaskTickController
             $row->save();
             return $row;
         });
+    }
 
-        if ($claimed === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'TICK_LOST_RACE', 'message' => 'Task could not be claimed for ticking.']],
-                Response::HTTP_CONFLICT,
-            );
-        }
-
-        // Mercure publish BEFORE the LLM call so the UI sees QUEUED → RUNNING immediately.
-        $this->mercure->publish($claimed->id, $claimed->user_id, [
-            'task_id' => $claimed->id,
-            'status'  => 'RUNNING',
-        ]);
-
-        // Mirror WorkerQueueProcessor::processQueuedTaskSync()'s exception path:
-        // any thrown error from the orchestrator flips the row to FAILED so the
-        // operator's UI surfaces the cause instead of leaving a phantom RUNNING.
-        //
-        // `singleStep: true` breaks the orchestrator's recursive tick chain
-        // after one LLM turn — see OrchestratorConfig. Server-mode workers
-        // leave it false so the daemon still drains each task in a single
-        // recursive run; client-mode forces true so the SPA sees one step
-        // per tick (tool calls appear progressively as the browser's tick
-        // loop fires the next /tick when the row is still QUEUED).
-        //
-        // The catch block mirrors TickPhaseRunner::handleTickFailure() so
-        // client-mode failures get the same classification, notification,
-        // and auto-retry treatment as server-mode failures — `error_code`
-        // is no longer hardcoded to `UNKNOWN`. Context-window errors take
-        // the same recovery path as in server mode.
+    /**
+     * Mirror WorkerQueueProcessor::processQueuedTaskSync()'s exception path:
+     * any thrown error from the orchestrator flips the row to FAILED so the
+     * operator's UI surfaces the cause instead of leaving a phantom RUNNING.
+     *
+     * `singleStep: true` breaks the orchestrator's recursive tick chain
+     * after one LLM turn — see OrchestratorConfig. Server-mode workers
+     * leave it false so the daemon still drains each task in a single
+     * recursive run; client-mode forces true so the SPA sees one step
+     * per tick.
+     *
+     * The catch block mirrors TickPhaseRunner::handleTickFailure() so
+     * client-mode failures get the same classification, notification,
+     * and auto-retry treatment as server-mode failures — `error_code`
+     * is no longer hardcoded to `UNKNOWN`. Context-window errors take
+     * the same recovery path as in server mode.
+     */
+    private function runOrchestratorTickAndHandleFailure(
+        Task $claimed,
+        string $leaseOwner,
+        float $startedAt,
+        int $userId,
+    ): void {
         $orchestratorConfig = (new OrchestratorConfig())
             ->withLease($leaseOwner, $this->tickLeaseSeconds)
             ->withSingleStep(true);
         try {
             $this->orchestrator->tick($claimed->id, $orchestratorConfig);
         } catch (Throwable $e) {
-            $this->logger->error('Task failed during /tick', [
-                'task_id' => $claimed->id,
-                'lease_owner' => $leaseOwner,
-                'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
-                'exception_class' => get_class($e),
-                'message' => $e->getMessage(),
-            ]);
+            $this->handleTickFailure($claimed, $leaseOwner, $startedAt, $userId, $e);
+        }
+    }
 
-            if ($this->errorClassifier->isContextWindowError($e)) {
-                // Mirror TickPhaseRunner::handleTickFailure's context-window
-                // short-circuit — the recovery path drives its own LLM turn,
-                // which (in singleStep mode) won't recurse, so the reaper
-                // will eventually flip the row to FAILED with the original
-                // error. We still notify so the operator sees the failure.
-                $this->notificationService?->notifyTaskFailed(Task::find($claimed->id));
-            } else {
-                $errorCode = $this->errorClassifier->classifyError($e);
-                $friendlyMsg = $this->errorClassifier->friendlyMessageForError($e, $errorCode);
-                $updated = Task::where('id', $claimed->id)
-                    ->where('status', 'RUNNING')
-                    ->update([
-                        'status'           => 'FAILED',
-                        'failure_reason'   => Utf8Sanitizer::scrubString($e->getMessage()),
-                        'error_code'       => $errorCode,
-                        'error_message'    => Utf8Sanitizer::scrubString($friendlyMsg),
-                        'lease_owner'      => null,
-                        'lease_expires_at' => null,
-                    ]);
+    private function handleTickFailure(
+        Task $claimed,
+        string $leaseOwner,
+        float $startedAt,
+        int $userId,
+        Throwable $e,
+    ): void {
+        $this->logger->error('Task failed during /tick', [
+            'task_id' => $claimed->id,
+            'lease_owner' => $leaseOwner,
+            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+            'exception_class' => get_class($e),
+            'message' => $e->getMessage(),
+        ]);
 
-                if ($updated > 0) {
-                    $failedTask = Task::find($claimed->id);
-                    if ($failedTask !== null) {
-                        $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
-                    }
+        if ($this->errorClassifier->isContextWindowError($e)) {
+            // Mirror TickPhaseRunner::handleTickFailure's context-window
+            // short-circuit — the recovery path drives its own LLM turn,
+            // which (in singleStep mode) won't recurse, so the reaper
+            // will eventually flip the row to FAILED with the original
+            // error. We still notify so the operator sees the failure.
+            $this->notificationService?->notifyTaskFailed(Task::find($claimed->id));
+        } else {
+            $errorCode = $this->errorClassifier->classifyError($e);
+            $friendlyMsg = $this->errorClassifier->friendlyMessageForError($e, $errorCode);
+            $updated = Task::where('id', $claimed->id)
+                ->where('status', 'RUNNING')
+                ->update([
+                    'status'           => 'FAILED',
+                    'failure_reason'   => Utf8Sanitizer::scrubString($e->getMessage()),
+                    'error_code'       => $errorCode,
+                    'error_message'    => Utf8Sanitizer::scrubString($friendlyMsg),
+                    'lease_owner'      => null,
+                    'lease_expires_at' => null,
+                ]);
+
+            if ($updated > 0) {
+                $failedTask = Task::find($claimed->id);
+                if ($failedTask !== null) {
+                    $this->notifyFailedAndScheduleRetry($failedTask, $errorCode);
                 }
             }
-
-            $this->mercure->publish($claimed->id, $userId, [
-                'task_id' => $claimed->id,
-                'status'  => 'FAILED',
-            ]);
         }
 
-        $fresh = Task::find($claimed->id);
+        $this->mercure->publish($claimed->id, $userId, [
+            'task_id' => $claimed->id,
+            'status'  => 'FAILED',
+        ]);
+    }
+
+    /**
+     * After a successful tick, the lease must be cleared on terminal /
+     * quiescent rows — otherwise the reaper could flip an actually-
+     * finished task to FAILED on the next housekeeping pass.
+     */
+    private function clearLeaseIfTerminal(int $taskId): void
+    {
+        $policy = new TaskLifecyclePolicy();
+        $fresh = Task::find($taskId);
         if ($fresh !== null && ($policy->isTerminal($fresh->status) || $policy->isQuiescent($fresh->status))) {
             $fresh->lease_owner = null;
             $fresh->lease_expires_at = null;
             $fresh->save();
         }
+    }
 
-        $this->logger->info('Task tick completed', [
-            'task_id' => $claimed->id,
-            'lease_owner' => $leaseOwner,
-            'status' => $fresh->status ?? 'unknown',
-            'step_count' => $fresh->step_count ?? 0,
-            'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
-        ]);
+    private function tickLostRaceResponse(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'TICK_LOST_RACE', 'message' => 'Task could not be claimed for ticking.']],
+            Response::HTTP_CONFLICT,
+        );
+    }
 
-        return new JsonResponse(['data' => ['task' => $this->taskService->getTask($claimed->id, $userId)]]);
+    private function tickAlreadyRunningResponse(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'TICK_ALREADY_RUNNING', 'message' => 'Task is already being ticked.']],
+            Response::HTTP_CONFLICT,
+        );
     }
 
     private function errorForException(InvalidArgumentException $e): JsonResponse
