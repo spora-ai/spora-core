@@ -417,18 +417,35 @@ test('export() then importPayload() round-trips on the same loader with zero PLU
     );
 
     $validation = (new Spora\AgentTemplates\AgentTemplateValidator())->validate($payload);
-    // Migration 0067 introduced a top-level `principal` block on the wire
-    // format. The validator hasn't been updated to whitelist it yet, so we
-    // expect a single UNKNOWN_TOP_LEVEL_KEY error scoped to that field —
-    // not a true validation failure that should block the round-trip.
-    $errors = $validation->errors();
-    expect($errors)->toHaveCount(1)
-        ->and($errors[0]['code'])->toBe('UNKNOWN_TOP_LEVEL_KEY')
-        ->and($errors[0]['path'])->toBe('principal');
+    // Exporter no longer emits a `principal` block — ownership is decided
+    // at import time from a flat `principal_id` field. The round-tripped
+    // payload must validate cleanly with zero errors.
+    expect($validation->errors())->toBeEmpty();
 
     $result = $importer->importPayload($this->userId, $payload);
     $codes = array_column($result->warnings, 'code');
     expect($codes)->not->toContain('PLUGIN_MISSING');
+});
+
+test('export() does NOT emit a top-level `principal` block (ownership belongs to the import call)', function (): void {
+    // Regression: the exporter used to emit `principal: { principal_id,
+    // type, user_id, group_id, owner_user_id }` so the importer would
+    // know which target principal the export belonged to. The block was
+    // never read by the importer (it picks the owner from the caller's
+    // user-principal or a flat `principal_id` field the caller adds at
+    // import time), the schema's `additionalProperties: false` rejected
+    // it, and a round-trip export→import always failed with
+    // "Unknown top-level field 'principal'". Dropping the block makes
+    // the wire format match both the validator and the importer.
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($this->userId),
+        'name'      => 'No Principal Block',
+        'max_steps' => 5,
+        'is_active' => true,
+    ]);
+
+    $payload = makeExporter()->export($agent)['template']->raw();
+    expect($payload)->not->toHaveKey('principal');
 });
 
 test('export() opt-in includes only non-secret non-empty agent overrides and inline info', function (): void {

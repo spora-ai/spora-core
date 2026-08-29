@@ -22,6 +22,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Tools\ToolInterface;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
+use Tests\Fixtures\StubOutputToolDisabledByDefaultOp;
 use Tests\Fixtures\StubOutputToolWithSchema;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
@@ -77,10 +78,11 @@ function resumeAuthSeedAgent(array $toolInstances): array
 
     foreach ($toolInstances as $instance) {
         $toolName = match (true) {
-            $instance instanceof StubOutputTool            => 'stub_output',
-            $instance instanceof StubOutputToolWithSchema  => 'stub_output_with_schema',
-            $instance instanceof StubInputTool             => 'stub_input',
-            default                                          => throw new InvalidArgumentException(
+            $instance instanceof StubOutputTool                    => 'stub_output',
+            $instance instanceof StubOutputToolDisabledByDefaultOp => 'stub_output_disabled_default',
+            $instance instanceof StubOutputToolWithSchema          => 'stub_output_with_schema',
+            $instance instanceof StubInputTool                     => 'stub_input',
+            default                                                 => throw new InvalidArgumentException(
                 'Unknown tool class: ' . get_class($instance),
             ),
         };
