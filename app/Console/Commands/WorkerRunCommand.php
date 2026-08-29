@@ -104,7 +104,7 @@ final class WorkerRunCommand extends Command
     {
         $output->writeln('<error>Server-side worker disabled: Spora is running in client-worker mode.</error>');
         $output->writeln('<comment>Tasks are driven by your browser via POST /api/v1/tasks/{id}/tick.</comment>');
-        $output->writeln('<comment>See https://docs.spora.example/client-worker-mode</comment>');
+        $output->writeln('<comment>See https://docs.spora-ai.com/deploy/shared-host/client-worker-mode</comment>');
     }
 
     private function runWorker(InputInterface $input, OutputInterface $output): int
