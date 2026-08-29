@@ -15,6 +15,7 @@ use Spora\Http\Exceptions\FeatureDisabledException;
 use Spora\Http\Exceptions\ForbiddenException;
 use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\PluginCatalogNotWiredException;
+use Spora\Http\Exceptions\TooManyRequestsException;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
@@ -234,6 +235,10 @@ final class Kernel implements KernelInterface
             $e instanceof InvalidCsrfTokenException => new JsonResponse(
                 ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
                 Response::HTTP_FORBIDDEN,
+            ),
+            $e instanceof TooManyRequestsException => new JsonResponse(
+                ['error' => ['code' => 'TOO_MANY_REQUESTS', 'message' => $e->getMessage()]],
+                Response::HTTP_TOO_MANY_REQUESTS,
             ),
             $e instanceof CatalogUnavailableException => new JsonResponse(
                 ['error' => ['code' => 'CATALOG_UNAVAILABLE', 'message' => $e->getMessage()]],

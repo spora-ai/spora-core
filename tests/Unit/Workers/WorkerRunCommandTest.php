@@ -6,6 +6,7 @@ use Cron\CronExpression;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\NullLogger;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
@@ -68,6 +69,7 @@ function makeWorkerRunCommand(): array
         $mercure,
         $notificationService,
         new Paths(BASE_PATH),
+        WorkerRuntimeMode::Server,
     );
 
     return [$command, $orchestrator, $db];
@@ -504,6 +506,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             $mercure,
             $notificationService,
             new Paths(BASE_PATH),
+            WorkerRuntimeMode::Server,
         );
 
         $processed = runProcessScheduledRuns($command);
@@ -902,6 +905,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
             $mercure,
             $notificationService,
             new Paths(BASE_PATH),
+            WorkerRuntimeMode::Server,
         );
 
         $authService = bootAuthLayer();
@@ -966,6 +970,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
             $mercure,
             $notificationService,
             new Paths(BASE_PATH),
+            WorkerRuntimeMode::Server,
         );
 
         $authService = bootAuthLayer();
@@ -1003,7 +1008,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
         $orphanedTask->refresh();
         expect($orphanedTask->status)->toBe('FAILED');
-        expect($orphanedTask->error_code)->toBe('ORPHANED');
+        expect($orphanedTask->error_code)->toBe('WORKER_DISCONNECTED');
     });
 });
 
@@ -1022,7 +1027,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
         $input  = new ArrayInput(['--daemon' => true, '--once' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -1046,7 +1051,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
         $input  = new ArrayInput(['--daemon' => true, '--reap-only' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -1070,7 +1075,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
 
-        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths);
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
         $input  = new ArrayInput(['--once' => true, '--reap-only' => true], $command->getDefinition());
         $output = new NullOutput();
@@ -1079,6 +1084,33 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $exitCode = $ref->invoke($command, $input, $output);
 
         expect($exitCode)->toBe(1);
+    });
+
+    it('exits with error in client mode', function (): void {
+        // Client-mode installs drive ticks via /api/v1/tasks/{id}/tick and the
+        // reaper via /worker/housekeeping — bin/spora worker:run has no work
+        // to do. The gate runs before bootDatabaseConnectionOnly() so a
+        // misconfigured install still produces a clear failure (no DB
+        // connection attempts).
+        Database::resetBootState();
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db->boot();
+
+        $paths = new Paths(BASE_PATH);
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publish')->andReturn(true);
+        $notification = Mockery::mock(NotificationService::class);
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+
+        $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Client);
+
+        $buffer = new Symfony\Component\Console\Output\BufferedOutput();
+        $ref = new ReflectionMethod($command, 'execute');
+        $exitCode = $ref->invoke($command, new ArrayInput([], $command->getDefinition()), $buffer);
+
+        expect($exitCode)->toBe(Symfony\Component\Console\Command\Command::FAILURE)
+            ->and($buffer->fetch())->toContain('client-worker mode');
     });
 });
 

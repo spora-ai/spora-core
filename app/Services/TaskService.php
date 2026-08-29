@@ -33,7 +33,7 @@ final class TaskService implements TaskServiceInterface
     /**
      * @inheritDoc
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null): array
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null, ?string $status = null): array
     {
         $query = Task::where('user_id', $userId)
             ->orderByDesc('updated_at')
@@ -41,6 +41,10 @@ final class TaskService implements TaskServiceInterface
 
         if ($agentId !== null) {
             $query->where('agent_id', $agentId);
+        }
+
+        if ($status !== null && $status !== '') {
+            $query->where('status', $status);
         }
 
         if ($since !== null) {

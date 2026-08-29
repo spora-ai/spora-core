@@ -95,6 +95,7 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         ->with($task->id, $userId)
         ->andThrow(new InvalidArgumentException('Cannot abort a task in status PENDING_APPROVAL.'));
 
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
@@ -122,6 +123,7 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         ->with(99999, $userId)
         ->andThrow(new InvalidArgumentException('Task not found.'));
 
+    $mercure = Mockery::mock(MercurePublisherInterface::class);
     $controller = new TaskController(
         bootAuthLayer(),
         $service,

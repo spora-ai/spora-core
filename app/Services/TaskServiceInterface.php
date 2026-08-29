@@ -50,7 +50,7 @@ interface TaskServiceInterface
      *     retry_after?: string
      * }>
      */
-    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null): array;
+    public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null, ?string $status = null): array;
 
     /**
      * @return array{

@@ -7,7 +7,6 @@ use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\AgentState;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
@@ -30,7 +29,6 @@ use Spora\Plugins\PluginLoader;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Tools\Attributes\Tool;
-use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -58,14 +56,12 @@ function makeOrchestrator(
     DriverFactory $driverFactory,
     array $toolInstances = [],
     ?Psr\Log\LoggerInterface $logger = null,
-    WorkerMode $workerMode = WorkerMode::Sync,
 ): Orchestrator {
     return new Orchestrator(
         $driverFactory,
         new OrchestratorConfig(
             toolInstances: $toolInstances,
             logger: $logger,
-            workerMode: $workerMode,
         ),
     );
 }
@@ -146,7 +142,25 @@ function enableToolsForAgent(int $agentId, array $toolInstances): void
 // start() tests
 // ---------------------------------------------------------------------------
 
-it('start creates a RUNNING Task and seeds user history row', function (): void {
+it('start creates a QUEUED Task and seeds user history row', function (): void {
+    [$agentId] = seedAgent();
+
+    $llm = Mockery::mock(LLMDriverInterface::class);
+    $llm->allows('complete')->never();
+
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+    $task = $orch->start($agentId, PROMPT_HELLO, maxSteps: 5);
+
+    expect($task->status)->toBe('QUEUED')
+        ->and($task->user_prompt)->toBe(PROMPT_HELLO)
+        ->and($task->max_steps)->toBe(5);
+
+    $history = TaskHistory::where('task_id', $task->id)->orderBy('sequence')->get();
+    expect($history->first()->role)->toBe('user')
+        ->and($history->first()->content)->toBe(PROMPT_HELLO);
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('after tick the started task reaches COMPLETED', function (): void {
     [$agentId] = seedAgent();
 
     $llm = mockLlm(new LLMResponse(
@@ -159,14 +173,11 @@ it('start creates a RUNNING Task and seeds user history row', function (): void 
 
     $orch = makeOrchestrator(mockDriverFactory($llm));
     $task = $orch->start($agentId, PROMPT_HELLO, maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
-    expect($task->status)->toBe('COMPLETED')      // tick ran synchronously
-        ->and($task->user_prompt)->toBe(PROMPT_HELLO)
-        ->and($task->max_steps)->toBe(5);
-
-    $history = TaskHistory::where('task_id', $task->id)->orderBy('sequence')->get();
-    expect($history->first()->role)->toBe('user')
-        ->and($history->first()->content)->toBe(PROMPT_HELLO);
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->final_response)->toBe('Done.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -237,6 +248,7 @@ it('InputTool path increments step_count once per LLM turn', function (): void {
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Run input tool', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
 
@@ -276,6 +288,7 @@ it('two parallel InputTools are both executed and step_count is 2', function ():
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Parallel inputs', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
@@ -308,6 +321,7 @@ it('N parallel InputTools in one LLM turn increment step_count by 1, not N', fun
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     // With the old bug: 10 tools × step_count++ would hit max_steps=10 immediately and FAIL.
     $task = $orch->start($agentId, 'Parallel overload', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // 2 LLM turns (not 10): tick 1 runs all 10 tools, tick 2 gets the final response.
@@ -332,6 +346,7 @@ it('parallel batch with one auto-execute and one requiring approval pauses with 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Mixed parallel', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
@@ -372,6 +387,7 @@ it('single assistant history row carries both tool calls when LLM fires two in p
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Parallel', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $assistantRow = TaskHistory::where('task_id', $task->id)
         ->where('role', 'assistant')
@@ -403,6 +419,7 @@ it('OutputTool requiring approval pauses task as PENDING_APPROVAL and serializes
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Run output tool', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL')
@@ -438,6 +455,7 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Auto approve', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // 2 LLM turns: one for the tool, one for the final text.
@@ -467,6 +485,7 @@ it('task is marked FAILED when step_count reaches max_steps', function (): void 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Infinite loop', maxSteps: 3);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('FAILED')
@@ -495,6 +514,7 @@ it('tool exception is caught, encoded as an error ToolResult, and the loop survi
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Use failing tool', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // Task must NOT be a zombie — the loop completed despite the exception.
@@ -509,7 +529,7 @@ it('tool exception is caught, encoded as an error ToolResult, and the loop survi
 // resume()
 // ---------------------------------------------------------------------------
 
-it('resume executes the approved OutputTool, appends history, and re-dispatches tick', function (): void {
+it('resume queues the approved OutputTool so the next tick executes it and appends history', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -526,12 +546,14 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Resume test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // New batch format: list<{provider_call_id, arguments}>.
     $orch->resume($task->id, [['provider_call_id' => 'call_r', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // 2 LLM turns: tick 1 (tool call paused) + tick 2 (after resume).
@@ -542,67 +564,6 @@ it('resume executes the approved OutputTool, appends history, and re-dispatches 
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->approved_arguments)->toBe(['x' => 99]);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-it('keeps the task status as PENDING_APPROVAL during tool execution to prevent async daemon race conditions', function (): void {
-    [$agentId] = seedAgent();
-
-    $callCount = 0;
-    $mock      = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->andReturnUsing(static function () use (&$callCount) {
-        $callCount++;
-        return $callCount === 1
-            ? new LLMResponse(null, [new DriverToolCall('call_race', 'race_condition_checker_tool', [])], 5, 3, 'cmp_1')
-            : new LLMResponse('Finished.', [], 5, 3, 'cmp_2');
-    });
-
-    // Create an inline diagnostic tool that checks the Task's status directly from the DB mid-execution
-    $checkerTool = new
-    #[Tool(name: 'race_condition_checker_tool', description: 'Checks task status')]
-    #[ToolOperation(name: 'default', description: 'Run check', enabledByDefault: true, requiresApprovalByDefault: true)]
-    class implements ToolInterface {
-        use HasOperations;
-        public ?string $statusInsideTool = null;
-        public ?int $taskId = null;
-        public function getParametersSchema(): array
-        {
-            return ['type' => 'object', 'properties' => [], 'required' => []];
-        }
-        public function execute(
-            array $arguments,
-            int $agentId,
-            ?int $userId = null,
-            ?int $taskId = null,
-            ?Spora\Services\PrincipalContext $context = null,
-        ): ToolResult {
-            // Task status should still be PENDING_APPROVAL while the tool is heavily executing
-            $task = Task::find($this->taskId);
-            $this->statusInsideTool = $task->status;
-            return new ToolResult(true, 'Checked.');
-        }
-        public function describeAction(array $arguments): string
-        {
-            return 'Checking.';
-        }
-    };
-
-    $tools = [$checkerTool];
-    enableToolsForAgent($agentId, $tools);
-    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
-
-    // Start task, it pauses
-    $task = $orch->start($agentId, 'Test race condition', maxSteps: 10);
-    $checkerTool->taskId = $task->id;
-
-    $task->refresh();
-    expect($task->status)->toBe('PENDING_APPROVAL');
-
-    $orch->resume($task->id, [['provider_call_id' => 'call_race', 'decision' => 'approve', 'arguments' => []]]);
-
-    expect($checkerTool->statusInsideTool)->toBe('PENDING_APPROVAL', 'The task status should NOT flip to RUNNING before the tool finishes executing.');
-
-    $task->refresh();
-    expect($task->status)->toBe('COMPLETED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('resume throws when task is not PENDING_APPROVAL', function (): void {
@@ -643,12 +604,14 @@ it('resume throws InvalidArgumentException when approved arguments fail schema v
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Schema validation test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     // Human forgot the required 'recipient' field — schema validation must catch this gracefully now.
     $orch->resume($task->id, [['provider_call_id' => 'call_schema', 'decision' => 'approve', 'arguments' => []]]);
+    claimAndTick($orch, $task->id);
 
     $toolCall = ToolCallModel::where('provider_call_id', 'call_schema')->first();
     expect($toolCall->status)->toBe('APPROVED')
@@ -674,11 +637,13 @@ it('resume routes mixed approve and reject decisions atomically', function (): v
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Mixed decisions', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $orch->resume($task->id, [
         ['provider_call_id' => 'call_approved', 'decision' => 'approve', 'arguments' => ['x' => 99]],
         ['provider_call_id' => 'call_rejected', 'decision' => 'reject', 'reason' => 'Wrong target'],
     ]);
+    claimAndTick($orch, $task->id);
 
     $approved = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_approved')->first();
     $rejected = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_rejected')->first();
@@ -706,6 +671,7 @@ it('resume keeps a task pending after a reject-only partial decision', function 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Partial reject', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $orch->resume($task->id, [[
         'provider_call_id' => 'call_rejected',
@@ -732,6 +698,7 @@ it('resume rejects an unknown provider call without mutating pending rows', func
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Unknown decision', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     expect(fn() => $orch->resume($task->id, [[
         'provider_call_id' => 'call_unknown',
@@ -754,6 +721,7 @@ it('resume validates every decision field before changing state', function (): v
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Invalid decisions', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $invalidDecisions = [
         ['invalid item'],
@@ -782,6 +750,7 @@ it('resume rolls back when a state call no longer has a pending database row', f
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Drifted decision', maxSteps: 10);
+    claimAndTick($orch, $task->id);
     ToolCallModel::where('provider_call_id', 'call_drifted')->update(['status' => 'REJECTED']);
 
     expect(fn() => $orch->resume($task->id, [[
@@ -796,7 +765,7 @@ it('resume rolls back when a state call no longer has a pending database row', f
 // reject()
 // ---------------------------------------------------------------------------
 
-it('reject injects rejection into history and re-dispatches tick', function (): void {
+it('reject injects rejection into history and queues the task for the next tick', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -813,11 +782,13 @@ it('reject injects rejection into history and re-dispatches tick', function (): 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Reject test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
     $orch->reject($task->id, 'Too risky');
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
@@ -884,7 +855,8 @@ it('logs a debug entry with tool name, agent_id, task_id, and arguments on every
     $tools = [new StubInputTool()];
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
-    $orch->start($agentId, 'Log dispatch test', maxSteps: 10);
+    $task = $orch->start($agentId, 'Log dispatch test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('logs an error when a tool returns a failed ToolResult, without including arguments', function (): void {
@@ -916,7 +888,8 @@ it('logs an error when a tool returns a failed ToolResult, without including arg
     $tools = [new StubFailingTool()];
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
-    $orch->start($agentId, 'Log failure test', maxSteps: 10);
+    $task = $orch->start($agentId, 'Log failure test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('logs an error with exception_class when a tool throws, without including arguments', function (): void {
@@ -947,7 +920,8 @@ it('logs an error with exception_class when a tool throws, without including arg
     $tools = [new ThrowingTool()];
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools, $logger);
-    $orch->start($agentId, 'Log exception test', maxSteps: 10);
+    $task = $orch->start($agentId, 'Log exception test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -971,6 +945,7 @@ it('injects the correct agentId into the tool execute scope', function (): void 
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Verify agent context', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
 
@@ -1001,6 +976,7 @@ it('handleToolCalls schema validation failure writes both ToolCall and history r
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Schema fail test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // The error must be fed back to the LLM so the task can complete, not get stuck
@@ -1289,7 +1265,10 @@ test('resolveLlmConfig throws when no config exists at any level', function (): 
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    expect(fn() => $orch->start($agent->id, 'Hello', maxSteps: 5))
+    // start() only enqueues — the config is resolved on the first tick.
+    $task = $orch->start($agent->id, 'Hello', maxSteps: 5);
+
+    expect(fn() => claimAndTick($orch, $task->id))
         ->toThrow(RuntimeException::class, 'No LLM configuration set for this agent');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1318,7 +1297,9 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
 
     // Should not throw - uses user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
-    expect($task->status)->toBe('COMPLETED');
+    claimAndTick($orch, $task->id);
+
+    expect($task->refresh()->status)->toBe('COMPLETED');
 
     // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
@@ -1363,7 +1344,9 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 
     // Should use user preference, not global default
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
-    expect($task->status)->toBe('COMPLETED');
+    claimAndTick($orch, $task->id);
+
+    expect($task->refresh()->status)->toBe('COMPLETED');
 
     // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
@@ -1415,7 +1398,9 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
 
     // Should use agent-specific config, not user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
-    expect($task->status)->toBe('COMPLETED');
+    claimAndTick($orch, $task->id);
+
+    expect($task->refresh()->status)->toBe('COMPLETED');
 
     // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
@@ -1490,13 +1475,15 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     $llmA = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orchA = makeOrchestrator(mockDriverFactory($llmA));
     $taskA = $orchA->start($agentA->id, 'Hello', maxSteps: 5);
-    expect($taskA->status)->toBe('COMPLETED');
+    claimAndTick($orchA, $taskA->id);
+    expect($taskA->refresh()->status)->toBe('COMPLETED');
 
     // User B's agent should get User B's config (via user_id = B in preference lookup)
     $llmB = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_2'));
     $orchB = makeOrchestrator(mockDriverFactory($llmB));
     $taskB = $orchB->start($agentB->id, 'Hello', maxSteps: 5);
-    expect($taskB->status)->toBe('COMPLETED');
+    claimAndTick($orchB, $taskB->id);
+    expect($taskB->refresh()->status)->toBe('COMPLETED');
 
     // Cleanup
     PrincipalPreference::whereIn('principal_id', [$userA, $userB])->delete();
@@ -1545,6 +1532,7 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     );
 
     $task = $orch->start($agentId, 'Auto approve test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
@@ -1585,6 +1573,7 @@ it('publishes intermediate state when tools require approval', function (): void
     );
 
     $task = $orch->start($agentId, 'Approval test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
@@ -1806,9 +1795,12 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // start() creates a RUNNING task then calls tick() which throws inside the transaction.
+    // start() only enqueues; the missing config surfaces on the first tick,
+    // which throws inside the transaction.
+    $task = $orch->start($agent->id, 'Hello', maxSteps: 5);
+
     try {
-        $orch->start($agent->id, 'Hello', maxSteps: 5);
+        claimAndTick($orch, $task->id);
         PHPUnit\Framework\Assert::fail('Expected RuntimeException was not thrown');
     } catch (RuntimeException $e) {
         expect($e->getMessage())->toBe('No LLM configuration set for this agent. Set a preferred config or ensure a global default exists.');
@@ -1829,7 +1821,7 @@ it('continue() updates Task.user_prompt to the new prompt', function (): void {
     [$agentId] = seedAgent();
 
     $llm = mockLlm(new LLMResponse('Continued response.', [], 10, 5, 'cmp_cont'));
-    $orch = makeOrchestrator(mockDriverFactory($llm), [], null, WorkerMode::Sync);
+    $orch = makeOrchestrator(mockDriverFactory($llm), [], null);
 
     $task = Task::create([
         'agent_id'    => $agentId,
@@ -1933,6 +1925,8 @@ it('continue() overrides max_steps when additionalSteps is supplied', function (
     ]);
 
     $continuedTask = $orch->continue($task->id, PROMPT_CONTINUED, additionalSteps: 25);
+    claimAndTick($orch, $continuedTask->id);
+    $continuedTask->refresh();
 
     // additionalSteps overrides the previous max_steps
     expect($continuedTask->max_steps)->toBe(25)
@@ -2170,6 +2164,7 @@ it('handleToolCalls writes a DISABLED ToolCall record when operation is disabled
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Disabled op test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // After the LLM tool call is disabled, no tool call is pending approval,
@@ -2205,6 +2200,7 @@ it('handleToolCalls writes a System Error ToolCall when LLM calls a tool that is
     // The agent is NOT given the StubInputTool — enableToolsForAgent is intentionally omitted.
     $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Tool not enabled test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
@@ -2259,6 +2255,7 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Dangling PENDING test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
@@ -2282,6 +2279,7 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
 
     // Approve only call_a; call_b is dangling and must be rejected by cleanup.
     $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
@@ -2303,7 +2301,7 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
-// resume() — partial-approval semantics (sync mode)
+// resume() — partial-approval semantics
 //
 // "Partial approval" = the user explicitly approves some of the pending
 // tool calls in the batch but not others. The previous implementation
@@ -2313,64 +2311,6 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
 // new behaviour: un-approved tool calls stay PENDING_APPROVAL, the
 // task stays PENDING_APPROVAL, `pending_state` is rewritten with only
 // the remaining calls, and the LLM is not called this round.
-// ---------------------------------------------------------------------------
-
-it('partial approval in sync mode leaves un-approved tool calls PENDING_APPROVAL and re-pauses the task', function (): void {
-    [$agentId] = seedAgent();
-
-    $callCount = 0;
-    $mock = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
-        $callCount++;
-
-        // Only one LLM round-trip is allowed: the initial pause. After
-        // the partial approval the task must remain PENDING_APPROVAL,
-        // so the second LLM call must NOT happen — the loop in
-        // `completeResume()` would otherwise trigger it via `tick()`.
-        return $callCount === 1
-            ? new LLMResponse(null, [
-                new DriverToolCall('call_a', 'stub_output', ['x' => 1]),
-                new DriverToolCall('call_b', 'stub_output', ['x' => 2]),
-            ], 5, 3, 'cmp_1')
-            : new LLMResponse('UNEXPECTED — partial approval must not tick the LLM.', [], 5, 3, 'cmp_X');
-    });
-
-    $tools = [new StubOutputTool()];
-    enableToolsForAgent($agentId, $tools);
-    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
-    $task = $orch->start($agentId, 'Partial approval sync', maxSteps: 10);
-
-    $task->refresh();
-    expect($task->status)->toBe('PENDING_APPROVAL');
-
-    // Approve only call_a. call_b should NOT execute silently.
-    $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
-
-    $task->refresh();
-    expect($task->status)->toBe('PENDING_APPROVAL');  // task stays paused
-    expect($callCount)->toBe(1);                       // exactly one LLM round-trip
-
-    // call_a row is APPROVED and executed; call_b is untouched.
-    $rowA = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_a')->first();
-    $rowB = ToolCallModel::where('task_id', $task->id)->where('provider_call_id', 'call_b')->first();
-    expect($rowA)->not->toBeNull()
-        ->and($rowA->status)->toBe('APPROVED')
-        ->and($rowA->executed_at)->not->toBeNull()
-        ->and($rowA->approved_arguments)->toBe(['x' => 99])
-        ->and($rowA->result_content)->not->toBeNull();
-    expect($rowB)->not->toBeNull()
-        ->and($rowB->status)->toBe('PENDING_APPROVAL')   // still waiting
-        ->and($rowB->executed_at)->toBeNull()
-        ->and($rowB->result_content)->toBeNull();
-
-    // pending_state was rewritten to contain only call_b.
-    $state = AgentState::fromJson((string) $task->pending_state);
-    $ids = array_map(static fn(DriverToolCall $tc): string => $tc->providerCallId, $state->pendingToolCalls);
-    expect($ids)->toBe(['call_b']);
-})->afterEach(fn() => Spora\Core\Database::resetBootState());
-
-// ---------------------------------------------------------------------------
-// resume() — partial-approval semantics (worker mode)
 // ---------------------------------------------------------------------------
 
 it('partial approval in worker mode defers the approved tool and keeps the un-approved set pending for a later round', function (): void {
@@ -2444,7 +2384,6 @@ it('partial approval in worker mode defers the approved tool and keeps the un-ap
     $orch = makeOrchestrator(
         mockDriverFactory($llm),
         $tools,
-        workerMode: WorkerMode::Worker,
     );
 
     $orch->resume($task->id, [['provider_call_id' => 'call_a', 'decision' => 'approve', 'arguments' => ['x' => 99]]]);
@@ -2497,6 +2436,7 @@ it('a second approval round finishes a partially-approved set without re-prompti
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Two-round approval', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
@@ -2507,8 +2447,9 @@ it('a second approval round finishes a partially-approved set without re-prompti
     expect($task->status)->toBe('PENDING_APPROVAL');
     expect($callCount)->toBe(1);
 
-    // Round 2: approve call_b — task should now complete.
+    // Round 2: approve call_b — both approved rows run on the next tick.
     $orch->resume($task->id, [['provider_call_id' => 'call_b', 'decision' => 'approve', 'arguments' => ['x' => 77]]]);
+    claimAndTick($orch, $task->id);
     $task->refresh();
     expect($task->status)->toBe('COMPLETED')
         ->and($callCount)->toBe(2)
@@ -2795,7 +2736,6 @@ it('worker-mode resume returns immediately and defers tool execution to the next
     $orch = makeOrchestrator(
         mockDriverFactory($llmFirst),
         $tools,
-        workerMode: WorkerMode::Worker,
     );
 
     $task->refresh();
@@ -2831,7 +2771,6 @@ it('worker-mode resume returns immediately and defers tool execution to the next
     $orch = makeOrchestrator(
         mockDriverFactory($llmSecond),
         $tools,
-        workerMode: WorkerMode::Worker,
     );
     $orch->tick($task->id);
 
@@ -2848,7 +2787,7 @@ it('worker-mode resume returns immediately and defers tool execution to the next
 // resume() — exception path: task is marked RESUME_FAILED
 // ---------------------------------------------------------------------------
 
-it('classifies a failure from the post-transaction resume tick normally', function (): void {
+it('classifies a failure from the tick that follows a resume normally', function (): void {
     [$agentId] = seedAgent();
 
     $callCount = 0;
@@ -2859,7 +2798,7 @@ it('classifies a failure from the post-transaction resume tick normally', functi
         if ($callCount === 1) {
             return new LLMResponse(null, [new DriverToolCall('call_x', 'stub_output', [])], 5, 3, 'cmp_1');
         }
-        // Second LLM call (recursive tick after resume): blow up.
+        // Second LLM call (the tick that picks up the approved batch): blow up.
         throw new RuntimeException('LLM is down on the resumed tick.');
     });
 
@@ -2867,13 +2806,16 @@ it('classifies a failure from the post-transaction resume tick normally', functi
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Resume exception test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
+    $orch->resume($task->id, [['provider_call_id' => 'call_x', 'decision' => 'approve', 'arguments' => []]]);
+
     try {
-        $orch->resume($task->id, [['provider_call_id' => 'call_x', 'decision' => 'approve', 'arguments' => []]]);
-        PHPUnit\Framework\Assert::fail('Expected RuntimeException to propagate from recursive tick');
+        claimAndTick($orch, $task->id);
+        PHPUnit\Framework\Assert::fail('Expected RuntimeException to propagate from the post-resume tick');
     } catch (RuntimeException $e) {
         // Expected
     }
@@ -2916,6 +2858,7 @@ it('resolveRequiresApproval uses override row when present, falling back to tool
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Approval override test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // Override forced auto-approval → no PENDING_APPROVAL, task completes immediately.
@@ -3129,7 +3072,8 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
     });
 
     $orch = makeOrchestrator(mockDriverFactory($mock), [$plainTool]);
-    $orch->start($agentId, 'Plain tool test', maxSteps: 5);
+    $task = $orch->start($agentId, 'Plain tool test', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     expect($capturedTools)->toHaveCount(1);
     expect($capturedTools[0]['function']['name'])->toBe('plain_tool');
@@ -3153,6 +3097,7 @@ it('resolveToolByName throws when the LLM invokes an unknown tool name', functio
 
     $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
     $task = $orch->start($agentId, 'Unknown tool test', maxSteps: 3);
+    claimAndTick($orch, $task->id);
 
     // Verify the System Error row was written for the unknown tool.
     $errorRow = TaskHistory::where('task_id', $task->id)
@@ -3180,6 +3125,7 @@ it('resume rejects an empty decisions list when pending_state is null', function
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Null pending state test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     Task::where('id', $task->id)->update(['pending_state' => null]);
 
@@ -3260,7 +3206,8 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
             pluginLoader: $pluginLoader,
         ),
     );
-    $orch->start($agentId, 'Plugin tool test', maxSteps: 5);
+    $task = $orch->start($agentId, 'Plugin tool test', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     expect($capturedTools)->toHaveCount(1);
     expect($capturedTools[0]['function']['name'])->toBe('test-plugin:plugin_search');
@@ -3289,6 +3236,7 @@ it('resolveToolByName strips plugin prefix from LLM tool call names', function (
     enableToolsForAgent($agentId, $tools);
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $task = $orch->start($agentId, 'Plugin prefix test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     // Tool resolves to stub_input (after stripping prefix) and executes successfully.
@@ -3372,9 +3320,10 @@ it('resolveLlmConfig falls back to default temperature when llmConfigService is 
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
     $task = $orch->start($agentId, 'Temperature default test', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     // Should complete without throwing even though llmConfigService is null.
-    expect($task->status)->toBe('COMPLETED');
+    expect($task->refresh()->status)->toBe('COMPLETED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -3411,6 +3360,7 @@ it('publishIntermediateState falls back to a default ToolCallSerializer when non
     );
 
     $task = $orch->start($agentId, 'Default serializer test', maxSteps: 10);
+    claimAndTick($orch, $task->id);
 
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
@@ -3469,7 +3419,8 @@ it('tick uses the default system prompt when agent has no system_prompt set', fu
 
     // The seeded agent has no system_prompt — verify the orchestrator substitutes the default.
     $orch = makeOrchestrator(mockDriverFactory($mock));
-    $orch->start($agentId, 'Default system prompt test', maxSteps: 5);
+    $task = $orch->start($agentId, 'Default system prompt test', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     expect($capturedRequest)->not->toBeNull()
         ->and($capturedRequest->systemPrompt)->toBe('You are a helpful AI assistant.');
@@ -3492,7 +3443,8 @@ it('tick uses the agent-provided system_prompt when set', function (): void {
     });
 
     $orch = makeOrchestrator(mockDriverFactory($mock));
-    $orch->start($agentId, 'Custom system prompt test', maxSteps: 5);
+    $task = $orch->start($agentId, 'Custom system prompt test', maxSteps: 5);
+    claimAndTick($orch, $task->id);
 
     expect($capturedRequest)->not->toBeNull()
         ->and($capturedRequest->systemPrompt)->toBe('You are the test agent. Always answer with "OK".');
@@ -3538,6 +3490,7 @@ describe('Orchestrator::handleToolCalls — happy path', function (): void {
             ),
         );
         $task = $orch->start($agentId, 'Happy path test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         // Auto-approved → no PENDING_APPROVAL, loop completes in 2 turns.
@@ -3575,6 +3528,7 @@ describe('Orchestrator::handleToolCalls — happy path', function (): void {
         enableToolsForAgent($agentId, $tools);
         $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
         $task = $orch->start($agentId, 'Approval queue test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         // Approval is required → orchestrator pauses, tick() is NOT recursed.
@@ -3617,6 +3571,7 @@ describe('Orchestrator::handleToolCalls — disabled tool', function (): void {
         // Note: enableToolsForAgent is intentionally NOT called for the agent.
         $orch = makeOrchestrator(mockDriverFactory($mock), [new StubInputTool()]);
         $task = $orch->start($agentId, 'Disabled tool test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         // The error is fed back to the LLM and the loop recovers.
@@ -3656,6 +3611,7 @@ describe('Orchestrator::handleToolCalls — validation failure', function (): vo
         enableToolsForAgent($agentId, $tools);
         $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
         $task = $orch->start($agentId, 'Validation failure test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         // Validation failure is recoverable — the LLM is given a second chance.
@@ -3698,6 +3654,7 @@ describe('Orchestrator::handleToolCalls — safeExecute catches throwable', func
         enableToolsForAgent($agentId, $tools);
         $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
         $task = $orch->start($agentId, 'Throw recovery test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         // The throwable is caught; the loop survives.
@@ -3746,6 +3703,7 @@ describe('Orchestrator::handleToolCalls — HasOperations operation disabled', f
         enableToolsForAgent($agentId, $tools);
         $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
         $task = $orch->start($agentId, 'Operation disabled test', maxSteps: 10);
+        claimAndTick($orch, $task->id);
 
         $task->refresh();
         expect($task->status)->toBe('COMPLETED');
@@ -4096,12 +4054,14 @@ it('retry resets failed-task state in place (error fields cleared, history prese
     ]);
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'retry me']);
 
-    // Mock the LLM to succeed — tick in Sync mode runs immediately and
-    // transitions the task FAILED → RUNNING → COMPLETED.
+    // Mock the LLM to succeed — retry() re-queues the row and the next
+    // tick transitions it FAILED → QUEUED → RUNNING → COMPLETED.
     $driver = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_retry'));
-    $orch   = makeOrchestrator(mockDriverFactory($driver), workerMode: WorkerMode::Sync);
+    $orch   = makeOrchestrator(mockDriverFactory($driver));
 
     $retried = $orch->retry($task->id);
+    claimAndTick($orch, $retried->id);
+    $retried->refresh();
 
     // Same task id, no new row created. The original 'user' row is preserved
     // as LLM context; the post-retry tick adds the assistant response row.
@@ -4145,7 +4105,7 @@ it('retry resets the failed task in place and clears retry_of_task_id so the mai
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'retry me']);
 
     $driver = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_retry'));
-    $orch   = makeOrchestrator(mockDriverFactory($driver), workerMode: WorkerMode::Worker);
+    $orch   = makeOrchestrator(mockDriverFactory($driver));
 
     $retried = $orch->retry($task->id);
 
@@ -4183,4 +4143,68 @@ it('retry throws when the task is not in FAILED status', function (): void {
 
     expect(fn() => $orch->retry($task->id))
         ->toThrow(InvalidTaskTransitionException::class, 'Can only retry failed tasks');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('singleStep=true breaks the post-tool-batch recursive tick so client-worker mode shows one LLM turn per call', function (): void {
+    // Stub driver mirrors the "Run input tool" pattern: first turn returns
+    // a tool_call, second turn returns the final text response. The
+    // orchestrator's recursive-tick chain would normally consume both
+    // turns inside a single Orchestrator::tick() call. With singleStep
+    // (the client-worker /tick controller sets it), the chain is broken
+    // after turn 1 so the SPA's per-tick rendering shows the tool call
+    // landing before the final answer.
+    [$agentId] = seedAgent();
+
+    $callCount = 0;
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(function () use (&$callCount) {
+        $callCount++;
+        if ($callCount === 1) {
+            return new LLMResponse(null, [new DriverToolCall('call_1', 'stub_input', [])], 10, 5, 'cmp_1');
+        }
+        return new LLMResponse('Done via input tool.', [], 10, 5, 'cmp_2');
+    });
+    $mock->allows('getProviderName')->andReturn('mock');
+    $mock->allows('getModelName')->andReturn('mock-model');
+    $mock->allows('supportsImageInput')->andReturn(false);
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Run input tool', maxSteps: 10);
+
+    // Manually claim the row to RUNNING so the recursive-tick gate at the
+    // start of runTick() doesn't bail — mirrors TaskTickController's CAS
+    // claim path.
+    Task::where('id', $task->id)
+        ->where('status', 'QUEUED')
+        ->update(['status' => 'RUNNING']);
+
+    $orch->tick($task->id, (new OrchestratorConfig())->withSingleStep(true));
+
+    $task->refresh();
+    // Turn 1 ran: tool_call persisted, status back to QUEUED, no final
+    // answer. step_count = 1 because dispatchLlmTurn incremented it once.
+    expect($task->status)->toBe('QUEUED')
+        ->and($task->step_count)->toBe(1)
+        ->and($task->final_response)->toBeNull();
+
+    $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
+    expect($toolCallRecord)->not->toBeNull()
+        ->and($toolCallRecord->status)->toBe('APPROVED')
+        ->and($toolCallRecord->result_content)->toBe('input_result');
+
+    // Re-claim (the reaper would have cleared RUNNING to FAILED on lease
+    // expiry — in practice the browser fires the next /tick fast enough
+    // that the row stays QUEUED). Second tick: turn 2 returns text,
+    // task completes.
+    Task::where('id', $task->id)
+        ->where('status', 'QUEUED')
+        ->update(['status' => 'RUNNING']);
+    $orch->tick($task->id, (new OrchestratorConfig())->withSingleStep(true));
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->step_count)->toBe(2)
+        ->and($task->final_response)->toBe('Done via input tool.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());

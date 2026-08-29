@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
-use Carbon\Carbon;
+use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use JsonException;
 use OpenApi\Attributes as OA;
@@ -18,6 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Handles task listing, status updates, cancellation, and real-time SSE streaming.
+ * Tick and cancelRetryChain live on dedicated controllers (TaskTickController,
+ * RetryChainController) so this class stays under the S1448 method-count ceiling.
  */
 final class TaskController
 {
@@ -36,12 +38,14 @@ final class TaskController
     /**
      * GET /api/v1/tasks
      * Optional ?agent_id=X query param to scope results to a specific agent.
+     * Optional ?status=X to filter by task status (e.g. RUNNING, FAILED).
      * Optional ?page=X&per_page=X for pagination (default per_page=20, max=100).
      */
     public function index(Request $request): JsonResponse
     {
         $userId  = $this->authService->currentUserId();
         $agentId = $request->query->has('agent_id') ? (int) $request->query->get('agent_id') : null;
+        $status = $request->query->has('status') ? (string) $request->query->get('status') : null;
         $since = $request->query->has('since') ? $request->query->get('since') : null;
 
         $page = $request->query->has('page') ? max(1, (int) $request->query->get('page')) : null;
@@ -51,7 +55,7 @@ final class TaskController
         $serverTime = Carbon::now()->toIso8601String();
 
         // Agent ownership validation is done inside the service
-        $result = $this->taskService->getTasksForUser($userId, $agentId, $since, $page, $perPage);
+        $result = $this->taskService->getTasksForUser($userId, $agentId, $since, $page, $perPage, $status);
 
         // When paginated, result is ['tasks' => [...], 'meta' => [...]] (not a list)
         // When not paginated, result is a flat array (list)
@@ -483,27 +487,6 @@ final class TaskController
             ['error' => ['code' => 'NOT_FOUND', 'message' => self::ERR_TASK_NOT_FOUND]],
             Response::HTTP_NOT_FOUND,
         );
-    }
-
-    /**
-     * DELETE /api/v1/tasks/{taskId}/retry-chain
-     *
-     * Cancels this task and ALL subsequent retry tasks in the same retry chain.
-     * All retry tasks share the same retry_of_task_id (the root original task),
-     * so a single WHERE clause cancels the entire chain.
-     */
-    public function cancelRetryChain(Request $request): Response
-    {
-        $userId = $this->authService->currentUserId();
-        $taskId = (int) $request->attributes->get('taskId', 0);
-
-        try {
-            $this->taskService->cancelRetryChain($taskId, $userId);
-        } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
-        }
-
-        return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
     private function decodeJson(Request $request): array

@@ -170,7 +170,16 @@ function buildCapabilityController(string $model, string $driverClass): array
 
     $stub = new StubTaskService();
     $mediaCapability = new TaskMediaCapabilityService($factory);
-    return [new TaskController($authService, $stub, $mediaCapability, new ContinueTaskDispatcher($stub, $mediaCapability), new DecisionsRequestValidator($stub)), $stub];
+    return [
+        new TaskController(
+            $authService,
+            $stub,
+            $mediaCapability,
+            new ContinueTaskDispatcher($stub, $mediaCapability),
+            new DecisionsRequestValidator($stub),
+        ),
+        $stub,
+    ];
 }
 
 /**

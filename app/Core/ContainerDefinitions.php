@@ -7,25 +7,17 @@ namespace Spora\Core;
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
-use League\CommonMark\Environment\Environment as CommonMarkEnvironment;
-use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
-use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
-use League\CommonMark\MarkdownConverter;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\Orchestrator;
-use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
-use Spora\AgentTemplates\AgentTemplateAgentCreator;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
-use Spora\AgentTemplates\AgentTemplateSettingsApplier;
-use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
@@ -81,14 +73,15 @@ use Spora\Http\PluginsController;
 use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
+use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
+use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
-use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentManifest;
@@ -104,6 +97,7 @@ use Spora\Services\AuthWorkflow;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
+use Spora\Services\DbRateLimiter;
 use Spora\Services\EmailTemplateLoader;
 use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
@@ -114,9 +108,7 @@ use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\Mail\MailTemplateRenderer;
 use Spora\Services\Mail\MailTemplateSyncService;
-use Spora\Services\MailTemplateService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
@@ -133,7 +125,6 @@ use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
-use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationServiceInterface;
@@ -143,9 +134,7 @@ use Spora\Services\PluginsService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
-use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
-use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
@@ -154,7 +143,6 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
-use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
@@ -223,13 +211,15 @@ final class ContainerDefinitions
                     'app_env'             => 'production',
                     'log_level'           => 'WARNING',
                     'log_path'            => $paths->storage('spora.log'),
-                    // Sync mode when no env is set. The shipped spora/.env.example
-                    // overrides this to `false` (queue mode) for operators who
-                    // run a worker. The dual defaults are intentional — see
-                    // env-vars.md in spora-docs: the safe fallback for env-less
-                    // LAMP/FTP deploys is sync (no worker); the safe choice for
-                    // .env-using deploys is queue (worker drains it).
-                    'worker_mode'         => true,
+                    // Worker runtime mode. Default 'server' — `bin/spora worker:run`
+                    // drains the QUEUED backlog. Set `SPORA_WORKER_RUNTIME_MODE=client`
+                    // for browser SharedWorker + `/worker/housekeeping` operators
+                    // (no daemon required). Unknown values fall back to 'server'.
+                    'worker_runtime_mode' => 'server',
+                    // Seconds the reaper should wait past the last heartbeat
+                    // before flipping a RUNNING row to FAILED. Configurable via
+                    // `SPORA_TICK_LEASE_SECONDS`.
+                    'tick_lease_seconds'  => 600,
                     'worker_stale_minutes' => 60,
                     'max_workers'         => 0,
                     'llm_timeout'         => 300,
@@ -369,7 +359,8 @@ final class ContainerDefinitions
         $apply('SPORA_ALLOW_GROUP_CREATION', 'allow_group_creation', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_LOG_LEVEL', 'log_level', static fn($v) => $v);
         $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
-        $apply('SPORA_SYNC_MODE', 'worker_mode', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
+        $apply('SPORA_WORKER_RUNTIME_MODE', 'worker_runtime_mode', static fn($v) => $v);
+        $apply('SPORA_TICK_LEASE_SECONDS', 'tick_lease_seconds', static fn($v) => (int) $v);
         $apply('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes', static fn($v) => (int) $v);
         $apply('SPORA_MAX_WORKERS', 'max_workers', static fn($v) => (int) $v);
         $apply('SPORA_LLM_TIMEOUT', 'llm_timeout', static fn($v) => (int) $v);
@@ -890,6 +881,8 @@ final class ContainerDefinitions
             ConfigController::class => static function (ContainerInterface $c): ConfigController {
                 return new ConfigController(
                     $c->get('config'),
+                    $c->get(WorkerRuntimeMode::class),
+                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
                 );
             },
 
@@ -1137,6 +1130,29 @@ final class ContainerDefinitions
                 );
             },
 
+            TaskTickController::class => static function (ContainerInterface $c): TaskTickController {
+                return new TaskTickController(
+                    $c->get(AuthService::class),
+                    $c->get(TaskServiceInterface::class),
+                    $c->get(WorkerRuntimeMode::class),
+                    $c->get(DbRateLimiter::class),
+                    $c->get(MercurePublisherInterface::class),
+                    $c->get(OrchestratorInterface::class),
+                    $c->get(\Spora\Agents\ErrorClassifier::class),
+                    $c->get(\Spora\Agents\RetryScheduler::class),
+                    $c->get(NotificationService::class),
+                    $c->get(LoggerInterface::class),
+                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                );
+            },
+
+            RetryChainController::class => static function (ContainerInterface $c): RetryChainController {
+                return new RetryChainController(
+                    $c->get(AuthService::class),
+                    $c->get(TaskServiceInterface::class),
+                );
+            },
+
             DecisionsRequestValidator::class => static function (ContainerInterface $c): DecisionsRequestValidator {
                 return new DecisionsRequestValidator(
                     $c->get(TaskServiceInterface::class),
@@ -1340,13 +1356,9 @@ final class ContainerDefinitions
                 // Same circular-dependency avoidance as HandoverService: the
                 // Orchestrator takes the tool instance list (which includes
                 // HandoverTool), so we resolve it lazily when spawn() is called.
-                $config = $c->get('config');
-                $workerMode = ($config['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker;
-
                 return new SubAgentService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->has(MercurePublisherInterface::class) ? $c->get(MercurePublisherInterface::class) : null,
-                    $workerMode,
                 );
             },
         ];
@@ -1377,196 +1389,26 @@ final class ContainerDefinitions
                     $composerBinary,
                 );
             },
+
+            // `worker_runtime_mode` is read as a raw string by the env-binding
+            // above; parse it into the enum here so consumers can inject
+            // WorkerRuntimeMode directly without re-validating. Unknown
+            // values fall back to Server — operators can fix the env later
+            // without bringing the app down.
+            WorkerRuntimeMode::class => static function (ContainerInterface $c): WorkerRuntimeMode {
+                $raw = $c->get('config')['worker_runtime_mode'] ?? 'server';
+                return WorkerRuntimeMode::tryFrom((string) $raw) ?? WorkerRuntimeMode::Server;
+            },
         ];
     }
 
     private static function orchestratorDefinitions(): array
     {
-        return [
-            OrchestratorInterface::class => static function (ContainerInterface $c): OrchestratorInterface {
-                return new Orchestrator(
-                    $c->get(DriverFactory::class),
-                    new OrchestratorConfig(
-                        llmConfigService: $c->get(LLMConfigService::class),
-                        toolInstances: $c->get('tool_instances'),
-                        logger: $c->get(LoggerInterface::class),
-                        workerMode: ($c->get('config')['worker_mode'] ?? true) ? WorkerMode::Sync : WorkerMode::Worker,
-                        notificationService: $c->get(NotificationService::class),
-                        pluginLoader: $c->get(PluginLoader::class),
-                        mercure: $c->get(MercurePublisherInterface::class),
-                        toolConfigService: $c->get(ToolConfigService::class),
-                        toolCallSerializer: $c->get(ToolCallSerializer::class),
-                        agentService: $c->get(AgentServiceInterface::class),
-                        principalPreferences: $c->get(LLMConfigPreferences::class),
-                    ),
-                    $c->get(PrincipalResolver::class),
-                    $c->get(AuthService::class),
-                );
-            },
-
-            MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
-                $config   = $c->get('config');
-                $hubUrl   = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
-                $jwtKey   = $config['mercure_jwt_key'] ?? null;
-                $client   = $c->get(HttpClientInterface::class);
-
-                return new MercurePublisher($client, $hubUrl, $jwtKey, $c->get(LoggerInterface::class));
-            },
-
-            NotificationService::class => static function (ContainerInterface $c): NotificationService {
-                return new NotificationService(
-                    $c->get(MercurePublisherInterface::class),
-                    $c->get(SystemMailer::class),
-                    $c->get('config'),
-                );
-            },
-
-            NotificationServiceInterface::class => static function (ContainerInterface $c): NotificationServiceInterface {
-                return $c->get(NotificationService::class);
-            },
-
-            SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
-                return new SystemMailer(
-                    $c->get('config'),
-                    $c->get(LoggerInterface::class),
-                    $c->get(MailTemplateRenderer::class),
-                );
-            },
-
-            // Markdown → HTML pipeline. CommonMarkCore + GFM gives tables,
-            // strikethrough, autolinks, task lists. Used by SystemMailer and
-            // by anything that renders a MailTemplate body.
-            CommonMarkEnvironment::class => static function (): CommonMarkEnvironment {
-                $env = new CommonMarkEnvironment();
-                $env->addExtension(new CommonMarkCoreExtension());
-                $env->addExtension(new GithubFlavoredMarkdownExtension());
-                return $env;
-            },
-
-            MarkdownConverter::class => static function (ContainerInterface $c): MarkdownConverter {
-                return new MarkdownConverter($c->get(CommonMarkEnvironment::class));
-            },
-
-            MailTemplateRenderer::class => static function (ContainerInterface $c): MailTemplateRenderer {
-                return new MailTemplateRenderer($c->get(MarkdownConverter::class));
-            },
-
-            // PluginLoader is constructed eagerly in Kernel and added to the
-            // builder there. The AppRegistry factory above consumes it via
-            // `$c->get(PluginLoader::class)->appClasses()`.
-
-            AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
-                $pluginLoader = $c->get(PluginLoader::class);
-                $paths = $c->get(Paths::class);
-
-                $appPaths = $c->has(AppLoader::class)
-                    ? ($c->get(AppLoader::class)->getApp()?->agentTemplatePaths() ?? [])
-                    : [];
-
-                $directories = array_merge(
-                    $paths->agentTemplatesPaths(),
-                    $pluginLoader->agentTemplatePaths(),
-                    $appPaths,
-                );
-
-                return new AgentTemplateScanner($directories);
-            },
-
-            AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
-
-            ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
-                return new ToolConfigSchemaInspector(
-                    [],
-                    $c->get(PrincipalResolver::class),
-                );
-            },
-
-            // Skills are scanned in priority order: project, then framework,
-            // then each plugin. The `source` label on each root is what
-            // SkillScanner uses to bucket same-named skills (see
-            // {@see SkillScanner::scan()}) and to tag the resulting Skill objects.
-            SkillScanner::class => static function (ContainerInterface $c): SkillScanner {
-                $paths = $c->get(Paths::class);
-
-                $roots = [];
-
-                // First two roots (project + framework) come from the centralised
-                // Paths helper — the same one AgentTemplateScanner uses for its
-                // priority order. Plugin roots are appended below; their
-                // `source` label is the contributing plugin's slug.
-                $project = $paths->base('skills');
-                if (is_dir($project)) {
-                    $roots[] = ['path' => $project, 'source' => 'project'];
-                }
-
-                $framework = $paths->framework('skills');
-                if (is_dir($framework)) {
-                    $roots[] = ['path' => $framework, 'source' => 'core'];
-                }
-
-                foreach ($c->get(PluginLoader::class)->skillPaths() as $root) {
-                    if (is_dir($root['path'])) {
-                        $roots[] = $root;
-                    }
-                }
-
-                return new SkillScanner($roots);
-            },
-
-            AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
-                return new AgentTemplateImporter(
-                    $c->get(ToolConfigService::class),
-                    $c->get(PluginLoader::class),
-                    $c->get(Paths::class),
-                    $c->get(AgentTemplateToolsApplier::class),
-                    $c->get(AgentTemplateAgentCreator::class),
-                    $c->get(AgentPictureService::class),
-                );
-            },
-
-            AgentTemplateToolsApplier::class => static function (ContainerInterface $c): AgentTemplateToolsApplier {
-                return new AgentTemplateToolsApplier(
-                    $c->get(ToolConfigService::class),
-                    $c->get(AgentTemplateSettingsApplier::class),
-                );
-            },
-
-            AgentTemplateAgentCreator::class => static fn(): AgentTemplateAgentCreator => new AgentTemplateAgentCreator(),
-
-            AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
-                return new AgentTemplateSettingsApplier(
-                    $c->get(ToolConfigService::class),
-                    $c->get(SkillScanner::class),
-                );
-            },
-
-            AgentTemplateExporter::class => static fn(ContainerInterface $c): AgentTemplateExporter => new AgentTemplateExporter(
-                $c->get(PluginLoader::class),
-                $c->get(ToolConfigService::class),
-                $c->get(ToolConfigSchemaInspector::class),
-            ),
-
-            MailTemplateServiceInterface::class => static function (ContainerInterface $c): MailTemplateServiceInterface {
-                return new MailTemplateService($c->get(MailTemplateRenderer::class));
-            },
-            MailTemplateSyncService::class => static function (ContainerInterface $c): MailTemplateSyncService {
-                return new MailTemplateSyncService(
-                    $c->get(EmailTemplateLoader::class),
-                    $c->get(MailTemplateServiceInterface::class),
-                );
-            },
-            PromptTemplateServiceInterface::class => static fn(): PromptTemplateServiceInterface => new PromptTemplateService(),
-            EmailTemplateLoader::class => static function (ContainerInterface $c): EmailTemplateLoader {
-                return new EmailTemplateLoader($c->get(Paths::class));
-            },
-            ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
-                return new ScheduledRunService(
-                    $c->get(OrchestratorInterface::class),
-                    $c->get(MercurePublisherInterface::class),
-                );
-            },
-            MailTemplate::class => static fn(): MailTemplate => new MailTemplate(),
-        ];
+        // Thin shim. The orchestrator slice needs several helpers to keep each
+        // one under the S138 function-length limit, so it lives in its own
+        // class rather than costing ContainerDefinitions method-count budget
+        // against the S1448 ceiling.
+        return OrchestratorContainerBindings::all();
     }
 
     private static function consoleCommandDefinitions(): array
@@ -1612,6 +1454,7 @@ final class ContainerDefinitions
                     $c->get(MercurePublisherInterface::class),
                     $c->get(NotificationService::class),
                     $c->get(Paths::class),
+                    $c->get(WorkerRuntimeMode::class),
                 );
             },
 
@@ -1620,6 +1463,7 @@ final class ContainerDefinitions
                     $c->get(Database::class),
                     $c,
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(WorkerRuntimeMode::class),
                 );
             },
 

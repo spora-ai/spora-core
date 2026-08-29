@@ -9,7 +9,7 @@ use Psr\Container\ContainerInterface;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\WorkerMode;
+use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Task;
@@ -51,6 +51,7 @@ final class TaskRunCommand extends Command
         private readonly Database               $database,
         private readonly ContainerInterface     $container,
         private readonly MercurePublisherInterface $mercure,
+        private readonly WorkerRuntimeMode      $workerRuntimeMode,
     ) {
         parent::__construct('task:run');
     }
@@ -62,6 +63,25 @@ final class TaskRunCommand extends Command
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        // The server-mode daemon spawns task:run via proc_open — in client mode
+        // that path is unreachable. Gate here as defense-in-depth for operators
+        // who invoke it manually from the CLI.
+        if ($this->workerRuntimeMode === WorkerRuntimeMode::Client) {
+            $this->writeClientModeError($output);
+            return Command::FAILURE;
+        }
+
+        return $this->runTask($input, $output);
+    }
+
+    private function writeClientModeError(OutputInterface $output): void
+    {
+        $output->writeln('<error>task:run disabled: Spora is running in client-worker mode.</error>');
+        $output->writeln('<comment>Tasks are driven by your browser. Use Retry from the UI instead.</comment>');
+    }
+
+    private function runTask(InputInterface $input, OutputInterface $output): int
     {
         $taskId = (int) $input->getArgument('taskId');
 
@@ -152,7 +172,6 @@ final class TaskRunCommand extends Command
                 llmConfigService: $this->container->get(LLMConfigService::class),
                 toolInstances: $this->container->get('tool_instances'),
                 logger: $this->container->get(\Psr\Log\LoggerInterface::class),
-                workerMode: WorkerMode::Sync,
                 notificationService: $this->container->get(NotificationService::class),
                 mercure: $this->mercure,
                 toolConfigService: $this->container->get(\Spora\Services\ToolConfigService::class),

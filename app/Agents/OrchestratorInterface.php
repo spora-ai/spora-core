@@ -33,8 +33,24 @@ interface OrchestratorInterface
 
     /**
      * One iteration of the loop. Called by the Symfony Messenger handler.
+     *
+     * `$config` is the lease-aware config used by client/server-mode ticks
+     * (browser SharedWorker, scheduled-run housekeeping). When supplied,
+     * the orchestrator threads the lease owner through `TickPhaseRunner`
+     * so the reaper cannot flip a still-progressing task to FAILED.
+     * When omitted, the orchestrator uses its stored `currentTickConfig`
+     * (set by a parent tick), or no lease at all (the messenger daemon's
+     * default path — `WorkerQueueProcessor` runs the whole task inline,
+     * so by the time the reaper would look at the row it's either
+     * terminal or has a fresh `updated_at` from the in-flight tick).
+     *
+     * Caveat: a row whose lease is NULL but whose `updated_at` is older
+     * than the reaper's threshold is reapable — the reaper's predicate
+     * is `(lease_expires_at IS NULL OR lease_expires_at <= now)` AND
+     * `updated_at <= threshold`. NULL-lease rows are NOT safer; they
+     * simply haven't been claimed yet.
      */
-    public function tick(int $taskId): void;
+    public function tick(int $taskId, ?OrchestratorConfig $config = null): void;
 
     /**
      * Apply per-call approval or rejection decisions to a task paused for human review.

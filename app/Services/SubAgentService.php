@@ -9,7 +9,6 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -58,7 +57,6 @@ final class SubAgentService implements SubAgentServiceInterface
     public function __construct(
         private readonly Closure $orchestratorFactory,
         private readonly ?MercurePublisherInterface $mercure = null,
-        private readonly WorkerMode $workerMode = WorkerMode::Sync,
         ?PrincipalService $principalService = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
@@ -326,20 +324,14 @@ final class SubAgentService implements SubAgentServiceInterface
         unset($data['spawned_sub_task_ids']);
         unset($data['sub_agent_expected_count']);
 
-        $newStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-
         Capsule::table('tasks')
             ->where('id', $parent->id)
             ->update([
-                'status' => $newStatus,
+                'status' => 'QUEUED',
                 'data'   => json_encode($data, JSON_THROW_ON_ERROR),
             ]);
 
         $this->publishParentState($parent->id, $parent->user_id);
-
-        if ($this->workerMode === WorkerMode::Sync) {
-            $orchestrator->tick($parent->id);
-        }
     }
 
     /**

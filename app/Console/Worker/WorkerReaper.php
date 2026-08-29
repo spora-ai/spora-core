@@ -9,7 +9,6 @@ use DateTimeZone;
 use Psr\Log\LoggerInterface;
 use Spora\Models\Task;
 use Spora\Services\NotificationService;
-use Spora\Workers\WorkerTickPlanner;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -24,8 +23,6 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 final class WorkerReaper
 {
-    private const DB_DATETIME_FORMAT = 'Y-m-d H:i:s';
-
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly NotificationService $notificationService,
@@ -37,61 +34,48 @@ final class WorkerReaper
             return;
         }
 
-        $maxAgeSeconds = $staleMinutes * 60;
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $threshold = $now->modify(sprintf('-%d seconds', $staleMinutes * 60));
 
-        $orphanedIds = $this->findOrphanedTaskIds($maxAgeSeconds, $now);
+        // Lease-aware + retry-chain-aware. The reaper is shared between server-mode
+        // daemon (`WorkerRunCommand --once`) and client-mode HTTP housekeeping, so the
+        // SQL must work for either runtime. `retry_of_task_id IS NULL` excludes the
+        // retry chain — orphaned retries are reported up to the root via
+        // `RetryScheduler::scheduleRootRetry` and are never flipped directly by the
+        // reaper (otherwise a reaper pass would race a pending retry and erase the
+        // root's failure context).
+        $orphanedIds = Task::where('status', 'RUNNING')
+            ->where(function ($q) use ($now): void {
+                $q->whereNull('lease_expires_at')
+                    ->orWhere('lease_expires_at', '<=', $now);
+            })
+            ->where('updated_at', '<=', $threshold)
+            ->whereNull('retry_of_task_id')
+            ->pluck('id')
+            ->all();
+
         if ($orphanedIds === []) {
             return;
         }
 
-        $updated = $this->markOrphansFailed($orphanedIds, $staleMinutes);
+        // WORKER_DISCONNECTED is the reaper's marker for "the lease holder
+        // vanished" — browser tab closed, housekeeping request dropped,
+        // server worker SIGKILL'd. The legacy `ORPHANED` code is reserved in
+        // {@see ErrorClassifier::RETRYABLE_ERROR_CODES} for compatibility with
+        // any historical row that still carries it, but no code path emits
+        // it anymore.
+        $updated = Task::whereIn('id', $orphanedIds)->update([
+            'status'         => 'FAILED',
+            'failure_reason' => "Task orphaned: lease expired and no progress for {$staleMinutes} minutes.",
+            'error_code'     => 'WORKER_DISCONNECTED',
+            'error_message'  => 'The browser driving this task disconnected. Click Retry to start a fresh attempt.',
+        ]);
         if ($updated <= 0) {
             return;
         }
 
         $this->reportReaped($updated, $staleMinutes, $output);
         $this->notifyOrphans($orphanedIds);
-    }
-
-    /**
-     * @return list<int>
-     */
-    private function findOrphanedTaskIds(int $maxAgeSeconds, DateTimeImmutable $now): array
-    {
-        $candidates = Task::where('status', 'RUNNING')
-            ->get(['id', 'status', 'updated_at']);
-
-        $orphanedIds = [];
-        foreach ($candidates as $candidate) {
-            $payload = [
-                'id'         => $candidate->id,
-                'status'     => $candidate->status,
-                'updated_at' => $candidate->updated_at !== null
-                    ? $candidate->updated_at->format(self::DB_DATETIME_FORMAT)
-                    : null,
-            ];
-            if (WorkerTickPlanner::isOrphan($payload, $maxAgeSeconds, $now)) {
-                $orphanedIds[] = $candidate->id;
-            }
-        }
-        return $orphanedIds;
-    }
-
-    /**
-     * @param list<int> $orphanedIds
-     */
-    private function markOrphansFailed(array $orphanedIds, int $staleMinutes): int
-    {
-        return Task::whereIn('id', $orphanedIds)->update([
-            'status'         => 'FAILED',
-            'failure_reason' => sprintf(
-                'Task orphaned: still RUNNING after %d minutes — worker process likely crashed or was restarted.',
-                $staleMinutes,
-            ),
-            'error_code'    => 'ORPHANED',
-            'error_message' => 'The task was interrupted. Click Retry to start a fresh attempt.',
-        ]);
     }
 
     private function reportReaped(int $updated, int $staleMinutes, OutputInterface $output): void

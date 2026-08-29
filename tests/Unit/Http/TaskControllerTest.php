@@ -6,6 +6,7 @@ namespace Tests\Unit\Http;
 
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\RetryChainController;
 use Spora\Http\TaskController;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,7 +16,22 @@ function makeTaskController(): array
 {
     $authService = bootAuthLayer();
     $service = new StubTaskService();
-    $controller = new TaskController($authService, $service, new TaskMediaCapabilityService(), new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()), new DecisionsRequestValidator($service));
+    $controller = new TaskController(
+        $authService,
+        $service,
+        new TaskMediaCapabilityService(),
+        new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()),
+        new DecisionsRequestValidator($service),
+    );
+
+    return [$controller, $authService, $service];
+}
+
+function makeRetryChainController(): array
+{
+    $authService = bootAuthLayer();
+    $service = new StubTaskService();
+    $controller = new RetryChainController($authService, $service);
 
     return [$controller, $authService, $service];
 }
@@ -344,9 +360,9 @@ describe('TaskController::continue', function (): void {
     });
 });
 
-describe('TaskController::cancelRetryChain', function (): void {
+describe('RetryChainController::cancelRetryChain', function (): void {
     test('returns 200 with deleted: true on success', function (): void {
-        [$controller, $authService] = makeTaskController();
+        [$controller, $authService] = makeRetryChainController();
         bootAuth($authService);
 
         $request = new Request();
@@ -357,7 +373,7 @@ describe('TaskController::cancelRetryChain', function (): void {
     });
 
     test('returns 404 for unknown id', function (): void {
-        [$controller, $authService] = makeTaskController();
+        [$controller, $authService] = makeRetryChainController();
         bootAuth($authService);
 
         $request = new Request();

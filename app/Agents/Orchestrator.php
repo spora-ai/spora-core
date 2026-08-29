@@ -13,7 +13,6 @@ use Spora\Agents\Exceptions\ToolContractException;
 use Spora\Agents\Exceptions\ToolNotRegisteredException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
@@ -60,7 +59,23 @@ final class Orchestrator implements OrchestratorInterface
     public readonly AgentDecisionProcessor $agentDecisionProcessor;
     public readonly AgentStateResolver $agentStateResolver;
     public readonly TaskStatusWriter $statusWriter;
-    public readonly WorkerMode $workerMode;
+
+    /** Lease config threaded through recursive ticks within the same
+     *  HTTP request (or worker daemon). Set by the outermost `tick()`
+     *  call so child calls inherit the same lease without each level
+     *  needing to re-pass the config. Cleared in a finally block so an
+     *  exception does not leak the config into the next request. */
+    private ?OrchestratorConfig $currentTickConfig = null;
+
+    /**
+     * Read-only accessor for collaborators (e.g. ContextWindowRecovery)
+     * that need to know whether the current tick is in single-step
+     * mode without poking at the orchestrator's internals.
+     */
+    public function currentTickConfig(): ?OrchestratorConfig
+    {
+        return $this->currentTickConfig;
+    }
 
     /** @var list<object> */
     public readonly array $toolInstances;
@@ -84,7 +99,6 @@ final class Orchestrator implements OrchestratorInterface
     ) {
         $config ??= new OrchestratorConfig();
 
-        $this->workerMode            = $config->workerMode;
         $this->toolInstances         = $config->toolInstances;
         $this->logger                = $config->logger;
         $this->notificationService   = $config->notificationService;
@@ -111,7 +125,7 @@ final class Orchestrator implements OrchestratorInterface
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
         $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
-        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->workerMode, $config->logger);
+        $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
             $this,
             $driverFactory,
@@ -125,7 +139,7 @@ final class Orchestrator implements OrchestratorInterface
         );
         $this->toolCallExecutor      = new ToolCallExecutor($this);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
-        $this->agentStateResolver     = new AgentStateResolver($this, $config->workerMode);
+        $this->agentStateResolver     = new AgentStateResolver($this);
         $this->statusWriter           = new TaskStatusWriter();
     }
 
@@ -157,7 +171,7 @@ final class Orchestrator implements OrchestratorInterface
         $task = Task::create([
             'agent_id'      => $agentId,
             'user_id'       => $resolvedUserId,
-            'status'        => $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
+            'status'        => 'QUEUED',
             'user_prompt'   => Utf8Sanitizer::scrubString($userPrompt),
             'step_count'    => 0,
             'max_steps'     => $maxSteps,
@@ -171,31 +185,29 @@ final class Orchestrator implements OrchestratorInterface
             $this->appendAttachmentRow($task->id, $mediaIds);
         }
 
-        if ($this->workerMode === WorkerMode::Sync) {
-            $this->tick($task->id);
-        }
-
         return $task->fresh();
     }
 
     /**
-     * Resumes a task from a non-terminal state. Accepted source states:
+     * Resumes a task from a non-terminal state by appending the user's
+     * follow-up prompt and flipping the row back to `QUEUED`. Accepted
+     * source states:
      *
      *   - `RUNNING`           — auto-abort: flip to `ABORTED`, persist
-     *                            the wall-clock stamp, append an abort-marker
-     *                            system row, append the user's prompt, and
-     *                            return WITHOUT calling `tick()`. The next
-     *                            resume (with a fresh prompt) is what
-     *                            actually drives the LLM. Done atomically
-     *                            inside a `lockForUpdate` transaction so a
-     *                            racing tick cannot observe a half-applied
-     *                            state.
-     *   - `ABORTED`           — drop `data.aborted_at`, flip to
-     *                            `RUNNING`/`QUEUED`, append the user's
-     *                            prompt, then either tick (Sync) or queue
-     *                            (Worker).
-     *   - `COMPLETED`/`FAILED` — append the user's prompt, flip to
-     *                            `RUNNING`/`QUEUED`, tick or queue.
+     *                            the wall-clock stamp, append an
+     *                            abort-marker system row, append the
+     *                            user's prompt, then transition to
+     *                            `QUEUED`. The LLM is not driven here —
+     *                            the next tick from the worker (server-
+     *                            side daemon or browser SharedWorker) is
+     *                            what actually advances the loop. Done
+     *                            inside a `lockForUpdate` transaction so
+     *                            a racing tick cannot observe a half-
+     *                            applied state.
+     *   - `ABORTED`           — drop `data.aborted_at`, append the
+     *                            user's prompt, transition to `QUEUED`.
+     *   - `COMPLETED`/`FAILED` — append the user's prompt, transition
+     *                            to `QUEUED`.
      *
      * Throws {@see InvalidTaskTransitionException} for any other source
      * state. The marker row carries `role=system`, `content=JSON`
@@ -205,10 +217,9 @@ final class Orchestrator implements OrchestratorInterface
     public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
     {
         $sourceStatus = null;
-        $shouldTick = false;
         $taskRef = null;
 
-        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, &$sourceStatus, &$shouldTick, &$taskRef): void {
+        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, &$sourceStatus, &$taskRef): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $sourceStatus = $task->status;
 
@@ -255,11 +266,9 @@ final class Orchestrator implements OrchestratorInterface
                 $task,
                 $newPrompt,
                 $additionalSteps,
-                targetStatus: $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED',
+                targetStatus: 'QUEUED',
                 clearAbortedAt: $task->status === 'ABORTED',
             );
-
-            $shouldTick = $this->workerMode === WorkerMode::Sync;
         });
 
         if ($sourceStatus === 'RUNNING') {
@@ -269,10 +278,6 @@ final class Orchestrator implements OrchestratorInterface
                 'to'      => 'ABORTED',
                 'user_id' => $taskRef?->user_id,
             ]);
-        }
-
-        if ($shouldTick && $taskRef !== null) {
-            $this->tick($taskRef->id);
         }
 
         return $taskRef !== null ? $taskRef->fresh() : Task::findOrFail($taskId);
@@ -327,17 +332,13 @@ final class Orchestrator implements OrchestratorInterface
             throw new InvalidTaskTransitionException('Can only retry failed tasks.');
         }
 
-        $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+        $task->status = 'QUEUED';
         $task->step_count = 0;
         $task->error_code = null;
         $task->failure_reason = null;
         $task->retry_after = null;
         $task->retry_of_task_id = null;
         $task->save();
-
-        if ($this->workerMode === WorkerMode::Sync) {
-            $this->tick($task->id);
-        }
 
         return $task->fresh();
     }
@@ -429,9 +430,40 @@ final class Orchestrator implements OrchestratorInterface
         );
     }
 
-    public function tick(int $taskId): void
+    public function tick(int $taskId, ?OrchestratorConfig $config = null): void
     {
-        $this->tickPhaseRunner->runTick($taskId);
+        // Track whether THIS call owns the currentTickConfig — the
+        // outermost caller is the only one allowed to clear it in the
+        // finally block. A recursive tick (called from TickPhaseRunner
+        // during handleToolCalls) inherits the stored config and must
+        // NOT clear it on exit, otherwise the outer tick's lease would
+        // vanish mid-batch.
+        $ownedConfig = $config !== null;
+        if ($ownedConfig) {
+            $this->currentTickConfig = $config;
+        } else {
+            $config = $this->currentTickConfig;
+        }
+
+        // TickPhaseRunner reads singleStep off the stored config so the
+        // post-tool-batch recursive tick can be gated per call-site.
+        if ($config !== null && $config->singleStep) {
+            $this->tickPhaseRunner->singleStep = true;
+        } else {
+            $this->tickPhaseRunner->singleStep = false;
+        }
+
+        $leaseOwner = $config?->leaseOwner;
+        $leaseSeconds = $config !== null ? $config->tickLeaseSeconds : 600;
+        $this->tickPhaseRunner->leaseGuard->configure($leaseOwner, $leaseSeconds);
+
+        try {
+            $this->tickPhaseRunner->runTick($taskId);
+        } finally {
+            if ($ownedConfig) {
+                $this->currentTickConfig = null;
+            }
+        }
     }
 
     /**
@@ -439,9 +471,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function resume(int $taskId, array $decisions): void
     {
-        $shouldTick = false;
-
-        Capsule::connection()->transaction(function () use ($taskId, $decisions, &$shouldTick): void {
+        Capsule::connection()->transaction(function () use ($taskId, $decisions): void {
             $task = $this->agentStateResolver->loadPendingTask($taskId);
             $state = $this->agentStateResolver->loadAgentState($task);
 
@@ -450,19 +480,12 @@ final class Orchestrator implements OrchestratorInterface
 
             $this->agentDecisionProcessor->markRejectionBatch($task, $rejectedBatch);
 
-            $shouldTick = $this->agentStateResolver->applyResumeTransition($task, $approvedBatch, $remainingState);
+            $this->agentStateResolver->applyResumeTransition($task, $approvedBatch, $remainingState);
 
             if ($approvedBatch !== []) {
                 $this->approvedBatchExecutor->execute($taskId, $approvedBatch);
-                if ($this->workerMode === WorkerMode::Sync) {
-                    $shouldTick = Task::where('id', $taskId)->value('status') === 'RUNNING';
-                }
             }
         });
-
-        if ($shouldTick) {
-            $this->tick($taskId);
-        }
     }
 
     public function reject(int $taskId, string $reason): void
@@ -703,13 +726,6 @@ final class Orchestrator implements OrchestratorInterface
         }
 
         return "\n[Effective Configuration]\n" . implode("\n", $lines);
-    }
-
-    public function callTraitMethod(object $object, string $method, array $args): mixed
-    {
-        /** @var callable */
-        $callable = [$object, $method];
-        return $callable(...$args);
     }
 
     public function resolveToolByName(string $toolName): ToolInterface

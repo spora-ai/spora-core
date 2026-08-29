@@ -28,6 +28,8 @@ use Illuminate\Support\Carbon;
  * @property int         $retry_count
  * @property Carbon|null $retry_after
  * @property array|null  $data
+ * @property string|null $lease_owner
+ * @property Carbon|null $lease_expires_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -49,6 +51,8 @@ final class Task extends Model
         'failure_reason',
         'error_code',
         'error_message',
+        'lease_owner',
+        'lease_expires_at',
         'parent_task_id',
         'retry_of_task_id',
         'retry_count',
@@ -63,6 +67,7 @@ final class Task extends Model
         'retry_count'      => 'integer',
         'retry_of_task_id' => 'integer',
         'retry_after'      => 'datetime',
+        'lease_expires_at' => 'datetime',
         'data'             => 'array',
     ];
 

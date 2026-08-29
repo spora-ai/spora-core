@@ -5,22 +5,12 @@ declare(strict_types=1);
 use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
-
-function mockLlmForMode(LLMResponse $response): LLMDriverInterface
-{
-    $mock = Mockery::mock(LLMDriverInterface::class);
-    $mock->allows('complete')->andReturn($response);
-    $mock->allows('getProviderName')->andReturn('mock');
-    $mock->allows('getModelName')->andReturn('mock-model');
-    return $mock;
-}
 
 function mockDriverFactoryForMode(LLMDriverInterface $driver): DriverFactory
 {
@@ -55,24 +45,7 @@ describe('WorkerModeTest', function (): void {
         ]);
     });
 
-    it('start in sync mode creates RUNNING task and dispatches tick synchronously', function (): void {
-        $mock = mockLlmForMode(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
-
-        $orch = new Orchestrator(
-            mockDriverFactoryForMode($mock),
-            new OrchestratorConfig(
-                logger: new NullLogger(),
-                workerMode: WorkerMode::Sync,
-            ),
-        );
-
-        $task = $orch->start($this->agent->id, 'Hello sync', maxSteps: 10);
-
-        expect($task->status)->toBe('COMPLETED')
-            ->and($task->user_prompt)->toBe('Hello sync');
-    });
-
-    it('start in worker mode creates QUEUED task without dispatching tick', function (): void {
+    it('start creates QUEUED task without dispatching tick', function (): void {
         $mock = Mockery::mock(LLMDriverInterface::class);
         $mock->allows('complete')->never();
 
@@ -80,7 +53,6 @@ describe('WorkerModeTest', function (): void {
             mockDriverFactoryForMode($mock),
             new OrchestratorConfig(
                 logger: new NullLogger(),
-                workerMode: WorkerMode::Worker,
             ),
         );
 
@@ -88,6 +60,28 @@ describe('WorkerModeTest', function (): void {
 
         expect($task->status)->toBe('QUEUED')
             ->and($task->user_prompt)->toBe('Hello worker');
+    });
+
+    it('start creates QUEUED task that becomes terminal after tick', function (): void {
+        $mock = Mockery::mock(LLMDriverInterface::class);
+        $mock->allows('complete')->andReturn(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
+        $mock->allows('getProviderName')->andReturn('mock');
+        $mock->allows('getModelName')->andReturn('mock-model');
+
+        $orch = new Orchestrator(
+            mockDriverFactoryForMode($mock),
+            new OrchestratorConfig(
+                logger: new NullLogger(),
+            ),
+        );
+
+        $task = $orch->start($this->agent->id, 'Hello worker', maxSteps: 10);
+        expect($task->status)->toBe('QUEUED');
+
+        claimAndTick($orch, $task->id);
+
+        $task->refresh();
+        expect($task->status)->toBe('COMPLETED');
     });
 
     it('tick is a no-op when task is QUEUED', function (): void {
@@ -98,7 +92,6 @@ describe('WorkerModeTest', function (): void {
             mockDriverFactoryForMode($mock),
             new OrchestratorConfig(
                 logger: new NullLogger(),
-                workerMode: WorkerMode::Worker,
             ),
         );
 

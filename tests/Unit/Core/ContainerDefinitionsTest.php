@@ -116,7 +116,8 @@ afterEach(function (): void {
     foreach ([
         'SPORA_DB_DRIVER', 'SPORA_DB_HOST', 'SPORA_DB_PORT', 'SPORA_DB_NAME', 'SPORA_DB_USER',
         'SPORA_DB_PASSWORD', 'SPORA_SQLITE_BUSY_TIMEOUT', 'SPORA_APP_ENV',
-        'SPORA_ALLOW_REGISTRATION', 'SPORA_LOG_LEVEL', 'SPORA_LOG_PATH', 'SPORA_SYNC_MODE',
+        'SPORA_ALLOW_REGISTRATION', 'SPORA_LOG_LEVEL', 'SPORA_LOG_PATH',
+        'SPORA_WORKER_RUNTIME_MODE', 'SPORA_TICK_LEASE_SECONDS',
         'SPORA_WORKER_STALE_MINUTES', 'SPORA_MAX_WORKERS', 'SPORA_LLM_TIMEOUT',
         'SPORA_TOOL_HTTP_TIMEOUT', 'SPORA_MERCURE_URL', 'SPORA_MERCURE_JWT_KEY',
         'SPORA_MERCURE_PUBLISH_URL', 'SPORA_NOTIFICATIONS_EMAIL_ENABLED', 'SPORA_APP_URL',
@@ -175,7 +176,8 @@ it('configDefinition honours env var overrides for all keys', function (): void 
         'SPORA_ALLOW_REGISTRATION'       => 'false',
         'SPORA_LOG_LEVEL'                => 'INFO',
         'SPORA_LOG_PATH'                 => '/tmp/spora.log',
-        'SPORA_SYNC_MODE'                => 'false',
+        'SPORA_WORKER_RUNTIME_MODE'      => 'client',
+        'SPORA_TICK_LEASE_SECONDS'       => '900',
         'SPORA_WORKER_STALE_MINUTES'     => '30',
         'SPORA_MAX_WORKERS'              => '4',
         'SPORA_LLM_TIMEOUT'              => '600',
@@ -205,7 +207,8 @@ it('configDefinition honours env var overrides for all keys', function (): void 
             ->and($config['allow_registration'])->toBeFalse()
             ->and($config['log_level'])->toBe('INFO')
             ->and($config['log_path'])->toBe('/tmp/spora.log')
-            ->and($config['worker_mode'])->toBeFalse()
+            ->and($config['worker_runtime_mode'])->toBe('client')
+            ->and($config['tick_lease_seconds'])->toBe(900)
             ->and($config['worker_stale_minutes'])->toBe(30)
             ->and($config['max_workers'])->toBe(4)
             ->and($config['llm_timeout'])->toBe(600)
@@ -443,6 +446,8 @@ it('apiTaskControllerDefinitions includes task/workflow controllers', function (
     $def = callContainerMethod('apiTaskControllerDefinitions');
 
     expect($def)->toHaveKey(Spora\Http\TaskController::class);
+    expect($def)->toHaveKey(Spora\Http\TaskTickController::class);
+    expect($def)->toHaveKey(Spora\Http\RetryChainController::class);
     expect($def)->toHaveKey(Spora\Services\TaskServiceInterface::class);
     expect($def)->toHaveKey(Spora\Http\AgentTemplateController::class);
     expect($def)->toHaveKey(Spora\Http\PromptTemplateController::class);

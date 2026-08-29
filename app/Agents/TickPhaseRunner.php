@@ -50,7 +50,24 @@ final class TickPhaseRunner
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?SubAgentServiceInterface $subAgent = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        public readonly LeaseGuard $leaseGuard = new LeaseGuard(),
     ) {}
+
+    /**
+     * Set by Orchestrator::tick from the per-call OrchestratorConfig.
+     * When `true`, the post-tool-batch recursive tick in
+     * {@see handleToolCalls()} is suppressed — the orchestrator stops
+     * after one LLM turn so the SPA sees the intermediate tool-call
+     * batch. The browser's tick loop fires the next `/tick` when the
+     * row is still QUEUED, picking up from where this tick stopped.
+     *
+     * Field (not method) so the orchestrator can flip it cheaply on
+     * every outer tick call without a setter, and so the recursive
+     * `Orchestrator::tick()` inherits it from the outermost call
+     * automatically.
+     */
+    public bool $singleStep = false;
+
     public function runTick(int $taskId): void
     {
         $task = $this->lockRunningTaskForTick($taskId);
@@ -61,6 +78,10 @@ final class TickPhaseRunner
         // Worker-mode pickup: run approved tools persisted with `executed_at IS NULL`
         // before the LLM round-trip so the next assistant message sees the results.
         $this->executeApprovedPendingToolsForTask($task);
+
+        // After tool batch write — a slow tool batch must not let the lease
+        // expire before the LLM turn starts.
+        $this->leaseGuard->extend($taskId);
 
         // The tool above may have flipped the task out of RUNNING — the
         // `sub_agent` op suspends the parent (`status = AWAITING_SUB_AGENTS`)
@@ -77,6 +98,11 @@ final class TickPhaseRunner
         }
 
         $this->dispatchLlmTurn($taskId, $task);
+
+        // After LLM response — extend so the next recursive tick (or the
+        // post-approval pickup on the next daemon tick) does not race the
+        // reaper.
+        $this->leaseGuard->extend($taskId);
     }
 
     /**
@@ -595,6 +621,31 @@ final class TickPhaseRunner
             // must not start another LLM turn.
             $latestStatus = Task::where('id', $task->id)->value('status');
             if ($latestStatus === 'ABORTED') {
+                return;
+            }
+
+            // Before recursive tick — keep the lease alive across the next
+            // tool batch + LLM round-trip so the reaper does not flip the
+            // row mid-batch.
+            $this->leaseGuard->extend($task->id);
+
+            if ($this->singleStep) {
+                // Client-worker mode: stop after one LLM turn so the SPA
+                // sees this batch of tool calls. Flip status back to
+                // QUEUED so the browser's next /tick can CAS-claim the
+                // row (the orchestrator's claim path rejects rows that
+                // are still RUNNING, which is where the outer tick left
+                // them). Clear the lease so the reaper doesn't pick up
+                // the row while the browser is preparing the next tick —
+                // the browser re-claims it with its own lease_owner.
+                Task::where('id', $task->id)
+                    ->where('status', 'RUNNING')
+                    ->update([
+                        'status'           => 'QUEUED',
+                        'lease_owner'      => null,
+                        'lease_expires_at' => null,
+                    ]);
+                $this->publishIntermediateState(Task::find($task->id) ?? $task);
                 return;
             }
 

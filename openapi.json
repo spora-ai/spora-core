@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.17.0-70-g0051f73"
+        "version": "0.18.1-1-gc5a876b"
     },
     "servers": [
         {
@@ -2231,12 +2231,12 @@
                 ]
             }
         },
-        "/api/v1/tasks/{taskId}/retry-chain": {
-            "delete": {
+        "/api/v1/tasks/{taskId}/tick": {
+            "post": {
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "CancelRetryChain Task",
+                "summary": "Tick TaskTick",
                 "parameters": [
                     {
                         "name": "taskId",
@@ -2247,6 +2247,59 @@
                         }
                     }
                 ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/retry-chain": {
+            "delete": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "CancelRetryChain RetryChain",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/worker/housekeeping": {
+            "post": {
+                "tags": [
+                    "Worker"
+                ],
+                "summary": "Housekeeping Worker",
+                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

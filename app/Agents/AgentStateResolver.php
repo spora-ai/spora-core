@@ -7,7 +7,6 @@ namespace Spora\Agents;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
-use Spora\Agents\ValueObjects\WorkerMode;
 use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
@@ -27,7 +26,6 @@ final class AgentStateResolver
 {
     public function __construct(
         private readonly Orchestrator $orchestrator,
-        private readonly WorkerMode $workerMode,
     ) {}
 
     public function loadPendingTask(int $taskId): Task
@@ -83,7 +81,7 @@ final class AgentStateResolver
         if ($approvedBatch !== []) {
             $task->pending_state = $remainingState->toJson();
             $task->save();
-            return $this->workerMode === WorkerMode::Sync;
+            return false;
         }
 
         $hasPendingApprovals = ToolCallModel::where('task_id', $task->id)
@@ -96,9 +94,9 @@ final class AgentStateResolver
         }
 
         $task->pending_state = null;
-        $task->status = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
+        $task->status = 'QUEUED';
         $task->save();
-        return $this->workerMode === WorkerMode::Sync;
+        return false;
     }
 
     public function recordBulkRejection(Task $task, string $reason): void
@@ -128,20 +126,13 @@ final class AgentStateResolver
     }
 
     /**
-     * Updates the task's status after a task-level `reject()` and triggers a
-     * follow-up `tick()` only in Sync mode so the LLM round-trip does not
-     * hold the lockForUpdate open.
-     *
-     * @return bool true when `tick()` was invoked; false otherwise.
+     * Updates the task's status after a task-level `reject()`. In the
+     * queue-and-tick world the row returns to QUEUED; the daemon (or
+     * browser worker) picks it up on the next tick.
      */
     public function transitionTaskAfterRejection(int $taskId): bool
     {
-        $taskStatus = $this->workerMode === WorkerMode::Sync ? 'RUNNING' : 'QUEUED';
-        Task::where('id', $taskId)->update(['status' => $taskStatus]);
-        if ($this->workerMode !== WorkerMode::Sync) {
-            return false;
-        }
-        $this->orchestrator->tick($taskId);
-        return true;
+        Task::where('id', $taskId)->update(['status' => 'QUEUED']);
+        return false;
     }
 }

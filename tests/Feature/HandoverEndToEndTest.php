@@ -210,6 +210,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
 
         // Step 3: Start the chat with Source agent. Tick 1 should pause for approval.
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
+        claimAndTick($orch, $source->id);
         $source->refresh();
 
         // Step 4: HandoverTool requires approval, so the task is paused.
@@ -230,6 +231,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
+        claimAndTick($orch, $source->id);
 
         // Step 5: A new task is owned by the target agent, with
         // parent_task_id = source.
@@ -243,13 +245,13 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         expect($newTask->user_prompt)->toBe(HANDOVER_E2E_SUMMARY);
 
         // Step 6: Source task final state.
-        // After resume, the orchestrator's `completeResume` flips the
-        // source back to RUNNING and runs tick() again. The second LLM
-        // call returns text, which the orchestrator writes via
-        // `completeTaskWithResponse` — overwriting the HandoverService's
-        // `final_response="Handed off to Target Agent."` with the LLM text.
-        // This is a real interaction between the HandoverService and the
-        // orchestrator's resume flow; recorded here for the verifier.
+        // After resume, `completeResume` re-queues the source; the next tick
+        // runs the approved handover and then takes a second LLM turn whose
+        // text the orchestrator writes via `completeTaskWithResponse` —
+        // overwriting the HandoverService's
+        // `final_response="Handed off to Target Agent."`. This is a real
+        // interaction between the HandoverService and the resume flow;
+        // recorded here for the verifier.
         expect($source->status)->toBe('COMPLETED');
 
         // Step 7: The tool_call row's result_data flows through the task
@@ -308,6 +310,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         $orch = $built['outer'];
 
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
+        claimAndTick($orch, $source->id);
         $source->refresh();
         expect($source->status)->toBe('PENDING_APPROVAL');
 
@@ -320,6 +323,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
+        claimAndTick($orch, $source->id);
 
         // No new task for the target agent.
         $newTaskCount = Task::where('agent_id', $targetAgentId)->count();
@@ -369,6 +373,8 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         $orch = $built['outer'];
 
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
+        claimAndTick($orch, $source->id);
+
         $orch->resume($source->id, [[
             'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
             'decision' => 'approve',
@@ -378,6 +384,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                 'prompt' => HANDOVER_E2E_SUMMARY,
             ],
         ]]);
+        claimAndTick($orch, $source->id);
 
         $newTask = Task::where('parent_task_id', $source->id)->first();
         expect($newTask)->not->toBeNull();
