@@ -445,3 +445,106 @@ test('facade wires the schema, crypto, and name-resolver collaborators', functio
         'allowed_target_agents'  => [],
     ]);
 })->afterEach(fn() => Database::resetBootState());
+
+// pruneAgentOverrideByPrincipal — called by AgentPrincipalService::transferAgent
+// after the agent's principal_id changes, so the LLM-facing
+// `allowed_target_agents` list (multi-select, resolveAs=agent) stays in
+// sync with the new principal scope. The runtime `sharePrincipal()` gate
+// in HandoverTool still rejects stale ids at execute time, but pruning
+// them up-front keeps the LLM-facing tool definition honest.
+
+test('pruneAgentOverrideByPrincipal drops ids that do not share the new principal', function (): void {
+    [$service, , $authService] = makeToolConfigService();
+
+    // Source agent (in principal-A) and two target agents (one in A,
+    // one in B). Override references both plus an unrelated agent in a
+    // third principal C.
+    $userA = $authService->register('prune-a@example.com', 'Password1!', 'A');
+    $userB = $authService->register('prune-b@example.com', 'Password1!', 'B');
+    $principalA = createUserPrincipalPublic($userA);
+    $principalB = createUserPrincipalPublic($userB);
+
+    $sourceAgent = Agent::create([
+        'principal_id' => $principalA,
+        'name'         => 'Source',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ])->id;
+    $targetInA = Agent::create([
+        'principal_id' => $principalA,
+        'name'         => 'TargetInA',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ])->id;
+    $targetInB = Agent::create([
+        'principal_id' => $principalB,
+        'name'         => 'TargetInB',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ])->id;
+
+    $service->putAgentOverride(TestTool::class, $sourceAgent, [
+        'allowed_target_agents' => [$targetInA, $targetInB, 999_999],
+        'max_results'           => '20',
+    ]);
+
+    // Transfer source from A → B. After the transfer, only $targetInB
+    // shares the new principal; the rest should be pruned.
+    $removed = $service->pruneAgentOverrideByPrincipal(TestTool::class, $sourceAgent, $principalB);
+
+    expect($removed)->toBe(2);
+    $stored = $service->getRawAgentOverride(TestTool::class, $sourceAgent);
+    expect($stored['allowed_target_agents'])->toBe([$targetInB]);
+    // Non-agent-id settings are untouched.
+    expect($stored['max_results'])->toBe('20');
+})->afterEach(fn() => Database::resetBootState());
+
+test('pruneAgentOverrideByPrincipal is a no-op when no override exists', function (): void {
+    [$service] = makeToolConfigService();
+    expect($service->pruneAgentOverrideByPrincipal(TestTool::class, 999_999, 42))->toBe(0);
+})->afterEach(fn() => Database::resetBootState());
+
+test('pruneAgentOverrideByPrincipal keeps every target when they all share the new principal', function (): void {
+    [$service, , $authService] = makeToolConfigService();
+
+    $userId = $authService->register('prune-keep@example.com', 'Password1!', 'Keep');
+    $principal = createUserPrincipalPublic($userId);
+
+    $source = Agent::create([
+        'principal_id' => $principal,
+        'name'         => 'Source',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ])->id;
+    $t1 = Agent::create(['principal_id' => $principal, 'name' => 'T1', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
+    $t2 = Agent::create(['principal_id' => $principal, 'name' => 'T2', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
+
+    $service->putAgentOverride(TestTool::class, $source, [
+        'allowed_target_agents' => [$t1, $t2],
+    ]);
+
+    expect($service->pruneAgentOverrideByPrincipal(TestTool::class, $source, $principal))->toBe(0);
+    expect($service->getRawAgentOverride(TestTool::class, $source)['allowed_target_agents'])
+        ->toBe([$t1, $t2]);
+})->afterEach(fn() => Database::resetBootState());
+
+test('pruneAgentOverrideByPrincipal is a no-op when the override has no agent-id keys', function (): void {
+    [$service, , $authService] = makeToolConfigService();
+
+    // Seed an agent + override without any multi-select `resolveAs=agent` keys.
+    $agentId = makeAgent($authService, 'no-agent-ids');
+    $service->putAgentOverride(TestTool::class, $agentId, [
+        'max_results' => '15',
+    ]);
+
+    expect($service->pruneAgentOverrideByPrincipal(TestTool::class, $agentId, 42))->toBe(0);
+    expect($service->getRawAgentOverride(TestTool::class, $agentId)['max_results'])->toBe('15');
+})->afterEach(fn() => Database::resetBootState());
