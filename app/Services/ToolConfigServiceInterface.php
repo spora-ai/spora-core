@@ -45,6 +45,26 @@ interface ToolConfigServiceInterface
     public function deleteAgentOverride(string $toolClass, int $agentId): void;
 
     /**
+     * Drop every agent-id target from the per-agent override whose
+     * agent does NOT share `$newPrincipalId`. Called after an agent's
+     * `principal_id` changes (e.g. via `transferAgent`) so the
+     * LLM-facing list of valid targets stays in sync with the new
+     * principal scope — otherwise the stored list still contains the
+     * old principal's agents and the LLM can only pick from stale ids.
+     *
+     * Only multi-select settings with `resolveAs === 'agent'` are
+     * considered (e.g. HandoverTool's `allowed_target_agents`).
+     * Settings are read, filtered, and written back through the same
+     * crypto + merge pipeline as `putAgentOverride`, so encryption and
+     * schema filtering are preserved.
+     *
+     * Returns the total count of ids removed across all such settings,
+     * or 0 if nothing changed (no override, no matching settings, or
+     * every target already shared the new principal).
+     */
+    public function pruneAgentOverrideByPrincipal(string $toolClass, int $agentId, int $newPrincipalId): int;
+
+    /**
      * @return array<string, mixed>
      */
     public function getRawAgentOverride(string $toolClass, int $agentId): array;

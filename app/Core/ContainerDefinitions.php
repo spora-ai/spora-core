@@ -793,10 +793,15 @@ final class ContainerDefinitions
 
             // Principal materialisation + agent-transfer path. Split out of
             // AgentService so the umbrella stays under the SonarCloud
-            // S1448 20-method-per-class ceiling.
+            // S1448 20-method-per-class ceiling. ToolConfigService is
+            // optional — the transfer call prunes per-agent handover
+            // allowlists when the new principal doesn't share their
+            // previous targets. Tests can leave it null to skip the
+            // prune path.
             AgentPrincipalService::class => static function (ContainerInterface $c): AgentPrincipalService {
                 return new AgentPrincipalService(
                     $c->get(PrincipalService::class),
+                    $c->get(ToolConfigService::class),
                 );
             },
 

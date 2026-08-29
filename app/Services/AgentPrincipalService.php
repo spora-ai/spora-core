@@ -8,6 +8,7 @@ use PDOException;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Services\Exceptions\DependencyNotWiredException;
+use Spora\Tools\HandoverTool;
 
 /**
  * Principal-aware slice of the agent lifecycle: materialising the
@@ -26,6 +27,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
 
     public function __construct(
         private readonly ?PrincipalService $principalService = null,
+        private readonly ?ToolConfigServiceInterface $toolConfigService = null,
     ) {}
 
     public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
@@ -33,7 +35,31 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
         if ($this->principalService === null) {
             throw new DependencyNotWiredException('PrincipalService not wired into AgentPrincipalService — cannot transfer.');
         }
-        return $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+
+        $agent = $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+
+        // After a successful transfer the agent's principal_id may have
+        // changed; any per-agent override on HandoverTool holds a
+        // `allowed_target_agents` list that the operator picked before
+        // the transfer — those ids now belong to the OLD principal and
+        // would be rejected by HandoverTool::sharePrincipal() at runtime.
+        // Prune them up-front so the LLM-facing tool definition reflects
+        // the new principal scope immediately, instead of silently
+        // failing every handover until the operator notices.
+        //
+        // No-op when the transfer was a no-op (source == target
+        // principal_id) — `pruneAgentOverrideByPrincipal` is a no-op
+        // itself when the agent's override doesn't reference any
+        // cross-principal ids, so the cost is one SELECT.
+        if ($this->toolConfigService !== null) {
+            $this->toolConfigService->pruneAgentOverrideByPrincipal(
+                HandoverTool::class,
+                (int) $agent->id,
+                $targetPrincipalId,
+            );
+        }
+
+        return $agent;
     }
 
     /**
