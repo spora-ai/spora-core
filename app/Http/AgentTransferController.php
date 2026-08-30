@@ -59,8 +59,16 @@ final class AgentTransferController
      * are 403 (caller does not control source/target) and 404 (agent
      * or target principal not found).
      */
-    public function transferPrincipal(int $agentId, Request $request): JsonResponse
+    public function transferPrincipal(Request $request): JsonResponse
     {
+        // {id} comes through the route as a request attribute. Reading
+        // here (instead of declaring `int $agentId` on the signature)
+        // matches AgentToolController / AgentOverrideController /
+        // AgentPictureController — and avoids the Router's name-based
+        // binding tripping when the parameter name and route variable
+        // don't match.
+        $agentId = (int) $request->attributes->get('id', 0);
+
         $setup = $this->resolveTransferSetup($request);
         if ($setup instanceof JsonResponse) {
             return $setup;

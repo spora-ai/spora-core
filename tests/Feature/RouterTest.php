@@ -131,6 +131,54 @@ test('Router passes {id} route variable as method argument to POST handler', fun
     expect($controller->receivedId)->toBe(42);
 });
 
+/**
+ * Regression guard for the AgentTransferController route-binding bug
+ * (spora-core Aug 23, commit 1b9e235). The route was registered as
+ * `/api/v1/agents/{id}/transfer` but the controller declared
+ * `int $agentId` — the Router binds path variables to controller
+ * parameters by name and threw `LogicException: Required parameter
+ * "agentId" has no matching route variable`, returning 500 to the
+ * client for every transfer call until a unit test happened to
+ * exercise the full Router → Controller dispatch (none did).
+ *
+ * The fix moves the controller to the codebase convention used by
+ * AgentToolController / AgentOverrideController / AgentPictureController:
+ * accept `Request $request` only and read the id from
+ * `$request->attributes->get('id', 0)`. This test pins the convention
+ * down — a controller registered against a route with `{id}` must
+ * dispatch cleanly even when its method declares no `$id` parameter.
+ */
+final class AttributesOnlyTestController
+{
+    public ?int $receivedId = null;
+
+    public function handle(Request $request): Response
+    {
+        $this->receivedId = (int) $request->attributes->get('id', 0);
+        return new Response(json_encode(['id' => $this->receivedId]), Response::HTTP_OK);
+    }
+}
+
+test('Router dispatches a route with {id} into a controller that only declares Request $request', function (): void {
+    $container = (new ContainerBuilder())->build();
+    $container->set(AttributesOnlyTestController::class, new AttributesOnlyTestController());
+
+    $router = new Router($container, function (FastRoute\RouteCollector $r): void {
+        $r->addRoute('POST', '/api/v1/agents/{id}/transfer', [AttributesOnlyTestController::class, 'handle']);
+    });
+
+    $request = Request::create('/api/v1/agents/5/transfer', 'POST');
+    $response = $router->dispatch($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['id'])->toBe(5);
+
+    $controller = $container->get(AttributesOnlyTestController::class);
+    expect($controller->receivedId)->toBe(5);
+});
+
 test('Router dispatches 405 for wrong method', function (): void {
     $container = (new ContainerBuilder())->build();
 
