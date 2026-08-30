@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
+use Spora\Models\Agent;
 use Spora\Services\AgentPrincipalService;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
@@ -114,5 +115,115 @@ describe('AgentPrincipalService::transferAgent handover-allowlist prune', functi
 
         $stored = $toolConfig->getRawAgentOverride(TestTool::class, $sourceAgent);
         expect($stored['max_results'])->toBe('99');
+    })->afterEach(fn() => Database::resetBootState());
+});
+
+/**
+ * pruneHandoverAllowlist — directly tested so each short-circuit
+ * (no override row, every target shares the new principal, no
+ * `resolveAs=agent` settings) is pinned without going through the
+ * full transfer flow. The two integration tests above cover the
+ * happy path of the transfer → prune sequence; the cases here cover
+ * the prune method's defensive branches.
+ */
+describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
+    it('drops ids that do not share the new principal', function (): void {
+        [$service, $auth, , , $toolConfig] = makeAgentPrincipalService();
+
+        $userA = $auth->register('aps-prune-a@example.com', PRINC_TEST_PASSWORD, 'A');
+        $userB = $auth->register('aps-prune-b@example.com', PRINC_TEST_PASSWORD, 'B');
+        $principalA = createUserPrincipalPublic($userA);
+        $principalB = createUserPrincipalPublic($userB);
+
+        $sourceAgent = Agent::create([
+            'principal_id' => $principalA,
+            'name'         => 'Source',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+        $targetInA = Agent::create([
+            'principal_id' => $principalA,
+            'name'         => 'TargetInA',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+        $targetInB = Agent::create([
+            'principal_id' => $principalB,
+            'name'         => 'TargetInB',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+
+        $toolConfig->putAgentOverride(HandoverTool::class, $sourceAgent, [
+            'allowed_target_agents' => [$targetInA, $targetInB, 999_999],
+            'max_results'           => '20',
+        ]);
+
+        $removed = $service->pruneHandoverAllowlist($sourceAgent, $principalB);
+
+        expect($removed)->toBe(2);
+        $stored = $toolConfig->getRawAgentOverride(HandoverTool::class, $sourceAgent);
+        expect($stored['allowed_target_agents'])->toBe([$targetInB]);
+        // Non-agent-id settings are untouched.
+        expect($stored['max_results'])->toBe('20');
+    })->afterEach(fn() => Database::resetBootState());
+
+    it('is a no-op when no override exists', function (): void {
+        [$service] = makeAgentPrincipalService();
+        expect($service->pruneHandoverAllowlist(999_999, 42))->toBe(0);
+    })->afterEach(fn() => Database::resetBootState());
+
+    it('keeps every target when they all share the new principal', function (): void {
+        [$service, $auth, , , $toolConfig] = makeAgentPrincipalService();
+        $userId = $auth->register('aps-prune-keep@example.com', PRINC_TEST_PASSWORD, 'Keep');
+        $principal = createUserPrincipalPublic($userId);
+
+        $source = Agent::create([
+            'principal_id' => $principal,
+            'name'         => 'Source',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+        $t1 = Agent::create(['principal_id' => $principal, 'name' => 'T1', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
+        $t2 = Agent::create(['principal_id' => $principal, 'name' => 'T2', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
+
+        $toolConfig->putAgentOverride(HandoverTool::class, $source, [
+            'allowed_target_agents' => [$t1, $t2],
+        ]);
+
+        expect($service->pruneHandoverAllowlist($source, $principal))->toBe(0);
+        expect($toolConfig->getRawAgentOverride(HandoverTool::class, $source)['allowed_target_agents'])
+            ->toBe([$t1, $t2]);
+    })->afterEach(fn() => Database::resetBootState());
+
+    it('is a no-op when the override has no agent-id keys', function (): void {
+        [$service, $auth, , , $toolConfig] = makeAgentPrincipalService();
+        $userId = $auth->register('aps-prune-noids@example.com', PRINC_TEST_PASSWORD, 'NoIds');
+        $principal = createUserPrincipalPublic($userId);
+
+        $agentId = Agent::create([
+            'principal_id' => $principal,
+            'name'         => 'NoIds',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+
+        // Override without any multi-select `resolveAs=agent` keys.
+        $toolConfig->putAgentOverride(HandoverTool::class, $agentId, [
+            'max_results' => '15',
+        ]);
+
+        expect($service->pruneHandoverAllowlist($agentId, $principal))->toBe(0);
+        expect($toolConfig->getRawAgentOverride(HandoverTool::class, $agentId)['max_results'])->toBe('15');
     })->afterEach(fn() => Database::resetBootState());
 });

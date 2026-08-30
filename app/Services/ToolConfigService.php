@@ -12,7 +12,6 @@ use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
 use Spora\Skills\SkillScanner;
-use Spora\Tools\ToolSettingSchema;
 
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
@@ -480,86 +479,6 @@ class ToolConfigService implements ToolConfigServiceInterface
         }
 
         return $this->crypto->decodeSettings($toolClass, $override->getRawOriginal('settings'));
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * Implementation:
-     *   1. Load the current override (empty → no-op).
-     *   2. Collect every multi-select setting with `resolveAs === 'agent'`
-     *      from the tool's schema (today that's just HandoverTool's
-     *      `allowed_target_agents`, but new tools can declare the same
-     *      shape without touching this method).
-     *   3. Resolve `principal_id` for every referenced agent id in a
-     *      single `Agent::whereIn` query.
-     *   4. Filter each setting's id array to keep only entries whose
-     *      `principal_id === $newPrincipalId`.
-     *   5. If anything was pruned, write the filtered override back
-     *      through `putAgentOverride` so encryption + schema filtering
-     *      stay consistent with the rest of the write path.
-     */
-    public function pruneAgentOverrideByPrincipal(string $toolClass, int $agentId, int $newPrincipalId): int
-    {
-        $existing = $this->getRawAgentOverride($toolClass, $agentId);
-        if ($existing === []) {
-            return 0;
-        }
-
-        $agentIdKeys = [];
-        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
-            if ($setting->type === 'multi-select' && $setting->resolveAs === 'agent') {
-                $agentIdKeys[] = $setting->key;
-            }
-        }
-        if ($agentIdKeys === []) {
-            return 0;
-        }
-
-        // Collect every agent id referenced by these settings.
-        $idsToCheck = [];
-        foreach ($agentIdKeys as $key) {
-            if (!isset($existing[$key]) || !is_array($existing[$key])) {
-                continue;
-            }
-            foreach ($existing[$key] as $id) {
-                $idsToCheck[(int) $id] = true;
-            }
-        }
-        if ($idsToCheck === []) {
-            return 0;
-        }
-
-        $principalsByAgentId = Agent::whereIn('id', array_keys($idsToCheck))
-            ->pluck('principal_id', 'id')
-            ->all();
-
-        $totalRemoved = 0;
-        $updated = $existing;
-        foreach ($agentIdKeys as $key) {
-            if (!isset($updated[$key]) || !is_array($updated[$key])) {
-                continue;
-            }
-            $before = count($updated[$key]);
-            $updated[$key] = array_values(array_filter(
-                $updated[$key],
-                fn(int $id): bool => isset($principalsByAgentId[$id])
-                    && (int) $principalsByAgentId[$id] === $newPrincipalId,
-            ));
-            $totalRemoved += $before - count($updated[$key]);
-        }
-
-        if ($totalRemoved === 0) {
-            return 0;
-        }
-
-        // Round-trip through putAgentOverride so encryption, schema
-        // filtering, and the existing merge logic apply uniformly.
-        // Settings that ended up empty after the prune are dropped
-        // by putAgentOverride's array_filter, so the row loses them.
-        $this->putAgentOverride($toolClass, $agentId, $updated);
-
-        return $totalRemoved;
     }
 
     /**

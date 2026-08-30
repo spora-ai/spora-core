@@ -9,6 +9,7 @@ use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Services\Exceptions\DependencyNotWiredException;
 use Spora\Tools\HandoverTool;
+use Spora\Tools\ToolSettingSchema;
 
 /**
  * Principal-aware slice of the agent lifecycle: materialising the
@@ -48,18 +49,130 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
         // failing every handover until the operator notices.
         //
         // No-op when the transfer was a no-op (source == target
-        // principal_id) — `pruneAgentOverrideByPrincipal` is a no-op
-        // itself when the agent's override doesn't reference any
-        // cross-principal ids, so the cost is one SELECT.
-        if ($this->toolConfigService !== null) {
-            $this->toolConfigService->pruneAgentOverrideByPrincipal(
-                HandoverTool::class,
-                (int) $agent->id,
-                $targetPrincipalId,
-            );
-        }
+        // principal_id) — the prune is a no-op itself when the agent's
+        // override doesn't reference any cross-principal ids, so the
+        // cost is at most one SELECT.
+        $this->pruneHandoverAllowlist((int) $agent->id, $targetPrincipalId);
 
         return $agent;
+    }
+
+    /**
+     * Prune the per-agent HandoverTool override so the
+     * `allowed_target_agents` list no longer references agents in a
+     * principal other than `$newPrincipalId`. Public so the behaviour
+     * is unit-testable in isolation; the runtime entry point is
+     * {@see transferAgent()}.
+     *
+     * Returns the number of agent ids removed, or 0 if nothing
+     * matched (no override row, no agent-id settings, or every target
+     * already shared the new principal).
+     */
+    public function pruneHandoverAllowlist(int $agentId, int $newPrincipalId): int
+    {
+        $existing = $this->loadExistingHandoverOverride($agentId);
+        if ($existing === null) {
+            return 0;
+        }
+
+        $agentIdKeys = $this->collectAgentIdSettingKeys(HandoverTool::class);
+        if ($agentIdKeys === []) {
+            return 0;
+        }
+
+        $removed = $this->filterOutCrossPrincipalTargets($existing, $agentIdKeys, $newPrincipalId);
+        if ($removed > 0 && $this->toolConfigService !== null) {
+            $this->toolConfigService->putAgentOverride(
+                HandoverTool::class,
+                $agentId,
+                $existing,
+            );
+        }
+        return $removed;
+    }
+
+    /**
+     * Returns the decrypted override row for HandoverTool, or null
+     * when there's no row or no `ToolConfigService` wired (test
+     * stubs). Treating both empty-row and unwired-service as the
+     * same "nothing to do" signal lets {@see pruneHandoverAllowlist()}
+     * stay at three returns.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function loadExistingHandoverOverride(int $agentId): ?array
+    {
+        if ($this->toolConfigService === null) {
+            return null;
+        }
+        $existing = $this->toolConfigService->getRawAgentOverride(HandoverTool::class, $agentId);
+        return $existing === [] ? null : $existing;
+    }
+
+    /**
+     * Walk the tool's `#[ToolSetting]` schema and return the keys of
+     * every multi-select setting with `resolveAs === 'agent'` (today
+     * that's just HandoverTool's `allowed_target_agents`, but new tools
+     * can declare the same shape without touching this method).
+     *
+     * @return list<string>
+     */
+    private function collectAgentIdSettingKeys(string $toolClass): array
+    {
+        $keys = [];
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            if ($setting->type === 'multi-select' && $setting->resolveAs === 'agent') {
+                $keys[] = $setting->key;
+            }
+        }
+        return $keys;
+    }
+
+    /**
+     * Filter each agent-id setting in `$existing` down to entries
+     * whose `Agent.principal_id === $newPrincipalId`. Mutates `$existing`
+     * in place (callers pass it through to `putAgentOverride`).
+     *
+     * Two short-circuits to keep complexity bounded:
+     *   - no referenced agent ids → return 0 without a DB query
+     *   - the schema carries no agent-id keys → return 0 immediately
+     *
+     * @param  array<string, mixed> $existing
+     * @param  list<string> $agentIdKeys
+     */
+    private function filterOutCrossPrincipalTargets(array &$existing, array $agentIdKeys, int $newPrincipalId): int
+    {
+        $idsToCheck = [];
+        foreach ($agentIdKeys as $key) {
+            if (!isset($existing[$key]) || !is_array($existing[$key])) {
+                continue;
+            }
+            foreach ($existing[$key] as $id) {
+                $idsToCheck[(int) $id] = true;
+            }
+        }
+        if ($idsToCheck === []) {
+            return 0;
+        }
+
+        $principalsByAgentId = Agent::whereIn('id', array_keys($idsToCheck))
+            ->pluck('principal_id', 'id')
+            ->all();
+
+        $totalRemoved = 0;
+        foreach ($agentIdKeys as $key) {
+            if (!isset($existing[$key]) || !is_array($existing[$key])) {
+                continue;
+            }
+            $before = count($existing[$key]);
+            $existing[$key] = array_values(array_filter(
+                $existing[$key],
+                fn(int $id): bool => isset($principalsByAgentId[$id])
+                    && (int) $principalsByAgentId[$id] === $newPrincipalId,
+            ));
+            $totalRemoved += $before - count($existing[$key]);
+        }
+        return $totalRemoved;
     }
 
     /**
