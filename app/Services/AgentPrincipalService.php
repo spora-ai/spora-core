@@ -51,7 +51,8 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
         // No-op when the transfer was a no-op (source == target
         // principal_id) — the prune is a no-op itself when the agent's
         // override doesn't reference any cross-principal ids, so the
-        // cost is at most one SELECT.
+        // cost is two SELECTs at most (`getRawAgentOverride` + the
+        // cross-principal `Agent::whereIn`).
         $this->pruneHandoverAllowlist((int) $agent->id, $targetPrincipalId);
 
         return $agent;
@@ -93,10 +94,10 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
 
     /**
      * Returns the decrypted override row for HandoverTool, or null
-     * when there's no row or no `ToolConfigService` wired (test
-     * stubs). Treating both empty-row and unwired-service as the
-     * same "nothing to do" signal lets {@see pruneHandoverAllowlist()}
-     * stay at three returns.
+     * when there's nothing to prune: no `ToolConfigService` wired
+     * (test stubs), no row at all, or a row that decodes to an empty
+     * array. Folding all three into a single null sentinel lets
+     * {@see pruneHandoverAllowlist()} stay at three returns.
      *
      * @return array<string, mixed>|null
      */
@@ -133,9 +134,10 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
      * whose `Agent.principal_id === $newPrincipalId`. Mutates `$existing`
      * in place (callers pass it through to `putAgentOverride`).
      *
-     * Two short-circuits to keep complexity bounded:
-     *   - no referenced agent ids → return 0 without a DB query
-     *   - the schema carries no agent-id keys → return 0 immediately
+     * Short-circuits to 0 when no referenced agent ids were found in
+     * the override — saves the `Agent::whereIn` round-trip when the
+     * stored list is empty (the common case after a fresh transfer
+     * with no operator-configured targets yet).
      *
      * @param  array<string, mixed> $existing
      * @param  list<string> $agentIdKeys
