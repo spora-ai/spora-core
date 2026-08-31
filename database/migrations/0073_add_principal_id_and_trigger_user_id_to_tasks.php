@@ -64,22 +64,27 @@ return new class extends Migration
             });
         }
 
-        // 3) Backfill principal_id from the user → user-principal map.
-        //    Every user has a principals row by construction (migration
-        //    0067 bulk-inserted them), so this lookup never misses in
-        //    the well-formed case. The post-backfill orphan check below
-        //    surfaces any drift loudly rather than silently leaving
-        //    tasks invisible.
-        $userPrincipals = Capsule::table('principals')
-            ->where('type', 'user')
-            ->pluck('id', 'user_id')
-            ->all();
-        foreach ($userPrincipals as $userId => $principalId) {
-            Capsule::table('tasks')
-                ->where('user_id', $userId)
-                ->whereNull('principal_id')
-                ->update(['principal_id' => $principalId]);
-        }
+        // 3) Backfill principal_id from the AGENT's principal_id, not
+        //    the clicker's user-principal. A task on a user-owned agent
+        //    inherits the agent's user-principal; a task on a group-owned
+        //    agent inherits the agent's group-principal. The
+        //    earlier "user-principal of trigger_user_id" backfill left
+        //    group-owned agents' tasks attributed to whoever clicked
+        //    Send, breaking the group-shared visibility contract
+        //    (only the original clicker could see their own task on a
+        //    group agent). The corrected backfill aligns every task with
+        //    its agent's owner principal so the visibility scoping
+        //    (`whereIn('principal_id', $visiblePrincipalIds)`) works
+        //    the same way for tasks as it does for the agent itself.
+        //
+        //    The post-backfill orphan check below (no principal_id left
+        //    null) still holds because every task has a non-null
+        //    agent.principal_id post-migration-0067.
+        Capsule::table('tasks')
+            ->whereNull('principal_id')
+            ->update([
+                'principal_id' => Capsule::raw('(SELECT principal_id FROM agents WHERE agents.id = tasks.agent_id)'),
+            ]);
 
         $missingPrincipal = (int) Capsule::table('tasks')->whereNull('principal_id')->count();
         if ($missingPrincipal > 0) {
