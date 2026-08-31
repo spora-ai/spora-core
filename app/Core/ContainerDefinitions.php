@@ -1148,6 +1148,7 @@ final class ContainerDefinitions
                     $c->get(NotificationService::class),
                     $c->get(LoggerInterface::class),
                     (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1354,6 +1355,8 @@ final class ContainerDefinitions
                 // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
                 return new HandoverService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
+                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1364,6 +1367,8 @@ final class ContainerDefinitions
                 return new SubAgentService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->has(MercurePublisherInterface::class) ? $c->get(MercurePublisherInterface::class) : null,
+                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
+                    $c->get(PrincipalResolver::class),
                 );
             },
         ];

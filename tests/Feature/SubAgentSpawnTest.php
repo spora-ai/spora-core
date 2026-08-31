@@ -781,7 +781,7 @@ describe('SubAgentService::spawn', function (): void {
         $parent = Task::create([
             'agent_id'    => $parentAgentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'AWAITING_SUB_AGENTS',
             'user_prompt' => SUB_AGENT_PARENT_PROMPT,
             'max_steps'   => 10,
@@ -795,7 +795,7 @@ describe('SubAgentService::spawn', function (): void {
         $child = Task::create([
             'agent_id'       => $childAgentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'         => 'QUEUED',
             'user_prompt'    => SUB_AGENT_PROMPT,
             'max_steps'      => 5,
@@ -956,7 +956,7 @@ describe('SubAgentService::spawn', function (): void {
         $parent = Task::create([
             'agent_id'    => $parentAgentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => SUB_AGENT_PARENT_PROMPT,
             'max_steps'   => 10,
@@ -1263,7 +1263,7 @@ describe('SubAgentService::spawn', function (): void {
         $parent = Task::create([
             'agent_id'    => $parentAgentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'AWAITING_SUB_AGENTS',
             'user_prompt' => SUB_AGENT_PARENT_PROMPT,
             'data'        => json_encode([
@@ -1277,7 +1277,7 @@ describe('SubAgentService::spawn', function (): void {
         $child = Task::create([
             'agent_id'       => $childAgentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'         => 'COMPLETED',
             'user_prompt'    => SUB_AGENT_PROMPT,
             'final_response' => 'final answer',

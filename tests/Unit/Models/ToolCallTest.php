@@ -28,7 +28,7 @@ it('allows mass assignment of tool call fields', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,
@@ -66,7 +66,7 @@ it('casts JSON columns to arrays and dates to Carbon', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,
@@ -114,7 +114,7 @@ it('belongs to a task, agent, and approver', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,

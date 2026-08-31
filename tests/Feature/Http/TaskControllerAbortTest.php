@@ -33,7 +33,7 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'RUNNING',
         'user_prompt' => 'live',
@@ -58,7 +58,7 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
     $mercure->shouldReceive('publish')->andReturn(true);
     $mercure->shouldReceive('publishToUser')->andReturn(true);
 
-    $service = new TaskService($orch, $mercure);
+    $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
@@ -82,7 +82,7 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'PENDING_APPROVAL',
         'user_prompt' => 'awaiting',
@@ -143,7 +143,7 @@ it('POST /abort with no body works (no-body call)', function (): void {
     [$userId, $agent] = seedAbortEndpointFixtures();
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'RUNNING',
         'user_prompt' => 'live',
@@ -161,7 +161,7 @@ it('POST /abort with no body works (no-body call)', function (): void {
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->shouldReceive('publish')->andReturn(true);
 
-    $service = new TaskService($orch, $mercure);
+    $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
     $controller = new TaskController(
         bootAuthLayer(),
         $service,

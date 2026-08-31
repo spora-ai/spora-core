@@ -65,7 +65,7 @@ final class BuildMessagesSummaryTest extends TestCase
         return Task::create([
             'agent_id' => $agentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status' => 'RUNNING',
             'user_prompt' => 'Test',
             'step_count' => 0,

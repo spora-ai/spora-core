@@ -30,11 +30,14 @@ final class HandoverService implements HandoverServiceInterface
     public function __construct(
         private readonly Closure $orchestratorFactory,
         ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
     private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
 
     public function handover(
         int $sourceTaskId,
@@ -42,8 +45,13 @@ final class HandoverService implements HandoverServiceInterface
         string $summary,
         int $userId,
     ): Task {
+        // Source-task gate: any member of a principal that owns the task
+        // can hand it off. Matches the widened per-task action gating —
+        // hand-off is a "what to do next with this conversation" decision,
+        // not a "you must be the original clicker" guard.
+        $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
         $source = Task::where('id', $sourceTaskId)
-            ->where('user_id', $userId)
+            ->whereIn('principal_id', $visiblePrincipalIds)
             ->first();
         if ($source === null) {
             throw new InvalidArgumentException('Source task not found.');

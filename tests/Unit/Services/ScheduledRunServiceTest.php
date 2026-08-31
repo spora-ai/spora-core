@@ -32,7 +32,8 @@ function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?M
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
         return Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => 1,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => 1,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,
@@ -499,7 +500,8 @@ describe('ScheduledRunService::triggerRun', function (): void {
             $captured = ['agentId' => $agentId, 'prompt' => $prompt, 'maxSteps' => $maxSteps];
             return Task::create([
                 'agent_id'    => $agentId,
-                'user_id'     => 1,
+                'principal_id' => (int) Agent::find($agentId)->principal_id,
+                'trigger_user_id' => 1,
                 'status'      => 'RUNNING',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,
@@ -534,7 +536,8 @@ describe('ScheduledRunService::triggerRun', function (): void {
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
             return Task::create([
                 'agent_id'    => $agentId,
-                'user_id'     => 1,
+                'principal_id' => (int) Agent::find($agentId)->principal_id,
+                'trigger_user_id' => 1,
                 'status'      => 'RUNNING',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,

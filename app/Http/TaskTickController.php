@@ -23,6 +23,7 @@ use Spora\Models\Task;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -57,6 +58,7 @@ final class TaskTickController
         private readonly ?NotificationService $notificationService,
         private readonly LoggerInterface $logger,
         private readonly int $tickLeaseSeconds,
+        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -179,12 +181,12 @@ final class TaskTickController
         }
 
         // Mercure publish BEFORE the LLM call so the UI sees QUEUED → RUNNING immediately.
-        $this->mercure->publish($claimed->id, $claimed->user_id, [
+        $this->mercure->publish($claimed->id, $claimed->principalUserId(), [
             'task_id' => $claimed->id,
             'status'  => 'RUNNING',
         ]);
 
-        $this->runOrchestratorTickAndHandleFailure($claimed, $leaseOwner, $startedAt, $userId);
+        $this->runOrchestratorTickAndHandleFailure($claimed, $leaseOwner, $startedAt);
         $this->clearLeaseIfTerminal($claimed->id);
 
         $fresh = Task::find($claimed->id);
@@ -208,7 +210,13 @@ final class TaskTickController
      */
     private function loadDrivableTask(int $taskId, int $userId): Task
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        // Group-scoped: any member of any principal that owns the task
+        // can drive the tick. The legacy runner-only guard
+        // (`tasks.user_id`) is widened to `tasks.principal_id IN
+        // visiblePrincipalIds(user)` — matches the per-task action
+        // gating semantics.
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -274,7 +282,6 @@ final class TaskTickController
         Task $claimed,
         string $leaseOwner,
         float $startedAt,
-        int $userId,
     ): void {
         $orchestratorConfig = (new OrchestratorConfig())
             ->withLease($leaseOwner, $this->tickLeaseSeconds)
@@ -282,7 +289,7 @@ final class TaskTickController
         try {
             $this->orchestrator->tick($claimed->id, $orchestratorConfig);
         } catch (Throwable $e) {
-            $this->handleTickFailure($claimed, $leaseOwner, $startedAt, $userId, $e);
+            $this->handleTickFailure($claimed, $leaseOwner, $startedAt, $e);
         }
     }
 
@@ -290,7 +297,6 @@ final class TaskTickController
         Task $claimed,
         string $leaseOwner,
         float $startedAt,
-        int $userId,
         Throwable $e,
     ): void {
         $this->logger->error('Task failed during /tick', [
@@ -330,7 +336,7 @@ final class TaskTickController
             }
         }
 
-        $this->mercure->publish($claimed->id, $userId, [
+        $this->mercure->publish($claimed->id, $claimed->principalUserId(), [
             'task_id' => $claimed->id,
             'status'  => 'FAILED',
         ]);

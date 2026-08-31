@@ -12,8 +12,11 @@ use Illuminate\Support\Carbon;
 /**
  * @property int         $id
  * @property int         $agent_id
- * @property int         $user_id
+ * @property int         $principal_id
+ * @property int|null    $trigger_user_id
  * @property Agent       $agent
+ * @property Principal   $principal
+ * @property User|null   $triggerUser
  * @property string      $status
  * @property string      $user_prompt
  * @property string|null $final_response
@@ -41,7 +44,8 @@ final class Task extends Model
     /** @var list<string> */
     protected $fillable = [
         'agent_id',
-        'user_id',
+        'principal_id',
+        'trigger_user_id',
         'status',
         'user_prompt',
         'final_response',
@@ -76,9 +80,38 @@ final class Task extends Model
         return $this->belongsTo(Agent::class);
     }
 
-    public function user(): BelongsTo
+    /**
+     * The principal that owns this task. Mirrors `agents.principal_id`
+     * at creation time and is updated on agent transfer so the new
+     * owner inherits every run.
+     */
+    public function principal(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Principal::class);
+    }
+
+    /**
+     * The user who clicked "Send" — the credential owner for the tick
+     * and the attribution the UI shows as "started by". Nullable so
+     * system-generated tasks (scheduled runs, future cron / webhooks)
+     * can land without a human trigger. NOT updated on agent transfer:
+     * historical "user X started this chat" attribution outlives
+     * ownership changes.
+     */
+    public function triggerUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'trigger_user_id');
+    }
+
+    /**
+     * Convenience accessor for the Mercure `user/{userId}/tasks` topic:
+     * the topic still keys off `user_id` (the trigger user's id) so
+     * `trigger_user_id` IS the user_id we want. Returns null when the
+     * task has no trigger (system-generated).
+     */
+    public function principalUserId(): ?int
+    {
+        return $this->trigger_user_id !== null ? (int) $this->trigger_user_id : null;
     }
 
     /** @return HasMany<TaskHistory, $this> */

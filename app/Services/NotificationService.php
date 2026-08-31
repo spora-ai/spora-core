@@ -22,8 +22,9 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyTaskCompleted(Task $task): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'task_completed',
             'title'   => 'Task completed',
             'body'    => $task->user_prompt,
@@ -31,12 +32,12 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'task_completed', 'notification' => $this->toResource($notification)],
         );
 
         // Also publish to the task channel so the UI updates the task status
-        $this->mercure->publish($task->id, $task->user_id, [
+        $this->mercure->publish($task->id, $userId, [
             'id'             => $task->id,
             'status'         => 'COMPLETED',
             'final_response' => $task->final_response,
@@ -46,8 +47,9 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyTaskFailed(Task $task): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'task_failed',
             'title'   => 'Task failed',
             'body'    => $task->failure_reason ?: 'An error occurred during task execution.',
@@ -55,12 +57,12 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'task_failed', 'notification' => $this->toResource($notification)],
         );
 
         // Also publish to the task channel so the UI updates the task status
-        $this->mercure->publish($task->id, $task->user_id, [
+        $this->mercure->publish($task->id, $userId, [
             'id'             => $task->id,
             'status'         => 'FAILED',
             'error_code'     => $task->error_code,
@@ -72,8 +74,9 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyPendingApproval(Task $task): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'pending_approval',
             'title'   => 'Task pending approval',
             'body'    => $task->user_prompt,
@@ -82,18 +85,19 @@ class NotificationService implements NotificationServiceInterface
 
         // Publish to user channel for notification badge updates
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'pending_approval', 'notification' => $this->toResource($notification)],
         );
 
         // Publish to task channel so the UI can update task status in real-time
-        $this->mercure->publish($task->id, $task->user_id, ['event' => 'pending_approval', 'task_id' => $task->id]);
+        $this->mercure->publish($task->id, $userId, ['event' => 'pending_approval', 'task_id' => $task->id]);
     }
 
     public function notifyScheduledRunCompleted(int $runId, Task $task): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'scheduled_run_completed',
             'title'   => 'Scheduled run completed',
             'body'    => $task->user_prompt,
@@ -101,15 +105,16 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'scheduled_run_completed', 'notification' => $this->toResource($notification)],
         );
     }
 
     public function notifyTaskOrphaned(Task $task): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'task_orphaned',
             'title'   => 'Task interrupted',
             'body'    => 'The task was interrupted and has been stopped. You can retry it manually.',
@@ -117,15 +122,16 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'task_orphaned', 'notification' => $this->toResource($notification)],
         );
     }
 
     public function notifyRetryQueued(Task $retryTask, int $attempt, int $max): void
     {
+        $userId = $retryTask->principalUserId();
         $notification = $this->create([
-            'user_id' => $retryTask->user_id,
+            'user_id' => $userId,
             'type'    => 'task_retry_queued',
             'title'   => 'Retry scheduled',
             'body'    => "Retry {$attempt}/{$max} scheduled.",
@@ -139,15 +145,16 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $retryTask->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'task_retry_queued', 'notification' => $this->toResource($notification)],
         );
     }
 
     public function notifyTaskRetrying(Task $task, int $attempt, int $max): void
     {
+        $userId = $task->principalUserId();
         $notification = $this->create([
-            'user_id' => $task->user_id,
+            'user_id' => $userId,
             'type'    => 'task_retrying',
             'title'   => 'Retrying task',
             'body'    => "Retrying task (attempt {$attempt}/{$max})...",
@@ -160,7 +167,7 @@ class NotificationService implements NotificationServiceInterface
         ]);
 
         $this->mercure->publishToUser(
-            $task->user_id,
+            $userId,
             ['event' => 'notification', 'type' => 'task_retrying', 'notification' => $this->toResource($notification)],
         );
     }
@@ -175,7 +182,10 @@ class NotificationService implements NotificationServiceInterface
             return;
         }
 
-        $user = $task->user;
+        // `tasks.principal_id` is NOT NULL post-0071, and the FK is
+        // ON DELETE CASCADE — so a principal can never be missing for a
+        // live task. Eloquent lazy-loads the relation on first access.
+        $user = $task->principal->user ?? null;
         if ($user === null) {
             return;
         }

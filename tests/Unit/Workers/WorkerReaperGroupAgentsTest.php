@@ -45,7 +45,7 @@ describe('WorkerReaper — server:housekeeping lease prefix', function (): void 
         $task = Task::create([
             'agent_id'    => $agentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'server housekeeping target',
             'max_steps'   => 10,
@@ -75,7 +75,7 @@ describe('WorkerReaper — server:housekeeping lease prefix', function (): void 
         $task = Task::create([
             'agent_id'    => $agentId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'stale server housekeeping target',
             'max_steps'   => 10,

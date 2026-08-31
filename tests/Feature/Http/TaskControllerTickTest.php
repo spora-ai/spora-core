@@ -83,6 +83,7 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
         null,
         new NullLogger(),
         600,
+        new Spora\Services\PrincipalResolver(),
     );
 
     return [
@@ -104,7 +105,7 @@ function seedTickTask(int $userId, int $agentId, array $overrides = []): Task
     return Task::create(array_merge([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'QUEUED',
         'user_prompt' => 'tick target',
         'max_steps'   => 10,
@@ -126,7 +127,7 @@ function makeRawTickController(
     Orchestrator $orchestrator,
     MercurePublisherInterface $mercure,
 ): array {
-    $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
+    $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
 
     $controller = new TaskTickController(
         $authService,
@@ -140,6 +141,7 @@ function makeRawTickController(
         null,
         new NullLogger(),
         600,
+        new Spora\Services\PrincipalResolver(),
     );
 
     return [
@@ -184,7 +186,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $otherId = $otherAuth->register('tick-other@example.com', TICK_TEST_PASSWORD, 'Other');
         simulateLoggedInSession($otherId, 'tick-other@example.com');
 
-        $otherService = new TaskService($harness['orchestrator'], $harness['mercure'], new ToolCallSerializer([]));
+        $otherService = new TaskService($harness['orchestrator'], $harness['mercure'], new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $otherAuth,
             $otherService,
@@ -197,6 +199,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             null,
             new NullLogger(),
             600,
+            new Spora\Services\PrincipalResolver(),
         );
 
         $response = $controller->tick(buildTickRequest($task->id));
@@ -257,13 +260,13 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         // only the QUEUED→RUNNING assertion matters here.
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->shouldReceive('publish')
-            ->with($task->id, $task->user_id, ['task_id' => $task->id, 'status' => 'RUNNING'])
+            ->with($task->id, $task->principalUserId(), ['task_id' => $task->id, 'status' => 'RUNNING'])
             ->atLeast()
             ->once()
             ->andReturn(true);
         $mercure->shouldReceive('publish')->andReturn(true);
 
-        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
+        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $authService,
             $service,
@@ -276,6 +279,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             null,
             new NullLogger(),
             600,
+            new Spora\Services\PrincipalResolver(),
         );
 
         $response = $controller->tick(buildTickRequest($task->id));
@@ -322,7 +326,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class);
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
+        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $authService,
             $service,
@@ -335,6 +339,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             null,
             new NullLogger(),
             600,
+            new Spora\Services\PrincipalResolver(),
         );
 
         $response = $controller->tick(buildTickRequest($task->id));

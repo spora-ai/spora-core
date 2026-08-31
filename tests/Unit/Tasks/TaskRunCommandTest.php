@@ -115,7 +115,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -192,7 +192,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -268,7 +268,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -341,7 +341,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Already running',
             'max_steps'   => 10,
@@ -438,7 +438,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -514,7 +514,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Fail me',
             'max_steps'   => 10,
@@ -660,7 +660,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
         $task = Task::create([
             'agent_id'    => $this->agent->id,
             'principal_id' => createUserPrincipalPublic($this->userId),
-            'user_id'     => $this->userId,
+            'trigger_user_id' => $this->userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'What can you do?',
             'max_steps'   => 10,

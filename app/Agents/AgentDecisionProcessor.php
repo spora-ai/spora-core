@@ -181,7 +181,7 @@ final class AgentDecisionProcessor
         $model->update([
             'status'        => 'REJECTED',
             'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            'rejected_by'   => $task->user_id,
+            'rejected_by'   => $task->principalUserId(),
             'reject_reason' => $rejected['reason'],
         ]);
 

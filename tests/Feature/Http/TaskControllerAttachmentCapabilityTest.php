@@ -156,7 +156,8 @@ function buildCapabilityController(string $model, string $driverClass): array
     if (Task::query()->find(1) === null) {
         Task::query()->insert([
             'id' => 1,
-            'user_id' => $userId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'trigger_user_id' => $userId,
             'agent_id' => 10,
             'status' => 'COMPLETED',
             'user_prompt' => 'previous',

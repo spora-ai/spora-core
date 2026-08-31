@@ -97,7 +97,7 @@ function seedRunningTask(): int
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'in progress',
         'step_count'  => 0,
@@ -126,7 +126,7 @@ it('continue() throws InvalidTaskTransitionException when task is in a rejected 
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'in approval',
         'step_count'  => 0,

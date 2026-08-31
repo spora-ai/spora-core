@@ -56,7 +56,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Test prompt',
@@ -93,7 +93,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'Run me',
@@ -124,8 +124,8 @@ describe('TaskService — getTasksForUser', function (): void {
             'max_steps' => 5, 'is_active' => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent1->id, 'status' => 'COMPLETED', 'user_prompt' => 'A1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent2->id, 'status' => 'RUNNING', 'user_prompt' => 'A2', 'max_steps' => 5]);
 
         $service = makeTaskService();
 
@@ -153,7 +153,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $oldTask = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'COMPLETED',
             'user_prompt' => 'Old task',
@@ -164,7 +164,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $newTask = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'  => $agent->id,
             'status'    => 'RUNNING',
             'user_prompt' => 'New task',
@@ -200,8 +200,8 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task 1', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Task 2', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId);
@@ -223,7 +223,7 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
+        Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'Task', 'max_steps' => 5]);
 
         $service = makeTaskService();
         $result = $service->getTasksForUser($userId, null, '2099-01-01T00:00:00Z');
@@ -245,13 +245,13 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        $task1 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
+        $task1 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => 'First', 'max_steps' => 5]);
         Task::where('id', $task1->id)->update(['updated_at' => '2025-01-01 00:00:00']);
 
-        $task2 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
+        $task2 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING', 'user_prompt' => 'Second', 'max_steps' => 5]);
         Task::where('id', $task2->id)->update(['updated_at' => '2025-06-01 00:00:00']);
 
-        $task3 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
+        $task3 = Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING', 'user_prompt' => 'Third', 'max_steps' => 5]);
         Task::where('id', $task3->id)->update(['updated_at' => '2025-03-01 00:00:00']);
 
         $service = makeTaskService();
@@ -280,7 +280,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         // Create 5 tasks
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -312,7 +312,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
 
         for ($i = 1; $i <= 5; $i++) {
-            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
+            Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
@@ -340,7 +340,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         $queued = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $agent->id,
             'status'       => 'QUEUED',
             'user_prompt'  => 'queued task',
@@ -348,7 +348,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $agent->id,
             'status'       => 'RUNNING',
             'user_prompt'  => 'running task',
@@ -356,7 +356,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $agent->id,
             'status'       => 'COMPLETED',
             'user_prompt'  => 'completed task',
@@ -391,7 +391,7 @@ describe('TaskService — getTasksForUser', function (): void {
 
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $agent->id,
             'status'       => 'QUEUED',
             'user_prompt'  => 'q',
@@ -399,7 +399,7 @@ describe('TaskService — getTasksForUser', function (): void {
         ]);
         Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $agent->id,
             'status'       => 'RUNNING',
             'user_prompt'  => 'r',
@@ -438,7 +438,7 @@ describe('TaskService — startTask', function (): void {
             ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-                    'user_id'     => $userIdArg ?? $userId,
+                    'trigger_user_id' => $userIdArg ?? $userId,
                     'agent_id'    => $agentId,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
@@ -476,7 +476,7 @@ describe('TaskService — startTask', function (): void {
             ->once()
             ->with($agent->id, 'p', 12, null, null, [], $userId) // 12 = agent.max_steps
             ->andReturnUsing(fn(int $a, string $p, int $m, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null) => Task::create([
-                'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userIdArg ?? $userId, 'agent_id' => $a, 'status' => 'RUNNING',
+                'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userIdArg ?? $userId, 'agent_id' => $a, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -535,7 +535,7 @@ describe('TaskService — startTask', function (): void {
         ]);
 
         // Orchestrator passes user_id through to the row, just like the real
-        // implementation does (Task::create([..., 'user_id' => $resolvedUserId])).
+        // implementation does (Task::create([..., 'trigger_user_id' => $resolvedUserId])).
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
         $mercure      = Mockery::mock(MercurePublisherInterface::class);
         $mercure->shouldReceive('publish')->andReturn(true);
@@ -546,7 +546,8 @@ describe('TaskService — startTask', function (): void {
             ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps, ?int $parent, ?int $runId, array $mediaIds, ?int $userIdArg = null): Task {
                 return Task::create([
                     'agent_id'    => $agentId,
-                    'user_id'     => $userIdArg ?? 0,
+                    'principal_id' => (int) Agent::find($agentId)->principal_id,
+                    'trigger_user_id' => $userIdArg ?? 0,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
                     'max_steps'   => $maxSteps,
@@ -558,10 +559,12 @@ describe('TaskService — startTask', function (): void {
         $service->startTask($plainMemberId, $agent->id, 'plain member chat');
 
         // The task row must be attributed to the caller, not the owner.
+        // Post-0071: `trigger_user_id` carries the clicker identity, NOT
+        // `user_id` (which no longer exists on `tasks`).
         $taskRow = Task::where('agent_id', $agent->id)->orderByDesc('id')->first();
         expect($taskRow)->not->toBeNull();
-        expect((int) $taskRow->user_id)->toBe($plainMemberId)
-            ->and((int) $taskRow->user_id)->not->toBe($ownerId);
+        expect((int) $taskRow->trigger_user_id)->toBe($plainMemberId)
+            ->and((int) $taskRow->trigger_user_id)->not->toBe($ownerId);
     });
 
     it('falls back to PrincipalResolver when no explicit userId is passed (worker / scheduled-run path preserves prior behaviour)', function (): void {
@@ -587,7 +590,8 @@ describe('TaskService — startTask', function (): void {
             ->once()
             ->with($agent->id, 'worker chat', 4, null, null, [], null)
             ->andReturnUsing(fn($a, $p, $m) => Task::create([
-                'agent_id' => $a, 'user_id' => $userId, 'status' => 'RUNNING',
+                'agent_id' => $a, 'principal_id' => (int) Agent::find($a)->principal_id,
+                'trigger_user_id' => $userId, 'status' => 'RUNNING',
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
@@ -617,7 +621,7 @@ describe('TaskService — getTask', function (): void {
         ]);
         $taskA = Task::create([
             'principal_id' => createUserPrincipalPublic($userA),
-            'user_id'     => $userA,
+            'trigger_user_id' => $userA,
             'agent_id'    => $agentA->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'private',
@@ -638,7 +642,7 @@ describe('TaskService — getTask', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'hi',
@@ -675,7 +679,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -724,7 +728,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'with history',
@@ -757,7 +761,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'handover please',
@@ -808,7 +812,7 @@ describe('TaskService — getTaskWithHistory', function (): void {
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'COMPLETED',
             'user_prompt' => 'shape parity',
@@ -862,7 +866,7 @@ describe('TaskService — approveTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'RUNNING',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -879,7 +883,7 @@ describe('TaskService — approveTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'AppOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -923,7 +927,7 @@ describe('TaskService — rejectTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -940,7 +944,7 @@ describe('TaskService — rejectTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RejOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -982,7 +986,7 @@ describe('TaskService — retryTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'RetBadAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -1000,7 +1004,7 @@ describe('TaskService — retryTask', function (): void {
         ]);
         $original = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'please try again',
@@ -1056,7 +1060,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContPaAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'PENDING_APPROVAL',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -1073,7 +1077,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContStepsAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -1090,7 +1094,7 @@ describe('TaskService — continueTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'ContOkAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
 
@@ -1104,7 +1108,7 @@ describe('TaskService — continueTask', function (): void {
             ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
-                    'user_id'     => $userId,
+                    'trigger_user_id' => $userId,
                     'agent_id'    => 1,
                     'status'      => 'RUNNING',
                     'user_prompt' => 'more please',
@@ -1141,7 +1145,7 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED',
             'user_prompt' => 'p', 'max_steps' => 5,
         ]);
         Spora\Models\TaskHistory::create([
@@ -1163,12 +1167,12 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelParAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $child = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'retry',
@@ -1191,12 +1195,12 @@ describe('TaskService — deleteTask', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'DelNPAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $parent = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'orig', 'max_steps' => 5,
         ]);
         $childOfOther = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'QUEUED',
             'user_prompt'    => 'unrelated retry',
@@ -1231,7 +1235,7 @@ describe('TaskService — cancelRetryChain', function (): void {
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'CancelNRAgent', 'max_steps' => 5, 'is_active' => true,
         ]);
         $task = Task::create([
-            'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
+            'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'FAILED',
             'user_prompt' => 'p', 'max_steps' => 5, 'retry_of_task_id' => null,
         ]);
 
@@ -1252,7 +1256,7 @@ describe('TaskService — cancelRetryChain', function (): void {
         // itself and retry_after set in the future.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'FAILED',
             'user_prompt' => 'orig',
@@ -1276,5 +1280,334 @@ describe('TaskService — cancelRetryChain', function (): void {
         expect($failed->retry_after)->toBeNull();
         expect($failed->retry_of_task_id)->toBeNull();
         expect((int) $failed->retry_count)->toBe(0);
+    });
+
+    it('lets a group member cancel a retry chain on a shared agent (regression: principal-scoped filter, not user-principal)', function (): void {
+        // Regression for the cancelRetryChain bulk-update filter: it
+        // used to scope on `tasks.user_id = $userId`. After the
+        // principal_id migration, scoping on the caller's user-principal
+        // would silently no-op for group-shared chains (the chain's
+        // principal_id is the group, not the user). Fix: scope on the
+        // loaded task's principal_id so any group member with visibility
+        // can cancel the chain.
+        $authService = bootAuthLayer();
+        $ownerId      = $authService->register('cancel-owner@example.com', 'Password1!', 'CancelOwner');
+        $plainMemberId = $authService->register('cancel-member@example.com', 'Password1!', 'CancelMember');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'CancelGroup');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId, 'name' => 'CancelSharedAgent',
+            'max_steps' => 5, 'is_active' => true,
+        ]);
+        // Failed task owned by the GROUP. Member B is the trigger, but
+        // we're cancelling from the owner's perspective — group member
+        // with visibility, not the original clicker.
+        $failed = Task::create([
+            'principal_id' => $groupPrincipalId, 'trigger_user_id' => $plainMemberId,
+            'agent_id' => $agent->id, 'status' => 'FAILED',
+            'user_prompt' => 'orig', 'max_steps' => 5, 'retry_count' => 1,
+        ]);
+        $failed->retry_of_task_id = $failed->id;
+        $failed->save();
+        Capsule::table('tasks')
+            ->where('id', $failed->id)
+            ->update(['retry_after' => date('Y-m-d H:i:s', time() + 600)]);
+
+        $service = makeTaskService();
+        expect($service->cancelRetryChain($failed->id, $ownerId))->toBeTrue();
+
+        $failed->refresh();
+        expect($failed->retry_after)->toBeNull()
+            ->and($failed->retry_of_task_id)->toBeNull()
+            ->and((int) $failed->retry_count)->toBe(0);
+    });
+});
+
+/**
+ * Group-shared visibility: the core regression from the user's bug
+ * report. Without these tests the `principal_id`-based scoping on
+ * `getTasksForUser` / `getTask` could silently regress back to the
+ * runner-only `user_id` filter.
+ */
+describe('TaskService — group-shared run visibility (post-0071)', function (): void {
+
+    it('returns another member\'s run on a group-shared agent (the bug fix)', function (): void {
+        // Two members of the same group; member B's run on the group-owned
+        // agent must show up in member A's list. Pre-0071 this would 404
+        // because the legacy `where('user_id', $userId)` filter hid it.
+        $authService = bootAuthLayer();
+        $ownerId       = $authService->register('shared-owner@example.com', 'Password1!', 'SharedOwner');
+        $plainMemberId = $authService->register('shared-member@example.com', 'Password1!', 'SharedMember');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'SharedVis');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'SharedVisAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+
+        // Member B creates a task on the shared agent.
+        $task = Task::create([
+            'agent_id'         => $agent->id,
+            'principal_id'     => $groupPrincipalId,
+            'trigger_user_id'  => $plainMemberId,
+            'status'           => 'COMPLETED',
+            'user_prompt'      => 'member B chat',
+            'final_response'   => 'done',
+            'max_steps'        => 5,
+            'step_count'       => 1,
+        ]);
+
+        // Member A fetches — should see member B's run.
+        $service = makeTaskService();
+        $result  = $service->getTasksForUser($ownerId);
+
+        expect($result)->toHaveCount(1)
+            ->and($result[0]['id'])->toBe($task->id);
+    });
+
+    it('returns another member\'s run on a shared agent via getTask (deep-link works for group members)', function (): void {
+        $authService = bootAuthLayer();
+        $ownerId       = $authService->register('link-owner@example.com', 'Password1!', 'LinkOwner');
+        $plainMemberId = $authService->register('link-member@example.com', 'Password1!', 'LinkMember');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'DeepLink');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'DeepLinkAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+        $task = Task::create([
+            'agent_id'         => $agent->id,
+            'principal_id'     => $groupPrincipalId,
+            'trigger_user_id'  => $plainMemberId,
+            'status'           => 'COMPLETED',
+            'user_prompt'      => 'member B chat',
+            'max_steps'        => 5,
+        ]);
+
+        // Member A deep-links to member B's run.
+        $service = makeTaskService();
+        $result  = $service->getTask($task->id, $ownerId);
+
+        expect($result)->not->toBeNull()
+            ->and($result['id'])->toBe($task->id);
+    });
+
+    it('does NOT return another user\'s runs on a private agent (no leak)', function (): void {
+        $authService = bootAuthLayer();
+        $ownerId     = $authService->register('priv-owner@example.com', 'Password1!', 'PrivOwner');
+        $strangerId  = $authService->register('priv-stranger@example.com', 'Password1!', 'PrivStranger');
+
+        $ownerPrincipalId = createUserPrincipalPublic($ownerId);
+
+        $agent = Agent::create([
+            'principal_id' => $ownerPrincipalId,
+            'name'         => 'PrivAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+        Task::create([
+            'agent_id'         => $agent->id,
+            'principal_id'     => $ownerPrincipalId,
+            'trigger_user_id'  => $ownerId,
+            'status'           => 'COMPLETED',
+            'user_prompt'      => 'private',
+            'max_steps'        => 5,
+        ]);
+
+        // Stranger — different user, no group in common.
+        $service = makeTaskService();
+        $result  = $service->getTasksForUser($strangerId);
+
+        expect($result)->toBeEmpty();
+    });
+
+    it('honours multiple group memberships (user in two groups sees both)', function (): void {
+        $authService = bootAuthLayer();
+        $aliceId     = $authService->register('multi-alice@example.com', 'Password1!', 'MultiAlice');
+        $bobId       = $authService->register('multi-bob@example.com', 'Password1!', 'MultiBob');
+        $carolId     = $authService->register('multi-carol@example.com', 'Password1!', 'MultiCarol');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($aliceId);
+        $principalService->ensureUserPrincipal($bobId);
+        $principalService->ensureUserPrincipal($carolId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+
+        // Alice + Bob in group G1
+        $g1 = $groupService->createGroup($aliceId, 'MultiG1');
+        $groupService->addMember((int) $g1->id, (int) $bobId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $aliceId);
+        $g1PrincipalId = (int) $principalService->ensureGroupPrincipal((int) $g1->id)->id;
+
+        // Alice + Carol in group G2
+        $g2 = $groupService->createGroup($aliceId, 'MultiG2');
+        $groupService->addMember((int) $g2->id, (int) $carolId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $aliceId);
+        $g2PrincipalId = (int) $principalService->ensureGroupPrincipal((int) $g2->id)->id;
+
+        $agent1 = Agent::create(['principal_id' => $g1PrincipalId, 'name' => 'G1Agent', 'max_steps' => 5, 'is_active' => true]);
+        $agent2 = Agent::create(['principal_id' => $g2PrincipalId, 'name' => 'G2Agent', 'max_steps' => 5, 'is_active' => true]);
+
+        Task::create([
+            'agent_id' => $agent1->id, 'principal_id' => $g1PrincipalId,
+            'trigger_user_id' => $bobId, 'status' => 'COMPLETED',
+            'user_prompt' => 'G1', 'max_steps' => 5,
+        ]);
+        Task::create([
+            'agent_id' => $agent2->id, 'principal_id' => $g2PrincipalId,
+            'trigger_user_id' => $carolId, 'status' => 'COMPLETED',
+            'user_prompt' => 'G2', 'max_steps' => 5,
+        ]);
+
+        // Alice sees both.
+        $service = makeTaskService();
+        $result  = $service->getTasksForUser($aliceId);
+
+        expect($result)->toHaveCount(2);
+    });
+
+    it('does NOT leak group-shared runs to non-members', function (): void {
+        $authService = bootAuthLayer();
+        $ownerId     = $authService->register('gate-owner@example.com', 'Password1!', 'GateOwner');
+        $memberId    = $authService->register('gate-member@example.com', 'Password1!', 'GateMember');
+        $outsiderId  = $authService->register('gate-outsider@example.com', 'Password1!', 'GateOutsider');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($memberId);
+        $principalService->ensureUserPrincipal($outsiderId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'GateTest');
+        $groupService->addMember((int) $group->id, (int) $memberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'GateAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+        Task::create([
+            'agent_id' => $agent->id, 'principal_id' => $groupPrincipalId,
+            'trigger_user_id' => $memberId, 'status' => 'COMPLETED',
+            'user_prompt' => 'inside', 'max_steps' => 5,
+        ]);
+
+        // Outsider — not in the group, owns no group agents.
+        $service = makeTaskService();
+        $result  = $service->getTasksForUser($outsiderId);
+
+        expect($result)->toBeEmpty();
+    });
+});
+
+describe('TaskService — per-task actions widen to group-member (post-0071)', function (): void {
+
+    it('any group member can approve a pending-approval task on a shared agent', function (): void {
+        // Replaces the legacy runner-only guard. The owner-or-group-member
+        // semantic is the v4 locked decision.
+        $authService = bootAuthLayer();
+        $ownerId      = $authService->register('approve-owner@example.com', 'Password1!', 'ApproveOwner');
+        $plainMemberId = $authService->register('approve-member@example.com', 'Password1!', 'ApproveMember');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'ApproveTest');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'ApproveAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+        $task = Task::create([
+            'agent_id' => $agent->id, 'principal_id' => $groupPrincipalId,
+            'trigger_user_id' => $plainMemberId, 'status' => 'PENDING_APPROVAL',
+            'user_prompt' => 'pending', 'max_steps' => 5,
+        ]);
+
+        $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
+        $mercure      = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->shouldReceive('publish')->andReturn(true);
+        $orchestrator->shouldReceive('resume')
+            ->once()
+            ->andReturnUsing(function () use ($task): void {
+                Task::where('id', $task->id)->update(['status' => 'RUNNING']);
+            });
+
+        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $result  = $service->approveTask($task->id, $ownerId, [
+            ['provider_call_id' => 'c1', 'decision' => 'approve'],
+        ]);
+
+        expect($result['status'])->toBe('RUNNING');
+    });
+
+    it('throws (404-shaped) when a non-group member tries to act on a shared-agent task', function (): void {
+        $authService = bootAuthLayer();
+        $ownerId      = $authService->register('guard-owner@example.com', 'Password1!', 'GuardOwner');
+        $plainMemberId = $authService->register('guard-member@example.com', 'Password1!', 'GuardMember');
+        $outsiderId    = $authService->register('guard-outsider@example.com', 'Password1!', 'GuardOutsider');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+        $principalService->ensureUserPrincipal($outsiderId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'GuardTest');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'GuardAgent',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ]);
+        $task = Task::create([
+            'agent_id' => $agent->id, 'principal_id' => $groupPrincipalId,
+            'trigger_user_id' => $plainMemberId, 'status' => 'PENDING_APPROVAL',
+            'user_prompt' => 'pending', 'max_steps' => 5,
+        ]);
+
+        $service = makeTaskService();
+        expect(fn() => $service->approveTask($task->id, $outsiderId, [
+            ['provider_call_id' => 'c1', 'decision' => 'approve'],
+        ]))->toThrow(InvalidArgumentException::class);
     });
 });

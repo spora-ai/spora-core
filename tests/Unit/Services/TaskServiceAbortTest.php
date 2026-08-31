@@ -25,7 +25,7 @@ function seedAbortTaskServiceFixtures(string $status, array $data = []): array
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => $status,
         'user_prompt' => 'orig',
@@ -66,7 +66,7 @@ final class CapturingMercure implements MercurePublisherInterface
 function makeCapturingService(OrchestratorInterface $orchestrator): array
 {
     $mercure = new CapturingMercure();
-    return [new TaskService($orchestrator, $mercure), $mercure];
+    return [new TaskService($orchestrator, $mercure, null, new Spora\Services\PrincipalResolver()), $mercure];
 }
 
 it('abortTask throws when the task is missing', function (): void {
@@ -147,7 +147,7 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
     // Build a 3-deep chain: grandparent → parent → child
     $grandparent = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'AWAITING_SUB_AGENTS',
         'user_prompt' => 'gp',
@@ -156,7 +156,7 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
     ]);
     $parent = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $grandparent->id,
         'status'    => 'AWAITING_SUB_AGENTS',
@@ -166,7 +166,7 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
     ]);
     $child = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $parent->id,
         'status'    => 'RUNNING',
@@ -215,7 +215,7 @@ it('abortSubAgentAndCascade is a no-op for non-awaiting ancestors', function ():
 
     $parent = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'status'    => 'COMPLETED',
         'user_prompt' => 'already done',
@@ -223,7 +223,7 @@ it('abortSubAgentAndCascade is a no-op for non-awaiting ancestors', function ():
     ]);
     $child = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'  => $agent->id,
         'parent_task_id' => $parent->id,
         'status'    => 'RUNNING',

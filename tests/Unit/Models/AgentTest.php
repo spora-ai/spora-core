@@ -64,7 +64,7 @@ it('has many tasks, agent tools, and tool calls', function (): void {
     Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'hi',
         'step_count'  => 1,
@@ -78,7 +78,7 @@ it('has many tasks, agent tools, and tool calls', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'hi',
         'step_count'  => 1,

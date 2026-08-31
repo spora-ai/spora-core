@@ -702,7 +702,7 @@ final class TickPhaseRunner
             'totals' => $totals,
         ];
 
-        $this->mercure->publish($task->id, $task->user_id, $taskData);
+        $this->mercure->publish($task->id, $task->principalUserId(), $taskData);
     }
 
     /**

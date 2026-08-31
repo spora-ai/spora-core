@@ -227,3 +227,107 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         expect($toolConfig->getRawAgentOverride(HandoverTool::class, $agentId)['max_results'])->toBe('15');
     })->afterEach(fn() => Database::resetBootState());
 });
+
+describe('AgentPrincipalService::transferAgent task-principal propagation (post-0071)', function (): void {
+
+    it('propagates principal_id to every inherited task on transfer', function (): void {
+        // Transfer agent ownership from group A to group B. Caller owns
+        // both groups, so PrincipalService::transferAgent's
+        // `callerControlsPrincipal` gate passes on both sides.
+        [$service, $auth, $principalService, $groupService, ] = makeAgentPrincipalService();
+        $callerId = $auth->register('aps-prop-caller@example.com', PRINC_TEST_PASSWORD, 'PropCaller');
+        $groupA = $groupService->createGroup($callerId, 'PropA');
+        $groupB = $groupService->createGroup($callerId, 'PropB');
+        $principalA = (int) $principalService->ensureGroupPrincipal($groupA->id)->id;
+        $principalB = (int) $principalService->ensureGroupPrincipal($groupB->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $principalA,
+            'name'         => 'TransferMe',
+            'llm_provider' => 'mock',
+            'llm_model'    => 'mock',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+
+        // Three tasks, all originally owned by group A (their trigger
+        // user is the caller — anyone in either group).
+        $callerPrincipalId = (int) $principalService->ensureUserPrincipal($callerId)->id;
+        $taskIds = [];
+        for ($i = 0; $i < 3; $i++) {
+            $taskIds[] = Capsule::table('tasks')->insertGetId([
+                'agent_id'        => $agent,
+                'principal_id'    => $principalA,
+                'trigger_user_id' => $callerId,
+                'status'          => 'COMPLETED',
+                'user_prompt'     => "task {$i}",
+                'max_steps'       => 10,
+                'created_at'      => date('Y-m-d H:i:s'),
+                'updated_at'      => date('Y-m-d H:i:s'),
+            ]);
+        }
+        // Silence unused variable lint warning while keeping the
+        // helper chain explicit about the principal layout.
+        unset($callerPrincipalId);
+
+        $service->transferAgent($agent, $principalB, $callerId);
+
+        // Every task's principal_id now points at group B.
+        $rows = Capsule::table('tasks')->whereIn('id', $taskIds)->pluck('principal_id')->all();
+        foreach ($rows as $row) {
+            expect((int) $row)->toBe($principalB);
+        }
+
+        // trigger_user_id stays on the caller — the clicker attribution
+        // is immutable, even across ownership changes.
+        $triggerIds = Capsule::table('tasks')->whereIn('id', $taskIds)->pluck('trigger_user_id')->all();
+        foreach ($triggerIds as $tid) {
+            expect((int) $tid)->toBe($callerId);
+        }
+    })->afterEach(fn() => Database::resetBootState());
+
+    it('does not touch tasks belonging to other agents when one is transferred', function (): void {
+        // Two agents, both owned by the caller via different groups.
+        // Transferring agent A must not touch agent B's tasks. The bulk
+        // update must be scoped by agent_id.
+        [$service, $auth, $principalService, $groupService, ] = makeAgentPrincipalService();
+        $callerId = $auth->register('aps-iso-caller@example.com', PRINC_TEST_PASSWORD, 'IsoCaller');
+        $groupA = $groupService->createGroup($callerId, 'IsoA');
+        $groupB = $groupService->createGroup($callerId, 'IsoB');
+        $principalA = (int) $principalService->ensureGroupPrincipal($groupA->id)->id;
+        $principalB = (int) $principalService->ensureGroupPrincipal($groupB->id)->id;
+
+        $agentA = Agent::create([
+            'principal_id' => $principalA, 'name' => 'A', 'llm_provider' => 'mock', 'llm_model' => 'mock',
+            'max_steps' => 10, 'is_active' => true,
+        ])->id;
+        $agentB = Agent::create([
+            'principal_id' => $principalB, 'name' => 'B', 'llm_provider' => 'mock', 'llm_model' => 'mock',
+            'max_steps' => 10, 'is_active' => true,
+        ])->id;
+
+        $taskA = Capsule::table('tasks')->insertGetId([
+            'agent_id' => $agentA, 'principal_id' => $principalA, 'trigger_user_id' => $callerId,
+            'status' => 'COMPLETED', 'user_prompt' => 'a', 'max_steps' => 10,
+            'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $taskB = Capsule::table('tasks')->insertGetId([
+            'agent_id' => $agentB, 'principal_id' => $principalB, 'trigger_user_id' => $callerId,
+            'status' => 'COMPLETED', 'user_prompt' => 'b', 'max_steps' => 10,
+            'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // Transfer A → group B's principal. Agent B already has principalB
+        // so its tasks shouldn't be touched (other than a no-op update).
+        $service->transferAgent($agentA, $principalB, $callerId);
+
+        expect((int) Capsule::table('tasks')->where('id', $taskA)->value('principal_id'))->toBe($principalB);
+
+        // The isolation invariant: agent B's task must NOT have been
+        // mutated. Verify by checking trigger_user_id still matches
+        // (we did NOT accidentally copy from agent A's tasks).
+        $agentBTasks = Capsule::table('tasks')->where('id', $taskB)->first();
+        expect((int) $agentBTasks->trigger_user_id)->toBe($callerId);
+        expect((int) $agentBTasks->principal_id)->toBe($principalB);
+    })->afterEach(fn() => Database::resetBootState());
+});

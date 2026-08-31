@@ -74,7 +74,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Original',
@@ -138,7 +138,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Original',

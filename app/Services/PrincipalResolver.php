@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use LogicException;
 use Spora\Models\Agent;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
@@ -62,19 +63,48 @@ final class PrincipalResolver
      * back to the agent's owner if no task has run yet (cold agent) so
      * credential resolution has something concrete to use during the
      * initial execution.
+     *
+     * Source column is `tasks.trigger_user_id` (not `user_id`): the
+     * post-0071 schema separates the immutable clicker attribution
+     * (`trigger_user_id`) from the mutable ownership marker
+     * (`principal_id`). Resolving credentials from `trigger_user_id`
+     * preserves the original "clicker runs the tick" semantic even
+     * after the agent is transferred to a new owner.
      */
     public function runnerUserId(int $agentId): ?int
     {
-        $runnerUserId = Task::where('agent_id', $agentId)
+        $triggerUserId = Task::where('agent_id', $agentId)
             ->orderByDesc('id')
-            ->value('user_id');
+            ->value('trigger_user_id');
 
-        if ($runnerUserId !== null) {
-            return (int) $runnerUserId;
+        if ($triggerUserId !== null) {
+            return (int) $triggerUserId;
         }
 
         $principalId = Agent::where('id', $agentId)->value('principal_id');
         return $principalId !== null ? $this->ownerUserId((int) $principalId) : null;
+    }
+
+    /**
+     * Resolve a user-id → user-principal-id. Used by writers that need
+     * to populate `tasks.principal_id` from a caller-supplied user-id
+     * (e.g. Orchestrator::start). Throws when no user-principal exists
+     * — the post-0067 schema guarantees one per user via the
+     * migration's bulk-insert + the `PrincipalService::ensureUserPrincipal()`
+     * idempotent guard, so a miss means the caller forgot to materialise.
+     */
+    public function userPrincipalId(int $userId): int
+    {
+        $id = Principal::where('type', Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->value('id');
+
+        if ($id === null) {
+            throw new LogicException(
+                "No user-principal exists for user {$userId} — call PrincipalService::ensureUserPrincipal() first.",
+            );
+        }
+        return (int) $id;
     }
 
     /**

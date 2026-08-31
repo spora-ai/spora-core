@@ -41,7 +41,7 @@ function makeTaskForUser(int $userId): Task
     return Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'Hello world',
         'final_response' => 'Hi back',

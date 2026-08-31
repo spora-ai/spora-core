@@ -456,7 +456,7 @@ final class ScheduledRunProcessor
             'status'      => $task->status,
             'user_prompt' => $task->user_prompt,
         ];
-        $this->mercure->publish($task->id, $task->user_id, $taskData);
+        $this->mercure->publish($task->id, $task->principalUserId(), $taskData);
     }
 
     private function computeNextDueAt(ScheduledRun $run): ?string

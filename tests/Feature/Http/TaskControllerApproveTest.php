@@ -69,7 +69,7 @@ function approvalFeatureHarness(
     $task = Task::create([
         'agent_id' => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status' => 'PENDING_APPROVAL',
         'user_prompt' => 'Review these actions',
         'step_count' => 1,
@@ -133,7 +133,7 @@ function approvalFeatureHarness(
     );
     $mercure = Mockery::mock(MercurePublisherInterface::class);
     $mercure->allows('publish');
-    $taskService = new TaskService($orchestrator, $mercure, new ToolCallSerializer([$tool]));
+    $taskService = new TaskService($orchestrator, $mercure, new ToolCallSerializer([$tool]), new Spora\Services\PrincipalResolver());
     $mediaCapability = new TaskMediaCapabilityService();
     $controller = new TaskController(
         $authService,

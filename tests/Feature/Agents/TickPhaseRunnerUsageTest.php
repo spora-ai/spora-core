@@ -43,7 +43,7 @@ test('TickPhaseRunner persists contentBlocks and Usage into the DB', function ()
     ]);
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'hi',
@@ -124,7 +124,7 @@ test('Orchestrator::appendHistory persists a plain assistant message without a r
     ]);
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'hi',
