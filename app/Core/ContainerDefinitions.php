@@ -69,6 +69,7 @@ use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
+use Spora\Http\NotificationSubscriptionController;
 use Spora\Http\PluginsController;
 use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
@@ -390,6 +391,10 @@ final class ContainerDefinitions
         $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
         if ($notifEmail !== null) {
             $set('notifications.email_enabled', filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN));
+        } else {
+            // Default-on: set explicitly so the API can introspect the
+            // resolved value rather than relying on `?? true` in consumers.
+            $set('notifications.email_enabled', true);
         }
 
         return $overrides;
@@ -1204,6 +1209,14 @@ final class ContainerDefinitions
                 return new NotificationController(
                     $c->get(AuthService::class),
                     $c->get(NotificationServiceInterface::class),
+                );
+            },
+
+            NotificationSubscriptionController::class => static function (ContainerInterface $c): NotificationSubscriptionController {
+                return new NotificationSubscriptionController(
+                    $c->get(AuthService::class),
+                    $c->get(\Spora\Services\NotificationSubscriptionService::class),
+                    $c->get('config'),
                 );
             },
 

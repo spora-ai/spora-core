@@ -8,9 +8,11 @@ use Monolog\Logger;
 use Spora\Models\Agent;
 use Spora\Models\MailTemplate;
 use Spora\Models\Notification;
+use Spora\Models\NotificationSubscription;
 use Spora\Models\Task;
 use Spora\Models\User;
 use Spora\Services\NotificationService;
+use Spora\Services\NotificationSubscriptionService;
 use Spora\Services\SystemMailer;
 use Tests\Support\TestCapturingMercure;
 
@@ -19,7 +21,7 @@ defined('NOTIF_TEST_PASSWORD') || define('NOTIF_TEST_PASSWORD', 'Password1!');
 function makeNotificationServiceWithUser(): array
 {
     $mercure = new TestCapturingMercure();
-    $service = new NotificationService($mercure);
+    $service = new NotificationService($mercure, null, [], new NotificationSubscriptionService());
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -355,7 +357,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         expect(Notification::where('user_id', $userId)->count())->toBe(0);
     });
 
-    it('sends the scheduled_run_completed email when enabled and the template exists', function (): void {
+    it('sends the scheduled_run_completed email when the caller is subscribed and the template exists', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
         $task = makeTaskForUser($userId);
 
@@ -366,14 +368,26 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
             'body_html' => null,
         ]);
 
+        // Subscribe the caller to the task's principal so the resolver returns them.
+        NotificationSubscription::create([
+            'user_id'     => $userId,
+            'target_type' => NotificationSubscription::TARGET_PRINCIPAL,
+            'target_id'   => (int) $task->principal_id,
+        ]);
+
         $testHandler = new TestHandler();
         $logger = new Logger('test', [$testHandler]);
         $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
 
-        $service = new NotificationService(new TestCapturingMercure(), $systemMailer, [
-            'notifications' => ['email_enabled' => true],
-            'app_name'      => 'Spora',
-        ]);
+        $service = new NotificationService(
+            new TestCapturingMercure(),
+            $systemMailer,
+            [
+                'notifications' => ['email_enabled' => true],
+                'app_name'      => 'Spora',
+            ],
+            new NotificationSubscriptionService(),
+        );
 
         $service->sendEmailForScheduledRun($task);
 
@@ -385,5 +399,42 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         $context = $records[0]->context;
         expect($context['to'])->toContain($user->email);
         expect($context['subject'])->toBe('Run completed: NotifTestAgent');
+    });
+
+    it('sends the email by default when the email_enabled key is absent (default-on)', function (): void {
+        // Regression: default-on must hold even when the email_enabled
+        // key is absent — exercises the `?? true` fallback.
+        MailTemplate::create([
+            'name'      => 'scheduled_run_completed',
+            'subject'   => 'Run completed: {{agent_name}}',
+            'body'      => 'Agent {{agent_name}} finished task {{task_id}}.',
+            'body_html' => null,
+        ]);
+
+        [$service, , $userId] = makeNotificationServiceWithUser();
+        $task = makeTaskForUser($userId);
+
+        NotificationSubscription::create([
+            'user_id'     => $userId,
+            'target_type' => NotificationSubscription::TARGET_PRINCIPAL,
+            'target_id'   => (int) $task->principal_id,
+        ]);
+
+        $testHandler = new TestHandler();
+        $logger = new Logger('test', [$testHandler]);
+        $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
+
+        // No 'notifications' key — exercises the `?? true` fallback in
+        // NotificationService when the config key is fully absent.
+        $service = new NotificationService(
+            new TestCapturingMercure(),
+            $systemMailer,
+            ['app_name' => 'Spora'],
+            new NotificationSubscriptionService(),
+        );
+
+        $service->sendEmailForScheduledRun($task);
+
+        expect($testHandler->hasInfoThatContains('Mail sent via log driver'))->toBeTrue();
     });
 });
