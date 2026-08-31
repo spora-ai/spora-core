@@ -115,7 +115,7 @@ function resumeAuthSeedPendingTask(
     $task = Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'resume auth test',
         'step_count'  => 0,
@@ -245,7 +245,7 @@ it('worker resume rejects a tool revoked from the agent and does not execute it'
     $task = Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'worker resume auth test',
         'step_count'  => 0,
@@ -580,7 +580,7 @@ it('executeOrQueue re-loads enabledClasses so a mid-tick revocation is honoured'
     $task = Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'stale snapshot test',
         'step_count'  => 0,

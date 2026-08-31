@@ -330,7 +330,8 @@ describe('PrincipalResolver::runnerUserId', function (): void {
         $aid = seedUserAgent((int) $principal->id, 'Run');
         Capsule::table('tasks')->insert([
             'agent_id'     => $aid,
-            'user_id'      => $userId,
+            'principal_id' => (int) $principal->id,
+            'trigger_user_id' => $userId,
             'status'       => 'COMPLETED',
             'user_prompt'  => 'hi',
             'step_count'   => 1,

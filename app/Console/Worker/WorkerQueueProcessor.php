@@ -79,7 +79,7 @@ final class WorkerQueueProcessor
         $this->logger->info('Processing task', ['task_id' => $task->id]);
         $output->writeln(sprintf('<info>Processing task %d...</info>', $task->id));
 
-        $this->mercure->publish($task->id, $task->user_id, [
+        $this->mercure->publish($task->id, $task->principalUserId(), [
             'task_id' => $task->id,
             'status'  => 'RUNNING',
         ]);
@@ -137,7 +137,7 @@ final class WorkerQueueProcessor
                 break;
             }
 
-            $this->mercure->publish($task->id, $task->user_id, [
+            $this->mercure->publish($task->id, $task->principalUserId(), [
                 'task_id' => $task->id,
                 'status'  => 'RUNNING',
             ]);
@@ -236,7 +236,7 @@ final class WorkerQueueProcessor
 
             $this->orchestrator->retry((int) $retryTask->id);
 
-            $this->mercure->publish($retryTask->id, $retryTask->user_id, [
+            $this->mercure->publish($retryTask->id, $retryTask->principalUserId(), [
                 'task_id' => $retryTask->id,
                 'status'  => 'RUNNING',
             ]);

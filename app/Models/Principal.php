@@ -6,6 +6,7 @@ namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use LogicException;
 
 /**
@@ -57,6 +58,19 @@ final class Principal extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(Group::class);
+    }
+
+    /**
+     * Tasks owned by this principal. Inverse of {@see Task::principal()};
+     * keyed on `tasks.principal_id` (FK CASCADE — deleting a principal
+     * cascades to its owned tasks, just as deleting a user cascades to
+     * that user's user-principal + their agent rows).
+     *
+     * @return HasMany<Task, $this>
+     */
+    public function tasks(): HasMany
+    {
+        return $this->hasMany(Task::class, 'principal_id');
     }
 
     /**

@@ -94,7 +94,7 @@ test('attachment row + user prompt produce a single user message with extracted 
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Summarize this paper',
         'step_count'  => 0,
@@ -154,7 +154,7 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Summarize this paper',
         'step_count'  => 0,
@@ -221,7 +221,7 @@ test('multiple text attachments + prompt produces a single combined block', func
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Compare these notes',
         'step_count'  => 0,
@@ -381,7 +381,7 @@ test('PDF upload: parser returns text → markdown_content populated → LLM get
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Summarize chapter 1',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -434,7 +434,7 @@ test('PDF upload: parser returns empty string → LLM gets [no extractable text]
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'What does this PDF say?',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -483,7 +483,7 @@ test('PDF upload: parser throws → conversion swallowed → LLM gets [no extrac
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Read this PDF',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -527,7 +527,7 @@ test('production row order: user row first, attachment row second collapses to o
     $agentId = buildMarkdownPipelineAgent($userId);
     $task = \Spora\Models\Task::create([
         'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status' => 'RUNNING', 'user_prompt' => 'Summarize this paper',
         'step_count' => 0, 'max_steps' => 10,
     ]);
@@ -588,7 +588,7 @@ test('multiple text attachments in production row order: one user message with d
     $task = \Spora\Models\Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'Compare these notes',
         'max_steps'   => 10,

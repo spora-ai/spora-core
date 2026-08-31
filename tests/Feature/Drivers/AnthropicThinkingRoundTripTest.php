@@ -127,7 +127,7 @@ test('Anthropic thinking signature is replayed byte-identical on the next outbou
     ]);
     $task = \Spora\Models\Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id' => $agent->id,
         'status' => 'RUNNING',
         'user_prompt' => 'round-trip',

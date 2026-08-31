@@ -192,7 +192,8 @@ it('tick marks task COMPLETED when LLM returns text', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Do something',
         'step_count'  => 0,
@@ -217,7 +218,8 @@ it('tick is a no-op when task is not RUNNING', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'COMPLETED',
         'user_prompt' => 'x',
         'step_count'  => 0,
@@ -571,7 +573,8 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'x',
         'step_count'  => 0,
@@ -807,7 +810,8 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'COMPLETED',
         'user_prompt' => 'x',
         'step_count'  => 0,
@@ -1032,7 +1036,8 @@ it('continues correctly when LLM sends tool call with empty array arguments "[]"
     // This is stored in tool_call_payload as the string "[]".
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Get current time',
         'step_count'  => 1,
@@ -1097,7 +1102,8 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Test',
         'step_count'  => 0,
@@ -1148,7 +1154,8 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Test',
         'step_count'  => 0,
@@ -1202,7 +1209,8 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Test',
         'step_count'  => 0,
@@ -1490,8 +1498,11 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     // Detach references first (FK from principal_preferences.preferred_llm_config_id).
     PrincipalPreference::whereIn('preferred_llm_config_id', [$configA->id, $configB->id])->delete();
 
-    LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
+    // Delete tasks → agents → LLM configs in that order to satisfy the
+    // tasks.agent_id and agents.llm_driver_config_id FK chains.
+    Task::whereIn('agent_id', [$agentA->id, $agentB->id])->delete();
     Agent::whereIn('id', [$agentA->id, $agentB->id])->delete();
+    LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
@@ -1622,8 +1633,9 @@ it('publishes the final tool batch even when status flips to ABORTED post-batch'
     // Pull a RUNNING task out of the DB and flip its status to ABORTED
     // so the post-batch bail will fire on its first read.
     $task = Task::create([
-        'user_id'     => Agent::find($agentId)->user_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'agent_id'    => $agentId,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'abort race test',
         'max_steps'   => 10,
@@ -1708,7 +1720,7 @@ it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORT
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($agent->user_id),
-        'user_id'     => $agent->user_id,
+        'trigger_user_id' => $agent->user_id,
         'agent_id'    => $agent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'abort race',
@@ -1825,7 +1837,8 @@ it('continue() updates Task.user_prompt to the new prompt', function (): void {
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'COMPLETED',
         'user_prompt' => PROMPT_ORIGINAL,
         'step_count'  => 1,
@@ -1898,7 +1911,8 @@ it('continue() throws InvalidTaskTransitionException when source status is not i
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'awaiting approval',
         'step_count'  => 0,
@@ -1917,7 +1931,8 @@ it('continue() overrides max_steps when additionalSteps is supplied', function (
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'COMPLETED',
         'user_prompt' => PROMPT_ORIGINAL,
         'step_count'  => 5,
@@ -1950,7 +1965,8 @@ it('tick marks task FAILED with error_code, error_message, and failure_reason wh
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hello',
         'step_count'  => 0,
@@ -1982,7 +1998,8 @@ it('tick classifies RateLimitException as RATE_LIMIT and marks task FAILED', fun
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hello',
         'step_count'  => 0,
@@ -2013,7 +2030,8 @@ it('tick classifies RetryableException with 529 as SERVER_OVERLOADED', function 
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hello',
         'step_count'  => 0,
@@ -2050,7 +2068,8 @@ it('tick marks task FAILED with CONTEXT_WINDOW_FIRST_TURN on first-turn context 
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hello',
         'step_count'  => 0,
@@ -2102,7 +2121,8 @@ it('tick compacts history and retries successfully when context window error hap
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Original',
         'step_count'  => 0,
@@ -2331,7 +2351,8 @@ it('partial approval in worker mode defers the approved tool and keeps the un-ap
     // pickup e2e test below.)
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'Partial approval worker',
         'step_count'  => 1,
@@ -2486,7 +2507,8 @@ it('runTick() picks up APPROVED + executed_at NULL rows and runs them before the
     // waiting for execution (the worker-mode resume sentinel shape).
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Worker pickup test',
         'step_count'  => 0,
@@ -2560,7 +2582,8 @@ it('runTick() worker-mode pickup records a Validation Error when the approved ar
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Validation failure in pickup',
         'step_count'  => 0,
@@ -2623,7 +2646,8 @@ it('runTick() worker-mode pickup persists the failure result when safeExecute re
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Throwing tool in pickup',
         'step_count'  => 0,
@@ -2698,7 +2722,8 @@ it('worker-mode resume returns immediately and defers tool execution to the next
     // in WorkerModeTest.
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'PENDING_APPROVAL',
         'user_prompt' => 'Worker pickup e2e',
         'step_count'  => 1,
@@ -2896,7 +2921,7 @@ it('scheduleAutoRetry schedules the retry in place when error code is retryable 
     $task = Task::create([
         'agent_id'      => $agentId,
         'principal_id' => createUserPrincipalPublic($agent->user_id),
-        'user_id'     => $agent->user_id,
+        'trigger_user_id' => $agent->user_id,
         'status'        => 'RUNNING',
         'user_prompt'   => 'Retry me',
         'step_count'    => 0,
@@ -2954,7 +2979,8 @@ it('scheduleAutoRetry does NOT create a retry when agent has no retry policy', f
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'No retry policy',
         'step_count'  => 0,
@@ -2998,7 +3024,7 @@ it('scheduleAutoRetry does NOT exceed max_retries', function (): void {
     $task = Task::create([
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($agent->user_id),
-        'user_id'     => $agent->user_id,
+        'trigger_user_id' => $agent->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Exhausted retries',
         'step_count'  => 0,
@@ -3256,7 +3282,8 @@ it('buildMessages includes tool result rows in the conversation sent to the LLM'
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Test',
         'step_count'  => 0,
@@ -3381,7 +3408,8 @@ it('tick stores a context window error message that mentions the actual limit wh
 
     $task = Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => Agent::find($agentId)->user_id,
+        'principal_id' => (int) Agent::find($agentId)->principal_id,
+        'trigger_user_id' => Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Hi',
         'step_count'  => 0,
@@ -3733,7 +3761,8 @@ describe('Orchestrator::buildMessages — empty history', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => Agent::find($agentId)->user_id,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => Agent::find($agentId)->user_id,
             'status'      => 'RUNNING',
             'user_prompt' => 'No history',
             'step_count'  => 0,
@@ -3764,7 +3793,8 @@ describe('Orchestrator::buildMessages — summary substitution', function (): vo
 
         $task = Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => Agent::find($agentId)->user_id,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => Agent::find($agentId)->user_id,
             'status'      => 'RUNNING',
             'user_prompt' => 'Summary test',
             'step_count'  => 0,
@@ -3819,7 +3849,8 @@ describe('Orchestrator::buildMessages — assistant tool_call payload', function
 
         $task = Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => Agent::find($agentId)->user_id,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => Agent::find($agentId)->user_id,
             'status'      => 'RUNNING',
             'user_prompt' => 'Empty args test',
             'step_count'  => 0,
@@ -3860,7 +3891,8 @@ describe('Orchestrator::buildMessages — assistant tool_call payload', function
 
         $task = Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => Agent::find($agentId)->user_id,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => Agent::find($agentId)->user_id,
             'status'      => 'RUNNING',
             'user_prompt' => 'Non-empty args test',
             'step_count'  => 0,
@@ -3903,7 +3935,8 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
 
         $task = Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => Agent::find($agentId)->user_id,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => Agent::find($agentId)->user_id,
             'status'      => 'RUNNING',
             'user_prompt' => 'Tool role test',
             'step_count'  => 0,
@@ -4043,7 +4076,7 @@ it('retry resets failed-task state in place (error fields cleared, history prese
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'       => $agentId,
         'status'         => 'FAILED',
         'user_prompt'    => 'retry me',
@@ -4090,7 +4123,7 @@ it('retry resets the failed task in place and clears retry_of_task_id so the mai
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $agentId,
         'status'      => 'FAILED',
         'user_prompt' => 'retry me',
@@ -4132,7 +4165,7 @@ it('retry throws when the task is not in FAILED status', function (): void {
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $agentId,
         'status'      => 'COMPLETED',
         'user_prompt' => 'already done',

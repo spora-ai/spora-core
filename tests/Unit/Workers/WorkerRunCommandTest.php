@@ -43,7 +43,8 @@ function makeWorkerRunCommand(): array
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
         return Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => 1,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => 1,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,
@@ -89,7 +90,8 @@ function makeStandaloneScheduledRunProcessor(): ScheduledRunProcessor
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
         return Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => 1,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => 1,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,
@@ -480,7 +482,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             ->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
                 return Task::create([
                     'agent_id'    => $agentId,
-                    'user_id'     => 1,
+                    'principal_id' => (int) Agent::find($agentId)->principal_id,
+                    'trigger_user_id' => 1,
                     'status'      => 'RUNNING',
                     'user_prompt' => $prompt,
                     'max_steps'   => $maxSteps,
@@ -814,7 +817,8 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
             return Task::create([
                 'agent_id'    => $agentId,
-                'user_id'     => 1,
+                'principal_id' => (int) Agent::find($agentId)->principal_id,
+                'trigger_user_id' => 1,
                 'status'      => 'RUNNING',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,
@@ -855,7 +859,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Test prompt',
             'max_steps'   => 10,
@@ -921,7 +925,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'QUEUED',
             'user_prompt' => 'Should not run',
             'max_steps'   => 10,
@@ -986,7 +990,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orphanedTask = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Orphaned',
             'max_steps'   => 10,
@@ -1314,7 +1318,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         // FAILED task whose retry_after is in the future — worker must skip.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',
@@ -1352,7 +1356,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
         // retry_of_task_id pointing to itself and retry_after in the past.
         $failed = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'       => $agent->id,
             'status'         => 'FAILED',
             'user_prompt'    => 'orig',

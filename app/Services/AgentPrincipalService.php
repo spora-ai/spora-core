@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use PDOException;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
@@ -37,25 +38,48 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
             throw new DependencyNotWiredException('PrincipalService not wired into AgentPrincipalService — cannot transfer.');
         }
 
-        $agent = $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
+        // Wrap the whole transfer (agent row + task rows + handover
+        // allowlist prune) in a single transaction. PrincipalService::
+        // transferAgent already opens its own transaction; on Capsule,
+        // nested calls become savepoints, so the bulk task UPDATE here
+        // rolls back atomically with the agent update if anything below
+        // it throws. Result: the agent, its tasks, and the LLM-facing
+        // handover allowlist all move to the new principal together — or
+        // none of them do.
+        return Capsule::connection()->transaction(function () use ($agentId, $targetPrincipalId, $callerUserId): Agent {
+            $agent = $this->principalService->transferAgent($agentId, $targetPrincipalId, $callerUserId);
 
-        // After a successful transfer the agent's principal_id may have
-        // changed; any per-agent override on HandoverTool holds a
-        // `allowed_target_agents` list that the operator picked before
-        // the transfer — those ids now belong to the OLD principal and
-        // would be rejected by HandoverTool::sharePrincipal() at runtime.
-        // Prune them up-front so the LLM-facing tool definition reflects
-        // the new principal scope immediately, instead of silently
-        // failing every handover until the operator notices.
-        //
-        // No-op when the transfer was a no-op (source == target
-        // principal_id) — the prune is a no-op itself when the agent's
-        // override doesn't reference any cross-principal ids, so the
-        // cost is two SELECTs at most (`getRawAgentOverride` + the
-        // cross-principal `Agent::whereIn`).
-        $this->pruneHandoverAllowlist((int) $agent->id, $targetPrincipalId);
+            // Propagate the new ownership to every task row that belongs
+            // to this agent. `tasks.principal_id` drives visibility +
+            // per-task action gating — without this bulk update the
+            // inherited runs would stay attributed to the old principal
+            // and the new owner wouldn't see them in their "My Tasks"
+            // list.
+            //
+            // `tasks.trigger_user_id` is intentionally NOT touched: the
+            // historical "user X started this chat" attribution outlives
+            // ownership changes (post-0071 schema split).
+            Capsule::table('tasks')
+                ->where('agent_id', $agent->id)
+                ->update(['principal_id' => $targetPrincipalId]);
 
-        return $agent;
+            // After a successful transfer the agent's principal_id may
+            // have changed; any per-agent override on HandoverTool holds
+            // a `allowed_target_agents` list that the operator picked
+            // before the transfer — those ids now belong to the OLD
+            // principal and would be rejected by HandoverTool::
+            // sharePrincipal() at runtime. Prune them up-front so the
+            // LLM-facing tool definition reflects the new principal
+            // scope immediately, instead of silently failing every
+            // handover until the operator notices.
+            //
+            // No-op when the transfer was a no-op (source == target
+            // principal_id) — the prune is a no-op itself when the
+            // agent's override doesn't reference any cross-principal ids.
+            $this->pruneHandoverAllowlist((int) $agent->id, $targetPrincipalId);
+
+            return $agent;
+        });
     }
 
     /**
@@ -208,7 +232,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
 
     private function findLegacyUserPrincipal(int $userId): ?int
     {
-        $existing = \Illuminate\Database\Capsule\Manager::table('principals')
+        $existing = Capsule::table('principals')
             ->where('type', Principal::TYPE_USER)
             ->where('user_id', $userId)
             ->value('id');
@@ -218,7 +242,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
 
     private function insertLegacyUserPrincipal(int $userId): int
     {
-        return (int) \Illuminate\Database\Capsule\Manager::table('principals')->insertGetId([
+        return (int) Capsule::table('principals')->insertGetId([
             'type'       => Principal::TYPE_USER,
             'user_id'    => $userId,
             'created_at' => date(self::DATETIME_FORMAT),

@@ -58,16 +58,22 @@ final class SubAgentService implements SubAgentServiceInterface
         private readonly Closure $orchestratorFactory,
         private readonly ?MercurePublisherInterface $mercure = null,
         ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
     private readonly PrincipalService $principalService;
+    private readonly PrincipalResolver $principalResolver;
 
     public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId): Task
     {
+        // Parent-task gate widens to principal_id membership: any group
+        // member can spawn a sub-agent on a parent's conversation.
+        $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
         $parent = Task::where('id', $parentTaskId)
-            ->where('user_id', $userId)
+            ->whereIn('principal_id', $visiblePrincipalIds)
             ->first();
         // Migration 0067: agents are owned by a principal. Look up the
         // target agent and verify the caller controls its principal.
@@ -331,7 +337,7 @@ final class SubAgentService implements SubAgentServiceInterface
                 'data'   => json_encode($data, JSON_THROW_ON_ERROR),
             ]);
 
-        $this->publishParentState($parent->id, $parent->user_id);
+        $this->publishParentState($parent->id, $parent->principalUserId());
     }
 
     /**

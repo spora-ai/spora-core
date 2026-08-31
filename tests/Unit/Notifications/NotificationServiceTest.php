@@ -73,7 +73,7 @@ describe('NotificationService', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Hello',
             'max_steps'   => 10,
@@ -103,7 +103,7 @@ describe('NotificationService', function (): void {
         $task = Task::create([
             'agent_id'       => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'         => 'FAILED',
             'user_prompt'    => 'Fail me',
             'max_steps'      => 10,
@@ -136,7 +136,7 @@ describe('NotificationService', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'PENDING_APPROVAL',
             'user_prompt' => 'Approve me',
             'max_steps'   => 10,
@@ -161,7 +161,7 @@ describe('NotificationService', function (): void {
         $task = Task::create([
             'agent_id'    => $agent->id,
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'status'      => 'COMPLETED',
             'user_prompt' => 'Scheduled task',
             'max_steps'   => 10,

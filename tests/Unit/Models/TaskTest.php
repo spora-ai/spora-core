@@ -30,7 +30,7 @@ it('casts step_count, max_steps, retry_count to integers and data to array', fun
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,
@@ -54,19 +54,19 @@ it('belongs to an agent and a user', function (): void {
         'is_active'    => true,
     ]);
     $task = Task::create([
-        'agent_id'    => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'hi',
-        'step_count'  => 0,
-        'max_steps'   => 10,
+        'agent_id'         => $agent->id,
+        'principal_id'     => createUserPrincipalPublic($userId),
+        'trigger_user_id'  => $userId,
+        'status'           => 'RUNNING',
+        'user_prompt'      => 'hi',
+        'step_count'       => 0,
+        'max_steps'        => 10,
     ]);
 
     expect($task->agent)->toBeInstanceOf(Agent::class)
         ->and((int) $task->agent->getKey())->toBe($agent->id)
-        ->and($task->user)->toBeInstanceOf(User::class)
-        ->and((int) $task->user->getKey())->toBe($userId);
+        ->and($task->triggerUser)->toBeInstanceOf(User::class)
+        ->and((int) $task->triggerUser->getKey())->toBe($userId);
 });
 
 it('has many task history entries and tool calls', function (): void {
@@ -80,13 +80,13 @@ it('has many task history entries and tool calls', function (): void {
         'is_active'    => true,
     ]);
     $task = Task::create([
-        'agent_id'    => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'hi',
-        'step_count'  => 0,
-        'max_steps'   => 10,
+        'agent_id'         => $agent->id,
+        'principal_id'     => createUserPrincipalPublic($userId),
+        'trigger_user_id'  => $userId,
+        'status'           => 'RUNNING',
+        'user_prompt'      => 'hi',
+        'step_count'       => 0,
+        'max_steps'        => 10,
     ]);
 
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'hi']);

@@ -40,7 +40,7 @@ function makeClientScheduledProcessor(
                 'principal_id' => $userId !== null
                     ? createUserPrincipalPublic($userId)
                     : createUserPrincipalPublic(1),
-                'user_id'     => $userId ?? 1,
+                'trigger_user_id' => $userId ?? 1,
                 'status'      => 'QUEUED',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,
@@ -177,7 +177,7 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
             ->first();
         expect($entry->status)->toBe(ScheduledRunNext::STATUS_DONE);
 
-        $task = Task::where('agent_id', $agentId)->where('user_id', $userId)->first();
+        $task = Task::where('agent_id', $agentId)->where('principal_id', createUserPrincipalPublic($userId))->first();
         expect($task)->not->toBeNull()
             ->and($task->status)->toBe('COMPLETED');
     });
@@ -200,7 +200,7 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
             600,
         );
 
-        $task = Task::where('agent_id', $agentId)->where('user_id', $userId)->first();
+        $task = Task::where('agent_id', $agentId)->where('principal_id', createUserPrincipalPublic($userId))->first();
         expect($task)->not->toBeNull();
         // The lease is cleared on terminal transition by the controller/processor.
         // Verify it was written during the tick: pull a fresh copy mid-flight
@@ -231,7 +231,7 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
 
         expect($result)->toBeFalse();
 
-        $task = Task::where('agent_id', $agentId)->where('user_id', $userId)->first();
+        $task = Task::where('agent_id', $agentId)->where('principal_id', createUserPrincipalPublic($userId))->first();
         expect($task)->not->toBeNull()
             ->and($task->status)->toBe('FAILED')
             ->and($task->error_code)->toBe('UNKNOWN')

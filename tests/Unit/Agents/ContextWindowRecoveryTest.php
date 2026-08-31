@@ -45,7 +45,7 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
 
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $agent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'compact test',

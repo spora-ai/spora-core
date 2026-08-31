@@ -172,6 +172,13 @@ test('0067 migration does not cascade-delete dependent rows when rebuilding the 
         $t->foreign('user_id', 'fk_agents_user_id')
             ->references('id')->on('users')->onDelete('cascade');
     });
+    // Relax tasks.principal_id to nullable + re-add the pre-0071
+    // user_id column. The post-0071 boot sets principal_id to NOT NULL —
+    // we have to undo that so the dependent-row test can backfill tasks
+    // with the pre-state user_id shape.
+    Capsule::schema()->table('tasks', static function (Blueprint $t): void {
+        $t->unsignedBigInteger('principal_id')->nullable()->change();
+    });
 
     $agentId = (int) Capsule::table('agents')->insertGetId([
         'user_id'      => $userId,
@@ -182,6 +189,16 @@ test('0067 migration does not cascade-delete dependent rows when rebuilding the 
         'created_at'   => date('Y-m-d H:i:s'),
         'updated_at'   => date('Y-m-d H:i:s'),
     ]);
+    // Re-add the pre-0071 user_id column on tasks so the dependent-row
+    // cascade test exercises the same DB shape the SQLite rebuild path
+    // is expected to handle. (agents.user_id was already re-added above
+    // for the same reason; tasks needs the parallel fix.)
+    Capsule::schema()->table('tasks', static function (Blueprint $t): void {
+        $t->unsignedBigInteger('user_id')->nullable()->after('agent_id');
+        $t->index('user_id', 'idx_tasks_user_id');
+        $t->foreign('user_id', 'fk_tasks_user_id')
+            ->references('id')->on('users')->onDelete('cascade');
+    });
     $taskId = (int) Capsule::table('tasks')->insertGetId([
         'agent_id'     => $agentId,
         'user_id'      => $userId,

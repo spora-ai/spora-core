@@ -40,7 +40,7 @@ function createReaperTask(int $agentId, int $userId, array $overrides): Task
     $defaults = [
         'agent_id'    => $agentId,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'reaper target',
         'max_steps'   => 10,

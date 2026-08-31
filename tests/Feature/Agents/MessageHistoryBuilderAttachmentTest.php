@@ -54,7 +54,8 @@ function makeAttachmentTask(int $agentId): \Spora\Models\Task
 {
     return \Spora\Models\Task::create([
         'agent_id'    => $agentId,
-        'user_id'     => \Spora\Models\Agent::find($agentId)->user_id,
+        'principal_id' => (int) \Spora\Models\Agent::find($agentId)->principal_id,
+        'trigger_user_id' => \Spora\Models\Agent::find($agentId)->user_id,
         'status'      => 'RUNNING',
         'user_prompt' => 'attachment test',
         'step_count'  => 0,

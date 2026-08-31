@@ -28,7 +28,7 @@ function makeGroupClaimProcessor(): ScheduledRunProcessor
             'principal_id' => $userId !== null
                 ? createUserPrincipalPublic($userId)
                 : createUserPrincipalPublic(1),
-            'user_id'     => $userId ?? 1,
+            'trigger_user_id' => $userId ?? 1,
             'status'      => 'QUEUED',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,

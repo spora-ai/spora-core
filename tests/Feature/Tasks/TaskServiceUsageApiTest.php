@@ -37,7 +37,7 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
     ]);
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id' => $agent->id,
         'status' => 'COMPLETED',
         'user_prompt' => 'hi',
@@ -84,6 +84,8 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
         Mockery::mock(MercurePublisherInterface::class),
+        null,
+        new \Spora\Services\PrincipalResolver(),
     );
 
     /** @var array<string, mixed> $result */
@@ -138,7 +140,7 @@ test('task detail resource strips redacted_thinking data payload', function (): 
     ]);
     $task = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id' => $agent->id,
         'status' => 'COMPLETED',
         'user_prompt' => 'hi',
@@ -158,6 +160,8 @@ test('task detail resource strips redacted_thinking data payload', function (): 
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
         Mockery::mock(MercurePublisherInterface::class),
+        null,
+        new \Spora\Services\PrincipalResolver(),
     );
 
     /** @var array<string, mixed> $result */

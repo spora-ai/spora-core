@@ -35,7 +35,15 @@ final class TaskService implements TaskServiceInterface
      */
     public function getTasksForUser(int $userId, ?int $agentId = null, ?string $since = null, ?int $page = null, ?int $perPage = null, ?string $status = null): array
     {
-        $query = Task::where('user_id', $userId)
+        // Visibility scoping: every principal the user can act as (their
+        // own user-principal + group-principals for every group they
+        // belong to) confers visibility on tasks owned by that principal.
+        // This widens the legacy `where('user_id', $userId)` gate so a
+        // group member can see every other member's runs on a shared
+        // agent. Migrated from `tasks.user_id` to `tasks.principal_id`
+        // — see migration 0071.
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $query = $query = Task::whereIn('principal_id', $visiblePrincipalIds)
             ->orderByDesc('updated_at')
             ->with(['agent']);
 
@@ -96,7 +104,8 @@ final class TaskService implements TaskServiceInterface
         }
 
         if ($parentTaskId !== null) {
-            $parentTask = Task::where('id', $parentTaskId)->where('user_id', $userId)->first();
+            $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+            $parentTask = Task::where('id', $parentTaskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
             if ($parentTask === null) {
                 throw new InvalidArgumentException('parent_task_id is invalid.');
             }
@@ -106,7 +115,7 @@ final class TaskService implements TaskServiceInterface
         $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
 
         $resource = $this->taskResource($task);
-        $this->mercure->publish($task->id, $userId, $resource);
+        $this->mercure->publish($task->id, $task->principalUserId(), $resource);
 
         return $resource;
     }
@@ -116,7 +125,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function getTask(int $taskId, int $userId): ?array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             return null;
         }
@@ -128,7 +138,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function getTaskWithHistory(int $taskId, int $userId, ?int $sinceSequence = null): ?array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             return null;
         }
@@ -140,7 +151,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function approveTask(int $taskId, int $userId, array $decisions): array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -153,7 +165,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
+        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
 
         return $resource;
     }
@@ -163,7 +175,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function rejectTask(int $taskId, int $userId, string $reason): array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -176,7 +189,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
+        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
 
         return $resource;
     }
@@ -186,7 +199,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function retryTask(int $taskId, int $userId): array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -198,7 +212,7 @@ final class TaskService implements TaskServiceInterface
         $retried = $this->orchestrator->retry($task->id);
 
         $resource = $this->taskResource($retried);
-        $this->mercure->publish($retried->id, $retried->user_id, $resource);
+        $this->mercure->publish($retried->id, $retried->principalUserId(), $resource);
 
         return $resource;
     }
@@ -211,7 +225,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function continueTask(int $taskId, int $userId, string $prompt, ?int $additionalSteps = null, array $mediaIds = []): array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -233,7 +248,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $resource = $this->taskResource($continuedTask);
-        $this->mercure->publish($continuedTask->id, $continuedTask->user_id, $resource);
+        $this->mercure->publish($continuedTask->id, $continuedTask->principalUserId(), $resource);
 
         return $resource;
     }
@@ -249,7 +264,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function abortTask(int $taskId, int $userId): array
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -263,7 +279,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $resource = $this->taskResource($aborted);
-        $this->mercure->publish($aborted->id, $aborted->user_id, $resource);
+        $this->mercure->publish($aborted->id, $aborted->principalUserId(), $resource);
 
         return $resource;
     }
@@ -280,7 +296,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function abortSubAgentAndCascade(int $childTaskId, int $userId): array
     {
-        $child = Task::where('id', $childTaskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $child = Task::where('id', $childTaskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($child === null) {
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
         }
@@ -297,7 +314,7 @@ final class TaskService implements TaskServiceInterface
 
         $fresh = $abortedChild->fresh();
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->user_id, $resource);
+        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
 
         return $resource;
     }
@@ -341,7 +358,7 @@ final class TaskService implements TaskServiceInterface
             try {
                 $aborted = $this->orchestrator->abort((int) $target->id);
                 $resource = $this->taskResource($aborted);
-                $this->mercure->publish($aborted->id, (int) $aborted->user_id, $resource);
+                $this->mercure->publish($aborted->id, $aborted->principalUserId(), $resource);
             } catch (InvalidTaskTransitionException $e) {
                 // Ancestor transitioned between the cascade scan and the
                 // per-row abort — treat as a no-op for the cascading call.
@@ -355,7 +372,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function deleteTask(int $taskId, int $userId): bool
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             return false;
         }
@@ -377,7 +395,8 @@ final class TaskService implements TaskServiceInterface
      */
     public function cancelRetryChain(int $taskId, int $userId): bool
     {
-        $task = Task::where('id', $taskId)->where('user_id', $userId)->first();
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {
             return false;
         }
@@ -390,8 +409,10 @@ final class TaskService implements TaskServiceInterface
         // `retry_after` is enough to stop the worker from re-ticking it; the
         // task stays FAILED so the user can still see the failure or click
         // Retry Now manually.
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
+        $userPrincipalId = $resolver->userPrincipalId($userId);
         Capsule::table('tasks')
-            ->where('user_id', $userId)
+            ->where('principal_id', $userPrincipalId)
             ->where('retry_of_task_id', $task->retry_of_task_id)
             ->where('retry_count', '>=', $task->retry_count)
             ->where('status', 'FAILED')

@@ -712,7 +712,7 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'idem test',
@@ -1188,7 +1188,7 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
         ]);
         $task = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $agent->id,
             'status'      => 'RUNNING',
             'user_prompt' => 'idem2 test',

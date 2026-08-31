@@ -29,7 +29,8 @@ function makeScheduledRunController(): array
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) {
         return Spora\Models\Task::create([
             'agent_id'    => $agentId,
-            'user_id'     => 1,
+            'principal_id' => (int) Agent::find($agentId)->principal_id,
+            'trigger_user_id' => 1,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,

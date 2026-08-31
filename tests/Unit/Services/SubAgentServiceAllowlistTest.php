@@ -86,7 +86,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
 
         $parent = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id' => $agent->id,
             'status' => 'AWAITING_SUB_AGENTS',
             'user_prompt' => 'parent',

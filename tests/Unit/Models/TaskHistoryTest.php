@@ -31,7 +31,7 @@ it('allows mass assignment of history fields', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,
@@ -64,7 +64,7 @@ it('belongs to a task', function (): void {
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'RUNNING',
         'user_prompt' => 'hi',
         'step_count'  => 0,

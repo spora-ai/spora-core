@@ -64,7 +64,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original prompt',
@@ -74,7 +74,8 @@ describe('HandoverService::handover', function (): void {
         $newTask = new Task();
         $newTask->id = 12345;
         $newTask->agent_id = $targetAgentId;
-        $newTask->user_id = $userId;
+        $newTask->principal_id = createUserPrincipalPublic($userId);
+        $newTask->trigger_user_id = $userId;
         $newTask->parent_task_id = $source->id;
         $newTask->status = 'RUNNING';
         $newTask->user_prompt = 'ctx';
@@ -110,7 +111,7 @@ describe('HandoverService::handover', function (): void {
 
         $foreignSource = Task::create([
             'principal_id' => createUserPrincipalPublic($otherUserId),
-            'user_id'     => $otherUserId,
+            'trigger_user_id' => $otherUserId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Foreign prompt',
@@ -144,7 +145,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',
@@ -167,7 +168,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'     => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'    => $sourceAgentId,
             'status'      => 'RUNNING',
             'user_prompt' => 'Original',
@@ -178,7 +179,8 @@ describe('HandoverService::handover', function (): void {
         $newTask = new Task();
         $newTask->id = 7777;
         $newTask->agent_id = $targetAgentId;
-        $newTask->user_id = $userId;
+        $newTask->principal_id = createUserPrincipalPublic($userId);
+        $newTask->trigger_user_id = $userId;
         $newTask->parent_task_id = $source->id;
         $newTask->status = 'RUNNING';
         $newTask->user_prompt = 'ctx';
@@ -227,7 +229,7 @@ describe('HandoverService::handover', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $sourceAgentId,
             'status'       => 'RUNNING',
             'user_prompt'  => 'Original',
@@ -279,7 +281,7 @@ describe('SubAgentService::spawn', function (): void {
 
         $source = Task::create([
             'principal_id' => createUserPrincipalPublic($userId),
-            'user_id'      => $userId,
+            'trigger_user_id' => $userId,
             'agent_id'     => $sourceAgent->id,
             'status'       => 'RUNNING',
             'user_prompt'  => 'Original',

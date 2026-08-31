@@ -59,7 +59,7 @@ function seedTaskWithStatus(string $status, array $data = []): int
 
     $task = Task::create(array_merge([
         'agent_id'    => $agent->id,
-        'principal_id' => createUserPrincipalPublic($userId), 'user_id'     => $userId,
+        'principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId,
         'status'      => $status,
         'user_prompt' => 'orig',
         'step_count'  => 0,
@@ -229,7 +229,7 @@ it('Orchestrator::continue on ABORTED source clears aborted_at and re-prompts', 
     $task = Task::create([
         'agent_id'    => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'      => 'ABORTED',
         'user_prompt' => 'orig',
         'step_count'  => 0,
@@ -303,7 +303,7 @@ it('Orchestrator::continue from ABORTED clears stale retry_of_task_id so the wor
     $task = Task::create([
         'agent_id'         => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'           => 'ABORTED',
         'user_prompt'      => 'orig',
         'step_count'       => 0,
@@ -364,7 +364,7 @@ it('Orchestrator::continue from COMPLETED also clears stale retry markers', func
     $task = Task::create([
         'agent_id'         => $agent->id,
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'status'           => 'COMPLETED',
         'user_prompt'      => 'old',
         'final_response'   => 'done',

@@ -147,36 +147,42 @@ final class Orchestrator implements OrchestratorInterface
 
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task
     {
-        Agent::findOrFail($agentId);
+        $agent = Agent::findOrFail($agentId);
 
         $taskData = $runId !== null ? ['run_id' => $runId] : [];
 
-        // `tasks.user_id` has two meanings:
-        // - task attribution (who triggered the chat) → used by the UI to
-        //   decide which tasks show up under "My tasks" and to gate
-        //   per-task actions like approve / reject / abort / destroy
-        // - credential ownership → used by the orchestrator to pick whose
-        //   LLM driver config + tool overrides to load on each tick
-        // For interactive callers (`POST /tasks`) the HTTP controller knows
-        // exactly who triggered the request, so it passes `$userId` and we
-        // skip the runner fallback. Worker / scheduled-run paths leave it
-        // null and fall through to the runner (most-recent user) so the
-        // LLM still runs under a valid principal.
+        // `tasks` carries two identity columns (post-0071) plus the
+        // historical `user_id`-derived ones:
+        // - `tasks.principal_id` — the agent's owner principal. Drives
+        //   visibility + per-task action gating. Copied from the agent
+        //   here, then re-bulk-updated by AgentPrincipalService when the
+        //   agent is transferred.
+        // - `tasks.trigger_user_id` — the user who clicked "Send".
+        //   Drives credential resolution (via PrincipalResolver::
+        //   runnerUserId) and Mercure topic routing. Nullable for
+        //   system-generated tasks (cron / scheduled / webhook).
+        // For interactive callers (`POST /tasks`) the HTTP controller
+        // passes `$userId` explicitly and we skip the runner fallback.
+        // Worker / scheduled-run paths leave it null and fall through to
+        // the runner (the agent's most recent trigger) so the LLM still
+        // runs under a valid principal.
+        $resolver = $this->principalResolver ?? new PrincipalResolver();
         $resolvedUserId = $userId;
         if ($resolvedUserId === null) {
-            $resolver = $this->principalResolver ?? new PrincipalResolver();
             $resolvedUserId = $resolver->runnerUserId($agentId) ?? $this->authService?->currentUserId();
         }
+        $principalId = (int) $agent->principal_id;
 
         $task = Task::create([
-            'agent_id'      => $agentId,
-            'user_id'       => $resolvedUserId,
-            'status'        => 'QUEUED',
-            'user_prompt'   => Utf8Sanitizer::scrubString($userPrompt),
-            'step_count'    => 0,
-            'max_steps'     => $maxSteps,
-            'parent_task_id' => $parentTaskId,
-            'data'          => $taskData,
+            'agent_id'         => $agentId,
+            'principal_id'     => $principalId,
+            'trigger_user_id'  => $resolvedUserId,
+            'status'           => 'QUEUED',
+            'user_prompt'      => Utf8Sanitizer::scrubString($userPrompt),
+            'step_count'       => 0,
+            'max_steps'        => $maxSteps,
+            'parent_task_id'   => $parentTaskId,
+            'data'             => $taskData,
         ]);
 
         $this->appendHistory($task->id, 'user', $userPrompt);
@@ -276,7 +282,7 @@ final class Orchestrator implements OrchestratorInterface
                 'task_id' => $taskId,
                 'from'    => 'RUNNING',
                 'to'      => 'ABORTED',
-                'user_id' => $taskRef?->user_id,
+                'user_id' => $taskRef?->principalUserId(),
             ]);
         }
 
@@ -367,7 +373,7 @@ final class Orchestrator implements OrchestratorInterface
                 return;
             }
 
-            $userId = (int) $task->user_id;
+            $userId = $task->principalUserId();
 
             if (!$policy->canAbortFrom($task->status)) {
                 throw new InvalidTaskTransitionException(
@@ -401,7 +407,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     private function appendAttachmentRow(int $taskId, array $mediaIds): void
     {
-        $userId = (int) (Task::find($taskId)?->user_id ?: 0);
+        $userId = Task::find($taskId)?->principalUserId() ?? 0;
         $refs = [];
         foreach ($mediaIds as $mid) {
             if ($mid === '') {

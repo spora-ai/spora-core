@@ -64,7 +64,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Original',
@@ -131,7 +131,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'user_id'     => $userId,
+        'trigger_user_id' => $userId,
         'agent_id'    => $sourceAgent->id,
         'status'      => 'RUNNING',
         'user_prompt' => 'Original',
