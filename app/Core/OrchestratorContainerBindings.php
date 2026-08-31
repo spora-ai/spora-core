@@ -176,7 +176,7 @@ final class OrchestratorContainerBindings
                 return $c->get(NotificationService::class);
             },
 
-            NotificationSubscriptionService::class => static function (ContainerInterface $c): NotificationSubscriptionService {
+            NotificationSubscriptionService::class => static function (): NotificationSubscriptionService {
                 return new NotificationSubscriptionService();
             },
 

@@ -32,6 +32,8 @@ use Spora\Models\Task;
  */
 final class NotificationSubscriptionService
 {
+    private const SQL_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
+
     public function resolveRecipientsForTask(Task $task): array
     {
         $this->ensureDefaultSubscribersExist($task);
@@ -97,7 +99,7 @@ final class NotificationSubscriptionService
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = date(self::SQL_TIMESTAMP_FORMAT);
         foreach ($userIds as $userId) {
             $this->insertIgnore([
                 'user_id'     => $userId,
@@ -116,8 +118,8 @@ final class NotificationSubscriptionService
             'user_id'     => $userId,
             'target_type' => $targetType,
             'target_id'   => $targetId,
-            'created_at'  => date('Y-m-d H:i:s'),
-            'updated_at'  => date('Y-m-d H:i:s'),
+            'created_at'  => date(self::SQL_TIMESTAMP_FORMAT),
+            'updated_at'  => date(self::SQL_TIMESTAMP_FORMAT),
         ]);
     }
 

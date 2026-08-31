@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.19.0-2-g8dabf72"
+        "version": "0.19.0-2-g7f19987"
     },
     "servers": [
         {
@@ -2975,6 +2975,87 @@
                 ]
             }
         },
+        "/api/v1/notifications/read-all": {
+            "post": {
+                "tags": [
+                    "Notifications"
+                ],
+                "summary": "MarkAllRead Notification",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/notifications/subscriptions": {
+            "get": {
+                "tags": [
+                    "Notifications"
+                ],
+                "summary": "Index NotificationSubscription",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Notifications"
+                ],
+                "summary": "Subscribe NotificationSubscription",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Notifications"
+                ],
+                "summary": "Unsubscribe NotificationSubscription",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
         "/api/v1/notifications/{id}/read": {
             "post": {
                 "tags": [
@@ -2991,28 +3072,6 @@
                         }
                     }
                 ],
-                "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    },
-                    {
-                        "csrfToken": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/notifications/read-all": {
-            "post": {
-                "tags": [
-                    "Notifications"
-                ],
-                "summary": "MarkAllRead Notification",
-                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

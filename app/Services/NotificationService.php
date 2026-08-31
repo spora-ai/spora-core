@@ -177,15 +177,10 @@ class NotificationService implements NotificationServiceInterface
     {
         // Default-on: feature ships enabled. Operators opt out via
         // SPORA_NOTIFICATIONS_EMAIL_ENABLED=false in .env.
-        if (! ($this->config['notifications']['email_enabled'] ?? true)) {
-            return;
-        }
-
-        if ($this->systemMailer === null) {
-            return;
-        }
-
-        if ($this->subscriptions === null) {
+        if ($this->systemMailer === null
+            || $this->subscriptions === null
+            || ! ($this->config['notifications']['email_enabled'] ?? true)
+        ) {
             return;
         }
 
