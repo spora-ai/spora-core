@@ -38,7 +38,7 @@ test('0071 migration leaves the post-state schema in place after boot()', functi
     // Database::boot() runs all migrations including 0071, so the
     // post-state schema must already be correct on entry. We then
     // assert the migration is idempotent by re-running up().
-    $migration = require __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
 
     expect(Capsule::schema()->hasColumn('tasks', 'principal_id'))->toBeTrue();
     expect(Capsule::schema()->hasColumn('tasks', 'trigger_user_id'))->toBeTrue();
@@ -92,12 +92,81 @@ test('0071 migration backfills principal_id from the user-principal map when re-
     ]);
 
     // Re-run the migration against this pre-state.
-    $migration = require __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
     $migration->up();
 
     $task = Capsule::table('tasks')->where('id', $taskId)->first();
     expect((int) $task->principal_id)->toBe($principalId);
     expect((int) $task->trigger_user_id)->toBe($userId);
+});
+
+test('0071 migration backfills principal_id from the AGENT, not from user-principal', function (): void {
+    // Regression: the earlier backfill set tasks.principal_id to the
+    // *creator's* user-principal, which broke group-shared visibility
+    // (a group agent's tasks got attributed to whichever member clicked
+    // Send, so other members couldn't see them). The corrected backfill
+    // aligns every task with its agent's principal_id so the visibility
+    // scoping (`whereIn('principal_id', $visiblePrincipalIds)`) works
+    // the same way for tasks as for the agent itself.
+    $now = date('Y-m-d H:i:s');
+    $userId = (int) Capsule::table('users')->insertGetId([
+        'email'      => 'agent-owner@example.com',
+        'username'   => 'agent_owner',
+        'password'   => 'unused-hash',
+        'status'     => 1,
+        'verified'   => 1,
+        'roles_mask' => 0,
+        'registered' => time(),
+    ]);
+    $groupId = (int) Capsule::table('groups')->insertGetId([
+        'name'                => 'AgentOwnerGroup',
+        'description'         => null,
+        'created_by_user_id'  => $userId,
+        'created_at'          => $now,
+        'updated_at'          => $now,
+    ]);
+    $groupPrincipalId = (int) Capsule::table('principals')->insertGetId([
+        'type'       => 'group',
+        'group_id'   => $groupId,
+        'user_id'    => null,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+    Capsule::table('principals')->insert([
+        'type'       => 'user',
+        'user_id'    => $userId,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+    // Agent is owned by the GROUP, not the user.
+    $agentId = (int) Capsule::table('agents')->insertGetId([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'group-owned-agent',
+        'max_steps'    => 10,
+        'is_active'    => 1,
+        'created_at'   => $now,
+        'updated_at'   => $now,
+    ]);
+    reapplyPre0071TasksUserIdColumn();
+    $taskId = (int) Capsule::table('tasks')->insertGetId([
+        'agent_id'    => $agentId,
+        'user_id'     => $userId,
+        'status'      => 'COMPLETED',
+        'user_prompt' => 'group-shared fixture',
+        'step_count'  => 1,
+        'max_steps'   => 10,
+        'created_at'  => $now,
+        'updated_at'  => $now,
+    ]);
+
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration->up();
+
+    $task = Capsule::table('tasks')->where('id', $taskId)->first();
+    // principal_id mirrors the AGENT's principal (group), NOT the user's
+    // user-principal. trigger_user_id still points at the clicker.
+    expect((int) $task->principal_id)->toBe($groupPrincipalId)
+        ->and((int) $task->trigger_user_id)->toBe($userId);
 });
 
 test('0071 migration throws when a tasks.user_id has no matching user-principal', function (): void {
@@ -108,7 +177,7 @@ test('0071 migration throws when a tasks.user_id has no matching user-principal'
     // (already NOT NULL post-boot) which masks the bug rather than
     // testing it — the line-level assertion is more durable.
     $migrationFile = file_get_contents(
-        __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php',
+        __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php',
     );
     expect($migrationFile)->toContain("whereNull('principal_id')");
     expect($migrationFile)->toContain('principal_id backfill left');
@@ -173,7 +242,7 @@ test('0071 rebuild preserves dependent rows (task_history, tool_calls)', functio
         'proposed_arguments'    => '[]',
     ]);
 
-    $migration = require __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
     $migration->rebuildSqliteTableWithoutUserId();
 
     expect(Capsule::table('tasks')->where('id', $taskId)->count())->toBe(1)
@@ -182,7 +251,7 @@ test('0071 rebuild preserves dependent rows (task_history, tool_calls)', functio
 });
 
 test('0071 migration forward-only: down() preserves the new columns', function (): void {
-    $migration = require __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
     $migration->down();
 
     // The new columns stay. A real rollback needs a backup restore.
@@ -191,7 +260,7 @@ test('0071 migration forward-only: down() preserves the new columns', function (
 });
 
 test('0071 migration is idempotent — re-run against post-0071 schema is a no-op', function (): void {
-    $migration = require __DIR__ . '/../../../database/migrations/0071_add_principal_id_and_trigger_user_id_to_tasks.php';
+    $migration = require __DIR__ . '/../../../database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks.php';
 
     expect(fn() => $migration->up())->not()->toThrow(Throwable::class);
     expect(fn() => $migration->up())->not()->toThrow(Throwable::class);
