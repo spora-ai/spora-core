@@ -44,6 +44,7 @@ use Spora\Services\MercurePublisher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationServiceInterface;
+use Spora\Services\NotificationSubscriptionService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
@@ -167,11 +168,16 @@ final class OrchestratorContainerBindings
                     $c->get(MercurePublisherInterface::class),
                     $c->get(SystemMailer::class),
                     $c->get('config'),
+                    $c->get(NotificationSubscriptionService::class),
                 );
             },
 
             NotificationServiceInterface::class => static function (ContainerInterface $c): NotificationServiceInterface {
                 return $c->get(NotificationService::class);
+            },
+
+            NotificationSubscriptionService::class => static function (ContainerInterface $c): NotificationSubscriptionService {
+                return new NotificationSubscriptionService();
             },
 
             SystemMailer::class => static function (ContainerInterface $c): SystemMailer {

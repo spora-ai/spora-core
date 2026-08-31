@@ -31,6 +31,7 @@ use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
+use Spora\Http\NotificationSubscriptionController;
 use Spora\Http\PluginsController;
 use Spora\Http\PrincipalController;
 use Spora\Http\PromptTemplateController;
@@ -338,9 +339,18 @@ final class RouteDefinitions
         $r->addRoute('PUT', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/notifications', [NotificationController::class, 'destroyAll'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Static subscription routes (collection-level) must be
+        // registered before the variable `/{id}` routes below so
+        // fast-route's regex-based dispatcher does not shadow them
+        // with a catch-all.
+        $r->addRoute('GET', '/api/v1/notifications/subscriptions', [NotificationSubscriptionController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/notifications/subscriptions', [NotificationSubscriptionController::class, 'subscribe'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/notifications/subscriptions', [NotificationSubscriptionController::class, 'unsubscribe'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        $r->addRoute('POST', '/api/v1/notifications/{id}/read', [NotificationController::class, 'markRead'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/notifications/{id}', [NotificationController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
     }
 

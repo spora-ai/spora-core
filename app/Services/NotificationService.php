@@ -18,6 +18,7 @@ class NotificationService implements NotificationServiceInterface
         private readonly MercurePublisherInterface $mercure,
         private readonly ?SystemMailer $systemMailer = null,
         private readonly array $config = [],
+        private readonly ?NotificationSubscriptionService $subscriptions = null,
     ) {}
 
     public function notifyTaskCompleted(Task $task): void
@@ -174,7 +175,9 @@ class NotificationService implements NotificationServiceInterface
 
     public function sendEmailForScheduledRun(Task $task): void
     {
-        if (! ($this->config['notifications']['email_enabled'] ?? false)) {
+        // Default-on: feature ships enabled. Operators opt out via
+        // SPORA_NOTIFICATIONS_EMAIL_ENABLED=false in .env.
+        if (! ($this->config['notifications']['email_enabled'] ?? true)) {
             return;
         }
 
@@ -182,28 +185,46 @@ class NotificationService implements NotificationServiceInterface
             return;
         }
 
-        // `tasks.principal_id` is NOT NULL post-0071, and the FK is
-        // ON DELETE CASCADE — so a principal can never be missing for a
-        // live task. Eloquent lazy-loads the relation on first access.
-        $user = $task->principal->user ?? null;
-        if ($user === null) {
+        if ($this->subscriptions === null) {
             return;
         }
 
-        /** @var User $user */
+        // Recipients are resolved per-task from `notification_subscriptions`.
+        // Replaces the previous `tasks.principal->user` routing, which
+        // silently dropped emails for group-owned runs (a `type=group`
+        // principal has `user_id IS NULL` per the XOR invariant in
+        // `Principal::validateXor()`).
+        $recipients = $this->subscriptions->resolveRecipientsForTask($task);
+        if ($recipients === []) {
+            return;
+        }
+
+        $users = User::query()->whereIn('id', $recipients)->get();
+        if ($users->isEmpty()) {
+            return;
+        }
+
+        /** @var \Spora\Models\Agent $agent */
         $agent = $task->agent;
 
-        $this->systemMailer->sendTemplatedEmail(
-            'scheduled_run_completed',
-            [
-                'task_id'     => $task->id,
-                'agent_name'  => $agent->name,
-                'user_prompt' => $task->user_prompt,
-                'site_name'   => $this->config['app_name'] ?? 'Spora',
-                'run_url'     => $this->buildRunUrl($task->id),
-            ],
-            [$user->email],
-        );
+        $variables = [
+            'task_id'     => $task->id,
+            'agent_name'  => $agent->name,
+            'user_prompt' => $task->user_prompt,
+            'site_name'   => $this->config['app_name'] ?? 'Spora',
+            'run_url'     => $this->buildRunUrl($task->id),
+        ];
+
+        // One email per subscriber — keeps recipient addresses out of a
+        // shared `To:` header.
+        foreach ($users as $user) {
+            /** @var User $user */
+            $this->systemMailer->sendTemplatedEmail(
+                'scheduled_run_completed',
+                $variables,
+                [$user->email],
+            );
+        }
     }
 
     private function buildRunUrl(int|string $taskId): string
