@@ -43,7 +43,7 @@ final class TaskService implements TaskServiceInterface
         // agent. Migrated from `tasks.user_id` to `tasks.principal_id`
         // — see migration 0071.
         $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
-        $query = $query = Task::whereIn('principal_id', $visiblePrincipalIds)
+        $query = Task::whereIn('principal_id', $visiblePrincipalIds)
             ->orderByDesc('updated_at')
             ->with(['agent']);
 
@@ -409,10 +409,16 @@ final class TaskService implements TaskServiceInterface
         // `retry_after` is enough to stop the worker from re-ticking it; the
         // task stays FAILED so the user can still see the failure or click
         // Retry Now manually.
-        $resolver = $this->principalResolver ?? new PrincipalResolver();
-        $userPrincipalId = $resolver->userPrincipalId($userId);
+        //
+        // Filter on the loaded task's principal_id (not the caller's
+        // user-principal) — every task in a retry chain shares the same
+        // agent → same principal_id, so scoping to that principal
+        // correctly catches every chain row regardless of which
+        // group member triggered the cancel. Filter on the user's
+        // own user-principal would silently no-op for group-shared
+        // chains (their principal_id is the group, not the caller).
         Capsule::table('tasks')
-            ->where('principal_id', $userPrincipalId)
+            ->where('principal_id', (int) $task->principal_id)
             ->where('retry_of_task_id', $task->retry_of_task_id)
             ->where('retry_count', '>=', $task->retry_count)
             ->where('status', 'FAILED')

@@ -186,7 +186,7 @@ final class TaskTickController
             'status'  => 'RUNNING',
         ]);
 
-        $this->runOrchestratorTickAndHandleFailure($claimed, $leaseOwner, $startedAt, $userId);
+        $this->runOrchestratorTickAndHandleFailure($claimed, $leaseOwner, $startedAt);
         $this->clearLeaseIfTerminal($claimed->id);
 
         $fresh = Task::find($claimed->id);
@@ -282,7 +282,6 @@ final class TaskTickController
         Task $claimed,
         string $leaseOwner,
         float $startedAt,
-        int $userId,
     ): void {
         $orchestratorConfig = (new OrchestratorConfig())
             ->withLease($leaseOwner, $this->tickLeaseSeconds)
@@ -290,7 +289,7 @@ final class TaskTickController
         try {
             $this->orchestrator->tick($claimed->id, $orchestratorConfig);
         } catch (Throwable $e) {
-            $this->handleTickFailure($claimed, $leaseOwner, $startedAt, $userId, $e);
+            $this->handleTickFailure($claimed, $leaseOwner, $startedAt, $e);
         }
     }
 
@@ -298,7 +297,6 @@ final class TaskTickController
         Task $claimed,
         string $leaseOwner,
         float $startedAt,
-        int $userId,
         Throwable $e,
     ): void {
         $this->logger->error('Task failed during /tick', [

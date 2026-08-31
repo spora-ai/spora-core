@@ -1281,6 +1281,54 @@ describe('TaskService — cancelRetryChain', function (): void {
         expect($failed->retry_of_task_id)->toBeNull();
         expect((int) $failed->retry_count)->toBe(0);
     });
+
+    it('lets a group member cancel a retry chain on a shared agent (regression: principal-scoped filter, not user-principal)', function (): void {
+        // Regression for the cancelRetryChain bulk-update filter: it
+        // used to scope on `tasks.user_id = $userId`. After the
+        // principal_id migration, scoping on the caller's user-principal
+        // would silently no-op for group-shared chains (the chain's
+        // principal_id is the group, not the user). Fix: scope on the
+        // loaded task's principal_id so any group member with visibility
+        // can cancel the chain.
+        $authService = bootAuthLayer();
+        $ownerId      = $authService->register('cancel-owner@example.com', 'Password1!', 'CancelOwner');
+        $plainMemberId = $authService->register('cancel-member@example.com', 'Password1!', 'CancelMember');
+
+        $principalService = new Spora\Services\PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $principalService->ensureUserPrincipal($plainMemberId);
+
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'CancelGroup');
+        $groupService->addMember((int) $group->id, (int) $plainMemberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipalId = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        $agent = Agent::create([
+            'principal_id' => $groupPrincipalId, 'name' => 'CancelSharedAgent',
+            'max_steps' => 5, 'is_active' => true,
+        ]);
+        // Failed task owned by the GROUP. Member B is the trigger, but
+        // we're cancelling from the owner's perspective — group member
+        // with visibility, not the original clicker.
+        $failed = Task::create([
+            'principal_id' => $groupPrincipalId, 'trigger_user_id' => $plainMemberId,
+            'agent_id' => $agent->id, 'status' => 'FAILED',
+            'user_prompt' => 'orig', 'max_steps' => 5, 'retry_count' => 1,
+        ]);
+        $failed->retry_of_task_id = $failed->id;
+        $failed->save();
+        Capsule::table('tasks')
+            ->where('id', $failed->id)
+            ->update(['retry_after' => date('Y-m-d H:i:s', time() + 600)]);
+
+        $service = makeTaskService();
+        expect($service->cancelRetryChain($failed->id, $ownerId))->toBeTrue();
+
+        $failed->refresh();
+        expect($failed->retry_after)->toBeNull()
+            ->and($failed->retry_of_task_id)->toBeNull()
+            ->and((int) $failed->retry_count)->toBe(0);
+    });
 });
 
 /**
