@@ -301,11 +301,24 @@ describe('MediaTool::get_media', function (): void {
         }
     });
 
-    it('returns the asset for any of the user\'s agents when scope=user', function (): void {
+    it('returns the asset for any of the user\'s agents when scope=user (alias to principal)', function (): void {
+        // `scope=user` is now a runtime alias for `scope=principal` —
+        // existing agents with the legacy setting keep working without a
+        // migration. The principal context carries the user-principal
+        // info that {@see MediaArchiveService::isAssetInPrincipalScope()}
+        // needs to recognise the asset as belonging to the caller's
+        // principal (via the direct-upload path: `asset.user_id === owner`).
         $otherAgent = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $otherAgent, userId: 42);
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'user']);
+
+        $context = new Spora\Services\PrincipalContext(
+            principalId: createUserPrincipalPublic(42),
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: 42,
+            runnerUserId: 42,
+        );
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
         try {
@@ -313,6 +326,7 @@ describe('MediaTool::get_media', function (): void {
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
                 userId: 42,
+                context: $context,
             );
 
             expect($result->success)->toBeTrue();
@@ -342,7 +356,168 @@ describe('MediaTool::get_media', function (): void {
         }
     });
 
-    it('returns 404 for an asset owned by another user (scope=user)', function (): void {
+    it('scope=principal lets an agent mint a public URL for a sibling agent\'s asset (same principal)', function (): void {
+        // Two agents of the same user-principal. The asset is created
+        // by agent A; the tool runs as agent B. With `scope=principal`
+        // the tool must surface agent A's asset because both agents
+        // belong to the same principal.
+        $callerUserId = 12345;
+        $principalId  = createUserPrincipalPublic($callerUserId);
+
+        $agentA = Agent::create([
+            'principal_id' => $principalId,
+            'name'         => 'mp-sibling-a',
+            'max_steps'    => 10,
+            'is_active'    => 1,
+        ]);
+        $agentB = Agent::create([
+            'principal_id' => $principalId,
+            'name'         => 'mp-sibling-b',
+            'max_steps'    => 10,
+            'is_active'    => 1,
+        ]);
+
+        $asset = seedMediaAsset(agentId: $agentA->id, userId: $callerUserId);
+        $config = Mockery::mock(ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
+
+        $context = new Spora\Services\PrincipalContext(
+            principalId: $principalId,
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $callerUserId,
+            runnerUserId: $callerUserId,
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            $config,
+            ['app_url' => 'https://example.test'],
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_public_url', 'asset_id' => $asset->id],
+                agentId: $agentB->id,
+                userId: $callerUserId,
+                context: $context,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['asset_id'])->toBe($asset->id);
+        } finally {
+            $restore();
+        }
+    });
+
+    it('scope=principal refuses an asset owned by an agent of a different principal', function (): void {
+        // Two distinct user-principals; caller is principal A, asset
+        // lives under principal B. With `scope=principal` the tool
+        // must NOT surface the asset.
+        $callerUserId = 11111;
+        $otherUserId  = 22222;
+        $callerPrincipalId  = createUserPrincipalPublic($callerUserId);
+        $otherPrincipalId   = createUserPrincipalPublic($otherUserId);
+
+        $otherAgent = Agent::create([
+            'principal_id' => $otherPrincipalId,
+            'name'         => 'mp-other-principal-agent',
+            'max_steps'    => 10,
+            'is_active'    => 1,
+        ]);
+        $asset = seedMediaAsset(agentId: $otherAgent->id, userId: $otherUserId);
+        $config = Mockery::mock(ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
+
+        $context = new Spora\Services\PrincipalContext(
+            principalId: $callerPrincipalId,
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $callerUserId,
+            runnerUserId: $callerUserId,
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: 9999,
+                userId: $callerUserId,
+                context: $context,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('scope=principal surfaces direct uploads by the principal\'s owner user', function (): void {
+        // A direct-upload row (agent_id=null, user_id=owner) must
+        // surface under `scope=principal` because
+        // {@see MediaArchiveService::isAssetInPrincipalScope()} matches
+        // it via the direct-upload path.
+        $callerUserId = 33333;
+        $principalId  = createUserPrincipalPublic($callerUserId);
+
+        $asset = seedMediaAsset(agentId: null, userId: $callerUserId);
+        $config = Mockery::mock(ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
+
+        $context = new Spora\Services\PrincipalContext(
+            principalId: $principalId,
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $callerUserId,
+            runnerUserId: $callerUserId,
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: 9999,
+                userId: $callerUserId,
+                context: $context,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['id'])->toBe($asset->id);
+        } finally {
+            $restore();
+        }
+    });
+
+    test('cold-principal PrincipalContext returns Media asset not found rather than crashing', function (): void {
+        // Cold context (principalId = 0, ownerUserId = null) → service
+        // helper returns false → tool surfaces the standard
+        // "Media asset not found" instead of throwing.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+        $config = Mockery::mock(ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
+
+        $context = new Spora\Services\PrincipalContext(
+            principalId: 0,
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: null,
+            runnerUserId: null,
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: 9999,
+                userId: 99,
+                context: $context,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('Media asset not found');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('returns 404 for an asset owned by another user (scope=user → principal)', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 42);
         $config = Mockery::mock(ToolConfigService::class);
@@ -350,10 +525,18 @@ describe('MediaTool::get_media', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
         try {
+            // Different user-principal — must not see the asset.
+            $context = new Spora\Services\PrincipalContext(
+                principalId: createUserPrincipalPublic(88),
+                type: Spora\Models\Principal::TYPE_USER,
+                ownerUserId: 88,
+                runnerUserId: 88,
+            );
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
                 userId: 88,
+                context: $context,
             );
 
             expect($result->success)->toBeFalse();

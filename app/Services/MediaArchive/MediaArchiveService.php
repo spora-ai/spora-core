@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
+use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 
@@ -226,6 +227,43 @@ final class MediaArchiveService
         return MediaAsset::query()->where('agent_id', $agentId)->count();
     }
 
+    /**
+     * True iff the asset belongs to the given principal: either a direct
+     * upload by the principal's owner user, or attached to any agent owned
+     * by that principal. Used by `MediaTool::assetInScope()` for the
+     * single-asset auth check (get_media / get_public_url / get_embed_code);
+     * mirrors the LIST endpoint's `applyPrincipalIdScope()` query so both
+     * paths share one principal-aware definition.
+     *
+     * Returns `false` when the principal context is unresolvable
+     * (cold principal / boot-auth test harness with no PrincipalContext).
+     */
+    public function isAssetInPrincipalScope(
+        MediaAsset $asset,
+        ?PrincipalContext $context,
+        ?int $legacyUserId,
+    ): bool {
+        $principalId = $context !== null ? $context->principalId : 0;
+        $ownerUserId = $context !== null ? $context->ownerUserId : $legacyUserId;
+
+        if ($principalId <= 0 || $ownerUserId === null) {
+            return false;
+        }
+
+        if ((int) $asset->user_id === $ownerUserId) {
+            return true;
+        }
+
+        if ($asset->agent_id === null) {
+            return false;
+        }
+
+        return Agent::query()
+            ->where('id', (int) $asset->agent_id)
+            ->where('principal_id', $principalId)
+            ->exists();
+    }
+
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void
     {
         $this->ingestPipeline->writePayloadToAsset($asset, $bytes);
@@ -283,14 +321,17 @@ final class MediaArchiveService
      * Extracted from {@see list()} to drop the S3776 cognitive-complexity
      * budget; the controller has already vetted every id against
      * `visiblePrincipalIds()` so the service trusts the list as-is.
+     *
+     * Post-migration 0075, the bulk of rows hit the indexed
+     * `media_assets.principal_id IN (…)` fast path. The `orWhereIn`
+     * through `agents` is a back-compat fallback for legacy rows whose
+     * `principal_id` stayed NULL (uploaded before 0075 ran) so the
+     * same caller still surfaces them under their principal via the
+     * `agent_id → agents.principal_id` join.
      */
     private function applyPrincipalIdScope(Builder $builder, ListMediaQuery $query): void
     {
         $principalIds = array_values(array_unique(array_map('intval', $query->principalIds ?? [])));
-        // Direct uploads surface only when the user-principal is in the
-        // scope list. Without this gate, every group chip would also
-        // surface the user's uploads (which belong to the user-principal,
-        // not the group-principal) — that's the bug the user reported.
         $includeUploads = false;
         if ($query->agentOwnerUserId !== null) {
             $userPrincipalId = $this->principalService
@@ -298,14 +339,24 @@ final class MediaArchiveService
                 ->id;
             $includeUploads = in_array($userPrincipalId, $principalIds, true);
         }
-        $builder->where(function (Builder $q) use ($principalIds, $query, $includeUploads): void {
-            if ($includeUploads && $query->agentOwnerUserId !== null) {
-                $q->where('user_id', $query->agentOwnerUserId);
-            }
-            $q->orWhereIn('agent_id', Agent::query()
-                ->select('id')
-                ->whereIn('principal_id', $principalIds));
+        $builder->where(function (Builder $q) use ($principalIds): void {
+            // Fast path: indexed principal_id column on media_assets.
+            $q->whereIn('principal_id', $principalIds);
+            // Back-compat: legacy rows where principal_id was left NULL
+            // still surface under the same principal via the agent join.
+            // The outer `whereNull('media_assets.principal_id')` keeps
+            // the planner on the agents subquery (idx_agents_principal_id)
+            // and avoids double-counting rows already in the fast path.
+            $q->orWhere(function (Builder $sub) use ($principalIds): void {
+                $sub->whereNull('media_assets.principal_id')
+                    ->whereIn('media_assets.agent_id', Agent::query()
+                        ->select('id')
+                        ->whereIn('principal_id', $principalIds));
+            });
         });
+        if ($includeUploads && $query->agentOwnerUserId !== null) {
+            $builder->orWhere('user_id', $query->agentOwnerUserId);
+        }
     }
 
     /**

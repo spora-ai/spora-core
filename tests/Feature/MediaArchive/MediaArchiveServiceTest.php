@@ -936,6 +936,7 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
                 $ctx['metadata'],
                 $rejectingStore,
                 \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+                new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
             );
             $service = new MediaArchiveService($pipeline);
             $png = base64_decode(

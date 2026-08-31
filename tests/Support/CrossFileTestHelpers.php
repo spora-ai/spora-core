@@ -277,6 +277,7 @@ if (!function_exists('makeMediaArchiveService')) {
             $ctx['metadata'],
             $ctx['assetStore'],
             Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+            new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
         );
 
         $service = new Spora\Services\MediaArchive\MediaArchiveService($pipeline);

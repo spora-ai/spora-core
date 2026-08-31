@@ -11,6 +11,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -37,6 +38,7 @@ final class MediaUploadController
         private readonly MediaArchiveService $mediaArchive,
         private readonly MediaAllowedTypesService $allowedTypes,
         private readonly AuthService $auth,
+        private readonly PrincipalResolver $principalResolver,
         private readonly MimeSniffer $sniffer,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
         private readonly array $config = [],
@@ -49,6 +51,7 @@ final class MediaUploadController
             return $validated;
         }
 
+        /** @var UploadedFile $file */
         [$file, $bytes, $userId] = $validated;
         $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
 
@@ -63,6 +66,26 @@ final class MediaUploadController
             );
         }
 
+        // Intersect the request's `principal_id` with the caller's
+        // visible principals — typo tolerance and existence-hiding in
+        // one. A foreign id is rejected with 403 so the operator can't
+        // silently stamp an asset into someone else's principal.
+        $principalIdRaw = $request->request->get('principal_id');
+        $requestedPrincipalId = is_string($principalIdRaw) && ctype_digit($principalIdRaw)
+            ? (int) $principalIdRaw
+            : null;
+        if ($requestedPrincipalId !== null) {
+            $visible = $this->principalResolver->visiblePrincipalIds($userId);
+            if (!in_array($requestedPrincipalId, $visible, true)) {
+                return $this->error(
+                    Response::HTTP_FORBIDDEN,
+                    'FORBIDDEN_PRINCIPAL',
+                    'You can only upload into a principal you belong to.',
+                );
+            }
+        }
+        $principalId = $requestedPrincipalId;
+
         $clientName = $file->getClientOriginalName();
         $prompt = $request->request->get('prompt');
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
@@ -72,6 +95,8 @@ final class MediaUploadController
                 ? Utf8Sanitizer::scrubString($clientName)
                 : null,
             userId: $userId,
+            principalId: $principalId,
+            agentId: $agentId,
             prompt: is_string($prompt) ? Utf8Sanitizer::scrubString($prompt) : null,
             tags: Utf8Sanitizer::scrub($this->parseJsonArray($request->request->get('tags'))),
             metadata: Utf8Sanitizer::scrub($this->parseJsonObject($request->request->get('metadata'))),

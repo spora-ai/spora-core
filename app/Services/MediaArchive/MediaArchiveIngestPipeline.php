@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use Psr\Log\LoggerInterface;
+use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 
@@ -35,11 +37,19 @@ final class MediaArchiveIngestPipeline
         private readonly MetadataExtractor $metadata,
         private readonly AssetStore $assetStore,
         private readonly MediaConverterRegistry $converters,
+        private readonly PrincipalService $principalService,
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
     public function ingest(MediaIngestRequest $request): MediaAsset
     {
+        // Precedence: caller-supplied principal_id → agent's principal →
+        // user's user-principal → null. Matches
+        // MediaArchiveService::applyPrincipalIdScope()'s dual-path union on
+        // the read side so LIST and INSERT agree on what a row's
+        // "principal" means.
+        $request = $request->withPrincipalId($this->resolvePrincipalId($request));
+
         if ($request->toolCallId !== null && $request->url !== null) {
             $existing = $this->findExisting($request->toolCallId, $request->url);
             if ($existing !== null) {
@@ -47,6 +57,43 @@ final class MediaArchiveIngestPipeline
             }
         }
         return $this->ingestFresh($request);
+    }
+
+    /**
+     * Caller-supplied `principalId` wins; otherwise inherit from the
+     * source agent; otherwise materialise the user-principal from
+     * `userId`. Rows with no attribution at all stay null — the same
+     * back-compat shape the LIST endpoint's `applyPrincipalIdScope()`
+     * joins through `agents` to surface.
+     */
+    private function resolvePrincipalId(MediaIngestRequest $request): ?int
+    {
+        if ($request->principalId !== null) {
+            return $request->principalId;
+        }
+        if ($request->agentId !== null) {
+            $agent = Agent::query()->find($request->agentId);
+            // Defensive: `agents.principal_id` is nullable in the schema
+            // even though the Agent model's @property types it as int.
+            // A zero/null value means the agent was created before
+            // migration 0067 backfilled the column.
+            if ($agent !== null && (int) $agent->principal_id > 0) {
+                return (int) $agent->principal_id;
+            }
+        }
+        if ($request->userId !== null) {
+            // Stale or test-fixture user_ids won't have a `users` row —
+            // ensureUserPrincipal throws on missing users. We swallow
+            // and return null so the row stays principal-less and the
+            // LIST endpoint's back-compat agent-join still surfaces it
+            // under the right principal once a real user is wired up.
+            try {
+                return $this->principalService->ensureUserPrincipal($request->userId)->id;
+            } catch (\Spora\Services\Exceptions\PrincipalMaterialisationException) {
+                return null;
+            }
+        }
+        return null;
     }
 
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void
@@ -118,6 +165,7 @@ final class MediaArchiveIngestPipeline
                     durationSeconds: $request->durationSeconds,
                     filename: $request->filename,
                     userId: $request->userId,
+                    principalId: $request->principalId,
                     uploadSource: $request->uploadSource,
                 ),
             );
@@ -159,6 +207,7 @@ final class MediaArchiveIngestPipeline
                 token: $reference->token,
                 filename: $request->filename,
                 userId: $request->userId,
+                principalId: $request->principalId,
                 uploadSource: $request->uploadSource,
             ),
         );
@@ -265,6 +314,7 @@ final class MediaArchiveIngestPipeline
                 ? Utf8Sanitizer::scrubString($fields->filename)
                 : $existing->filename,
             'user_id' => $fields->userId ?? $existing->user_id,
+            'principal_id' => $fields->principalId ?? $existing->principal_id,
             'upload_source' => $fields->uploadSource ?: ($existing->upload_source ?? 'tool'),
         ]);
         $existing->save();
@@ -301,6 +351,7 @@ final class MediaArchiveIngestPipeline
         $schema = $asset->getConnection()->getSchemaBuilder();
         $optionalFields = [
             'user_id'            => fn() => $fields->userId ?? $request->userId,
+            'principal_id'       => fn() => $fields->principalId ?? $request->principalId,
             'filename'           => fn() => $fields->filename !== null ? Utf8Sanitizer::scrubString($fields->filename) : null,
             'upload_source'      => fn() => $fields->uploadSource ?: 'tool',
             'tags'               => fn() => Utf8Sanitizer::scrub($request->tags),
