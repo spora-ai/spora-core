@@ -83,9 +83,21 @@ final class MediaAllowedTypesService
     private readonly array $imageExtensions;
 
     /**
-     * @return list<string> Allowed MIME types for the given agent.
-     *                     Empty `$agentId` (no agent context) returns the
-     *                     text + converter union, but no images.
+     * @return list<string> Allowed MIME types for the given context.
+     *                     Images are allowed when EITHER:
+     *                       (a) the caller passed an `agent_id` whose
+     *                           LLM driver reports `supportsImageInput()`
+     *                           (the original post-`MediaPickerOverlay`
+     *                           composer flow), OR
+     *                       (b) the caller passed no `agent_id` (the
+     *                           Media Archive plugin's direct upload flow
+     *                           where the operator archives bytes on
+     *                           their own behalf, not via an agent's
+     *                           tool call) — there's no LLM in the
+     *                           loop at upload time, so the
+     *                           `supportsImageInput` gate doesn't apply.
+     *                     In both cases `imageExtensions` must be
+     *                     non-empty (operator hasn't disabled images).
      */
     public function allowedMimeTypes(?int $agentId = null): array
     {
@@ -96,7 +108,9 @@ final class MediaAllowedTypesService
         foreach ($this->converters->allSupportedMimeTypes() as $mime) {
             $set[strtolower($mime)] = true;
         }
-        if ($agentId !== null && $this->agentSupportsImages($agentId) && $this->imageExtensions !== []) {
+        $agentSupportsImages = $agentId === null
+            || $this->agentSupportsImages($agentId);
+        if ($agentSupportsImages && $this->imageExtensions !== []) {
             foreach ($this->imageExtensions as $ext) {
                 $mime = self::imageMimeForExtension($ext);
                 if ($mime !== null) {

@@ -29,9 +29,10 @@ test('returns text + converter types without an agent_id query param', function 
     $body = json_decode($resp->getContent(), true);
     expect($body['data']['mime_types'])->toContain('text/plain');
     expect($body['data']['mime_types'])->toContain('application/pdf');
-    foreach ($body['data']['mime_types'] as $m) {
-        expect(str_starts_with($m, 'image/'))->toBeFalse();
-    }
+    // No agent_id → direct operator upload (Media Archive plugin's
+    // Upload dialog) — images are allowed by default. The
+    // vision-LLM gate only kicks in when ?agent_id= is supplied.
+    expect($body['data']['mime_types'])->toContain('image/jpeg');
 });
 
 test('with ?agent_id adds image types when the agent\'s LLM is vision-capable', function (): void {
