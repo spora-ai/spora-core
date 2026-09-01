@@ -2,43 +2,34 @@
 
 Contributions are welcome! Spora is still in early alpha, and there are many ways to help.
 
+This guide covers the **PHP framework** (`spora-core`). For the Vue admin UI, see [`spora-frontend`](https://github.com/spora-ai/spora-frontend).
+
 ## Getting Started
 
-1. Read the [architecture overview](docs/01_architecture.md) to understand how Spora works
-2. Check the [plugin system docs](docs/07_plugins.md) if you're interested in extending Spora
-3. Look at the [open issues](https://github.com/spora-ai/Spora/issues) for things to work on
+1. Read the [architecture overview](https://docs.spora-ai.com/reference/concepts/architecture) to understand how Spora works
+2. Check the [plugin system docs](https://docs.spora-ai.com/reference/concepts/plugins-system) if you're interested in extending Spora
+3. Look at the [open issues](https://github.com/spora-ai/spora/issues) for things to work on
 
 ## Development Setup
 
-See the [Installation Guide](docs/13_installation.md) for full setup instructions.
+See the [Installation Guide](https://docs.spora-ai.com/start/operators/install) for full setup instructions.
 
 ## Coding Standards
 
 ### Backend (PHP)
 
 - **Static Analysis:** `composer analyse` — must pass (PHPStan level configured in `phpstan.neon`)
-- **Tests:** `composer test` — must pass (Pest)
+- **Tests:** `composer test:parallel` — must pass (Pest, parallel mode)
 - **Formatting:** `composer format` — run before committing (PHP-CS-Fixer)
-
-### Frontend (JavaScript/TypeScript)
-
-- **Linting:** `cd frontend && npm run lint` — must pass (ESLint + TypeScript)
-- **Tests:** `cd frontend && npm test` — must pass (Vitest)
 
 ## Testing Your Changes
 
 ```bash
-# Backend (serial — slow but most thorough)
-composer analyse && composer test
-
-# Backend (parallel — ~6.7× faster, 27s vs 293s on the spora-core suite)
+# Standard verification — ~22s on a typical PR
 composer analyse && composer test:parallel
 
-# Frontend
-cd frontend && npm run lint && npm test
-
-# Both together
-composer analyse && composer test:parallel && cd frontend && npm run lint && npm test
+# Debug a single failing test (serial mode)
+./vendor/bin/pest tests/Unit/Agents/OrchestratorTest.php
 ```
 
 ### Running tests in parallel
@@ -53,16 +44,9 @@ composer analyse && composer test:parallel && cd frontend && npm run lint && npm
 - The first parallel run may be slightly slower because workers spawn; subsequent tests reuse workers.
 - Memory limit per worker is set in `phpunit.xml` (`<ini name="memory_limit" value="1G"/>`). If you see "Premature end of PHP process" errors, lower the parallel `--processes` count or the per-worker memory limit.
 
-If you need to debug a single test file in parallel mode:
-
-```bash
-./vendor/bin/pest --parallel --processes=4 tests/Unit/Agents/OrchestratorTest.php
-```
-
 ## Pull Request Guidelines
 
 - One focus per PR (one feature, one fix, one refactor)
 - Include tests for new functionality
 - Update documentation if behavior changes
 - Follow the existing code style
-
