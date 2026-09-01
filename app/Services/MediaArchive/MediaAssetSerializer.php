@@ -78,8 +78,9 @@ final class MediaAssetSerializer
     private function buildPublicUrl(MediaAsset $asset, ?string $baseUrl): ?string
     {
         // No token => no public URL. Without this guard the
-        // MediaArchiveSharingTest PATCH-disable case leaks a URL
-        // with a stray ?token= query string.
+        // PATCH-disable case (covered in
+        // spora-plugin-media-archive/src/Http/MediaArchiveAdminController)
+        // leaks a URL with a stray ?token= query string.
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
             return null;
         }

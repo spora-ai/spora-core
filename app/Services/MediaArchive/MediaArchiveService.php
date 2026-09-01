@@ -259,19 +259,14 @@ final class MediaArchiveService
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
-
-        if ((int) $asset->user_id === $ownerUserId) {
-            return true;
-        }
-
-        if ($asset->agent_id === null) {
-            return false;
-        }
-
-        return Agent::query()
-            ->where('id', (int) $asset->agent_id)
-            ->where('principal_id', $principalId)
-            ->exists();
+        return ($asset->user_id !== null && (int) $asset->user_id === $ownerUserId)
+            || (
+                $asset->agent_id !== null
+                && Agent::query()
+                    ->where('id', (int) $asset->agent_id)
+                    ->where('principal_id', $principalId)
+                    ->exists()
+            );
     }
 
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void

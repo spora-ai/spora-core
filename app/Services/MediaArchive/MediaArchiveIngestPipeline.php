@@ -10,6 +10,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
+use Spora\Services\Exceptions\PrincipalMaterialisationException;
 use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
@@ -68,32 +69,47 @@ final class MediaArchiveIngestPipeline
      */
     private function resolvePrincipalId(MediaIngestRequest $request): ?int
     {
-        if ($request->principalId !== null) {
-            return $request->principalId;
+        return $this->principalFromRequest($request->principalId)
+            ?? $this->principalFromAgent($request->agentId)
+            ?? $this->principalFromUser($request->userId);
+    }
+
+    private function principalFromRequest(?int $principalId): ?int
+    {
+        return $principalId;
+    }
+
+    private function principalFromAgent(?int $agentId): ?int
+    {
+        if ($agentId === null) {
+            return null;
         }
-        if ($request->agentId !== null) {
-            $agent = Agent::query()->find($request->agentId);
-            // Defensive: `agents.principal_id` is nullable in the schema
-            // even though the Agent model's @property types it as int.
-            // A zero/null value means the agent was created before
-            // migration 0067 backfilled the column.
-            if ($agent !== null && (int) $agent->principal_id > 0) {
-                return (int) $agent->principal_id;
-            }
+        $agent = Agent::query()->find($agentId);
+        // Defensive: `agents.principal_id` is nullable in the schema
+        // even though the Agent model's @property types it as int.
+        // A zero/null value means the agent was created before
+        // migration 0067 backfilled the column.
+        if ($agent === null || (int) $agent->principal_id <= 0) {
+            return null;
         }
-        if ($request->userId !== null) {
-            // Stale or test-fixture user_ids won't have a `users` row —
-            // ensureUserPrincipal throws on missing users. We swallow
-            // and return null so the row stays principal-less and the
-            // LIST endpoint's back-compat agent-join still surfaces it
-            // under the right principal once a real user is wired up.
-            try {
-                return $this->principalService->ensureUserPrincipal($request->userId)->id;
-            } catch (\Spora\Services\Exceptions\PrincipalMaterialisationException) {
-                return null;
-            }
+        return (int) $agent->principal_id;
+    }
+
+    private function principalFromUser(?int $userId): ?int
+    {
+        if ($userId === null) {
+            return null;
         }
-        return null;
+        // Stale or test-fixture user_ids won't have a `users` row —
+        // ensureUserPrincipal throws on missing users. We swallow
+        // and return null so the row stays principal-less and the
+        // LIST endpoint's back-compat agent-join still surfaces it
+        // under the right principal once a real user is wired up.
+        try {
+            return $this->principalService->ensureUserPrincipal($userId)->id;
+        } catch (PrincipalMaterialisationException) {
+            return null;
+        }
     }
 
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void

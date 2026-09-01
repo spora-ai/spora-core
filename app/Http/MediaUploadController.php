@@ -58,33 +58,16 @@ final class MediaUploadController
         // The allowlist must use the sniffed MIME, never the client header.
         $agentIdRaw = $request->request->get('agent_id');
         $agentId = is_string($agentIdRaw) && ctype_digit($agentIdRaw) ? (int) $agentIdRaw : null;
-        if (!$this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
-            return $this->error(
-                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
-                'UNSUPPORTED_MEDIA_TYPE',
-                sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
-            );
-        }
-
-        // Intersect the request's `principal_id` with the caller's
-        // visible principals — typo tolerance and existence-hiding in
-        // one. A foreign id is rejected with 403 so the operator can't
-        // silently stamp an asset into someone else's principal.
         $principalIdRaw = $request->request->get('principal_id');
-        $requestedPrincipalId = is_string($principalIdRaw) && ctype_digit($principalIdRaw)
+        $principalId = is_string($principalIdRaw) && ctype_digit($principalIdRaw)
             ? (int) $principalIdRaw
             : null;
-        if ($requestedPrincipalId !== null) {
-            $visible = $this->principalResolver->visiblePrincipalIds($userId);
-            if (!in_array($requestedPrincipalId, $visible, true)) {
-                return $this->error(
-                    Response::HTTP_FORBIDDEN,
-                    'FORBIDDEN_PRINCIPAL',
-                    'You can only upload into a principal you belong to.',
-                );
-            }
+
+        $error = $this->checkMimeAllowed($sniffedMime, $agentId)
+            ?? $this->checkPrincipalAllowed($principalId, $userId);
+        if ($error !== null) {
+            return $error;
         }
-        $principalId = $requestedPrincipalId;
 
         $clientName = $file->getClientOriginalName();
         $prompt = $request->request->get('prompt');
@@ -106,6 +89,40 @@ final class MediaUploadController
         return new JsonResponse(
             ['data' => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? ''))],
             Response::HTTP_CREATED,
+        );
+    }
+
+    private function checkMimeAllowed(string $sniffedMime, ?int $agentId): ?JsonResponse
+    {
+        if ($this->allowedTypes->isAllowed($sniffedMime, $agentId)) {
+            return null;
+        }
+        return $this->error(
+            Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
+            'UNSUPPORTED_MEDIA_TYPE',
+            sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
+        );
+    }
+
+    /**
+     * Intersect the request's `principal_id` with the caller's visible
+     * principals — typo tolerance and existence-hiding in one. A foreign
+     * id is rejected with 403 so the operator can't silently stamp an
+     * asset into someone else's principal.
+     */
+    private function checkPrincipalAllowed(?int $principalId, int $userId): ?JsonResponse
+    {
+        if ($principalId === null) {
+            return null;
+        }
+        $visible = $this->principalResolver->visiblePrincipalIds($userId);
+        if (in_array($principalId, $visible, true)) {
+            return null;
+        }
+        return $this->error(
+            Response::HTTP_FORBIDDEN,
+            'FORBIDDEN_PRINCIPAL',
+            'You can only upload into a principal you belong to.',
         );
     }
 

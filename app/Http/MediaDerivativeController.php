@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Models\Principal;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
@@ -63,20 +64,16 @@ final class MediaDerivativeController
         }
 
         $producer = $this->findProducer($parent, $format);
-        if ($producer === null) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NO_PRODUCER', 'message' => 'No producer supports this format for this asset.']],
-                Response::HTTP_CONFLICT,
-            );
+        try {
+            $output = $producer === null
+                ? null
+                : $producer->produce($parent, $format, $options);
+        } catch (Throwable $e) {
+            return $this->producerError($e);
         }
 
-        try {
-            $output = $producer->produce($parent, $format, $options);
-        } catch (Throwable $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'PRODUCER_FAILED', 'message' => $e->getMessage()]],
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
+        if ($producer === null || $output === null) {
+            return $this->noProducer();
         }
 
         $derivative = $this->derivatives->create(
@@ -110,6 +107,22 @@ final class MediaDerivativeController
             return [];
         }
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function noProducer(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'NO_PRODUCER', 'message' => 'No producer supports this format for this asset.']],
+            Response::HTTP_CONFLICT,
+        );
+    }
+
+    private function producerError(Throwable $e): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'PRODUCER_FAILED', 'message' => $e->getMessage()]],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
     }
 
     private function findProducer(MediaAsset $parent, string $format): ?MediaDerivativeProducerInterface
@@ -158,8 +171,8 @@ final class MediaDerivativeController
         if ($userId === null) {
             return null;
         }
-        $principal = \Spora\Models\Principal::query()
-            ->where('type', \Spora\Models\Principal::TYPE_USER)
+        $principal = Principal::query()
+            ->where('type', Principal::TYPE_USER)
             ->where('user_id', $userId)
             ->first();
         if ($principal === null) {

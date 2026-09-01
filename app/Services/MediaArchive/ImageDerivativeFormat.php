@@ -29,6 +29,10 @@ final class ImageDerivativeFormat
     public const KIND_RESIZE = 'resize';
     public const KIND_CONVERT = 'convert';
 
+    private const TARGET_MIME_WEBP = 'image/webp';
+    private const TARGET_MIME_PNG = 'image/png';
+    private const TARGET_MIME_JPEG = 'image/jpeg';
+
     /**
      * Catalogue of every preset the producer advertises. Order matters
      * only for the UI dropdown — the producer doesn't depend on it.
@@ -41,7 +45,7 @@ final class ImageDerivativeFormat
             'label'     => 'Thumbnail (256px)',
             'kind'      => self::KIND_RESIZE,
             'longEdge'  => 256,
-            'targetMime' => 'image/webp',
+            'targetMime' => self::TARGET_MIME_WEBP,
             'quality'   => 80,
         ],
         [
@@ -49,7 +53,7 @@ final class ImageDerivativeFormat
             'label'     => 'Medium (1024px)',
             'kind'      => self::KIND_RESIZE,
             'longEdge'  => 1024,
-            'targetMime' => 'image/webp',
+            'targetMime' => self::TARGET_MIME_WEBP,
             'quality'   => 80,
         ],
         [
@@ -57,7 +61,7 @@ final class ImageDerivativeFormat
             'label'     => 'Convert to PNG',
             'kind'      => self::KIND_CONVERT,
             'longEdge'  => null,
-            'targetMime' => 'image/png',
+            'targetMime' => self::TARGET_MIME_PNG,
             'quality'   => null,
         ],
         [
@@ -65,7 +69,7 @@ final class ImageDerivativeFormat
             'label'     => 'Convert to JPEG',
             'kind'      => self::KIND_CONVERT,
             'longEdge'  => null,
-            'targetMime' => 'image/jpeg',
+            'targetMime' => self::TARGET_MIME_JPEG,
             'quality'   => 85,
         ],
         [
@@ -73,7 +77,7 @@ final class ImageDerivativeFormat
             'label'     => 'Convert to WebP',
             'kind'      => self::KIND_CONVERT,
             'longEdge'  => null,
-            'targetMime' => 'image/webp',
+            'targetMime' => self::TARGET_MIME_WEBP,
             'quality'   => 80,
         ],
     ];

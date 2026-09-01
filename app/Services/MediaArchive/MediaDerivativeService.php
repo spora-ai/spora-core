@@ -15,9 +15,6 @@ use Throwable;
 
 /**
  * Owns the lifecycle of media derivatives.
-
-/**
- * Owns the lifecycle of media derivatives.
  *
  * A derivative is a fresh `media_assets` row linked back to its parent
  * through the `media_derivatives` join table. The natural key on the

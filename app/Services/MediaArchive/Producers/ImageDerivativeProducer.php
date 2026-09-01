@@ -9,10 +9,10 @@ use Intervention\Image\Interfaces\DriverInterface;
 use Intervention\Image\Interfaces\EncodedImageInterface;
 use Intervention\Image\Interfaces\ImageInterface;
 use InvalidArgumentException;
-use RuntimeException;
 use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\DerivativeOutput;
+use Spora\Services\MediaArchive\Exceptions\ImageDerivativeProducerException;
 use Spora\Services\MediaArchive\ImageDerivativeFormat;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Throwable;
@@ -121,7 +121,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
             $manager = new ImageManager($this->resolveDriver());
             $image = $manager->read($bytes);
         } catch (Throwable $e) {
-            throw new RuntimeException(sprintf(
+            throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: failed to decode source image: %s',
                 $e->getMessage(),
             ), 0, $e);
@@ -190,7 +190,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
         return match ($asset->storage_mode) {
             'data_url' => $this->readDataUrlBytes($asset),
             'local'    => $this->readLocalBytes($asset),
-            default    => throw new RuntimeException(sprintf(
+            default    => throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: storage_mode "%s" has no materialised bytes',
                 (string) $asset->storage_mode,
             )),
@@ -201,7 +201,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
     {
         $payload = $asset->payload;
         if (!is_string($payload) || $payload === '') {
-            throw new RuntimeException(sprintf(
+            throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: MediaAsset %s has empty data_url payload',
                 $asset->id,
             ));
@@ -213,14 +213,14 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
     {
         $token = $asset->asset_token;
         if (!is_string($token) || $token === '') {
-            throw new RuntimeException(sprintf(
+            throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: MediaAsset %s has no asset_token',
                 $asset->id,
             ));
         }
         $ext = self::MIME_TO_EXT[strtolower((string) $asset->mime_type)] ?? null;
         if ($ext === null) {
-            throw new RuntimeException(sprintf(
+            throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: cannot derive local-file extension for MIME "%s"',
                 (string) $asset->mime_type,
             ));
@@ -238,7 +238,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
             restore_error_handler();
         }
         if (!is_string($bytes)) {
-            throw new RuntimeException(sprintf(
+            throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: MediaAsset %s local file unreadable: %s',
                 $asset->id,
                 $path,
