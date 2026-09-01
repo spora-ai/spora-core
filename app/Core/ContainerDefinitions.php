@@ -123,10 +123,12 @@ use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\MediaArchive\Producers\ImageDerivativeProducer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
@@ -174,6 +176,12 @@ final class ContainerDefinitions
         // MediaConverterRegistry at construction time.
         MediaConverterDiscovery::add(PdfToMarkdownConverter::class);
         MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
+
+        // Same pattern for derivative producers. The "Convert to" dropdown
+        // in `spora-plugin-media-archive-frontend` surfaces whatever this
+        // list contains — plugins ship heavier producers (PDF, video) in
+        // their own composer packages via the same registration hook.
+        MediaDerivativeProducerDiscovery::add(ImageDerivativeProducer::class);
 
         return array_merge(
             self::configDefinition(),

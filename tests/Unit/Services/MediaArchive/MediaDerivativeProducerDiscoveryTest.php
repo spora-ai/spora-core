@@ -8,6 +8,15 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
+beforeEach(function (): void {
+    // The registry is a static, process-global list — without this
+    // reset, a sibling test in the same parallel worker (e.g. the
+    // options controller registering `ImageDerivativeProducer`) leaks
+    // into this file and breaks the strict "exactly one entry"
+    // assertion below.
+    MediaDerivativeProducerDiscovery::reset();
+});
+
 test('MediaDerivativeProducerDiscovery::add is idempotent', function (): void {
     MediaDerivativeProducerDiscovery::add(Tests\Support\FakeDerivativeProducer::class);
     MediaDerivativeProducerDiscovery::add(Tests\Support\FakeDerivativeProducer::class);

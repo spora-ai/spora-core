@@ -25,6 +25,12 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
+beforeEach(function (): void {
+    // Discovery is process-global; a sibling test in the same parallel
+    // worker may have registered producers we don't care about here.
+    MediaDerivativeProducerDiscovery::reset();
+});
+
 /**
  * @return array{0: MediaDerivativeOptionsController, 1: MediaArchiveService}
  */
@@ -98,6 +104,48 @@ test('GET /media/{id}/derivatives/options returns each format with its available
         $byFormat[$opt['format']] = $opt['available'];
     }
     expect($byFormat)->toBe(['pdf' => true]);
+});
+
+test('GET /media/{id}/derivatives/options surfaces human labels from ImageDerivativeFormat for an image asset', function (): void {
+    [$controller] = buildDerivativeOptionsControllerFixture();
+    $parent = seedOptionsParent(42);
+    MediaDerivativeProducerDiscovery::add(\Spora\Services\MediaArchive\Producers\ImageDerivativeProducer::class);
+
+    $resp = $controller->index($parent->id);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($resp->getContent(), true);
+
+    $byFormat = [];
+    foreach ($body['data'] as $opt) {
+        $byFormat[$opt['format']] = $opt;
+    }
+    // All five image presets are present and marked available because
+    // the parent fixture is image/png — one of the producer's accepted
+    // source MIMEs.
+    expect($byFormat)->toHaveKeys(['thumbnail-256', 'medium-1024', 'format-png', 'format-jpeg', 'format-webp']);
+    expect($byFormat['thumbnail-256']['label'])->toBe('Thumbnail (256px)');
+    expect($byFormat['thumbnail-256']['available'])->toBeTrue();
+    expect($byFormat['medium-1024']['label'])->toBe('Medium (1024px)');
+    expect($byFormat['medium-1024']['available'])->toBeTrue();
+    expect($byFormat['format-png']['label'])->toBe('Convert to PNG');
+    expect($byFormat['format-webp']['label'])->toBe('Convert to WebP');
+});
+
+test('GET /media/{id}/derivatives/options marks every preset unavailable when the source MIME is not in the producer list', function (): void {
+    [$controller] = buildDerivativeOptionsControllerFixture();
+    $parent = seedOptionsParent(42);
+    $parent->mime_type = 'application/pdf';
+    $parent->save();
+    MediaDerivativeProducerDiscovery::add(\Spora\Services\MediaArchive\Producers\ImageDerivativeProducer::class);
+
+    $resp = $controller->index($parent->id);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($resp->getContent(), true);
+    foreach ($body['data'] as $opt) {
+        expect($opt['available'])->toBeFalse();
+    }
 });
 
 test('GET /media/{id}/derivatives/options returns an empty array when no producers are registered', function (): void {

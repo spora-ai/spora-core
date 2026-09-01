@@ -15,6 +15,9 @@ use Throwable;
 
 /**
  * Owns the lifecycle of media derivatives.
+
+/**
+ * Owns the lifecycle of media derivatives.
  *
  * A derivative is a fresh `media_assets` row linked back to its parent
  * through the `media_derivatives` join table. The natural key on the
@@ -25,9 +28,10 @@ use Throwable;
  *
  * `principal_id` inheritance: the derivative inherits the parent's
  * `principal_id` when set; otherwise it pulls from the supplied
- * `PrincipalContext`, otherwise from `PrincipalService::ensureUserPrincipal($userId)`,
- * otherwise stays NULL — matching the precedence chain used by the
- * ingest pipeline so LIST and CREATE agree on a row's "principal".
+ * `PrincipalContext`, otherwise from
+ * `PrincipalService::ensureUserPrincipal($userId)`, otherwise stays
+ * NULL — matching the precedence chain used by the ingest pipeline so
+ * LIST and CREATE agree on a row's "principal".
  */
 final class MediaDerivativeService
 {
@@ -130,7 +134,15 @@ final class MediaDerivativeService
             foreach ($outputs as $format) {
                 $key = $format;
                 if (!isset($byFormat[$key])) {
-                    $byFormat[$key] = ['format' => $format, 'label' => strtoupper($format), 'available' => false];
+                    $byFormat[$key] = [
+                        'format'    => $format,
+                        // Resolved per-producer below; the slug fallback
+                        // keeps unknown formats presentable so producers
+                        // shipped without an ImageDerivativeFormat-style
+                        // catalogue still get a sensible label.
+                        'label'     => ImageDerivativeFormat::labelFor($format),
+                        'available' => false,
+                    ];
                 }
                 if ($sourceMatches) {
                     $byFormat[$key]['available'] = true;
