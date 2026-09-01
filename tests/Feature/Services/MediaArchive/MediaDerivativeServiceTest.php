@@ -11,7 +11,9 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\DerivativeOutput;
+use Spora\Services\MediaArchive\ImageDerivativeFormat;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\PrincipalContext;
@@ -252,4 +254,65 @@ test('MediaDerivativeService::listFor returns the derivative rows for a parent',
     expect($rows[0]['producer_plugin'])->toBe('p');
     expect($rows[0]['producer_operation'])->toBe('op');
     expect($rows[0]['derivative']->id)->toBe($derivative->id);
+});
+
+test('ImageDerivativeFormat::chipLabelFor maps each preset to a chip-friendly string', function (): void {
+    // The VersionsStrip chip row mirrors the dropdown options but
+    // needs shorter labels (the dropdown gets "Thumbnail (256px)";
+    // the chip is constrained to ~7-8 chars). Keep this list in sync
+    // with FORMAT_PRESETS — adding a preset without a chip label
+    // would surface an unreadable slug.
+    expect(ImageDerivativeFormat::chipLabelFor('thumbnail-256'))->toBe('Thumb 256');
+    expect(ImageDerivativeFormat::chipLabelFor('medium-1024'))->toBe('Medium 1024');
+    expect(ImageDerivativeFormat::chipLabelFor('format-png'))->toBe('PNG');
+    expect(ImageDerivativeFormat::chipLabelFor('format-jpeg'))->toBe('JPEG');
+    expect(ImageDerivativeFormat::chipLabelFor('format-webp'))->toBe('WebP');
+    // Future producers outside the catalogue fall back to the slug.
+    expect(ImageDerivativeFormat::chipLabelFor('avif'))->toBe('AVIF');
+});
+
+test('MediaAssetSerializer::serialize attaches a chip label per derivative on the wire', function (): void {
+    // The VersionsStrip chip row reads `derivative.label` from the
+    // serializer payload; without it the chip would show the raw
+    // preset key (`FORMAT-PNG`) instead of a short identifier (`PNG`).
+    ['service' => $service] = makeDerivativeServiceFixture();
+    $parent = seedDerivativeParent();
+    MediaDerivativeProducerDiscovery::add(FakeDerivativeProducer::class);
+
+    // Three derivatives from two producers — the in-core producer gets
+    // chip labels via ImageDerivativeFormat; the FakeDerivativeProducer
+    // falls back to the upper-case format slug because it's outside
+    // the catalogue.
+    $service->create(
+        parent: $parent,
+        output: new DerivativeOutput('png', 'image/png'),
+        format: 'format-png',
+        producerPlugin: 'spora-core',
+        producerOperation: 'image.derive',
+    );
+    $service->create(
+        parent: $parent,
+        output: new DerivativeOutput('thumb', 'image/webp'),
+        format: 'thumbnail-256',
+        producerPlugin: 'spora-core',
+        producerOperation: 'image.derive',
+    );
+    $service->create(
+        parent: $parent,
+        output: new DerivativeOutput('pdf', 'application/pdf'),
+        format: 'pdf',
+        producerPlugin: 'fake-derivative-producer',
+        producerOperation: 'render',
+    );
+
+    $serializer = new MediaAssetSerializer(includeDerivatives: true, derivatives: $service);
+    $payload    = $serializer->serialize($parent);
+
+    $byFormat = [];
+    foreach ($payload['derivatives'] as $row) {
+        $byFormat[$row['format']] = $row;
+    }
+    expect($byFormat['format-png']['label'])->toBe('PNG');
+    expect($byFormat['thumbnail-256']['label'])->toBe('Thumb 256');
+    expect($byFormat['pdf']['label'])->toBe('PDF');
 });

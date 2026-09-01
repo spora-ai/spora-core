@@ -102,8 +102,16 @@ final class MediaAssetSerializer
         foreach ($rows as $row) {
             $derivative = $row['derivative'];
             $ext = MediaArchiveService::extensionForMime($derivative->mime_type);
+            // Per-derivative chip label for the VersionsStrip. Producers
+            // ship their own label resolution through
+            // `MediaDerivativeFormat::chipLabelFor()` so adding a new
+            // preset is a one-row change in the catalogue.
+            $label = $row['producer_plugin'] === 'spora-core'
+                ? ImageDerivativeFormat::chipLabelFor($row['format'])
+                : strtoupper($row['format']);
             $out[] = [
                 'format'             => $row['format'],
+                'label'              => $label,
                 'media_id'           => $derivative->id,
                 'asset_url'          => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivative->id . ($ext !== null ? '.' . $ext : ''),
                 'producer_plugin'    => $row['producer_plugin'],

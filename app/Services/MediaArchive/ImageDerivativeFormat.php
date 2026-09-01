@@ -115,4 +115,26 @@ final class ImageDerivativeFormat
         $preset = self::for($format);
         return $preset !== null ? $preset['label'] : strtoupper($format);
     }
+
+    /**
+     * Short, chip-friendly label for the VersionsStrip dropdown.
+     *
+     * The full {@see labelFor()} strings ("Thumbnail (256px)") are
+     * perfect for the "Convert to…" select but too wide for a pill chip
+     * next to the source asset. This collapses them to a tag-style
+     * identifier that fits: "Thumb 256", "PNG", "WebP", "JPEG". Falls
+     * back to the upper-case format slug for unknown keys so producers
+     * outside the catalogue still render something readable.
+     */
+    public static function chipLabelFor(string $format): string
+    {
+        return match ($format) {
+            'thumbnail-256' => 'Thumb 256',
+            'medium-1024'   => 'Medium 1024',
+            'format-png'    => 'PNG',
+            'format-jpeg'   => 'JPEG',
+            'format-webp'   => 'WebP',
+            default         => strtoupper($format),
+        };
+    }
 }

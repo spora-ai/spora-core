@@ -466,6 +466,7 @@ describe('MediaArchiveService::list', function (): void {
                 'media_type'                    => 'image',
                 'mime_type'                     => 'image/webp',
                 'byte_size'                     => 256,
+                'asset_url'                     => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivativeId . '.webp',
                 'payload'                       => $png,
                 'asset_token'                   => bin2hex(random_bytes(16)),
                 'migrated_from_inline_data_url' => true,
