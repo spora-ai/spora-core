@@ -314,9 +314,12 @@ final class MediaArchiveService
 
     /**
      * Apply the dashboard-style principal scope: media attached to any
-     * agent whose principal is in the list, plus direct uploads by the
-     * caller — but only when the caller's user-principal is in the list,
-     * so a group-scoped chip never leaks the user's direct uploads.
+     * agent whose principal is in the list. Direct uploads by the caller
+     * (rows with `user_id = callerId`) are NOT auto-included here — a
+     * direct upload attributed to a group-principal via the plugin upload
+     * dialog belongs to that group, not the caller's user-principal. The
+     * plugin's `My Media` chip is therefore a strict `principal_id = …`
+     * filter, matching the user's mental model of "media of my principal".
      *
      * Extracted from {@see list()} to drop the S3776 cognitive-complexity
      * budget; the controller has already vetted every id against
@@ -332,13 +335,6 @@ final class MediaArchiveService
     private function applyPrincipalIdScope(Builder $builder, ListMediaQuery $query): void
     {
         $principalIds = array_values(array_unique(array_map('intval', $query->principalIds ?? [])));
-        $includeUploads = false;
-        if ($query->agentOwnerUserId !== null) {
-            $userPrincipalId = $this->principalService
-                ->ensureUserPrincipal($query->agentOwnerUserId)
-                ->id;
-            $includeUploads = in_array($userPrincipalId, $principalIds, true);
-        }
         $builder->where(function (Builder $q) use ($principalIds): void {
             // Fast path: indexed principal_id column on media_assets.
             $q->whereIn('principal_id', $principalIds);
@@ -354,9 +350,6 @@ final class MediaArchiveService
                         ->whereIn('principal_id', $principalIds));
             });
         });
-        if ($includeUploads && $query->agentOwnerUserId !== null) {
-            $builder->orWhere('user_id', $query->agentOwnerUserId);
-        }
     }
 
     /**
