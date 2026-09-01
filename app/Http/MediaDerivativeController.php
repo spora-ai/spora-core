@@ -74,40 +74,40 @@ final class MediaDerivativeController
      */
     private function produceDerivativeResponse(MediaAsset $parent, string $format, array $options): array
     {
-        if ($format === '') {
-            return [Response::HTTP_BAD_REQUEST, [
-                'error' => ['code' => 'BAD_REQUEST', 'message' => '`format` is required.'],
-            ]];
-        }
-
-        $producer = $this->findProducer($parent, $format);
-        if ($producer === null) {
-            return [Response::HTTP_CONFLICT, [
-                'error' => ['code' => 'NO_PRODUCER', 'message' => 'No producer supports this format for this asset.'],
-            ]];
+        $producer = $format === '' ? null : $this->findProducer($parent, $format);
+        if ($format === '' || $producer === null) {
+            return $this->rejection(
+                $format === '' ? Response::HTTP_BAD_REQUEST : Response::HTTP_CONFLICT,
+                $format === '' ? 'BAD_REQUEST' : 'NO_PRODUCER',
+                $format === '' ? '`format` is required.' : 'No producer supports this format for this asset.',
+            );
         }
 
         try {
             $output = $producer->produce($parent, $format, $options);
-        } catch (Throwable $e) {
-            return [Response::HTTP_UNPROCESSABLE_ENTITY, [
-                'error' => ['code' => 'PRODUCER_FAILED', 'message' => $e->getMessage()],
+            $derivative = $this->derivatives->create(
+                parent: $parent,
+                output: $output,
+                format: $format,
+                producerPlugin: $producer->pluginSlug(),
+                producerOperation: $producer->operationName(),
+                userId: $this->auth->currentUserId(),
+                context: $this->resolveContext(),
+            );
+            return [Response::HTTP_CREATED, [
+                'data' => ['derivative' => $this->serializer->serialize($derivative)],
             ]];
+        } catch (Throwable $e) {
+            return $this->rejection(Response::HTTP_UNPROCESSABLE_ENTITY, 'PRODUCER_FAILED', $e->getMessage());
         }
+    }
 
-        $derivative = $this->derivatives->create(
-            parent: $parent,
-            output: $output,
-            format: $format,
-            producerPlugin: $producer->pluginSlug(),
-            producerOperation: $producer->operationName(),
-            userId: $this->auth->currentUserId(),
-            context: $this->resolveContext(),
-        );
-
-        return [Response::HTTP_CREATED, [
-            'data' => ['derivative' => $this->serializer->serialize($derivative)],
-        ]];
+    /**
+     * @return array{0: int, 1: array<string, mixed>}
+     */
+    private function rejection(int $status, string $code, string $message): array
+    {
+        return [$status, ['error' => ['code' => $code, 'message' => $message]]];
     }
 
     /**
