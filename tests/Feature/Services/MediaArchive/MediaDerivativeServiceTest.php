@@ -19,6 +19,13 @@ use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Tests\Support\FakeDerivativeProducer;
 
+// `SPORA_STORAGE_DIR` is cleared at every test entry in `tests/Pest.php`
+// (the parallel runner inherits whatever value the previous test left in
+// the worker process). This fixture pushes its per-test tmp dir onto the
+// process env so `Paths::storage()` resolves to an isolated root for the
+// duration of the test; the Pest afterEach restores the snapshot taken
+// at the previous test's entry.
+
 afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
