@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use DateTime;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -141,6 +142,15 @@ final class MediaArchiveService
     {
         /** @var Builder<MediaAsset> $builder */
         $builder = MediaAsset::query();
+
+        // Derivatives are full `media_assets` rows (linked to their parent
+        // via the `media_derivatives` join table). Without this filter they
+        // show up as siblings of the original in the library grid — a
+        // thumbnail next to the source it was derived from. The
+        // `media_derivatives_derivative_id_idx` index keeps the subquery
+        // cheap. Reach a derivative through its parent's detail page →
+        // `VersionsStrip` instead.
+        $builder->whereNotIn('id', Capsule::table('media_derivatives')->select('derivative_id'));
 
         if ($query->mediaTypes !== null && $query->mediaTypes !== []) {
             $builder->whereIn(
