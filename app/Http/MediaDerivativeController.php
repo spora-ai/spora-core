@@ -59,21 +59,40 @@ final class MediaDerivativeController
         $format  = (string) ($payload['format'] ?? '');
         $options = is_array($payload['options'] ?? null) ? $payload['options'] : [];
 
+        [$status, $body] = $this->produceDerivativeResponse($parent, $format, $options);
+
+        return new JsonResponse($body, $status);
+    }
+
+    /**
+     * Run the produce pipeline and return [status, body] for the HTTP
+     * response. Pulled out of `create()` so the controller entry point
+     * has a single trailing `return new JsonResponse(...)`.
+     *
+     * @param array<string, mixed> $options
+     * @return array{0: int, 1: array<string, mixed>}
+     */
+    private function produceDerivativeResponse(MediaAsset $parent, string $format, array $options): array
+    {
         if ($format === '') {
-            return $this->error('BAD_REQUEST', '`format` is required.', Response::HTTP_BAD_REQUEST);
+            return [Response::HTTP_BAD_REQUEST, [
+                'error' => ['code' => 'BAD_REQUEST', 'message' => '`format` is required.'],
+            ]];
         }
 
         $producer = $this->findProducer($parent, $format);
-        try {
-            $output = $producer === null
-                ? null
-                : $producer->produce($parent, $format, $options);
-        } catch (Throwable $e) {
-            return $this->producerError($e);
+        if ($producer === null) {
+            return [Response::HTTP_CONFLICT, [
+                'error' => ['code' => 'NO_PRODUCER', 'message' => 'No producer supports this format for this asset.'],
+            ]];
         }
 
-        if ($producer === null || $output === null) {
-            return $this->noProducer();
+        try {
+            $output = $producer->produce($parent, $format, $options);
+        } catch (Throwable $e) {
+            return [Response::HTTP_UNPROCESSABLE_ENTITY, [
+                'error' => ['code' => 'PRODUCER_FAILED', 'message' => $e->getMessage()],
+            ]];
         }
 
         $derivative = $this->derivatives->create(
@@ -86,10 +105,9 @@ final class MediaDerivativeController
             context: $this->resolveContext(),
         );
 
-        return new JsonResponse(
-            ['data' => ['derivative' => $this->serializer->serialize($derivative)]],
-            Response::HTTP_CREATED,
-        );
+        return [Response::HTTP_CREATED, [
+            'data' => ['derivative' => $this->serializer->serialize($derivative)],
+        ]];
     }
 
     /**
@@ -107,22 +125,6 @@ final class MediaDerivativeController
             return [];
         }
         return is_array($decoded) ? $decoded : [];
-    }
-
-    private function noProducer(): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'NO_PRODUCER', 'message' => 'No producer supports this format for this asset.']],
-            Response::HTTP_CONFLICT,
-        );
-    }
-
-    private function producerError(Throwable $e): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'PRODUCER_FAILED', 'message' => $e->getMessage()]],
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-        );
     }
 
     private function findProducer(MediaAsset $parent, string $format): ?MediaDerivativeProducerInterface
