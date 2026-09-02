@@ -88,6 +88,11 @@ final class SubAgentService implements SubAgentServiceInterface
         // Flip to AWAITING_SUB_AGENTS before the child tick — in Sync mode
         // the child ticks inline and may complete before we return, and the
         // parent's status is what gates the resume path on child completion.
+        // First-spawn-of-batch also opens the batch-open flag so the
+        // per-child resume hook refuses to fire mid-batch (the fix for the
+        // multi-child race where a concurrent child worker cleared the
+        // parent's data and the spawn sequence wrote `expected=N-1` for N
+        // children — see maybeResumeParent's batch-open gate below).
         $this->markParentAwaitingSubAgents($parent);
 
         // Catch driver failures from the child tick: TickPhaseRunner marks
@@ -116,12 +121,10 @@ final class SubAgentService implements SubAgentServiceInterface
 
         $this->recordSpawnedChild($parent, $child->id);
 
-        // The TickPhaseRunner hook already fired inside the child's tick,
-        // but at that moment the parent had no spawned ids recorded and
-        // loadReadyParent returned null. Re-check now that the registration
-        // is committed. For multi-child batches the post-tick check is a
-        // no-op (expected_count is still 0) — the actual resume fires from
-        // the batch-boundary hook after all spawns have incremented.
+        // Post-tick re-check is a no-op once the batch-open flag is set
+        // (the per-child hook is gated by it); the actual resume fires from
+        // the batch-boundary hook after all spawns have incremented and the
+        // flag is cleared.
         $child->refresh();
         if (in_array($child->status, ['COMPLETED', 'FAILED'], true)) {
             $this->maybeResumeParent($child->id);
@@ -142,6 +145,18 @@ final class SubAgentService implements SubAgentServiceInterface
             return;
         }
 
+        // Cross-process safety net: if a concurrent child worker completed
+        // its tick mid-batch (before the parent recorded the spawn), the
+        // per-child hook would otherwise fire `resumeParent` against a parent
+        // whose `data` hasn't been incremented yet — the resume gate would
+        // then permanently fail because `count(spawned) !== expected`.
+        // The batch-boundary hook (maybeResumeParentForParent) clears the
+        // flag after the parent has recorded every spawn, so the next
+        // per-child event (e.g. a child re-ticked from QUEUED) flows through.
+        if (($ready['parent']->data['sub_agent_batch_open'] ?? false) === true) {
+            return;
+        }
+
         $this->resumeParent($ready['parent'], $ready['siblingIds']);
     }
 
@@ -150,6 +165,13 @@ final class SubAgentService implements SubAgentServiceInterface
      * TickPhaseRunner (worker) after every approved tool in a batch has
      * run. Resumes the parent iff the spawned-id count matches
      * `sub_agent_expected_count` and every sibling is terminal.
+     *
+     * The batch-open flag is cleared BEFORE the resume decision so the next
+     * per-child event (e.g. a sibling re-ticked from QUEUED in worker mode)
+     * can flow through `maybeResumeParent` instead of being short-circuited
+     * by the gate. The flag is the cross-process lock that prevents the
+     * race where a fast child worker resumes the parent before the parent
+     * has recorded all of its spawns.
      */
     public function maybeResumeParentForParent(int $parentTaskId): void
     {
@@ -157,6 +179,8 @@ final class SubAgentService implements SubAgentServiceInterface
         if ($parent === null || $parent->status !== 'AWAITING_SUB_AGENTS') {
             return;
         }
+
+        $this->closeBatch($parent);
 
         $expectedCount = (int) ($parent->data['sub_agent_expected_count'] ?? 0);
         $siblingIds = $expectedCount > 0 ? $this->extractSpawnedChildIds($parent) : [];
@@ -263,14 +287,16 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Seeds `data.spawned_sub_task_ids = []` and flips the parent to
-     * `AWAITING_SUB_AGENTS`. Called BEFORE the child tick so the child's
-     * `maybeResumeParent` hook sees the parent in the right state.
+     * Seeds `data.spawned_sub_task_ids = []`, opens the batch-open flag, and
+     * flips the parent to `AWAITING_SUB_AGENTS`. Called BEFORE the child tick
+     * so the child's `maybeResumeParent` hook sees the parent in the right
+     * state.
      *
      * Short-circuits when the parent is already awaiting sub-agents with a
      * seeded `spawned_sub_task_ids` array — multi-child batches keep the
      * parent in this state across spawns, so a second `spawn()` would
-     * otherwise rewrite the same row.
+     * otherwise rewrite the same row. The flag stays open across the batch
+     * and is cleared by {@see closeBatch()} from the batch-boundary hook.
      */
     private function markParentAwaitingSubAgents(Task $parent): void
     {
@@ -284,6 +310,7 @@ final class SubAgentService implements SubAgentServiceInterface
         }
 
         $data['spawned_sub_task_ids'] = $data['spawned_sub_task_ids'] ?? [];
+        $data['sub_agent_batch_open'] = true;
 
         Capsule::table('tasks')
             ->where('id', $parent->id)
@@ -291,6 +318,27 @@ final class SubAgentService implements SubAgentServiceInterface
                 'status' => 'AWAITING_SUB_AGENTS',
                 'data'   => json_encode($data, JSON_THROW_ON_ERROR),
             ]);
+    }
+
+    /**
+     * Cross-process lock against the multi-child stall. Cleared by the
+     * batch-boundary hook (maybeResumeParentForParent) so a subsequent
+     * per-child event from a slow worker can resume normally. If the gate
+     * fails (count mismatch, non-terminal sibling), the flag stays open —
+     * the next batch-boundary call will clear it and re-evaluate.
+     */
+    private function closeBatch(Task $parent): void
+    {
+        $data = $parent->data ?? [];
+        if (($data['sub_agent_batch_open'] ?? false) !== true) {
+            return;
+        }
+
+        unset($data['sub_agent_batch_open']);
+
+        Capsule::table('tasks')
+            ->where('id', $parent->id)
+            ->update(['data' => json_encode($data, JSON_THROW_ON_ERROR)]);
     }
 
     /**
@@ -305,39 +353,63 @@ final class SubAgentService implements SubAgentServiceInterface
      * keeps exactly one `role:'tool'` row per `provider_call_id` so the
      * next LLM round-trip sees a single correlated result.
      *
+     * Idempotent under concurrent invocation: the per-child hook and the
+     * batch-boundary hook can race in worker mode (a slow sibling re-tick
+     * may fire `maybeResumeParent` after the boundary hook already flipped
+     * the row). The lockForUpdate + status guard collapses the race to a
+     * single status flip and skips duplicate tool-row writes.
+     *
      * @param list<int> $childIds
      */
-    private function resumeParent(Task $parent, array $childIds): void
+    public function resumeParent(Task $parent, array $childIds): bool
     {
-        $orchestrator = ($this->orchestratorFactory)();
-
-        foreach ($childIds as $childId) {
-            $child = Task::find($childId);
-            if ($child === null) {
-                continue;
+        return Capsule::connection()->transaction(function () use ($parent, $childIds): bool {
+            $row = Capsule::table('tasks')
+                ->where('id', $parent->id)
+                ->lockForUpdate()
+                ->first();
+            if ($row === null) {
+                return false;
+            }
+            // Idempotency: another caller (batch-boundary hook racing
+            // per-child hook in worker mode) already flipped the row.
+            if ($row->status !== 'AWAITING_SUB_AGENTS') {
+                return false;
             }
 
-            $toolCallId = $this->findToolCallIdForChild($parent->id, $childId);
-            $this->replaceOrAppendToolHistory(
-                orchestrator: $orchestrator,
-                parentTaskId: $parent->id,
-                toolCallId: $toolCallId,
-                content: $this->childContent($child),
-            );
-        }
+            $orchestrator = ($this->orchestratorFactory)();
 
-        $data = $parent->data ?? [];
-        unset($data['spawned_sub_task_ids']);
-        unset($data['sub_agent_expected_count']);
+            foreach ($childIds as $childId) {
+                $child = Task::find($childId);
+                if ($child === null) {
+                    continue;
+                }
 
-        Capsule::table('tasks')
-            ->where('id', $parent->id)
-            ->update([
-                'status' => 'QUEUED',
-                'data'   => json_encode($data, JSON_THROW_ON_ERROR),
-            ]);
+                $toolCallId = $this->findToolCallIdForChild((int) $parent->id, $childId);
+                $this->replaceOrAppendToolHistory(
+                    orchestrator: $orchestrator,
+                    parentTaskId: (int) $parent->id,
+                    toolCallId: $toolCallId,
+                    content: $this->childContent($child),
+                );
+            }
 
-        $this->publishParentState($parent->id, $parent->principalUserId());
+            $data = $parent->data ?? [];
+            unset($data['spawned_sub_task_ids']);
+            unset($data['sub_agent_expected_count']);
+            unset($data['sub_agent_batch_open']);
+
+            Capsule::table('tasks')
+                ->where('id', $parent->id)
+                ->update([
+                    'status' => 'QUEUED',
+                    'data'   => json_encode($data, JSON_THROW_ON_ERROR),
+                ]);
+
+            $this->publishParentState((int) $parent->id, (int) $parent->principalUserId());
+
+            return true;
+        });
     }
 
     /**

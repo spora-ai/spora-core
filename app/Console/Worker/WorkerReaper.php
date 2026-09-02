@@ -44,7 +44,13 @@ final class WorkerReaper
         // `RetryScheduler::scheduleRootRetry` and are never flipped directly by the
         // reaper (otherwise a reaper pass would race a pending retry and erase the
         // root's failure context).
-        $orphanedIds = Task::where('status', 'RUNNING')
+        //
+        // AWAITING_SUB_AGENTS is swept alongside RUNNING because a sub-agent
+        // multi-child stall (race between a concurrent child worker and the
+        // parent's spawn sequence) leaves the parent parked indefinitely with
+        // no live lease. Without this, the parent waits forever — see
+        // dashboard-and-subagent-fixes.md Plan D.
+        $orphanedIds = Task::whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
             ->where(function ($q) use ($now): void {
                 $q->whereNull('lease_expires_at')
                     ->orWhere('lease_expires_at', '<=', $now);
