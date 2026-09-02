@@ -99,12 +99,14 @@ final class AgentService implements AgentServiceInterface
 
         // Plan A: pre-load the per-viewer favourite set so AgentResource's
         // `is_favorite` field reads from a single Set<int> lookup instead
-        // of running one pivot query per agent.
-        $favoritedIds = UserAgentFavorite::query()
-            ->where('user_id', $userId)
-            ->whereIn('agent_id', $agents->pluck('id'))
-            ->pluck('agent_id')
-            ->flip();
+        // of running one pivot query per agent. The static helper on the
+        // model keeps this DI-free so AgentService doesn't need to depend
+        // on AgentFavoriteService (which itself depends on AgentService
+        // for the visibility check — would create a cycle).
+        $favoritedIds = UserAgentFavorite::loadFavoritedForViewer(
+            $userId,
+            $agents->pluck('id')->all(),
+        );
 
         return $agents
             ->map(fn(Agent $a) => $this->agentResource($a, $favoritedIds))

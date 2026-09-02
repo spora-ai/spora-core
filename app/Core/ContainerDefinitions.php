@@ -1057,6 +1057,7 @@ final class ContainerDefinitions
                 return new AgentTransferController(
                     $c->get(AuthService::class),
                     $c->get(AgentPrincipalService::class),
+                    $c->get(AgentFavoriteServiceInterface::class),
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),

@@ -15,9 +15,19 @@ function makeAgentTransferController(): array
 {
     $authService = bootAuthLayer();
     $principalService = new StubAgentPrincipalService();
-    $controller = new AgentTransferController($authService, $principalService);
+    // Plan A: the transfer response hydrates the per-viewer `is_favorite`
+    // field, so the controller needs a real AgentFavoriteService. The
+    // visibility check inside it routes through the AgentService stub
+    // which returns a non-null Agent for any non-999999 id.
+    $agentService = new \Spora\Services\AgentService();
+    $favoriteService = new \Spora\Services\AgentFavoriteService($agentService);
+    $controller = new AgentTransferController(
+        $authService,
+        $principalService,
+        $favoriteService,
+    );
 
-    return [$controller, $authService, $principalService];
+    return [$controller, $authService, $principalService, $favoriteService];
 }
 
 describe('AgentTransferController::transferPrincipal', function (): void {

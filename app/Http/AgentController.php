@@ -437,10 +437,20 @@ final class AgentController
 
     private function agentResourceContext(Agent $agent): AgentResourceContext
     {
+        // Plan A: pre-load the caller's favourited set so the per-viewer
+        // `is_favorite` field is correct on every single-agent response
+        // (show, store, update, transfer). Without this the field would
+        // default to false (the legacy shared column is gone) and the
+        // dashboard's post-toggle re-fetch would see the wrong value.
+        $favoritedIds = $this->favoriteService->loadFavoritedAgentIdsForViewer(
+            (int) $this->authService->currentUserId(),
+            [(int) $agent->id],
+        );
         return new AgentResourceContext(
             supportsImageInput: $this->resolveSupportsImageInput($agent),
             iconResolver: $this->toolIconResolver,
             pictureService: $this->pictureService,
+            favoritedAgentIds: $favoritedIds,
         );
     }
 }

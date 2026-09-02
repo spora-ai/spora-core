@@ -118,12 +118,13 @@ test('All split controllers share a consistent constructor surface', function ()
     // ToolIconResolver (per-tool icon chain), AgentPictureService,
     // PrincipalService, and PrincipalResolver. The tool and override
     // controllers take 3 (auth + their service + a config helper). The
-    // transfer controller takes 5 (auth + AgentPrincipalService +
+    // transfer controller takes 6 (auth + AgentPrincipalService +
+    // AgentFavoriteService [single-agent response hydration] +
     // DriverFactory + ToolIconResolver + AgentPictureService).
     expect($crud->getNumberOfParameters())->toBe(8);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
-    expect($transfer->getNumberOfParameters())->toBe(5);
+    expect($transfer->getNumberOfParameters())->toBe(6);
 });
 
 test('Route registration wires agent tool + override + transfer routes to the new controllers', function (): void {
