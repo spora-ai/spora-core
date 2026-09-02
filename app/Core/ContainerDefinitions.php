@@ -123,6 +123,7 @@ use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaAssetReader;
+use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
@@ -612,7 +613,13 @@ final class ContainerDefinitions
                 return new MediaArchiveService(
                     $c->get(MediaArchiveIngestPipeline::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
-                    $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : null,
+                    $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
+                );
+            },
+
+            MediaAssetResolver::class => static function (ContainerInterface $c): MediaAssetResolver {
+                return new MediaAssetResolver(
+                    $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : new PrincipalResolver(),
                 );
             },
 
