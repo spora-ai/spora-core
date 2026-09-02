@@ -181,7 +181,7 @@ final class TaskTickController
         }
 
         // Mercure publish BEFORE the LLM call so the UI sees QUEUED → RUNNING immediately.
-        $this->mercure->publish($claimed->id, $claimed->principalUserId(), [
+        $this->mercure->publishForPrincipal($claimed->id, $claimed->principalOwnerId(), [
             'task_id' => $claimed->id,
             'status'  => 'RUNNING',
         ]);
@@ -336,7 +336,7 @@ final class TaskTickController
             }
         }
 
-        $this->mercure->publish($claimed->id, $claimed->principalUserId(), [
+        $this->mercure->publishForPrincipal($claimed->id, $claimed->principalOwnerId(), [
             'task_id' => $claimed->id,
             'status'  => 'FAILED',
         ]);

@@ -162,6 +162,35 @@ final class PrincipalResolver
     }
 
     /**
+     * The user ids that can act on behalf of this principal:
+     * - user-principal: [principal->user_id]
+     * - group-principal: every member of principal->group_id
+     *
+     * Used by Mercure / notification fan-out so group peers receive
+     * the same event as the trigger user. Returns [] for an unknown
+     * principal id rather than throwing — callers can no-op cleanly.
+     *
+     * @return list<int>
+     */
+    public function visibleUserIds(int $principalId): array
+    {
+        $principal = Principal::find($principalId);
+        if ($principal === null) {
+            return [];
+        }
+
+        if ($principal->type === Principal::TYPE_USER) {
+            return $principal->user_id !== null ? [(int) $principal->user_id] : [];
+        }
+
+        $userIds = GroupMembership::where('group_id', (int) $principal->group_id)
+            ->pluck('user_id')
+            ->all();
+
+        return array_map(static fn($uid): int => (int) $uid, $userIds);
+    }
+
+    /**
      * Bundle up the principal context for a tool execution. Resolves the
      * agent's principal once, then fills `ownerUserId` from the principal
      * and `runnerUserId` from the latest task. Either may be `null` for a

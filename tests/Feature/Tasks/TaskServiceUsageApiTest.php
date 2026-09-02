@@ -81,9 +81,11 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
         ]);
     }
 
+    $mercure_mock = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure_mock */
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
-        Mockery::mock(MercurePublisherInterface::class),
+        $mercure_mock,
         null,
         new \Spora\Services\PrincipalResolver(),
     );
@@ -157,9 +159,11 @@ test('task detail resource strips redacted_thinking data payload', function (): 
         ],
     ]);
 
+    $mercure_mock = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure_mock */
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
-        Mockery::mock(MercurePublisherInterface::class),
+        $mercure_mock,
         null,
         new \Spora\Services\PrincipalResolver(),
     );

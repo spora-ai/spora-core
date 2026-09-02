@@ -26,7 +26,8 @@ const SCHEDULED_RUN_TEST_BAD_CRON = 'not-a-cron';
 function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?MercurePublisherInterface $mercure = null): ScheduledRunService
 {
     $orchestrator ??= Mockery::mock(OrchestratorInterface::class);
-    $mercure      ??= Mockery::mock(MercurePublisherInterface::class);
+    $mercure      ??= Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    /** @var MockInterface&MercurePublisherInterface $mercure */
 
     // Default stubs that callers can override.
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
@@ -40,7 +41,7 @@ function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?M
             'step_count'  => 0,
         ]);
     });
-    $mercure->allows('publish')->andReturn(true);
+    $mercure->allows('publishForPrincipal')->andReturn(true);
 
     return new ScheduledRunService($orchestrator, $mercure);
 }
@@ -493,7 +494,9 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
     it('returns a task id and marks the run as triggered', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var MockInterface&MercurePublisherInterface $mercure */
+        /** @var MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
 
         $captured = ['agentId' => -1, 'prompt' => '', 'maxSteps' => 0];
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use (&$captured): Task {
@@ -532,7 +535,9 @@ describe('ScheduledRunService::triggerRun', function (): void {
 
     it('on a recurring run, inserts a fresh PENDING next entry into scheduled_runs_next', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var MockInterface&MercurePublisherInterface $mercure */
+        /** @var MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
             return Task::create([
                 'agent_id'    => $agentId,
