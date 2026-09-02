@@ -43,7 +43,9 @@ function makeGroupClaimProcessor(): ScheduledRunProcessor
         }
     });
 
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
     $notification = Mockery::mock(NotificationService::class);

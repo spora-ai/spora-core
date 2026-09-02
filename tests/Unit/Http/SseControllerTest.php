@@ -17,7 +17,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, null, null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), null, null);
         $response = $controller->auth();
 
         expect($response->getStatusCode())->toBe(404);
@@ -30,7 +30,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, null, null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), null, null);
         $response = $controller->authorize();
 
         expect($response->getStatusCode())->toBe(404);
@@ -43,7 +43,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
         $response = $controller->auth();
 
         expect($response->getStatusCode())->toBe(200);
@@ -60,9 +60,13 @@ describe('SseController', function (): void {
         $authService = bootAuthLayer();
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
+        // Materialise the user-principal BEFORE generating the JWT so
+        // PrincipalResolver::visiblePrincipalIds has something to return.
+        $principalId = createUserPrincipalPublic($userId);
 
         $controller = new SseController(
             $authService,
+            new \Spora\Services\PrincipalResolver(),
             SseControllerTestLiterals::SSE_MERCURE_URL,
             'test-secret-key-for-jwt-signing-32ch',
             '/.well-known/mercure',
@@ -94,7 +98,8 @@ describe('SseController', function (): void {
         $parts = explode('.', $secure->getValue());
         expect(count($parts))->toBe(3);
         $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
-        expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/tasks");
+        $principalId = createUserPrincipalPublic($userId);
+        expect($payload['mercure']['subscribe'])->toContain("principal/{$principalId}/tasks");
     });
 
     it('authorize uses the unprefixed cookie name when app_url is http', function (): void {
@@ -104,6 +109,7 @@ describe('SseController', function (): void {
 
         $controller = new SseController(
             $authService,
+            new \Spora\Services\PrincipalResolver(),
             SseControllerTestLiterals::SSE_MERCURE_URL,
             'test-secret-key-for-jwt-signing-32ch',
             '/.well-known/mercure',
@@ -137,6 +143,7 @@ describe('SseController', function (): void {
 
         $controller = new SseController(
             $authService,
+            new \Spora\Services\PrincipalResolver(),
             'https://hub.example.com/.well-known/mercure', // public URL only
             'test-secret-key-for-jwt-signing-32ch',
             '/.well-known/mercure',
@@ -152,8 +159,11 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
         $secret = 'test-secret-key-for-jwt-signing-32ch';
+        // Materialise the user-principal BEFORE generating the JWT so
+        // PrincipalResolver::visiblePrincipalIds has something to return.
+        $principalId = createUserPrincipalPublic($userId);
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, $secret);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, $secret);
         $response = $controller->auth();
 
         $body = json_decode($response->getContent(), true);
@@ -164,7 +174,7 @@ describe('SseController', function (): void {
         $payloadJson = base64_decode(strtr($parts[1] ?? '', '-_', '+/'));
         $payload = json_decode($payloadJson, true);
 
-        expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/tasks");
+        expect($payload['mercure']['subscribe'])->toContain("principal/{$principalId}/tasks");
         expect($payload['mercure']['subscribe'])->toContain("user/{$userId}/notifications");
     });
 
@@ -173,7 +183,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key-for-jwt-signing-32ch');
         $response = $controller->auth();
 
         $body = json_decode($response->getContent(), true);
@@ -192,7 +202,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, null);
         $response = $controller->auth();
 
         expect($response->getStatusCode())->toBe(404);
@@ -205,7 +215,7 @@ describe('SseController', function (): void {
         $userId = $authService->register(SseControllerTestLiterals::SSE_EMAIL, SseControllerTestLiterals::SSE_PASSWORD, 'Sse');
         simulateLoggedInSession($userId, SseControllerTestLiterals::SSE_EMAIL);
 
-        $controller = new SseController($authService, null, 'test-secret-key-for-jwt-signing-32ch');
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), null, 'test-secret-key-for-jwt-signing-32ch');
         $response = $controller->auth();
 
         expect($response->getStatusCode())->toBe(404);
@@ -218,7 +228,7 @@ describe('SseController::status', function (): void {
     it('returns active=false when hubUrl is null', function (): void {
         $authService = bootAuthLayer();
 
-        $controller = new SseController($authService, null, null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), null, null);
         $response = $controller->status();
 
         expect($response->getStatusCode())->toBe(200);
@@ -230,7 +240,7 @@ describe('SseController::status', function (): void {
     it('returns active=true with default hubUrl when hubUrl is configured and publicUrl is null', function (): void {
         $authService = bootAuthLayer();
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key', null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key', null);
         $response = $controller->status();
 
         expect($response->getStatusCode())->toBe(200);
@@ -243,7 +253,7 @@ describe('SseController::status', function (): void {
         $authService = bootAuthLayer();
         $publicUrl = 'https://mercure.example.com/.well-known/mercure';
 
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key', $publicUrl);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, 'test-secret-key', $publicUrl);
         $response = $controller->status();
 
         expect($response->getStatusCode())->toBe(200);
@@ -256,7 +266,7 @@ describe('SseController::status', function (): void {
 describe('SseController::generateSubscriberJwt defensive check', function (): void {
     it('throws MercureConfigurationMissingException when jwtKey is null (via reflection)', function (): void {
         $authService = bootAuthLayer();
-        $controller = new SseController($authService, SseControllerTestLiterals::SSE_MERCURE_URL, null);
+        $controller = new SseController($authService, new \Spora\Services\PrincipalResolver(), SseControllerTestLiterals::SSE_MERCURE_URL, null);
 
         $method = new ReflectionMethod($controller, 'generateSubscriberJwt');
 

@@ -337,7 +337,7 @@ final class SubAgentService implements SubAgentServiceInterface
                 'data'   => json_encode($data, JSON_THROW_ON_ERROR),
             ]);
 
-        $this->publishParentState($parent->id, $parent->principalUserId());
+        $this->publishParentState($parent->id, $parent->principalOwnerId());
     }
 
     /**
@@ -459,6 +459,6 @@ final class SubAgentService implements SubAgentServiceInterface
             'parent_task_id' => $task->parent_task_id,
         ];
 
-        $this->mercure->publish($task->id, $userId, $resource);
+        $this->mercure->publishForPrincipal($task->id, $userId, $resource);
     }
 }

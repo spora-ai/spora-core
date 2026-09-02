@@ -20,6 +20,10 @@ function makeNotificationControllerUnit(): array
     $authService = bootAuthLayer();
 
     $mercure = new class implements MercurePublisherInterface {
+        public function publishForPrincipal(int $taskId, int $principalId, array $taskData): bool
+        {
+            return true;
+        }
         public function publish(int $taskId, int $userId, array $taskData): bool
         {
             return true;
@@ -30,7 +34,7 @@ function makeNotificationControllerUnit(): array
         }
     };
 
-    $notificationService = new NotificationService($mercure);
+    $notificationService = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
     $controller = new NotificationController($authService, $notificationService);
 
     return [$controller, $authService, $notificationService];

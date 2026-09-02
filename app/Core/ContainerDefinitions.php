@@ -1263,6 +1263,7 @@ final class ContainerDefinitions
 
                 return new SseController(
                     $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
                     $hubUrl,
                     $config['mercure_jwt_key'] ?? null,
                     '/.well-known/mercure',

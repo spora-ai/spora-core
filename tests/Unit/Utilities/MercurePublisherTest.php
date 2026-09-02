@@ -38,7 +38,7 @@ describe('MercurePublisher', function (): void {
         expect($result)->toBeTrue();
     });
 
-    it('publish() JWT claim contains user/{userId}/tasks and user/{userId}/notifications', function (): void {
+    it('publish() JWT claim contains only the topic being published', function (): void {
         $client = Mockery::mock(HttpClientInterface::class);
         $hubUrl = 'http://mercure/.well-known/mercure';
         $jwtKey = 'secret1234secret1234secret1234secret1234';
@@ -53,9 +53,11 @@ describe('MercurePublisher', function (): void {
                 $payloadJson = base64_decode(strtr($parts[1], '-_', '+/'));
                 $payload = json_decode($payloadJson, true);
 
-                // The JWT claim uses the actual userId from publish(99, 42)
+                // The publisher JWT grants only the topic being published
+                // (tightened in the Plan B fan-out: principal/{id}/tasks
+                // for task events, user/{id}/notifications for notifications).
                 expect($payload['mercure']['publish'])->toContain('user/42/tasks');
-                expect($payload['mercure']['publish'])->toContain('user/42/notifications');
+                expect($payload['mercure']['publish'])->not->toContain('user/42/notifications');
 
                 return true;
             }))

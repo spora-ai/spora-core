@@ -47,12 +47,22 @@ final class CapturingMercure implements MercurePublisherInterface
     /** @var array<int, array<string, mixed>> */
     public array $captured = [];
 
+    public function publishForPrincipal(int $taskId, int $principalId, array $taskData): bool
+    {
+        $this->captured[] = [
+            'task_id'     => $taskId,
+            'principal_id' => $principalId,
+            'status'      => $taskData['status'] ?? null,
+        ];
+        return true;
+    }
+
     public function publish(int $taskId, int $userId, array $taskData): bool
     {
         $this->captured[] = [
-            'task_id' => $taskId,
+            'task_id'     => $taskId,
             'principal_id' => createUserPrincipalPublic($userId),
-            'status'  => $taskData['status'] ?? null,
+            'status'      => $taskData['status'] ?? null,
         ];
         return true;
     }

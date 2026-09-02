@@ -21,7 +21,7 @@ defined('NOTIF_TEST_PASSWORD') || define('NOTIF_TEST_PASSWORD', 'Password1!');
 function makeNotificationServiceWithUser(): array
 {
     $mercure = new TestCapturingMercure();
-    $service = new NotificationService($mercure, null, [], new NotificationSubscriptionService());
+    $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver(), null, [], new NotificationSubscriptionService());
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -192,8 +192,8 @@ describe('NotificationService::notifyTaskCompleted', function (): void {
         expect($mercure->userEvents)->toHaveCount(1);
         expect($mercure->userEvents[0]['data']['type'])->toBe('task_completed');
 
-        expect($mercure->taskEvents)->toHaveCount(1);
-        expect($mercure->taskEvents[0]['data']['status'])->toBe('COMPLETED');
+        expect($mercure->principalEvents)->toHaveCount(1);
+        expect($mercure->principalEvents[0]['data']['status'])->toBe('COMPLETED');
     });
 });
 
@@ -214,8 +214,8 @@ describe('NotificationService::notifyTaskFailed', function (): void {
         expect($notif->body)->toBe('Boom');
 
         expect($mercure->userEvents[0]['data']['type'])->toBe('task_failed');
-        expect($mercure->taskEvents[0]['data']['status'])->toBe('FAILED');
-        expect($mercure->taskEvents[0]['data']['error_code'])->toBe('TIMEOUT');
+        expect($mercure->principalEvents[0]['data']['status'])->toBe('FAILED');
+        expect($mercure->principalEvents[0]['data']['error_code'])->toBe('TIMEOUT');
     });
 });
 
@@ -231,7 +231,7 @@ describe('NotificationService::notifyPendingApproval', function (): void {
         expect($notif)->not->toBeNull();
 
         expect($mercure->userEvents[0]['data']['type'])->toBe('pending_approval');
-        expect($mercure->taskEvents[0]['data']['event'])->toBe('pending_approval');
+        expect($mercure->principalEvents[0]['data']['event'])->toBe('pending_approval');
     });
 });
 
@@ -268,7 +268,7 @@ describe('NotificationService::notifyScheduledRunCompleted', function (): void {
         expect($mercure->userEvents[0]['data']['type'])->toBe('scheduled_run_completed');
         expect($mercure->userEvents[0]['data']['notification']['type'])->toBe('scheduled_run_completed');
         // Scheduled run notifications only publish to the user channel, not the task channel
-        expect($mercure->taskEvents)->toBe([]);
+        expect($mercure->principalEvents)->toBe([]);
     });
 });
 
@@ -295,7 +295,7 @@ describe('NotificationService::notifyRetryQueued', function (): void {
 
         expect($mercure->userEvents)->toHaveCount(1);
         expect($mercure->userEvents[0]['data']['type'])->toBe('task_retry_queued');
-        expect($mercure->taskEvents)->toBe([]);
+        expect($mercure->principalEvents)->toBe([]);
     });
 });
 
@@ -318,7 +318,7 @@ describe('NotificationService::notifyTaskRetrying', function (): void {
 
         expect($mercure->userEvents)->toHaveCount(1);
         expect($mercure->userEvents[0]['data']['type'])->toBe('task_retrying');
-        expect($mercure->taskEvents)->toBe([]);
+        expect($mercure->principalEvents)->toBe([]);
     });
 });
 
@@ -332,7 +332,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         $logger = new Logger('test', [$testHandler]);
         $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
 
-        $service = new NotificationService(new TestCapturingMercure(), $systemMailer, [
+        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), $systemMailer, [
             'notifications' => ['email_enabled' => false],
             'app_name'      => 'Spora',
         ]);
@@ -346,7 +346,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
         $task = makeTaskForUser($userId);
 
-        $service = new NotificationService(new TestCapturingMercure(), null, [
+        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), null, [
             'notifications' => ['email_enabled' => true],
             'app_name'      => 'Spora',
         ]);
@@ -381,6 +381,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
         $service = new NotificationService(
             new TestCapturingMercure(),
+            new Spora\Services\PrincipalResolver(),
             $systemMailer,
             [
                 'notifications' => ['email_enabled' => true],
@@ -428,6 +429,7 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         // NotificationService when the config key is fully absent.
         $service = new NotificationService(
             new TestCapturingMercure(),
+            new Spora\Services\PrincipalResolver(),
             $systemMailer,
             ['app_name' => 'Spora'],
             new NotificationSubscriptionService(),

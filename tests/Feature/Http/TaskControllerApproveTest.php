@@ -131,7 +131,9 @@ function approvalFeatureHarness(
         $driverFactory,
         new OrchestratorConfig(toolInstances: [$tool]),
     );
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish');
     $taskService = new TaskService($orchestrator, $mercure, new ToolCallSerializer([$tool]), new Spora\Services\PrincipalResolver());
     $mediaCapability = new TaskMediaCapabilityService();

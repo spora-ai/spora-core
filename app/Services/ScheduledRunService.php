@@ -354,7 +354,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'status'      => $task->status,
             'user_prompt' => $task->user_prompt,
         ];
-        $this->mercure->publish($task->id, $task->principalUserId(), $taskData);
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $taskData);
 
         $run->refresh();
 

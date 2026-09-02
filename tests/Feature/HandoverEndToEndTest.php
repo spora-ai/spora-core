@@ -256,7 +256,9 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
 
         // Step 7: The tool_call row's result_data flows through the task
         // detail API and includes new_task_id + handover=>true.
-        $taskService = new TaskService($orch, Mockery::mock(MercurePublisherInterface::class), null, new \Spora\Services\PrincipalResolver());
+        $taskService = $mercure_mock = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure_mock */
+        $taskService = new TaskService($orch, $mercure_mock, null, new \Spora\Services\PrincipalResolver());
         $detail = $taskService->getTaskWithHistory($source->id, $userId);
         expect($detail)->not->toBeNull();
 

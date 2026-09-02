@@ -160,12 +160,20 @@ final class OrchestratorContainerBindings
                 $jwtKey   = $config['mercure_jwt_key'] ?? null;
                 $client   = $c->get(HttpClientInterface::class);
 
-                return new MercurePublisher($client, $hubUrl, $jwtKey, $c->get(LoggerInterface::class));
+                return new MercurePublisher(
+                    $client,
+                    $hubUrl,
+                    $jwtKey,
+                    $c->get(LoggerInterface::class),
+                    (bool) ($config['mercure_legacy_user_topic'] ?? false),
+                    $c->get(PrincipalResolver::class),
+                );
             },
 
             NotificationService::class => static function (ContainerInterface $c): NotificationService {
                 return new NotificationService(
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(PrincipalResolver::class),
                     $c->get(SystemMailer::class),
                     $c->get('config'),
                     $c->get(NotificationSubscriptionService::class),
