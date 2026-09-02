@@ -96,9 +96,34 @@ final class MediaResolveController
      * Parse and validate the `ids` body field. Returns the validated list
      * on success, or a 422 `JsonResponse` on any validation failure.
      *
+     * The four validation steps each return `null` on success or an error
+     * message string on failure, so {@see parseIds} itself has a single
+     * 422-return path and stays under the Sonar S1142 return-count cap.
+     *
      * @return list<string>|JsonResponse
      */
     private function parseIds(Request $request): array|JsonResponse
+    {
+        $body = $this->decodeJsonBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
+        $ids = $this->extractIdList($body);
+        if ($ids instanceof JsonResponse) {
+            return $ids;
+        }
+        $checked = $this->validateUuidList($ids);
+        if ($checked instanceof JsonResponse) {
+            return $checked;
+        }
+        return array_values($checked);
+    }
+
+    /**
+     * Decode the request body as JSON. Returns a 422 `JsonResponse`
+     * on parse failure or a non-object body; the decoded value otherwise.
+     */
+    private function decodeJsonBody(Request $request): array|JsonResponse
     {
         try {
             $body = json_decode($request->getContent(), true, 8, JSON_THROW_ON_ERROR);
@@ -116,6 +141,19 @@ final class MediaResolveController
                 'Body must include an "ids" array.',
             );
         }
+        return $body;
+    }
+
+    /**
+     * Pull the `ids` field out of the decoded body and enforce the
+     * presence + cap constraints. Returns the raw list on success, or
+     * a 422 `JsonResponse` when the field is missing, not an array,
+     * empty, or over the cap.
+     *
+     * @return list<mixed>|JsonResponse
+     */
+    private function extractIdList(array $body): array|JsonResponse
+    {
         $raw = $body['ids'];
         if (!is_array($raw) || $raw === []) {
             return $this->error(
@@ -131,6 +169,20 @@ final class MediaResolveController
                 sprintf('At most %d ids per request.', self::MAX_IDS_PER_REQUEST),
             );
         }
+        return array_values($raw);
+    }
+
+    /**
+     * Walk the raw id list, dropping duplicates (preserving first
+     * occurrence) and verifying each entry is a UUID. Returns the
+     * deduped list on success, or a 422 `JsonResponse` when any entry
+     * is not a UUID string.
+     *
+     * @param  list<mixed> $raw
+     * @return array<string, string>|JsonResponse
+     */
+    private function validateUuidList(array $raw): array|JsonResponse
+    {
         $ids = [];
         foreach ($raw as $entry) {
             if (!is_string($entry) || preg_match(self::UUID_REGEX, $entry) !== 1) {
@@ -146,8 +198,7 @@ final class MediaResolveController
                 $ids[$entry] = $entry;
             }
         }
-
-        return array_values($ids);
+        return $ids;
     }
 
     private function error(int $status, string $code, string $message): JsonResponse

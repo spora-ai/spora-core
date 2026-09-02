@@ -117,8 +117,9 @@ test('resolve preserves the input id order in the response', function (): void {
 test('resolve allows group-member visibility via PrincipalResolver::isVisibleTo', function (): void {
     [$service, $ownerUserId, $controller] = buildResolveFixtures();
     $agent = Agent::query()->where('principal_id', Principal::where('type', Principal::TYPE_USER)->where('user_id', $ownerUserId)->value('id'))->first();
-    // Seed an agent-owned asset (uploaded by a different user, but attached
-    // to the owner's agent — owner should still see it via principal path).
+    // Seed an agent-owned, tool-generated asset (no `user_id`, attached to
+    // the owner's agent) — owner should still see it via the principal
+    // path that `PrincipalResolver::isVisibleTo` exposes.
     $asset = ingestAgentAsset($service, $agent, 'agent.png');
 
     $resp = $controller->resolve(jsonPost(['ids' => [$asset->id]]));

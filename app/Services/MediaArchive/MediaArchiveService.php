@@ -154,11 +154,35 @@ final class MediaArchiveService
         if ($ids === []) {
             return [];
         }
+        $byId = $this->loadAssetsById($ids);
+        return $this->filterByVisibility($ids, $byId, $userId, $isAdmin);
+    }
+
+    /**
+     * @param  list<string> $ids
+     * @return array<string, MediaAsset>
+     */
+    private function loadAssetsById(array $ids): array
+    {
         $assets = MediaAsset::query()->whereIn('id', $ids)->get();
         $byId = [];
         foreach ($assets as $asset) {
             $byId[$asset->id] = $asset;
         }
+        return $byId;
+    }
+
+    /**
+     * Walk the requested id list in order, drop missing rows (existence-
+     * hiding) and rows the caller cannot access (visibility union). Returns
+     * the input-order list of accessible `MediaAsset` rows.
+     *
+     * @param  list<string> $ids
+     * @param  array<string, MediaAsset> $byId
+     * @return list<MediaAsset>
+     */
+    private function filterByVisibility(array $ids, array $byId, int $userId, bool $isAdmin): array
+    {
         $resolved = [];
         foreach ($ids as $id) {
             $asset = $byId[$id] ?? null;
@@ -169,7 +193,6 @@ final class MediaArchiveService
                 $resolved[] = $asset;
             }
         }
-
         return $resolved;
     }
 
