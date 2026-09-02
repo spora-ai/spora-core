@@ -96,27 +96,24 @@ final class MediaResolveController
      * Parse and validate the `ids` body field. Returns the validated list
      * on success, or a 422 `JsonResponse` on any validation failure.
      *
-     * The four validation steps each return `null` on success or an error
-     * message string on failure, so {@see parseIds} itself has a single
-     * 422-return path and stays under the Sonar S1142 return-count cap.
+     * The three validation steps each return `null` on success or a 422
+     * `JsonResponse` on failure; the first non-null error wins and the
+     * method has a single error-return path so it stays under the Sonar
+     * S1142 return-count cap.
      *
      * @return list<string>|JsonResponse
      */
     private function parseIds(Request $request): array|JsonResponse
     {
         $body = $this->decodeJsonBody($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $ids = $this->extractIdList($body);
+        $ids = $body instanceof JsonResponse
+            ? $body
+            : $this->extractIdList($body);
         if ($ids instanceof JsonResponse) {
             return $ids;
         }
         $checked = $this->validateUuidList($ids);
-        if ($checked instanceof JsonResponse) {
-            return $checked;
-        }
-        return array_values($checked);
+        return $checked instanceof JsonResponse ? $checked : array_values($checked);
     }
 
     /**

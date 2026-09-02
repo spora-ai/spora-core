@@ -200,20 +200,36 @@ final class MediaArchiveService
      * Visibility check for {@see resolveMany()}. Mirrors
      * {@see \Spora\Http\AssetController::ownsAsset()} so the asset URL
      * the chat list renders always resolves when the row is here.
+     *
+     * Returns `true` for admins, callers who uploaded the asset
+     * directly, or callers whose visible-principal set covers the
+     * asset's owning agent. The 4-arm visibility union is decomposed
+     * into named predicates so this method stays under the Sonar
+     * S1142 return-count cap.
      */
     private function canResolveAsset(MediaAsset $asset, int $userId, bool $isAdmin): bool
     {
-        if ($isAdmin) {
+        if ($this->isAdminBypassed($isAdmin)) {
             return true;
         }
-        if ($asset->user_id !== null && (int) $asset->user_id === $userId) {
-            return true;
-        }
-        if ($asset->agent_id === null) {
-            return false;
-        }
+        return $this->callerOwnsAsset($asset, $userId)
+            || $this->agentIsVisibleToCaller($asset, $userId);
+    }
 
-        return $this->principalResolver->isVisibleTo((int) $asset->agent_id, $userId);
+    private function isAdminBypassed(bool $isAdmin): bool
+    {
+        return $isAdmin;
+    }
+
+    private function callerOwnsAsset(MediaAsset $asset, int $userId): bool
+    {
+        return $asset->user_id !== null && (int) $asset->user_id === $userId;
+    }
+
+    private function agentIsVisibleToCaller(MediaAsset $asset, int $userId): bool
+    {
+        return $asset->agent_id !== null
+            && $this->principalResolver->isVisibleTo((int) $asset->agent_id, $userId);
     }
 
     /**
