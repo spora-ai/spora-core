@@ -9,6 +9,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
+use Spora\Models\UserAgentFavorite;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
@@ -55,7 +56,6 @@ final class AgentService implements AgentServiceInterface
         'max_retries',
         'is_pinned',
         'is_archived',
-        'is_favorite',
         'notes',
     ];
 
@@ -88,11 +88,22 @@ final class AgentService implements AgentServiceInterface
             }
             $query->whereIn('principal_id', $principalIds);
         }
-        return $query
+        $agents = $query
             ->with(['agentTools', 'profilePicture.mediaAsset', 'principal'])
             ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(Agent $a) => $this->agentResource($a))
+            ->get();
+
+        // Plan A: pre-load the per-viewer favourite set so AgentResource's
+        // `is_favorite` field reads from a single Set<int> lookup instead
+        // of running one pivot query per agent.
+        $favoritedIds = UserAgentFavorite::query()
+            ->where('user_id', $userId)
+            ->whereIn('agent_id', $agents->pluck('id'))
+            ->pluck('agent_id')
+            ->flip();
+
+        return $agents
+            ->map(fn(Agent $a) => $this->agentResource($a, $favoritedIds))
             ->all();
     }
 
@@ -260,6 +271,43 @@ final class AgentService implements AgentServiceInterface
     }
 
     /**
+     * Per-user favourite. Plan A: replaces the shared `agents.is_favorite`
+     * column. Idempotent (insertOrIgnore on the composite PK) and no-op on
+     * unset when no row exists. Throws {@see AgentNotFoundException} when
+     * the agent is not visible to the caller (visibility = same principal
+     * axis as everywhere else in the service).
+     */
+    public function setFavorite(int $userId, int $agentId): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new AgentNotFoundException('Agent not found.');
+        }
+
+        UserAgentFavorite::insertOrIgnore([
+            'user_id'    => $userId,
+            'agent_id'   => $agentId,
+            'created_at' => date(self::DATETIME_FORMAT),
+        ]);
+
+        return $agent;
+    }
+
+    public function unsetFavorite(int $userId, int $agentId): Agent
+    {
+        $agent = $this->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw new AgentNotFoundException('Agent not found.');
+        }
+
+        UserAgentFavorite::where('user_id', $userId)
+            ->where('agent_id', $agentId)
+            ->delete();
+
+        return $agent;
+    }
+
+    /**
      * Share flip-a-boolean-column path for setPinned / setArchived.
      * Centralises the user-scoped ownership check + updated_at stamp so
      * the public methods stay one-liners and the SQL shape stays in one place.
@@ -330,7 +378,7 @@ final class AgentService implements AgentServiceInterface
     }
 
 
-    private function agentResource(Agent $agent): array
+    private function agentResource(Agent $agent, ?\Illuminate\Support\Collection $favoritedIds = null): array
     {
         $picture = $agent->getRelation('profilePicture');
         $media = $picture instanceof AgentPicture && $picture->media_asset_id !== null
@@ -344,6 +392,7 @@ final class AgentService implements AgentServiceInterface
             preloadedPicture: $picture instanceof AgentPicture ? $picture : null,
             preloadedMediaAsset: $media instanceof MediaAsset ? $media : null,
             preloadedPrincipal: $principal instanceof Principal ? $principal : null,
+            favoritedAgentIds: $favoritedIds,
         ));
     }
 }

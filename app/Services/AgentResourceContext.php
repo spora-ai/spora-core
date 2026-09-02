@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Collection as SupportCollection;
 use Spora\Models\AgentPicture;
 use Spora\Models\AgentTool;
 use Spora\Models\MediaAsset;
@@ -14,10 +15,11 @@ use Spora\Services\AgentPictures\AgentPictureService;
 /**
  * Optional eagerly-loaded relations + resolvers for {@see AgentResource::toArray()}.
  *
- * Bundles the seven optional dependencies the resource accepts so the
- * signature stays under the S107 7-parameter cap. Each field maps 1:1
- * to a previously-positional `AgentResource::toArray()` argument; see
- * the constructor phpdoc for the per-field contract.
+ * Bundles the eight optional dependencies the resource accepts so the
+ * signature stays under the S107 7-parameter cap (the per-viewer
+ * favourite set is the 8th field — Plan A). Each field maps 1:1 to a
+ * previously-positional `AgentResource::toArray()` argument; see the
+ * constructor phpdoc for the per-field contract.
  */
 final class AgentResourceContext
 {
@@ -57,6 +59,15 @@ final class AgentResourceContext
      *     so the dashboard listing doesn't issue one Principal::find per
      *     agent (then another user/group lookup for the display name).
      *     When null, the resource resolves the principal lazily.
+     * @param ?SupportCollection<int, int> $favoritedAgentIds  Cached
+     *     set of agent ids the caller has favourited — populated by the
+     *     dashboard listing (AgentService::getAgentsForUser) via a single
+     *     `SELECT agent_id FROM user_agent_favorites WHERE user_id = ? AND
+     *     agent_id IN (...)`. AgentResource's `is_favorite` field reads from
+     *     this set so the favourite toggle is per-caller. When null, the
+     *     field defaults to false (callers that don't care about favourites
+     *     — e.g. the `?select=id,name` projection — can skip the pivot
+     *     lookup entirely).
      */
     public function __construct(
         public readonly ?bool $supportsImageInput = null,
@@ -66,5 +77,6 @@ final class AgentResourceContext
         public readonly ?AgentPicture $preloadedPicture = null,
         public readonly ?MediaAsset $preloadedMediaAsset = null,
         public readonly ?Principal $preloadedPrincipal = null,
+        public readonly ?SupportCollection $favoritedAgentIds = null,
     ) {}
 }

@@ -29,7 +29,7 @@ use Spora\Tools\ToolSchemaPresenter;
  *   "max_retries": <int>,
  *   "is_pinned":   <bool>,
  *   "is_archived": <bool>,
- *   "is_favorite": <bool>,
+ *
  *
  *   // Tool config — separate sub-document. Empty when the agent has no tools.
  *   // Each entry is slim (FQCN + icon + enablement + per-op state) on
@@ -137,7 +137,8 @@ final class AgentManifest
             'max_retries'         => (int) ($agent->max_retries ?? 0),
             'is_pinned'           => (bool) ($agent->is_pinned ?? false),
             'is_archived'         => (bool) ($agent->is_archived ?? false),
-            'is_favorite'         => (bool) ($agent->is_favorite ?? false),
+            // Plan A: `is_favorite` was removed from the LLM-facing manifest —
+            // the favourite is per-user and the LLM doesn't act on it.
             'tools'               => $tools,
             'missing_required'    => $missingRequired,
             'overrides'           => $overrides,

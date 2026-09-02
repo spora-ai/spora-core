@@ -51,7 +51,6 @@ function makeManifestAgent(int $userId): array
         'max_retries'            => 0,
         'is_pinned'              => 0,
         'is_archived'            => 0,
-        'is_favorite'            => 0,
         'created_at'             => date('Y-m-d H:i:s'),
         'updated_at'             => date('Y-m-d H:i:s'),
     ]);
@@ -78,7 +77,8 @@ describe('AgentManifest::toArray', function (): void {
             ->and($out['max_retries'])->toBe(0)
             ->and($out['is_pinned'])->toBeFalse()
             ->and($out['is_archived'])->toBeFalse()
-            ->and($out['is_favorite'])->toBeFalse()
+            // Plan A: is_favorite was removed from the LLM-facing manifest.
+            ->and(array_key_exists('is_favorite', $out))->toBeFalse()
             // Calculator is registered in the test's ToolConfigService
             // but not enabled on this bare agent — manifest still
             // surfaces it with enabled=false so the LLM can plan.
@@ -244,7 +244,6 @@ describe('AgentManifestRenderer::markdown', function (): void {
             'max_retries'         => 0,
             'is_pinned'           => false,
             'is_archived'         => false,
-            'is_favorite'         => false,
             'tools'               => [
                 [
                     'tool_class' => 'Spora\\Plugins\\Weather\\Tools\\WeatherApiTool',
@@ -305,7 +304,6 @@ describe('AgentManifestRenderer::markdown — disabled-tools preamble', function
             'max_retries'         => 0,
             'is_pinned'           => false,
             'is_archived'         => false,
-            'is_favorite'         => false,
             'tools'               => [
                 ['tool_class' => 'Spora\\Tools\\TimeTool',         'enabled' => true,  'icon' => 'clock', 'operations' => []],
                 ['tool_class' => 'Spora\\Tools\\CalculatorTool',   'enabled' => false, 'icon' => null,    'operations' => []],
@@ -339,7 +337,6 @@ describe('AgentManifestRenderer::markdown — disabled-tools preamble', function
             'max_retries'         => 0,
             'is_pinned'           => false,
             'is_archived'         => false,
-            'is_favorite'         => false,
             'tools'               => [
                 ['tool_class' => 'A', 'enabled' => true,  'icon' => null, 'operations' => []],
                 ['tool_class' => 'B', 'enabled' => true,  'icon' => null, 'operations' => []],
@@ -372,7 +369,6 @@ describe('AgentManifestRenderer::markdown — disabled-tools preamble', function
             'max_retries'         => 0,
             'is_pinned'           => false,
             'is_archived'         => false,
-            'is_favorite'         => false,
             'tools'               => [
                 ['tool_class' => 'X', 'enabled' => false, 'icon' => null, 'operations' => []],
                 ['tool_class' => 'Y', 'enabled' => false, 'icon' => null, 'operations' => []],

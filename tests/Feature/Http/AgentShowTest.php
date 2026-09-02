@@ -98,6 +98,14 @@ function buildAgentController(): AgentController
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
         }
+        public function setFavorite(int $userId, int $agentId): Agent
+        {
+            throw new RuntimeException('not used');
+        }
+        public function unsetFavorite(int $userId, int $agentId): Agent
+        {
+            throw new RuntimeException('not used');
+        }
         public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
         {
             throw new RuntimeException('not implemented in test');

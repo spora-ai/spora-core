@@ -161,6 +161,8 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/agents/{id}/favorite', [AgentController::class, 'favorite'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/agents/{id}/favorite', [AgentController::class, 'unfavorite'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_AGENTS_TRANSFER, [AgentTransferController::class, 'transferPrincipal'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('POST', '/api/v1/agents/{id}/tools/{toolId}/enable', [AgentToolController::class, 'enableTool'], [AuthMiddleware::class, CsrfMiddleware::class]);

@@ -85,6 +85,22 @@ interface AgentServiceInterface
     public function setPinned(int $userId, int $agentId, bool $pinned): Agent;
 
     /**
+     * Per-user favourite toggle (Plan A). Idempotent — calling on an
+     * already-favourited agent is a no-op. Unlike setPinned/setArchived,
+     * the favourite is a per-user pivot row, not a column on the agent.
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent is not visible to $userId
+     */
+    public function setFavorite(int $userId, int $agentId): Agent;
+
+    /**
+     * Drop the favourite for the calling user. No-op if no row exists.
+     *
+     * @throws Exceptions\AgentNotFoundException If the agent is not visible to $userId
+     */
+    public function unsetFavorite(int $userId, int $agentId): Agent;
+
+    /**
      * Archive or unarchive an agent for the given user.
      *
      * Parameter order is (int $userId, int $agentId, bool $value) — see
