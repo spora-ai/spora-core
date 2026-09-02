@@ -144,8 +144,46 @@ describe('WorkerReaper::reapStaleTasks', function (): void {
         makeReaper()->reapStaleTasks($output, 60);
 
         $task->refresh();
+        expect($task->status)->toBe('FAILED');
+    });
+
+    it('reaps an AWAITING_SUB_AGENTS parent with an expired lease (Plan D multi-child stall)', function (): void {
+        // Plan D: the reaper must also sweep AWAITING_SUB_AGENTS rows so a
+        // genuine multi-child stall (race between a concurrent child worker
+        // and the parent's spawn sequence) doesn't leave the parent parked
+        // forever.
+        [$userId, $agentId] = seedReaperAgent();
+        $task = createReaperTask($agentId, $userId, [
+            'status'            => 'AWAITING_SUB_AGENTS',
+            'lease_expires_at'  => date(REAPER_DT, time() - 60),
+            'updated_at'        => date(REAPER_DT, time() - 61 * 60),
+        ]);
+
+        $output = new BufferedOutput();
+        makeReaper()->reapStaleTasks($output, 60);
+
+        $task->refresh();
         expect($task->status)->toBe('FAILED')
             ->and($task->error_code)->toBe('WORKER_DISCONNECTED');
+        expect($output->fetch())->toContain('Reaped 1');
+    });
+
+    it('does NOT reap a healthy AWAITING_SUB_AGENTS parent (lease is alive)', function (): void {
+        // Multi-child batch in flight — parent's lease is still valid
+        // (LeaseGuard extends it on every step boundary). The reaper must
+        // leave it alone.
+        [$userId, $agentId] = seedReaperAgent();
+        $task = createReaperTask($agentId, $userId, [
+            'status'           => 'AWAITING_SUB_AGENTS',
+            'lease_expires_at' => date(REAPER_DT, time() + 5 * 60),
+            'updated_at'       => date(REAPER_DT, time() - 61 * 60),
+        ]);
+
+        $output = new BufferedOutput();
+        makeReaper()->reapStaleTasks($output, 60);
+
+        $task->refresh();
+        expect($task->status)->toBe('AWAITING_SUB_AGENTS');
     });
 
     it('returns early without update if staleMinutes <= 0', function (): void {

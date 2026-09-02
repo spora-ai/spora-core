@@ -34,10 +34,17 @@ final class LeaseGuard
             return;
         }
 
+        // A parent in AWAITING_SUB_AGENTS holds a live lease so the
+        // sub-agent stall reaper doesn't sweep it before the children
+        // finish. WorkerReaper::reapStaleTasks filters by `lease_expires_at`,
+        // so extending the lease here keeps the parent visible to the
+        // reaper as alive — paired with the new reaper filter on
+        // AWAITING_SUB_AGENTS, a parent that genuinely stalls gets reaped
+        // on lease expiry, and a healthy multi-child batch holds the row.
         Capsule::table('tasks')
             ->where('id', $taskId)
             ->where('lease_owner', $this->leaseOwner)
-            ->where('status', 'RUNNING')
+            ->whereIn('status', ['RUNNING', 'AWAITING_SUB_AGENTS'])
             ->update([
                 'lease_expires_at' => gmdate('Y-m-d H:i:s', time() + $this->leaseSeconds),
             ]);
