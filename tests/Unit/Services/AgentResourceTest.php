@@ -24,9 +24,10 @@ it('maps every wire-format field for an agent', function (): void {
         'max_retries'          => 4,
         'is_pinned'            => true,
         'is_archived'          => false,
-        'is_favorite'          => true,
     ]);
 
+    // Plan A: is_favorite defaults to false when the caller passes a
+    // null context (no pre-loaded pivot set).
     $array = AgentResource::toArray($agent);
 
     expect($array)
@@ -50,12 +51,12 @@ it('maps every wire-format field for an agent', function (): void {
         ->and($array['max_retries'])->toBe(4)
         ->and($array['is_pinned'])->toBeTrue()
         ->and($array['is_archived'])->toBeFalse()
-        ->and($array['is_favorite'])->toBeTrue()
+        ->and($array['is_favorite'])->toBeFalse()
         ->and($array['created_at'])->toBeString()
         ->and($array['tools'])->toBe([]);
 });
 
-it('defaults is_pinned, is_archived, and is_favorite to false when the model columns are null', function (): void {
+it('defaults is_pinned and is_archived to false when the model columns are null', function (): void {
     // New Agent() without save() leaves the boolean fields null. The mapper
     // must coalesce each to false so clients never see null on a flag column.
     $agent = new Agent();

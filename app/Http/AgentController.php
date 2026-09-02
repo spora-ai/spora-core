@@ -12,6 +12,7 @@ use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
@@ -254,7 +255,10 @@ final class AgentController
      */
     private function applyAgentPatch(int $agentId, int $userId, array $body): Agent|JsonResponse
     {
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
+        // Plan A: `is_favorite` is gone from this allowlist — the column
+        // no longer exists on `agents`. The toggle is per-user via
+        // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
 
@@ -284,7 +288,10 @@ final class AgentController
      */
     private function coerceBooleanFlags(array &$data): void
     {
-        foreach (['is_pinned', 'is_archived', 'is_favorite'] as $boolKey) {
+        // Plan A: `is_favorite` is no longer in this list — the column
+        // was dropped in migration 0079 and the per-user pivot is set via
+        // dedicated endpoints (not PATCH).
+        foreach (['is_pinned', 'is_archived'] as $boolKey) {
             if (array_key_exists($boolKey, $data)) {
                 $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
             }
@@ -375,6 +382,42 @@ final class AgentController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * POST /api/v1/agents/{id}/favorite — mark the agent as a favourite
+     * for the calling user. Per-user; idempotent.
+     */
+    public function favorite(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $agentId = (int) $request->attributes->get('id', 0);
+
+        try {
+            $this->agentService->setFavorite($userId, $agentId);
+        } catch (AgentNotFoundException) {
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
+        }
+
+        return new JsonResponse(['data' => ['is_favorite' => true]]);
+    }
+
+    /**
+     * DELETE /api/v1/agents/{id}/favorite — drop the favourite for the
+     * calling user. No-op if no row exists.
+     */
+    public function unfavorite(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $agentId = (int) $request->attributes->get('id', 0);
+
+        try {
+            $this->agentService->unsetFavorite($userId, $agentId);
+        } catch (AgentNotFoundException) {
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
+        }
+
+        return new JsonResponse(['data' => ['is_favorite' => false]]);
     }
 
     private function resolveSupportsImageInput(Agent $agent): bool

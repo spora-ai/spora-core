@@ -66,6 +66,14 @@ function buildProfilePictureAgentController(): AgentController
         {
             return \Spora\Models\Agent::query()->find($agentId) ?? throw new RuntimeException('not found');
         }
+        public function setFavorite(int $userId, int $agentId): \Spora\Models\Agent
+        {
+            throw new RuntimeException('not used');
+        }
+        public function unsetFavorite(int $userId, int $agentId): \Spora\Models\Agent
+        {
+            throw new RuntimeException('not used');
+        }
         public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): \Spora\Models\Agent
         {
             throw new RuntimeException('not implemented in test');
