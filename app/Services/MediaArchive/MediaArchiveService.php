@@ -119,11 +119,78 @@ final class MediaArchiveService
 
     private readonly PrincipalService $principalService;
 
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
         ?PrincipalService $principalService = null,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+    }
+
+    /**
+     * Resolve a list of Media Archive UUIDs to their full rows, in input order,
+     * silently dropping any IDs the caller cannot access. Existence-hiding —
+     * a foreign id surfaces as a missing slot in the response, never as 404
+     * or 403, so the chat list cannot probe for archive rows it does not own.
+     *
+     * Admin callers bypass the visibility check. Non-admins can read a row
+     * when either (a) they uploaded it directly (`asset.user_id === userId`)
+     * or (b) the agent that produced it lives in one of their visible
+     * principals (`PrincipalResolver::isVisibleTo`) — same union as the
+     * `GET /api/v1/assets/{filename}` controller, so an attachment URL
+     * the chat list renders will always resolve through `AssetController`.
+     *
+     * The cap (64 IDs) is enforced by the controller; this method itself
+     * does not enforce the cap so it stays composable for in-process callers.
+     *
+     * @param  list<string> $ids
+     * @return list<MediaAsset>
+     */
+    public function resolveMany(array $ids, int $userId, bool $isAdmin): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $assets = MediaAsset::query()->whereIn('id', $ids)->get();
+        $byId = [];
+        foreach ($assets as $asset) {
+            $byId[$asset->id] = $asset;
+        }
+        $resolved = [];
+        foreach ($ids as $id) {
+            $asset = $byId[$id] ?? null;
+            if ($asset === null) {
+                continue;
+            }
+            if ($this->canResolveAsset($asset, $userId, $isAdmin)) {
+                $resolved[] = $asset;
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * Visibility check for {@see resolveMany()}. Mirrors
+     * {@see \Spora\Http\AssetController::ownsAsset()} so the asset URL
+     * the chat list renders always resolves when the row is here.
+     */
+    private function canResolveAsset(MediaAsset $asset, int $userId, bool $isAdmin): bool
+    {
+        if ($isAdmin) {
+            return true;
+        }
+        if ($asset->user_id !== null && (int) $asset->user_id === $userId) {
+            return true;
+        }
+        if ($asset->agent_id === null) {
+            return false;
+        }
+
+        return $this->principalResolver->isVisibleTo((int) $asset->agent_id, $userId);
     }
 
     /**

@@ -715,6 +715,54 @@ describe('MediaArchiveService::find / delete / countForAgent', function (): void
     });
 });
 
+// ----- Batch resolution: existence-hiding + visibility union --------------------
+
+describe('MediaArchiveService::resolveMany', function (): void {
+    beforeEach(function (): void {
+        $ctx = makeMediaArchiveService();
+        $this->ctx = $ctx;
+        $this->png = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+            strict: true,
+        );
+        $this->assetUser1 = $ctx['service']->ingest(new MediaIngestRequest(bytes: $this->png, mime: 'image/png', userId: 1));
+        $this->assetUser2 = $ctx['service']->ingest(new MediaIngestRequest(bytes: $this->png, mime: 'image/png', userId: 2));
+    });
+
+    afterEach(function (): void {
+        $this->ctx['restore']();
+    });
+
+    it('returns an empty list when given an empty id list', function (): void {
+        expect($this->ctx['service']->resolveMany([], 1, false))->toBe([]);
+    });
+
+    it('returns only the rows the caller owns (admin bypass disabled)', function (): void {
+        $resolved = $this->ctx['service']->resolveMany([$this->assetUser1->id, $this->assetUser2->id], 1, false);
+        expect(array_column($resolved, 'id'))->toBe([$this->assetUser1->id]);
+    });
+
+    it('returns every requested row when admin bypass is enabled', function (): void {
+        $resolved = $this->ctx['service']->resolveMany([$this->assetUser1->id, $this->assetUser2->id], 1, true);
+        expect(array_map(static fn($a) => $a->id, $resolved))->toContain($this->assetUser1->id, $this->assetUser2->id);
+    });
+
+    it('drops unknown ids without throwing', function (): void {
+        $resolved = $this->ctx['service']->resolveMany(
+            ['00000000-0000-4000-8000-000000000000', $this->assetUser1->id],
+            1,
+            false,
+        );
+        expect(array_column($resolved, 'id'))->toBe([$this->assetUser1->id]);
+    });
+
+    it('preserves the input id order in the resolved output', function (): void {
+        $b = $this->ctx['service']->ingest(new MediaIngestRequest(bytes: $this->png, mime: 'image/png', userId: 1));
+        $resolved = $this->ctx['service']->resolveMany([$b->id, $this->assetUser1->id], 1, false);
+        expect(array_column($resolved, 'id'))->toBe([$b->id, $this->assetUser1->id]);
+    });
+});
+
 // ----- Idempotency: tool_call_id upsert path ----------------------------------
 
 describe('MediaArchiveService::ingest idempotency without tool_call_id', function (): void {

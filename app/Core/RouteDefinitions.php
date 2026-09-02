@@ -28,6 +28,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -294,6 +295,10 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/media', [MediaArchiveController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/media/allowed-types', [MediaAllowedTypesController::class, 'index'], [AuthMiddleware::class]);
         $r->addRoute('POST', '/api/v1/media', [MediaUploadController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // Batch resolution of Media Archive UUIDs — the chat list uses
+        // this to resolve `task_history.attachments[*].media_id` references
+        // to wire-shape `MediaAsset` payloads without N+1 round trips.
+        $r->addRoute('POST', '/api/v1/media/resolve', [MediaResolveController::class, 'resolve'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Media derivatives — generic surface for any plugin (Typst, OCR,
         // …) to publish a derivative of a media asset. Generic on purpose:

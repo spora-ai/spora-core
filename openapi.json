@@ -1986,6 +1986,47 @@
                 ],
                 "summary": "Store Task",
                 "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "prompt",
+                                    "agent_id"
+                                ],
+                                "properties": {
+                                    "prompt": {
+                                        "description": "User prompt.",
+                                        "type": "string"
+                                    },
+                                    "agent_id": {
+                                        "description": "Agent id.",
+                                        "type": "integer"
+                                    },
+                                    "max_steps": {
+                                        "description": "Override the agent's default step cap.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "parent_task_id": {
+                                        "description": "Set to continue a prior task in the same chat.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "media_ids": {
+                                        "description": "Media Archive UUIDs to attach to the user turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
@@ -2214,6 +2255,37 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "prompt"
+                                ],
+                                "properties": {
+                                    "prompt": {
+                                        "description": "Follow-up prompt.",
+                                        "type": "string"
+                                    },
+                                    "additional_steps": {
+                                        "description": "Step budget for this continuation (defaults to the task's remaining budget).",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "media_ids": {
+                                        "description": "Media Archive UUIDs to attach to the follow-up turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
@@ -2442,6 +2514,51 @@
                 "security": [
                     {
                         "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/media/resolve": {
+            "post": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Resolve MediaResolve",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "ids"
+                                ],
+                                "properties": {
+                                    "ids": {
+                                        "description": "Media Archive UUIDs. Up to 64 per request.",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "maxItems": 64
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
                     }
                 ]
             }

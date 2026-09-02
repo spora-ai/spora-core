@@ -80,6 +80,24 @@ final class TaskController
     /**
      * POST /api/v1/tasks
      */
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ['prompt', 'agent_id'],
+            properties: [
+                new OA\Property(property: 'prompt', type: 'string', description: 'User prompt.'),
+                new OA\Property(property: 'agent_id', type: 'integer', description: 'Agent id.'),
+                new OA\Property(property: 'max_steps', type: 'integer', nullable: true, description: 'Override the agent\'s default step cap.'),
+                new OA\Property(property: 'parent_task_id', type: 'integer', nullable: true, description: 'Set to continue a prior task in the same chat.'),
+                new OA\Property(
+                    property: 'media_ids',
+                    type: 'array',
+                    items: new OA\Items(type: 'string', format: 'uuid'),
+                    description: 'Media Archive UUIDs to attach to the user turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
+                ),
+            ],
+        ),
+    )]
     public function store(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
@@ -341,6 +359,22 @@ final class TaskController
      * (and, on the RUNNING branch, an abort-marker system row) to the
      * existing task's history.
      */
+    #[OA\RequestBody(
+        required: true,
+        content: new OA\JsonContent(
+            required: ['prompt'],
+            properties: [
+                new OA\Property(property: 'prompt', type: 'string', description: 'Follow-up prompt.'),
+                new OA\Property(property: 'additional_steps', type: 'integer', nullable: true, description: 'Step budget for this continuation (defaults to the task\'s remaining budget).'),
+                new OA\Property(
+                    property: 'media_ids',
+                    type: 'array',
+                    items: new OA\Items(type: 'string', format: 'uuid'),
+                    description: 'Media Archive UUIDs to attach to the follow-up turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
+                ),
+            ],
+        ),
+    )]
     public function continue(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();

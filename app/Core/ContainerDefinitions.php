@@ -66,6 +66,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -611,6 +612,7 @@ final class ContainerDefinitions
                 return new MediaArchiveService(
                     $c->get(MediaArchiveIngestPipeline::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
+                    $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : null,
                 );
             },
 
@@ -1124,6 +1126,16 @@ final class ContainerDefinitions
                     $c->get(MimeSniffer::class),
                     new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                     $c->get('config'),
+                );
+            },
+
+            MediaResolveController::class => static function (ContainerInterface $c): MediaResolveController {
+                return new MediaResolveController(
+                    $c->get(MediaArchiveService::class),
+                    $c->get(AuthService::class),
+                    // The chat list doesn't need the derivatives strip;
+                    // that's a Media Archive detail-page concern.
+                    new MediaAssetSerializer(includeDerivatives: false),
                 );
             },
 
