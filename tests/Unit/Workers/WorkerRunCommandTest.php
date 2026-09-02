@@ -52,8 +52,8 @@ function makeWorkerRunCommand(): array
         ]);
     });
 
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
@@ -101,8 +101,8 @@ function makeStandaloneScheduledRunProcessor(): ScheduledRunProcessor
         ]);
     });
 
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
@@ -495,8 +495,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
                 ]);
             });
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -691,8 +691,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $throwingOrchestrator->allows('start')
             ->andThrow(new RuntimeException('LLM down'));
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -761,8 +761,8 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $throwingOrchestrator->allows('start')
             ->andThrow(new RuntimeException('LLM down'));
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -838,8 +838,8 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         // Make tick() throw an exception — simulating an LLM failure
         $orchestrator->allows('tick')->andThrow(new RuntimeException('LLM connection failed'));
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -904,8 +904,8 @@ describe('WorkerRunCommand --reap-only', function (): void {
         // start() must NOT be called either
         $orchestrator->shouldNotReceive('start');
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -970,8 +970,8 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $orchestrator->shouldNotReceive('tick');
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -1041,7 +1041,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
         $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1066,7 +1066,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
         $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1091,7 +1091,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
         $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1121,7 +1121,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
         $paths = new Paths(BASE_PATH);
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1152,7 +1152,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1196,7 +1196,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
         $agent = Agent::find($agentId);
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1223,7 +1223,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
         $agent = Agent::find($agentId);
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1247,7 +1247,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
         $agent = Agent::find($agentId);
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
@@ -1305,8 +1305,8 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
 
     function makeProcessor(OrchestratorInterface $orch, ?NotificationService $notification = null): WorkerQueueProcessor
     {
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         return new WorkerQueueProcessor(

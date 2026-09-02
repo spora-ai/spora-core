@@ -12,8 +12,8 @@ use Spora\Services\TaskService;
 function makeTaskService(): TaskService
 {
     $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
@@ -431,7 +431,7 @@ describe('TaskService — startTask', function (): void {
         ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')->once()->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -473,7 +473,7 @@ describe('TaskService — startTask', function (): void {
         ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publish')->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -543,7 +543,7 @@ describe('TaskService — startTask', function (): void {
         // Orchestrator passes user_id through to the row, just like the real
         // implementation does (Task::create([..., 'trigger_user_id' => $resolvedUserId])).
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publish')->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -591,7 +591,7 @@ describe('TaskService — startTask', function (): void {
         ensureAgentsHasPrincipalId($agent->id, $userId);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publish')->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -898,7 +898,7 @@ describe('TaskService — approveTask', function (): void {
         ]);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')->once()->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -961,7 +961,7 @@ describe('TaskService — rejectTask', function (): void {
         ]);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')->once()->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -1026,7 +1026,7 @@ describe('TaskService — retryTask', function (): void {
         ]);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')->once()->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -1115,7 +1115,7 @@ describe('TaskService — continueTask', function (): void {
         ]);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')->once()->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -1579,7 +1579,7 @@ describe('TaskService — per-task actions widen to group-member (post-0071)', f
         ]);
 
         $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publish')->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);

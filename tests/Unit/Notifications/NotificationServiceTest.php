@@ -18,7 +18,7 @@ const NOTIFICATIONS_API_PATH = '/api/v1/notifications/';
 
 function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = $mercureOverride ?? Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishForPrincipal')->andReturn(true);
@@ -59,8 +59,8 @@ describe('NotificationService', function (): void {
     it('notifyTaskCompleted creates a task_completed notification and publishes to Mercure', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishToUser')
             ->once()
@@ -97,8 +97,8 @@ describe('NotificationService', function (): void {
     it('notifyTaskFailed creates a task_failed notification', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishToUser')->andReturn(true);
         $mercure->allows('publish')->andReturn(true);
@@ -126,8 +126,8 @@ describe('NotificationService', function (): void {
     it('notifyPendingApproval publishes to both user channel and task channel', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishToUser')
             ->once()
@@ -160,8 +160,8 @@ describe('NotificationService', function (): void {
     it('notifyScheduledRunCompleted creates a scheduled_run_completed notification', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishToUser')->andReturn(true);
 

@@ -66,8 +66,8 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
     $factory->allows('makeFromAgent')->andReturn($driver);
     $orchestrator = new Orchestrator($factory, new OrchestratorConfig(logger: new NullLogger()));
 
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
@@ -260,8 +260,8 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         // Mercure publishes RUNNING once BEFORE the LLM call (UI flips
         // status immediately) and may also publish the terminal status —
         // only the QUEUED→RUNNING assertion matters here.
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishForPrincipal')
             ->with($task->id, $task->principalOwnerId(), ['task_id' => $task->id, 'status' => 'RUNNING'])
@@ -327,8 +327,8 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $factory->allows('makeFromAgent')->andReturn($throwingDriver);
         $orchestrator = new Orchestrator($factory, new OrchestratorConfig(logger: new NullLogger()));
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 

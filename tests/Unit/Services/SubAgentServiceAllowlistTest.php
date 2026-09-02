@@ -43,7 +43,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         ]);
 
         $captured = [];
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $publisher */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $publisher */
         $publisher = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $publisher->shouldReceive('publishForPrincipal')->andReturnUsing(function (int $taskId, int $principalId, array $payload) use (&$captured) {
             $captured[] = ['task_id' => $taskId, 'principal_id' => $principalId, 'data' => $payload['data'] ?? []];

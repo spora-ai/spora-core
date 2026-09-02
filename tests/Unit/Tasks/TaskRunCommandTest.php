@@ -81,9 +81,9 @@ describe('TaskRunCommand — task claiming', function (): void {
             'worker_mode' => true,
             'llm_timeout' => 300,
         ]);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mockMercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mockMercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mockMercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
         $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mockMercure->allows('publish')->andReturn(true);
         $mockMercure->allows('publishToUser')->andReturn(true);
@@ -237,8 +237,8 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
         $container->allows('get')->with(SubAgentServiceInterface::class)->andReturn(Mockery::mock(SubAgentServiceInterface::class));
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishUpdate')->andReturnNull();
 
@@ -320,8 +320,8 @@ describe('TaskRunCommand — task claiming', function (): void {
         $mockSubAgent = Mockery::mock(SubAgentServiceInterface::class);
         $container->shouldReceive('get')->with(SubAgentServiceInterface::class)->once()->andReturn($mockSubAgent);
 
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishUpdate')->andReturnNull();
 
@@ -747,8 +747,8 @@ describe('TaskRunCommand — client-mode guard', function (): void {
         // Database is final, but the runtime-mode gate runs BEFORE the DB
         // is touched, so we pass a real Database instance and never boot it.
         $container = Mockery::mock(ContainerInterface::class);
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
 
         $command = new TaskRunCommand(
