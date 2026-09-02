@@ -55,7 +55,6 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
         });
 
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publish')->andReturn(true);
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
@@ -99,7 +98,6 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         ->andThrow(new InvalidArgumentException('Cannot abort a task in status PENDING_APPROVAL.'));
 
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $controller = new TaskController(
         bootAuthLayer(),
@@ -128,7 +126,6 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         ->with(99999, $userId)
         ->andThrow(new InvalidArgumentException('Task not found.'));
 
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $controller = new TaskController(
@@ -165,7 +162,6 @@ it('POST /abort with no body works (no-body call)', function (): void {
         return Task::find($id);
     });
 
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publish')->andReturn(true);

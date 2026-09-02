@@ -7,7 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\UserAgentFavorite;
+use Spora\Services\AgentFavoriteService;
+use Spora\Services\AgentService;
 use Spora\Services\Exceptions\AgentNotFoundException;
+use Spora\Services\PrincipalResolver;
 
 /**
  * Plan A per-user favourites. Replaces the legacy shared
@@ -104,7 +107,10 @@ describe('AgentService setFavorite / unsetFavorite (Plan A)', function (): void 
 
     it('setFavorite throws AgentNotFoundException for a non-visible agent', function (): void {
         $ownerId = bootAuthLayer()->register('plan-a-visibility@example.test', 'Password1!', 'Owner');
-        $service = new \Spora\Services\AgentService();
+        // Plan A: favourites live in AgentFavoriteService (split out of
+        // AgentService to clear the S1448 20-method ceiling). The visibility
+        // check still goes through AgentService::getAgent.
+        $service = new AgentFavoriteService(new AgentService());
 
         // There is no agent id 999999 visible to this user.
         expect(fn() => $service->setFavorite($ownerId, 999999))
@@ -113,7 +119,7 @@ describe('AgentService setFavorite / unsetFavorite (Plan A)', function (): void 
 
     it('setFavorite is idempotent under double-invocation', function (): void {
         $seed = planASeedAgentWithOwner();
-        $service = new \Spora\Services\AgentService();
+        $service = new AgentFavoriteService(new AgentService());
 
         $service->setFavorite($seed['ownerId'], $seed['agentId']);
         $service->setFavorite($seed['ownerId'], $seed['agentId']);
@@ -122,7 +128,7 @@ describe('AgentService setFavorite / unsetFavorite (Plan A)', function (): void 
 
     it('unsetFavorite deletes the row', function (): void {
         $seed = planASeedAgentWithOwner();
-        $service = new \Spora\Services\AgentService();
+        $service = new AgentFavoriteService(new AgentService());
 
         $service->setFavorite($seed['ownerId'], $seed['agentId']);
         expect(UserAgentFavorite::count())->toBe(1);
@@ -133,7 +139,7 @@ describe('AgentService setFavorite / unsetFavorite (Plan A)', function (): void 
 
     it('unsetFavorite is a no-op when no row exists', function (): void {
         $seed = planASeedAgentWithOwner();
-        $service = new \Spora\Services\AgentService();
+        $service = new AgentFavoriteService(new AgentService());
 
         $service->unsetFavorite($seed['ownerId'], $seed['agentId']);
         expect(UserAgentFavorite::count())->toBe(0);
@@ -180,7 +186,8 @@ describe('AgentService setFavorite / unsetFavorite (Plan A)', function (): void 
         // Inject a real PrincipalResolver so the visibility check follows
         // the user → groups axis (the legacy user-principal-only path
         // would miss the group-owned agent).
-        $service = new \Spora\Services\AgentService(principalResolver: new \Spora\Services\PrincipalResolver());
+        $agentService = new AgentService(principalResolver: new PrincipalResolver());
+        $service = new AgentFavoriteService($agentService);
         $service->setFavorite($ownerId, $agentId);
 
         // User B sees the agent (group member) but has NOT favourited it.

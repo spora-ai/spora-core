@@ -282,7 +282,7 @@ final class Orchestrator implements OrchestratorInterface
                 'task_id' => $taskId,
                 'from'    => 'RUNNING',
                 'to'      => 'ABORTED',
-                'user_id' => $taskRef?->principalUserId(),
+                'user_id' => $taskRef?->triggerUserId(),
             ]);
         }
 
@@ -373,7 +373,7 @@ final class Orchestrator implements OrchestratorInterface
                 return;
             }
 
-            $userId = $task->principalUserId();
+            $userId = $task->triggerUserId();
 
             if (!$policy->canAbortFrom($task->status)) {
                 throw new InvalidTaskTransitionException(
@@ -407,7 +407,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     private function appendAttachmentRow(int $taskId, array $mediaIds): void
     {
-        $userId = Task::find($taskId)?->principalUserId() ?? 0;
+        $userId = Task::find($taskId)?->triggerUserId() ?? 0;
         $refs = [];
         foreach ($mediaIds as $mid) {
             if ($mid === '') {

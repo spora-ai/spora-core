@@ -26,6 +26,10 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  * is a self-contained responsibility (talks to `principals` and
  * `PrincipalService::transferAgent()` only) and earns its own class.
  *
+ * Per-user favourites moved to {@see AgentFavoriteService} for the same
+ * reason — Plan A replaced the shared `agents.is_favorite` column with
+ * a per-user pivot (migration 0077) and the toggle is its own surface.
+ *
  * Principals-and-groups (migration 0067) re-keyed the ownership column from
  * `agents.user_id` to `agents.principal_id`. Every user-scoped read or
  * mutation matches on the union of principals the user can act as, so the
@@ -268,43 +272,6 @@ final class AgentService implements AgentServiceInterface
     public function setArchived(int $userId, int $agentId, bool $archived): Agent
     {
         return $this->setFlag($userId, $agentId, 'is_archived', $archived);
-    }
-
-    /**
-     * Per-user favourite. Plan A: replaces the shared `agents.is_favorite`
-     * column. Idempotent (insertOrIgnore on the composite PK) and no-op on
-     * unset when no row exists. Throws {@see AgentNotFoundException} when
-     * the agent is not visible to the caller (visibility = same principal
-     * axis as everywhere else in the service).
-     */
-    public function setFavorite(int $userId, int $agentId): Agent
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            throw new AgentNotFoundException('Agent not found.');
-        }
-
-        UserAgentFavorite::insertOrIgnore([
-            'user_id'    => $userId,
-            'agent_id'   => $agentId,
-            'created_at' => date(self::DATETIME_FORMAT),
-        ]);
-
-        return $agent;
-    }
-
-    public function unsetFavorite(int $userId, int $agentId): Agent
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        if ($agent === null) {
-            throw new AgentNotFoundException('Agent not found.');
-        }
-
-        UserAgentFavorite::where('user_id', $userId)
-            ->where('agent_id', $agentId)
-            ->delete();
-
-        return $agent;
     }
 
     /**

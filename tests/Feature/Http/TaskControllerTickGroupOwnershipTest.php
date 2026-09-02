@@ -52,7 +52,6 @@ function makeTickGroupController(): array
     $orchestrator = new Orchestrator($factory, new OrchestratorConfig(logger: new NullLogger()));
 
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 

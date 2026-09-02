@@ -158,7 +158,7 @@ function buildAgentController(): AgentController
             return [];
         }
     };
-    return new AgentController(bootAuthLayer(), $agentService, $factory);
+    return new AgentController(bootAuthLayer(), $agentService, new \Spora\Services\AgentFavoriteService($agentService), $factory);
 }
 
 function seedShowLlmConfig(int $id, int $userId, string $driverClass, string $model): void

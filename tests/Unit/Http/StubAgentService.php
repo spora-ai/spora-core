@@ -132,17 +132,6 @@ class StubAgentService implements AgentServiceInterface
         return $this->setFlag($userId, $agentId, 'is_archived', $archived);
     }
 
-    public function setFavorite(int $userId, int $agentId): Agent
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        return $agent ?? new Agent();
-    }
-
-    public function unsetFavorite(int $userId, int $agentId): Agent
-    {
-        $agent = $this->getAgent($agentId, $userId);
-        return $agent ?? new Agent();
-    }
     /**
      * Apply the static default scalars to a stubbed Agent. Mirrors the
      * migration defaults for the new flag columns plus the long-standing

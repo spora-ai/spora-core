@@ -44,7 +44,6 @@ function makeGroupClaimProcessor(): ScheduledRunProcessor
     });
 
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 

@@ -53,7 +53,6 @@ function makeWorkerRunCommand(): array
     });
 
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
@@ -101,7 +100,6 @@ function makeStandaloneScheduledRunProcessor(): ScheduledRunProcessor
         ]);
     });
 
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
@@ -496,7 +494,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             });
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -692,7 +689,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             ->andThrow(new RuntimeException('LLM down'));
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -761,7 +757,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $throwingOrchestrator->allows('start')
             ->andThrow(new RuntimeException('LLM down'));
 
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
@@ -839,7 +834,6 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $orchestrator->allows('tick')->andThrow(new RuntimeException('LLM connection failed'));
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -905,7 +899,6 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orchestrator->shouldNotReceive('start');
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
@@ -970,7 +963,6 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         $orchestrator->shouldNotReceive('tick');
 
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
@@ -1305,7 +1297,6 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
 
     function makeProcessor(OrchestratorInterface $orch, ?NotificationService $notification = null): WorkerQueueProcessor
     {
-        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);

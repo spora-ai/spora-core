@@ -8,6 +8,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentResourceContext;
@@ -45,6 +46,7 @@ final class AgentController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
+        private readonly AgentFavoriteServiceInterface $favoriteService,
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
@@ -394,7 +396,7 @@ final class AgentController
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
-            $this->agentService->setFavorite($userId, $agentId);
+            $this->favoriteService->setFavorite($userId, $agentId);
         } catch (AgentNotFoundException) {
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }
@@ -412,7 +414,7 @@ final class AgentController
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
-            $this->agentService->unsetFavorite($userId, $agentId);
+            $this->favoriteService->unsetFavorite($userId, $agentId);
         } catch (AgentNotFoundException) {
             return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
         }

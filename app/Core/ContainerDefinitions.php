@@ -87,6 +87,8 @@ use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\AgentFavoriteService;
+use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPrincipalService;
@@ -804,6 +806,17 @@ final class ContainerDefinitions
                 );
             },
 
+            // Per-user favourites (Plan A) split out of AgentService so the
+            // umbrella stays under the SonarCloud S1448 20-method ceiling.
+            // The favourite service depends on AgentService::getAgent() for
+            // the visibility check (no circular DI — AgentService never
+            // depends back on AgentFavoriteService).
+            AgentFavoriteServiceInterface::class => static function (ContainerInterface $c): AgentFavoriteServiceInterface {
+                return new AgentFavoriteService(
+                    $c->get(AgentServiceInterface::class),
+                );
+            },
+
             AgentPictureService::class => static fn(): AgentPictureService => new AgentPictureService(),
 
             GroupPictureService::class => static fn(): GroupPictureService => new GroupPictureService(),
@@ -1027,6 +1040,7 @@ final class ContainerDefinitions
                 return new AgentController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(AgentFavoriteServiceInterface::class),
                     $c->get(DriverFactory::class),
                     $c->get(ToolIconResolver::class),
                     $c->get(AgentPictureService::class),

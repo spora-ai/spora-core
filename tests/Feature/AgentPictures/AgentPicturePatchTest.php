@@ -127,6 +127,7 @@ function buildProfilePictureAgentController(): AgentController
     return new AgentController(
         bootAuthLayer(),
         $agentService,
+        new \Spora\Services\AgentFavoriteService($agentService),
         null,
         null,
         new AgentPictureService(),

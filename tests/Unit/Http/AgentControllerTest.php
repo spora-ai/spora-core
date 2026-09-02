@@ -24,7 +24,7 @@ function makeAgentControllers(): array
     $toolSettings   = new StubAgentToolSettingsService();
     $security       = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig     = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
-    $crudController = new AgentController($authService, $service);
+    $crudController = new AgentController($authService, $service, new \Spora\Services\AgentFavoriteService($service));
     $toolController = new AgentToolController($authService, $toolSettings, $toolConfig);
     $overrideController = new AgentOverrideController($authService, $toolSettings, $toolConfig);
 

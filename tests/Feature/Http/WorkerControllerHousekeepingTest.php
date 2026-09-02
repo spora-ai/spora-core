@@ -33,7 +33,6 @@ function makeHousekeepingController(WorkerRuntimeMode $runtimeMode): array
 
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
     $notificationService = Mockery::mock(NotificationService::class);

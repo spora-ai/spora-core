@@ -101,7 +101,7 @@ final class MercurePublisher implements MercurePublisherInterface
 
         try {
             $response = $this->client->request('POST', $this->hubUrl, [
-                'auth_bearer' => $this->generatePublisherJwt($subjectId, $topic),
+                'auth_bearer' => $this->generatePublisherJwt($topic),
                 // Hard timeouts on connect and the full request — a wedged
                 // Mercure hub must NOT block the agent loop.
                 'timeout'      => 3.0,
@@ -134,7 +134,7 @@ final class MercurePublisher implements MercurePublisherInterface
      * Generate a minimal HS256 JWT for the Mercure publisher role.
      * Uses base64url encoding (RFC 7515) and a single timestamp to avoid clock-skew bugs.
      */
-    private function generatePublisherJwt(int $userId, string $topic): string
+    private function generatePublisherJwt(string $topic): string
     {
         $now     = time();
         $header  = $this->base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));

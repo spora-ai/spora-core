@@ -321,11 +321,13 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Cross-process lock against the multi-child stall. Cleared by the
-     * batch-boundary hook (maybeResumeParentForParent) so a subsequent
-     * per-child event from a slow worker can resume normally. If the gate
-     * fails (count mismatch, non-terminal sibling), the flag stays open —
-     * the next batch-boundary call will clear it and re-evaluate.
+     * Clear the cross-process lock that {@see markParentAwaitingSubAgents}
+     * set. The gate check in {@see maybeResumeParentForParent} runs *after*
+     * this clears, so a gate failure (count mismatch, non-terminal
+     * sibling) means the next batch-boundary call must re-open and
+     * re-evaluate. The unsetting here is unconditional so the per-child
+     * hook can resume normally once the gate has been satisfied by
+     * subsequent sibling completions.
      */
     private function closeBatch(Task $parent): void
     {
@@ -394,7 +396,17 @@ final class SubAgentService implements SubAgentServiceInterface
                 );
             }
 
-            $data = $parent->data ?? [];
+            // Re-decode `$row->data` (the freshly-locked snapshot) instead
+            // of reading the caller's in-memory `$parent->data`. A worker
+            // re-tick between `Task::find` and the lockForUpdate above
+            // would otherwise silently overwrite a concurrent writer's
+            // changes to the data column.
+            $data = isset($row->data)
+                ? json_decode((string) $row->data, true, 16, JSON_THROW_ON_ERROR)
+                : [];
+            if (!is_array($data)) {
+                $data = [];
+            }
             unset($data['spawned_sub_task_ids']);
             unset($data['sub_agent_expected_count']);
             unset($data['sub_agent_batch_open']);

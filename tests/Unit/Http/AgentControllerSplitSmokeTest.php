@@ -113,13 +113,14 @@ test('All split controllers share a consistent constructor surface', function ()
     expect($override)->toBeInstanceOf(ReflectionMethod::class);
     expect($transfer)->toBeInstanceOf(ReflectionMethod::class);
 
-    // CRUD controller takes auth, agentService, DriverFactory, ToolIconResolver
-    // (per-tool icon chain), AgentPictureService, PrincipalService, and
-    // PrincipalResolver. The tool and override controllers take 3 (auth +
-    // their service + a config helper). The transfer controller takes 5
-    // (auth + AgentPrincipalService + DriverFactory + ToolIconResolver +
-    // AgentPictureService).
-    expect($crud->getNumberOfParameters())->toBe(7);
+    // CRUD controller takes auth, agentService, AgentFavoriteService
+    // (Plan A per-user favourites, split out of AgentService), DriverFactory,
+    // ToolIconResolver (per-tool icon chain), AgentPictureService,
+    // PrincipalService, and PrincipalResolver. The tool and override
+    // controllers take 3 (auth + their service + a config helper). The
+    // transfer controller takes 5 (auth + AgentPrincipalService +
+    // DriverFactory + ToolIconResolver + AgentPictureService).
+    expect($crud->getNumberOfParameters())->toBe(8);
     expect($tool->getNumberOfParameters())->toBe(3);
     expect($override->getNumberOfParameters())->toBe(3);
     expect($transfer->getNumberOfParameters())->toBe(5);

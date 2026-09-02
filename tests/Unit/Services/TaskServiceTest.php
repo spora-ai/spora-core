@@ -13,7 +13,6 @@ function makeTaskService(): TaskService
 {
     $orchestrator = Mockery::mock(Spora\Agents\OrchestratorInterface::class);
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);

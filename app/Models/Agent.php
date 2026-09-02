@@ -30,8 +30,6 @@ use Throwable;
  * @property int $max_retries
  * @property bool $is_pinned
  * @property bool $is_archived
- * @property bool $is_favorite @deprecated Removed in Plan A; use the
- *             `favoritedByUsers` relation (per-user pivot).
  * @property string|null $notes
  * @property DateTimeInterface|null $created_at
  * @property DateTimeInterface|null $updated_at
