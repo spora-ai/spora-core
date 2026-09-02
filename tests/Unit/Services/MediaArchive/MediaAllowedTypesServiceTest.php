@@ -40,12 +40,19 @@ test('allowedMimeTypes unions in converter-supplied MIME types', function (): vo
     expect($mimes)->toContain('application/pdf');
 });
 
-test('allowedMimeTypes without an agent does NOT include image/*', function (): void {
+test('allowedMimeTypes without an agent DOES include image/* (direct operator upload)', function (): void {
+    // The Media Archive plugin's upload dialog calls
+    // /media/allowed-types WITHOUT ?agent_id because the operator is
+    // archiving bytes on their own behalf, not via an agent's tool
+    // call. There's no LLM in the upload loop, so the
+    // `agentSupportsImages()` gate doesn't apply. Images must still
+    // be in the allowlist or the dialog's submit fails with
+    // 415 UNSUPPORTED_MEDIA_TYPE.
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
-    foreach ($mimes as $m) {
-        expect(str_starts_with($m, 'image/'))->toBeFalse();
-    }
+    expect($mimes)->toContain('image/jpeg');
+    expect($mimes)->toContain('image/png');
+    expect($mimes)->toContain('image/webp');
 });
 
 test('allowedMimeTypes adds image/* when the agent\'s LLM is vision-capable', function (): void {

@@ -148,8 +148,9 @@ describe('MediaTool attributes', function (): void {
             ->and($setting->type)->toBe('select')
             ->and($setting->default)->toBe('agent')
             ->and($setting->options)->toBe([
-                'agent' => 'Only media created by this agent',
-                'user'  => 'All media owned by the current user (across agents)',
+                'agent'     => 'Only media created by this agent',
+                'principal' => 'All media owned by the calling agent\'s principal '
+                             . '(direct uploads + every agent of the principal)',
             ]);
     });
 

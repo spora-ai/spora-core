@@ -78,6 +78,7 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
         new MetadataExtractor($logger, false),
         $assetStore,
         \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        new PrincipalService(new PrincipalResolver()),
         $logger,
     );
     $archive = new MediaArchiveService($pipeline);

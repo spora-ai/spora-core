@@ -10,6 +10,7 @@ use Spora\Services\MediaArchive\MediaType;
 
 /**
  * @property string                                  $id
+ * @property int|null                               $principal_id
  * @property int|null                               $agent_id
  * @property int|null                               $task_id
  * @property int|null                               $tool_call_id
@@ -39,6 +40,7 @@ use Spora\Services\MediaArchive\MediaType;
  * @property Agent|null                             $agent
  * @property Task|null                              $task
  * @property User|null                              $user
+ * @property Principal|null                         $principal
  *
  * Note: the @property docblock above mirrors {@see self::COLUMNS} plus
  * the Eloquent-managed `created_at`/`updated_at` and the relationship
@@ -56,6 +58,7 @@ final class MediaAsset extends Model
      */
     public const COLUMNS = [
         'id',
+        'principal_id',
         'agent_id',
         'task_id',
         'tool_call_id',
@@ -89,6 +92,7 @@ final class MediaAsset extends Model
      * @var array<string, string>
      */
     public const CASTS = [
+        'principal_id'                   => 'integer',
         'agent_id'                       => 'integer',
         'task_id'                        => 'integer',
         'tool_call_id'                   => 'integer',
@@ -130,6 +134,11 @@ final class MediaAsset extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function principal(): BelongsTo
+    {
+        return $this->belongsTo(Principal::class);
     }
 
     /**

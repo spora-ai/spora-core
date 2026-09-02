@@ -434,6 +434,64 @@ describe('MediaArchiveService::list', function (): void {
         }
     });
 
+    it('excludes derivative rows from the library grid', function (): void {
+        // Derivatives are full media_assets rows — without the LIST
+        // filter they show up next to their source in the grid and the
+        // operator ends up with N copies of the same image (one for
+        // every "Convert to" they ran). They remain reachable via the
+        // parent asset's detail page → VersionsStrip.
+        $ctx = makeMediaArchiveService();
+        try {
+            $png = base64_decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+                strict: true,
+            );
+            $parent = $ctx['service']->ingest(new MediaIngestRequest(
+                bytes: $png,
+                mime: 'image/png',
+            ));
+
+            // Insert a fake derivative row directly. The full
+            // MediaDerivativeService path is covered elsewhere; here we
+            // just need to assert the LIST filter ignores rows that
+            // are linked as derivatives in `media_derivatives`.
+            $derivativeId = sprintf(
+                '%08x-dddd-eeee-ffff-%012x',
+                random_int(0, 0xffffffff),
+                random_int(0, 0xffffffffffff),
+            );
+            MediaAsset::create([
+                'id'                            => $derivativeId,
+                'storage_mode'                  => 'data_url',
+                'media_type'                    => 'image',
+                'mime_type'                     => 'image/webp',
+                'byte_size'                     => 256,
+                'asset_url'                     => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivativeId . '.webp',
+                'payload'                       => $png,
+                'asset_token'                   => bin2hex(random_bytes(16)),
+                'migrated_from_inline_data_url' => true,
+            ]);
+            Capsule::table('media_derivatives')->insert([
+                'id'                 => sprintf(
+                    '%08x-cccc-dddd-eeee-%012x',
+                    random_int(0, 0xffffffff),
+                    random_int(0, 0xffffffffffff),
+                ),
+                'parent_id'          => $parent->id,
+                'derivative_id'      => $derivativeId,
+                'format'             => 'thumbnail-256',
+                'producer_plugin'    => 'spora-core',
+                'producer_operation' => 'image.derive',
+            ]);
+
+            $page = $ctx['service']->list(new ListMediaQuery(mediaType: MediaType::Image));
+            expect($page->total())->toBe(1);
+            expect($page->getCollection()->first()->id)->toBe($parent->id);
+        } finally {
+            $ctx['restore']();
+        }
+    });
+
     it('clamps perPage to PER_PAGE_MAX', function (): void {
         $query = new ListMediaQuery(perPage: 999_999);
         expect($query->perPage())->toBe(ListMediaQuery::PER_PAGE_MAX);
@@ -936,6 +994,7 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
                 $ctx['metadata'],
                 $rejectingStore,
                 \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+                new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
             );
             $service = new MediaArchiveService($pipeline);
             $png = base64_decode(

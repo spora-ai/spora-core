@@ -20,6 +20,8 @@ use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -70,6 +72,7 @@ final class MediaArchiveTestSupport
             $metadata,
             $assetStore,
             self::buildConverterRegistry(),
+            new PrincipalService(new PrincipalResolver()),
             $logger,
         );
 

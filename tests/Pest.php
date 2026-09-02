@@ -186,6 +186,20 @@ function callController(object $controller, string $method, Symfony\Component\Ht
 
 uses(Tests\Concerns\CreatesPrincipal::class)
     ->beforeEach(function () {
+        // `SPORA_STORAGE_DIR` is read by `Paths::storage()` and several
+        // media test fixtures set it to a per-test tmp dir. The parallel
+        // runner inherits whatever value the previous test left in the
+        // worker process — so without this guard, fixtures that pass
+        // their own `Paths` instance to the SUT (e.g.
+        // `PluginCatalogServiceTest`) still see a polluted
+        // `Paths::storage()` because the SUT's collaborators resolve it
+        // independently. Snapshot the env var on entry and clear it so
+        // each test starts from a known-clean baseline; afterEach then
+        // restores the snapshot so tests in the same file that need a
+        // custom value can still rely on the previous test's setup.
+        $GLOBALS['__spora_storage_dir_previous'] = getenv('SPORA_STORAGE_DIR');
+        putenv('SPORA_STORAGE_DIR');
+        unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
         Spora\Core\Database::resetBootState();
         $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
         $db->boot();
@@ -196,6 +210,16 @@ uses(Tests\Concerns\CreatesPrincipal::class)
             Illuminate\Database\Capsule\Manager::connection()->rollBack();
         }
         Spora\Core\Database::resetBootState();
+        $previous = $GLOBALS['__spora_storage_dir_previous'] ?? false;
+        if ($previous === false) {
+            putenv('SPORA_STORAGE_DIR');
+            unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
+        } else {
+            putenv("SPORA_STORAGE_DIR={$previous}");
+            $_ENV['SPORA_STORAGE_DIR']    = $previous;
+            $_SERVER['SPORA_STORAGE_DIR'] = $previous;
+        }
+        unset($GLOBALS['__spora_storage_dir_previous']);
     })
     ->in(__DIR__);
 

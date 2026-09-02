@@ -6,7 +6,6 @@ namespace Tests\Feature\MediaArchive;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
-use Mockery as M;
 use Psr\Log\NullLogger;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
@@ -15,7 +14,6 @@ use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MetadataExtractor;
@@ -100,14 +98,14 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     $paths    = new Paths($tmp);
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $store    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-    $container = M::mock(\Psr\Container\ContainerInterface::class);
     $pipeline = new MediaArchiveIngestPipeline(
         new MediaIngestDecoder(),
         $resolver,
         $sniffer,
         $meta,
         $store,
-        new MediaConverterRegistry($container),
+        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
         $logger,
     );
     $service  = new MediaArchiveService($pipeline);

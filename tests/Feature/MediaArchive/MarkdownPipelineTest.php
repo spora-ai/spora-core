@@ -356,6 +356,7 @@ function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMa
         $metadata,
         new AutoAssetStore($database, $local, 1_048_576),
         $registry,
+        new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
         $logger,
     );
     return new \Spora\Services\MediaArchive\MediaArchiveService($pipeline);

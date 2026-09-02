@@ -54,6 +54,7 @@ function mediumblobTestArchiveService(AssetStore $store): MediaArchiveService
         new MetadataExtractor($logger, false),
         $store,
         new MediaConverterRegistry(M::mock(Psr\Container\ContainerInterface::class)),
+        new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
         $logger,
     );
     return new MediaArchiveService($pipeline);

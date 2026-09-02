@@ -9,6 +9,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaType;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -39,8 +40,13 @@ use Symfony\Component\HttpFoundation\Request;
  *   - `agent` (default): `search` filters by `agent_id`, `get_media`,
  *     `get_public_url` and `get_embed_code` require
  *     `asset->agent_id === $agentId`.
- *   - `user`: `search` filters by `user_id`, the three single-asset ops
- *     require `asset->user_id === $userId`.
+ *   - `principal`: `get_media`/`get_public_url`/`get_embed_code` accept any
+ *     asset whose `asset->user_id === $context->ownerUserId` (direct upload
+ *     by the principal's owner user) or whose attached agent belongs to the
+ *     calling agent's principal. `search` falls through to the listing
+ *     controller's principal-aware path.
+ *   - `user` (legacy): kept as a silent alias for `principal` so existing
+ *     `agent_tool_settings` rows keep working without a DB migration.
  *   - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
  */
 #[Tool(
@@ -56,8 +62,9 @@ use Symfony\Component\HttpFoundation\Request;
     type: 'select',
     default: 'agent',
     options: [
-        'agent' => 'Only media created by this agent',
-        'user'  => 'All media owned by the current user (across agents)',
+        'agent'     => 'Only media created by this agent',
+        'principal' => 'All media owned by the calling agent\'s principal '
+                     . '(direct uploads + every agent of the principal)',
     ],
     description: 'Controls which media_assets rows the tool can read.',
 )]
@@ -114,15 +121,15 @@ final class MediaTool extends AbstractTool
         int $agentId,
         ?int $userId = null,
         ?int $taskId = null,
-        ?\Spora\Services\PrincipalContext $context = null,
+        ?PrincipalContext $context = null,
     ): ToolResult {
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
             'search'         => $this->search($arguments, $agentId, $userId),
-            'get_media'      => $this->getMedia($arguments, $agentId, $userId),
-            'get_public_url' => $this->getPublicUrl($arguments, $agentId, $userId),
-            'get_embed_code' => $this->getEmbedCode($arguments, $agentId, $userId),
+            'get_media'      => $this->getMedia($arguments, $agentId, $userId, $context),
+            'get_public_url' => $this->getPublicUrl($arguments, $agentId, $userId, $context),
+            'get_embed_code' => $this->getEmbedCode($arguments, $agentId, $userId, $context),
             default          => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, or get_embed_code.'),
         };
     }
@@ -187,7 +194,7 @@ final class MediaTool extends AbstractTool
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function getMedia(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function getMedia(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
@@ -195,7 +202,7 @@ final class MediaTool extends AbstractTool
         }
 
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
+        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
@@ -208,7 +215,7 @@ final class MediaTool extends AbstractTool
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function getPublicUrl(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function getPublicUrl(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
@@ -217,7 +224,7 @@ final class MediaTool extends AbstractTool
 
         $asset = $this->archive->find($assetId);
         $host = (string) ($this->config['app_url'] ?? '');
-        $inScope = $asset !== null && $this->assetInScope($asset, $agentId, $userId);
+        $inScope = $asset !== null && $this->assetInScope($asset, $agentId, $userId, $context);
         if (!$inScope || $host === '') {
             return ToolResult::fail(!$inScope
                 ? self::ERR_ASSET_NOT_FOUND
@@ -243,7 +250,7 @@ final class MediaTool extends AbstractTool
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function getEmbedCode(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function getEmbedCode(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
@@ -251,7 +258,7 @@ final class MediaTool extends AbstractTool
         }
 
         $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId)) {
+        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
@@ -299,20 +306,41 @@ final class MediaTool extends AbstractTool
         $settings = $this->toolConfigService?->getEffectiveSettings(self::class, $agentId, $userId) ?? [];
         $scope = is_string($settings['scope'] ?? null) ? $settings['scope'] : 'agent';
 
-        return in_array($scope, ['agent', 'user'], true) ? $scope : 'agent';
+        // Legacy 'user' is a runtime alias for 'principal' — see the
+        // class-level docblock. Anything unrecognised falls back to
+        // 'agent' so a stale or mistyped setting never widens visibility.
+        return in_array($scope, ['agent', 'principal', 'user'], true) ? $scope : 'agent';
     }
 
-    private function assetInScope(MediaAsset $asset, int $agentId, ?int $userId): bool
-    {
+    /**
+     * True iff `$asset` is visible under the calling agent's current
+     * `scope` setting. Admin users always pass. For `scope=agent`, the
+     * asset must be attached to the calling agent. For `scope=principal`
+     * (and the legacy `scope=user` alias), the asset must belong to the
+     * calling agent's principal — either as a direct upload by the
+     * principal's owner user or as an asset of any agent of the
+     * principal — checked via {@see MediaArchiveService::isAssetInPrincipalScope()}.
+     *
+     * `PrincipalContext` is the orchestrator-supplied bundle; when it's
+     * unresolvable (cold principal / test harness) the principal branch
+     * returns false rather than crashing.
+     */
+    private function assetInScope(
+        MediaAsset $asset,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context = null,
+    ): bool {
         if ($this->auth->isAdmin()) {
             return true;
         }
 
         $scope = $this->resolveScope($agentId, $userId);
+        // Legacy alias: existing agents may still have 'user' persisted.
+        $effective = $scope === 'user' ? 'principal' : $scope;
 
-        if ($scope === 'user') {
-            $effectiveUserId = $userId ?? $this->auth->currentUserId();
-            return $effectiveUserId !== null && (int) $asset->user_id === $effectiveUserId;
+        if ($effective === 'principal') {
+            return $this->archive->isAssetInPrincipalScope($asset, $context, $userId);
         }
 
         return (int) $asset->agent_id === $agentId;

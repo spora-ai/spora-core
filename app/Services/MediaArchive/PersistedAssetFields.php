@@ -26,6 +26,7 @@ final class PersistedAssetFields
         public ?string $token = null,
         public ?string $filename = null,
         public ?int $userId = null,
+        public ?int $principalId = null,
         public string $uploadSource = 'tool',
     ) {}
 }

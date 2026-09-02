@@ -64,6 +64,8 @@ use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
 use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
+use Spora\Http\MediaDerivativeController;
+use Spora\Http\MediaDerivativeOptionsController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -121,9 +123,12 @@ use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\MediaArchive\Producers\ImageDerivativeProducer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
@@ -171,6 +176,12 @@ final class ContainerDefinitions
         // MediaConverterRegistry at construction time.
         MediaConverterDiscovery::add(PdfToMarkdownConverter::class);
         MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
+
+        // Same pattern for derivative producers. The "Convert to" dropdown
+        // in `spora-plugin-media-archive-frontend` surfaces whatever this
+        // list contains — plugins ship heavier producers (PDF, video) in
+        // their own composer packages via the same registration hook.
+        MediaDerivativeProducerDiscovery::add(ImageDerivativeProducer::class);
 
         return array_merge(
             self::configDefinition(),
@@ -609,6 +620,7 @@ final class ContainerDefinitions
                     $c->get(MetadataExtractor::class),
                     $c->get(AssetStore::class),
                     $c->get(MediaConverterRegistry::class),
+                    $c->get(PrincipalService::class),
                     $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
                 );
             },
@@ -1083,9 +1095,8 @@ final class ContainerDefinitions
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(),
+                    new MediaAssetSerializer(false),
                     $c->get(PrincipalResolver::class),
-                    $c->get('config'),
                 );
             },
 
@@ -1094,8 +1105,9 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
                     $c->get(MimeSniffer::class),
-                    new MediaAssetSerializer(),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                     $c->get('config'),
                 );
             },
@@ -1103,6 +1115,29 @@ final class ContainerDefinitions
             MediaAllowedTypesController::class => static function (ContainerInterface $c): MediaAllowedTypesController {
                 return new MediaAllowedTypesController(
                     $c->get(MediaAllowedTypesService::class),
+                );
+            },
+
+            MediaDerivativeService::class => static function (ContainerInterface $c): MediaDerivativeService {
+                return new MediaDerivativeService(
+                    $c->get(AssetStore::class),
+                    $c->get(PrincipalService::class),
+                    $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
+                );
+            },
+
+            MediaDerivativeController::class => static function (ContainerInterface $c): MediaDerivativeController {
+                return new MediaDerivativeController(
+                    $c->get(MediaDerivativeService::class),
+                    $c->get(AuthService::class),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
+                );
+            },
+
+            MediaDerivativeOptionsController::class => static function (ContainerInterface $c): MediaDerivativeOptionsController {
+                return new MediaDerivativeOptionsController(
+                    $c->get(MediaDerivativeService::class),
+                    $c->get(AuthService::class),
                 );
             },
 

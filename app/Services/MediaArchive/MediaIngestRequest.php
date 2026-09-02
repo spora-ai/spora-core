@@ -28,6 +28,15 @@ final readonly class MediaIngestRequest
         public ?string $mime = null,
         public ?string $filename = null,
         public ?MediaType $mediaType = null,
+        /**
+         * Principal to attribute the row to. When set, takes precedence
+         * over `agentId`/`userId` for ownership attribution. Used by the
+         * Media Archive upload page (spora-plugin-media-archive-frontend)
+         * where uploads are principal-first; agent ingestion (tool-
+         * generated media) leaves this null and the pipeline derives it
+         * from `agentId`.
+         */
+        public ?int $principalId = null,
         public ?int $agentId = null,
         public ?int $taskId = null,
         public ?int $toolCallId = null,
@@ -67,5 +76,39 @@ final readonly class MediaIngestRequest
                 'MediaIngestRequest requires exactly one non-empty source among bytes, hex, base64, or url.',
             );
         }
+    }
+
+    /**
+     * Return a copy of this request with `principalId` replaced. Used by
+     * the ingest pipeline when the caller did not pass a principal but the
+     * agent/user chain resolves to one.
+     */
+    public function withPrincipalId(?int $principalId): self
+    {
+        return new self(
+            bytes: $this->bytes,
+            hex: $this->hex,
+            base64: $this->base64,
+            url: $this->url,
+            mime: $this->mime,
+            filename: $this->filename,
+            mediaType: $this->mediaType,
+            principalId: $principalId,
+            agentId: $this->agentId,
+            taskId: $this->taskId,
+            toolCallId: $this->toolCallId,
+            userId: $this->userId,
+            pluginSlug: $this->pluginSlug,
+            toolName: $this->toolName,
+            prompt: $this->prompt,
+            width: $this->width,
+            height: $this->height,
+            durationSeconds: $this->durationSeconds,
+            byteSize: $this->byteSize,
+            tags: $this->tags,
+            metadata: $this->metadata,
+            uploadSource: $this->uploadSource,
+            publicAccessToken: $this->publicAccessToken,
+        );
     }
 }

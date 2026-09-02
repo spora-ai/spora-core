@@ -26,6 +26,8 @@ use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
 use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
+use Spora\Http\MediaDerivativeController;
+use Spora\Http\MediaDerivativeOptionsController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -278,16 +280,27 @@ final class RouteDefinitions
 
     private static function registerMediaRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
-        // Media Archive — read & delete surface for the operator. Plugin
-        // tools write rows via MediaArchiveService::ingest(); this route
-        // set is for browsing and cleanup.
+        // Media Archive — read surface for the composer picker and the
+        // operator dashboard. Plugin tools write rows via
+        // MediaArchiveService::ingest(); the upload endpoint also lives
+        // here so the composer can drop a file without depending on the
+        // Media Archive plugin. The four admin routes
+        // (`show`/`update`/`destroy`/`public-token/refresh`) moved to
+        // `spora-plugin-media-archive/src/Http/MediaArchiveAdminController`
+        // so the plugin owns its CRUD end-to-end, mirroring the
+        // `spora-plugin-memories` pattern.
         $r->addRoute('GET', '/api/v1/media', [MediaArchiveController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/media/allowed-types', [MediaAllowedTypesController::class, 'index'], [AuthMiddleware::class]);
         $r->addRoute('POST', '/api/v1/media', [MediaUploadController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_MEDIA_ITEM, [MediaArchiveController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', self::ROUTE_MEDIA_ITEM, [MediaArchiveController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/public-token/refresh', [MediaArchiveController::class, 'refreshPublicToken'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_MEDIA_ITEM, [MediaArchiveController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // Media derivatives — generic surface for any plugin (Typst, OCR,
+        // …) to publish a derivative of a media asset. Generic on purpose:
+        // multiple consumers (the Media Archive plugin's VersionsStrip,
+        // the composer, future admin surfaces), no plugin-specific logic.
+        // Mirrors the architectural rationale for keeping
+        // `/api/v1/media/allowed-types` in core.
+        $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/derivatives', [MediaDerivativeController::class, 'create'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
 
         // Public, token-gated media access. No auth middleware — the token
         // itself is the credential. The id is always a UUID shape; the

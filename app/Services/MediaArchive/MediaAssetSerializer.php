@@ -13,9 +13,19 @@ use Spora\Services\Text\Utf8Sanitizer;
  * Both MediaArchiveController and MediaUploadController need to
  * return the same payload - extracting the serializer here removes
  * a cross-controller static call and makes it trivially testable.
+ *
+ * The `derivatives` field is opt-in via the `$includeDerivatives`
+ * constructor flag (default true). LIST loops should pass `false`
+ * to avoid the N+1 — the detail page (single asset) is the natural
+ * consumer that always includes them.
  */
 final class MediaAssetSerializer
 {
+    public function __construct(
+        private readonly bool $includeDerivatives = true,
+        private readonly ?MediaDerivativeService $derivatives = null,
+    ) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -25,6 +35,7 @@ final class MediaAssetSerializer
         // See Spora\Services\Text\Utf8Sanitizer for the recovery algorithm.
         return Utf8Sanitizer::scrub([
             'id'                  => $asset->id,
+            'principal_id'        => $asset->principal_id,
             'agent_id'            => $asset->agent_id,
             'task_id'             => $asset->task_id,
             'tool_call_id'        => $asset->tool_call_id,
@@ -49,6 +60,7 @@ final class MediaAssetSerializer
             'public_access_token' => $asset->public_access_token,
             'public_url'          => $this->buildPublicUrl($asset, $baseUrl),
             'has_markdown'        => $asset->markdown_content !== null && $asset->markdown_content !== '',
+            'derivatives'         => $this->loadDerivatives($asset),
             'created_at'          => $asset->created_at?->toIso8601String(),
             'updated_at'          => $asset->updated_at?->toIso8601String(),
         ]);
@@ -66,8 +78,9 @@ final class MediaAssetSerializer
     private function buildPublicUrl(MediaAsset $asset, ?string $baseUrl): ?string
     {
         // No token => no public URL. Without this guard the
-        // MediaArchiveSharingTest PATCH-disable case leaks a URL
-        // with a stray ?token= query string.
+        // PATCH-disable case (covered in
+        // spora-plugin-media-archive/src/Http/MediaArchiveAdminController)
+        // leaks a URL with a stray ?token= query string.
         if ($asset->public_access_token === null || $asset->public_access_token === '') {
             return null;
         }
@@ -75,5 +88,38 @@ final class MediaAssetSerializer
             return null;
         }
         return rtrim($baseUrl, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function loadDerivatives(MediaAsset $asset): array
+    {
+        if (!$this->includeDerivatives || $this->derivatives === null) {
+            return [];
+        }
+        $rows = $this->derivatives->listFor($asset->id);
+        $out = [];
+        foreach ($rows as $row) {
+            $derivative = $row['derivative'];
+            $ext = MediaArchiveService::extensionForMime($derivative->mime_type);
+            // Per-derivative chip label for the VersionsStrip. Producers
+            // ship their own label resolution through
+            // `MediaDerivativeFormat::chipLabelFor()` so adding a new
+            // preset is a one-row change in the catalogue.
+            $label = $row['producer_plugin'] === 'spora-core'
+                ? ImageDerivativeFormat::chipLabelFor($row['format'])
+                : strtoupper($row['format']);
+            $out[] = [
+                'format'             => $row['format'],
+                'label'              => $label,
+                'media_id'           => $derivative->id,
+                'asset_url'          => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivative->id . ($ext !== null ? '.' . $ext : ''),
+                'producer_plugin'    => $row['producer_plugin'],
+                'producer_operation' => $row['producer_operation'],
+                'created_at'         => $row['created_at'],
+            ];
+        }
+        return $out;
     }
 }

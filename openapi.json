@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.19.0-2-g7f19987"
+        "version": "0.19.0-2-g35717ed"
     },
     "servers": [
         {
@@ -2386,67 +2386,12 @@
                 ]
             }
         },
-        "/api/v1/media/{id}": {
-            "get": {
+        "/api/v1/media/{id}/derivatives": {
+            "post": {
                 "tags": [
                     "Media"
                 ],
-                "summary": "Show MediaArchive",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ]
-            },
-            "delete": {
-                "tags": [
-                    "Media"
-                ],
-                "summary": "Destroy MediaArchive",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    },
-                    {
-                        "csrfToken": []
-                    }
-                ]
-            },
-            "patch": {
-                "tags": [
-                    "Media"
-                ],
-                "summary": "Update MediaArchive",
+                "summary": "Create MediaDerivative",
                 "parameters": [
                     {
                         "name": "id",
@@ -2472,12 +2417,12 @@
                 ]
             }
         },
-        "/api/v1/media/{id}/public-token/refresh": {
-            "post": {
+        "/api/v1/media/{id}/derivatives/options": {
+            "get": {
                 "tags": [
                     "Media"
                 ],
-                "summary": "RefreshPublicToken MediaArchive",
+                "summary": "Index MediaDerivativeOptions",
                 "parameters": [
                     {
                         "name": "id",
@@ -2496,9 +2441,6 @@
                 "security": [
                     {
                         "cookieAuth": []
-                    },
-                    {
-                        "csrfToken": []
                     }
                 ]
             }
