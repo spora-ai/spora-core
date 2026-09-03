@@ -360,6 +360,51 @@ final class AttachmentRowRenderer
      */
     private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
 
+    /**
+     * Hard cap on inline text bytes for the no-converter fallback.
+     * Smaller than the image cap because text is denser (~4 chars /
+     * token) and a 256 KB Typst file is already ~64K tokens — plenty
+     * for the LLM to reason over without blowing the context window.
+     */
+    private const MAX_INLINE_TEXT_BYTES = 256 * 1024;
+
+    /**
+     * Leading bytes we sample to confirm the asset really is text
+     * before inlining it. A NUL byte anywhere in the sample flags the
+     * file as binary so a mislabeled mime cannot poison the LLM context.
+     */
+    private const TEXT_INSPECTION_BYTES = 4096;
+
+    /**
+     * Mime prefixes/types we treat as text-safe for the no-converter
+     * inline fallback. `text/*` covers everything in the text family;
+     * the application/* set lists common text-based formats that do not
+     * start with `text/` (JSON, XML, YAML, Typst source, code, etc.).
+     * Binaries (PDF, image/*, audio/*, video/*, zip) are intentionally
+     * absent — base64-encoding them is not useful to the LLM.
+     */
+    private const TEXT_MIME_PREFIX = 'text/';
+
+    private const KNOWN_TEXT_APPLICATION_MIMES = [
+        'application/json',
+        'application/ld+json',
+        'application/xml',
+        'application/javascript',
+        'application/x-javascript',
+        'application/x-yaml',
+        'application/yaml',
+        'application/x-typst',
+        'application/typst',
+        'application/x-shellscript',
+        'application/x-sh',
+        'application/x-perl',
+        'application/x-python',
+        'application/x-ruby',
+        'application/x-httpd-php',
+        'application/sql',
+        'application/graphql',
+    ];
+
     public function __construct(
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
@@ -471,19 +516,98 @@ final class AttachmentRowRenderer
     }
 
     /**
+     * Produces the user-facing text block for a non-image attachment.
+     *
+     * Resolution order:
+     *   1. A registered converter populated `markdown_content` — use it
+     *      verbatim (PDF, plain-text passthrough, etc.).
+     *   2. The asset's mime type looks text-safe AND the raw bytes fit
+     *      within {@see MAX_INLINE_TEXT_BYTES} AND the leading bytes
+     *      contain no NUL — inline the raw bytes so the LLM has the
+     *      actual file content (Typst, JSON, YAML, code, CSV, etc.)
+     *      even when no converter is registered.
+     *   3. Otherwise, the file is binary or oversized. Surface the
+     *      metadata-only fallback so the LLM is not misled into trying
+     *      `read_url file:///api/v1/assets/...` (the failure mode this
+     *      fix removes).
+     *
      * @return array<string, mixed>
      */
     private function buildTextBlock(MediaAsset $asset): array
     {
+        $displayName = $asset->filename ?? $asset->id;
+
+        // 1. Registered converter produced extracted text — always prefer it.
         $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
             ? $asset->markdown_content
             : null;
-        $displayName = $asset->filename ?? $asset->id;
-        $body = $extracted ?? '[no extractable text]';
+        if ($extracted !== null) {
+            return [
+                'type' => 'text',
+                'text' => "# {$displayName} (extracted text)\n\n" . $extracted,
+            ];
+        }
+
+        // 2. No converter ran. For plain-text mime types we read the raw
+        // bytes from the asset's storage backend and inline them so the
+        // LLM can answer questions about the file. Capped at
+        // MAX_INLINE_TEXT_BYTES and re-checked for text-likeness so a
+        // mislabeled binary file does not slip through.
+        if ($this->isLikelyTextMime($asset)) {
+            $bytes = $this->loadAssetBytes($asset);
+            if ($bytes !== null
+                && strlen($bytes) <= self::MAX_INLINE_TEXT_BYTES
+                && $this->bytesLookLikeText($bytes)
+            ) {
+                return [
+                    'type' => 'text',
+                    'text' => "# {$displayName} (raw text — no converter registered)\n\n" . $bytes,
+                ];
+            }
+        }
+
+        // 3. Binary / oversized / unrecognised mime — the LLM gets the
+        // metadata prefix block (sibling) for the asset_id but no body
+        // here, so it cannot accidentally try `read_url file:///...`.
         return [
             'type' => 'text',
-            'text' => "# {$displayName} (extracted text)\n\n" . $body,
+            'text' => "# {$displayName} (no extracted text available)\n\n[no extractable text]",
         ];
+    }
+
+    /**
+     * Whether the asset's mime type is safe to inline as raw text
+     * without a registered converter. Matches the whole `text/*` family
+     * plus a curated list of common text-based application types
+     * (JSON, XML, YAML, code, Typst source, etc.). Binary formats
+     * (PDF, image/*, audio/*, video/*, zip) are intentionally absent.
+     */
+    private function isLikelyTextMime(MediaAsset $asset): bool
+    {
+        $mime = strtolower((string) ($asset->mime_type ?? ''));
+        if ($mime === '') {
+            return false;
+        }
+        if (str_starts_with($mime, self::TEXT_MIME_PREFIX)) {
+            return true;
+        }
+        return in_array($mime, self::KNOWN_TEXT_APPLICATION_MIMES, true);
+    }
+
+    /**
+     * Cheap text-shape check on the first {@see TEXT_INSPECTION_BYTES}
+     * of the asset. Rejects binary files mislabeled with a text mime
+     * (any NUL byte in the sample flags the file as binary) and accepts
+     * everything else — empty content counts as text. The 4 KB window
+     * catches common binary magic (PNG, PDF, ZIP) while staying cheap.
+     */
+    private function bytesLookLikeText(string $bytes): bool
+    {
+        $sample = substr($bytes, 0, self::TEXT_INSPECTION_BYTES);
+        if ($sample === '') {
+            return true;
+        }
+        return strpos($sample, "\0") === false;
     }
 
     /**

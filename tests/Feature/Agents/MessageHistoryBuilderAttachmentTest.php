@@ -8,6 +8,7 @@ use Spora\Agents\MessageHistoryBuilder;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
+use Spora\Models\MediaAsset;
 use Spora\Models\TaskHistory;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
@@ -586,4 +587,265 @@ test('user row first, image attachment second (production order) drops the image
     } else {
         expect($content)->toContain('Describe this');
     }
+});
+
+/**
+ * Plan: bug fix for non-converted text attachments falling through to
+ * `[no extractable text]` and tempting the LLM to call
+ * `read_url file:///api/v1/assets/...`. When `markdown_content` is
+ * null but the mime type looks text-safe, we read the raw bytes from
+ * the asset's storage backend and inline them so the LLM has the
+ * actual file content (Typst, JSON, YAML, code, CSV, etc.) without
+ * the operator having to register a converter first.
+ *
+ * Most of these tests bypass the ingest pipeline (which would
+ * normalise the mime via `MimeSniffer::sniffFromBytes` and route the
+ * asset through `PlainTextPassthroughConverter` when its mime matches
+ * `text/plain`). Bypassing keeps the test fixture focused on the
+ * fallback path: a non-null bytes payload with no extracted text.
+ */
+
+test('attachment fallback inlines raw bytes for text mime types when no converter ran (Typst)', function (): void {
+    // Reproduces the production failure: the operator uploads a .typ
+    // file, no Typst converter is registered, so markdown_content is
+    // null. Pre-fix the LLM got `# cv.typ (extracted text)\n\n[no
+    // extractable text]` and tried read_url with a file:/// URL. Post-fix
+    // the LLM gets the actual Typst source inlined as a text block.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    $typstSource = "#let name = \"Ada\"\n= Resume of #name\n\n#lorem(50)\n";
+    $asset = MediaAsset::create([
+        'id'           => '11111111-1111-4111-8111-111111111111',
+        'asset_url'    => '/api/v1/assets/11111111-1111-4111-8111-111111111111.typ',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'text/x-typst',
+        'byte_size'    => strlen($typstSource),
+        'user_id'      => 1,
+        'payload'      => $typstSource,
+        'filename'     => 'cv.typ',
+    ]);
+    expect($asset->markdown_content)->toBeNull();
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'user',
+        'content'      => 'Was steht in diesem Dokument?',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    expect($messages)->toHaveCount(1);
+    expect($messages[0]['role'])->toBe('user');
+    expect($messages[0]['content'])->toBeArray();
+    $blocks = $messages[0]['content'];
+    // Layout: [metadata_prefix, composedPromptBlock]. The composed
+    // block carries the operator prompt + the raw-text body header +
+    // the file bytes.
+    expect($blocks)->toHaveCount(2);
+    expect($blocks[0]['type'])->toBe('text');
+    expect($blocks[0]['text'])->toContain('[Attached asset_id=');
+    expect($blocks[0]['text'])->toContain($asset->id);
+    $composed = $blocks[1];
+    expect($composed['type'])->toBe('text');
+    expect($composed['text'])->toContain('Was steht in diesem Dokument?');
+    expect($composed['text'])->toContain('---');
+    expect($composed['text'])->toContain('# cv.typ (raw text — no converter registered)');
+    expect($composed['text'])->toContain($typstSource);
+    // Metadata lives in the sibling prefix block, not the composed body.
+    expect($composed['text'])->not->toContain('[Attached asset_id=');
+});
+
+test('attachment fallback inlines raw bytes for known text-based application mimes (JSON)', function (): void {
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+
+    $json = '{"name":"Ada","skills":["Typst","PHP"]}';
+    $asset = MediaAsset::create([
+        'id'           => '22222222-2222-4222-8222-222222222222',
+        'asset_url'    => '/api/v1/assets/22222222-2222-4222-8222-222222222222.json',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'application/json',
+        'byte_size'    => strlen($json),
+        'user_id'      => 1,
+        'payload'      => $json,
+        'filename'     => 'profile.json',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'user',
+        'content'      => 'Parse this profile',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $composed = $messages[0]['content'][1];
+    expect($composed['text'])->toContain('# profile.json (raw text — no converter registered)');
+    expect($composed['text'])->toContain($json);
+});
+
+test('attachment fallback skips raw-byte inline for binary mime without a converter (PDF)', function (): void {
+    // PDF is the canary: it's a common upload format, but it has no
+    // registered converter in core. The fallback must NOT inline
+    // binary bytes as text — it must keep the [no extractable text]
+    // body so the LLM isn't fed base64 garbage and doesn't try
+    // read_url on the relative /api/v1/assets/... URL.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    // PDF magic header followed by arbitrary bytes — contains NULs.
+    $pdfBytes = "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" . str_repeat("\x00\xff", 50);
+    $asset = MediaAsset::create([
+        'id'           => '33333333-3333-4333-8333-333333333333',
+        'asset_url'    => '/api/v1/assets/33333333-3333-4333-8333-333333333333.pdf',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'application/pdf',
+        'byte_size'    => strlen($pdfBytes),
+        'user_id'      => 1,
+        'payload'      => $pdfBytes,
+        'filename'     => 'cv.pdf',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    expect($messages)->toHaveCount(1);
+    $composed = $messages[0]['content'][1];
+    // Body is the explicit fallback — the LLM is told nothing was
+    // extractable rather than being handed the PDF's binary bytes.
+    expect($composed['text'])->toContain('# cv.pdf (no extracted text available)');
+    expect($composed['text'])->toContain('[no extractable text]');
+    // And the raw bytes do NOT leak into the body.
+    expect($composed['text'])->not->toContain('%PDF-1.4');
+});
+
+test('attachment fallback respects MAX_INLINE_TEXT_BYTES cap', function (): void {
+    // A 300 KB text file exceeds the 256 KB inline cap — must fall
+    // back to [no extractable text] rather than shipping a payload
+    // that blows the LLM context window.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $oversize = str_repeat('A', 300 * 1024); // 300 KB of plain ASCII
+    $asset = MediaAsset::create([
+        'id'           => '44444444-4444-4444-8444-444444444444',
+        'asset_url'    => '/api/v1/assets/44444444-4444-4444-8444-444444444444.log',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'text/plain',
+        'byte_size'    => strlen($oversize),
+        'user_id'      => 1,
+        'payload'      => $oversize,
+        'filename'     => 'huge.log',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $composed = $messages[0]['content'][1];
+    expect($composed['text'])->toContain('# huge.log (no extracted text available)');
+    expect($composed['text'])->toContain('[no extractable text]');
+    // Spot-check the cap actually bounded the body: a 300 KB string
+    // would balloon the LLM context. We assert the body length stays
+    // reasonable.
+    expect(strlen($composed['text']))->toBeLessThan(1024);
+});
+
+test('attachment fallback rejects mislabeled binary content (text mime with NUL bytes)', function (): void {
+    // Operator accidentally uploaded a binary file with a text mime
+    // type. The leading-bytes NUL check must catch it and fall back to
+    // [no extractable text] so the LLM context stays clean.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $binary = "PNG header would be here\n" . "\x00\x01\x02\x03\x00\x00";
+    $asset = MediaAsset::create([
+        'id'           => '55555555-5555-4555-8555-555555555555',
+        'asset_url'    => '/api/v1/assets/55555555-5555-4555-8555-555555555555.txt',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'text/plain', // mislabeled!
+        'byte_size'    => strlen($binary),
+        'user_id'      => 1,
+        'payload'      => $binary,
+        'filename'     => 'fake.txt',
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $composed = $messages[0]['content'][1];
+    expect($composed['text'])->toContain('# fake.txt (no extracted text available)');
+    expect($composed['text'])->toContain('[no extractable text]');
+    // The binary content must not leak into the body.
+    expect($composed['text'])->not->toContain("\x00\x01\x02\x03");
+});
+
+test('markdown_content takes precedence over the raw-bytes fallback', function (): void {
+    // When a converter populated markdown_content the raw-bytes path
+    // must not fire — the extracted text is the operator-friendly
+    // version (e.g. PDF page numbers stripped, markdown headings).
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $extracted = "# Heading\n\nThis is the extracted body.";
+    $raw = "raw bytes that should NOT appear";
+    $asset = MediaAsset::create([
+        'id'           => '66666666-6666-4666-8666-666666666666',
+        'asset_url'    => '/api/v1/assets/66666666-6666-4666-8666-666666666666.md',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'document',
+        'mime_type'    => 'text/markdown',
+        'byte_size'    => strlen($raw),
+        'user_id'      => 1,
+        'payload'      => $raw,
+        'filename'     => 'document.md',
+        'markdown_content' => $extracted,
+    ]);
+
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $composed = $messages[0]['content'][1];
+    expect($composed['text'])->toContain('# document.md (extracted text)');
+    expect($composed['text'])->toContain($extracted);
+    expect($composed['text'])->not->toContain($raw);
 });
