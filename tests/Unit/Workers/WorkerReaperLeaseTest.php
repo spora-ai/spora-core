@@ -18,7 +18,7 @@ function makeReaper(): WorkerReaper
     $notification = Mockery::mock(NotificationService::class);
     $notification->shouldIgnoreMissing();
 
-    return new WorkerReaper(new NullLogger(), $notification);
+    return new WorkerReaper(new NullLogger(), $notification, null);
 }
 
 function seedReaperAgent(): array

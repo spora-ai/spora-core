@@ -50,6 +50,7 @@ use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigSchemaInspector;
@@ -124,6 +125,9 @@ final class OrchestratorContainerBindings
                 return new WorkerReaper(
                     $c->get(LoggerInterface::class),
                     $c->get(NotificationService::class),
+                    $c->has(SubAgentServiceInterface::class)
+                        ? $c->get(SubAgentServiceInterface::class)
+                        : null,
                 );
             },
 

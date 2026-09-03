@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Console\Worker;
 
+use Closure;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
@@ -27,16 +28,68 @@ final class WorkerQueueProcessor
 
     private const SHUTDOWN_GRACE_MICROS = 30_000_000;
 
-    /** @var array<int, resource> */
+    /**
+     * Per-pipe read cap inside {@see reapChildren()}. Multiplied by two
+     * (stdout + stderr) this is the worst-case working-set growth per child
+     * per sweep before {@see truncateExcerpt()} applies the truncation marker
+     * and {@see proc_close()} releases the OS pipe.
+     */
+    private const CHILD_READ_CHUNK = 65_536;
+
+    /**
+     * Per-pipe excerpt budget for the `child_exit` log line. Mirrors
+     * {@see \Spora\Core\Kernel::mapPluginInstallFailureToResponse()}'s
+     * 8 KiB composer-stderr cap so a runaway child can't blow up the
+     * Monolog buffer; 64 KiB is bigger because tasks can emit genuinely
+     * useful output beyond a one-line error.
+     */
+    private const CHILD_EXCERPT_BUDGET = 65_536;
+
+    /**
+     * @var array<int, array{proc: resource, pipes: array<int, resource>, task_id: int}>
+     */
     private array $childProcs = [];
 
+    /**
+     * Accumulated bytes drained per child pipe across reap cycles. The reaper
+     * drains incrementally (non-blocking on every sweep) so a chatty child
+     * doesn't blow the per-pipe budget — but at log time we need every byte
+     * we've seen up to EOF, not just the last drain's leftovers. Indexed by
+     * pipe resource id so concurrent children don't bleed into each other.
+     *
+     * @var array<int, array{stdout: string, stderr: string}>
+     */
+    private array $childStreams = [];
+
+    /** @var Closure(int): list<string> */
+    private readonly Closure $cmdFactory;
+
+    /**
+     * @param Closure(int): list<string>|null $cmdFactory
+     *   Optional override that returns the argv to spawn for a given task id.
+     *   Defaults to `[$php, bin/spora, 'task:run', $taskId]` — exactly the
+     *   command {@see WorkerRunCommand} relied on inline before extraction.
+     *   Tests inject a smaller command to assert on exit codes, drain
+     *   budgets, and `proc_open`-failure paths without booting a full
+     *   Spora child task.
+     */
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly LoggerInterface $logger,
         private readonly MercurePublisherInterface $mercure,
         private readonly NotificationService $notificationService,
         private readonly Paths $paths,
-    ) {}
+        ?Closure $cmdFactory = null,
+    ) {
+        $this->cmdFactory = $cmdFactory ?? function (int $taskId): array {
+            return [
+                PHP_BINARY,
+                $this->paths->base('bin/spora'),
+                'task:run',
+                (string) $taskId,
+            ];
+        };
+    }
 
     /**
      * Claim and process a single QUEUED task synchronously in the parent process.
@@ -157,43 +210,140 @@ final class WorkerQueueProcessor
 
     /**
      * Spawn a child process to handle a single task.
+     *
+     * Uses explicit stdin/stdout/stderr pipes so {@see reapChildren()} can
+     * attach the exit code to a bounded excerpt of the child's output.
+     * The earlier empty-`$descriptorspec` form left children inheriting the
+     * parent's stdout/stderr — interleaved across concurrent children and
+     * invisible to the reaper, so an OOM-killed `task:run` left no trace
+     * except a silent prompt hang.
      */
     public function spawnChild(int $taskId): ?int
     {
-        $php = PHP_BINARY;
-        $bin = $this->paths->base('bin/spora');
-        $cmd = [$php, $bin, 'task:run', (string) $taskId];
+        $cmd = ($this->cmdFactory)($taskId);
 
-        $proc = proc_open($cmd, [], $pipes);
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $proc = proc_open($cmd, $descriptors, $pipes);
         if (!is_resource($proc)) {
+            $this->logger->error('Failed to spawn child process', [
+                'task_id' => $taskId,
+                'cmd'     => $cmd,
+            ]);
             return null;
         }
 
-        foreach ($pipes as $pipe) {
-            if (is_resource($pipe)) {
-                fclose($pipe);
-            }
-        }
+        // Parent doesn't write to stdin.
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
 
         $status = proc_get_status($proc);
-        $pid = $status['pid'];
+        $pid = (int) $status['pid'];
 
-        $this->childProcs[$pid] = $proc;
+        $this->childProcs[$pid] = [
+            'proc'    => $proc,
+            'pipes'   => $pipes,
+            'task_id' => $taskId,
+        ];
 
         return $pid;
     }
 
     /**
-     * Reap any child processes that have exited.
+     * Reap any child processes that have exited, draining their pipes and
+     * emitting a {@code child_exit} log line per finished child.
      */
     public function reapChildren(): void
     {
-        foreach ($this->childProcs as $pid => $proc) {
-            $status = proc_get_status($proc);
-            if (!$status['running']) {
-                proc_close($proc);
-                unset($this->childProcs[$pid]);
+        foreach ($this->childProcs as $pid => $entry) {
+            $proc    = $entry['proc'];
+            $pipes   = $entry['pipes'];
+            $taskId  = $entry['task_id'];
+
+            $stdoutPipe = $pipes[1] ?? null;
+            $stderrPipe = $pipes[2] ?? null;
+
+            // Drain whatever bytes are ready on this sweep. Non-blocking
+            // reads return whatever's currently in the kernel pipe buffer.
+            // We must call stream_get_contents() — even on an empty pipe
+            // — before feof() will flip true after the child closes its
+            // write end. Reading nothing is enough to advance the file
+            // position past the EOF marker once the child has exited.
+            $drainedStdout = $this->drainPipe($stdoutPipe);
+            $drainedStderr = $this->drainPipe($stderrPipe);
+
+            $pipeKey = is_resource($stdoutPipe) ? (int) $stdoutPipe : 0;
+            if (!isset($this->childStreams[$pipeKey])) {
+                $this->childStreams[$pipeKey] = ['stdout' => '', 'stderr' => ''];
             }
+            $this->childStreams[$pipeKey]['stdout'] .= $drainedStdout;
+            $this->childStreams[$pipeKey]['stderr'] .= $drainedStderr;
+
+            // Bound the per-pipe accumulator. A runaway child (worse than the
+            // 200 KB test burst) would otherwise grow our working set
+            // unbounded across reap sweeps.
+            if (strlen($this->childStreams[$pipeKey]['stdout']) > self::CHILD_EXCERPT_BUDGET * 4) {
+                $this->childStreams[$pipeKey]['stdout'] = substr(
+                    $this->childStreams[$pipeKey]['stdout'],
+                    0,
+                    self::CHILD_EXCERPT_BUDGET,
+                ) . '[...truncated; reaper safety ceiling reached...]';
+            }
+            if (strlen($this->childStreams[$pipeKey]['stderr']) > self::CHILD_EXCERPT_BUDGET * 4) {
+                $this->childStreams[$pipeKey]['stderr'] = substr(
+                    $this->childStreams[$pipeKey]['stderr'],
+                    0,
+                    self::CHILD_EXCERPT_BUDGET,
+                ) . '[...truncated; reaper safety ceiling reached...]';
+            }
+
+            // Done gate: feof() on stdout is the reliable signal that
+            // (a) the child has closed its write end (i.e. exited) AND
+            // (b) we've consumed everything it wrote. PHP's
+            // `proc_get_status` reports `running === true` until the parent
+            // fully drains the pipes AND calls proc_close, so it isn't
+            // sufficient on its own.
+            if (!is_resource($stdoutPipe) || !feof($stdoutPipe)) {
+                continue;
+            }
+
+            // EOF confirmed. Take the final accumulated bytes for the log.
+            $stdout = $this->childStreams[$pipeKey]['stdout'];
+            $stderr = $this->childStreams[$pipeKey]['stderr'];
+
+            $status  = proc_get_status($proc);
+            $exitCode = $status['exitcode'];
+            $signal   = (int) $status['termsig'];
+
+            $stdoutExcerpt = $this->truncateExcerpt($stdout, 'stdout');
+            $stderrExcerpt = $this->truncateExcerpt($stderr, 'stderr');
+
+            $level = $exitCode === 0 ? 'info' : 'error';
+            $this->logger->{$level}('child_exit', [
+                'task_id'        => $taskId,
+                'pid'            => $pid,
+                'exit_code'      => $exitCode,
+                'signal'         => $signal,
+                'stdout_excerpt' => $stdoutExcerpt,
+                'stderr_excerpt' => $stderrExcerpt,
+            ]);
+
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            proc_close($proc);
+
+            unset(
+                $this->childProcs[$pid],
+                $this->childStreams[$pipeKey],
+            );
         }
     }
 
@@ -248,8 +398,8 @@ final class WorkerQueueProcessor
      */
     public function shutdownParent(): void
     {
-        foreach ($this->childProcs as $proc) {
-            proc_terminate($proc);
+        foreach ($this->childProcs as $entry) {
+            proc_terminate($entry['proc']);
         }
 
         $start = hrtime(true);
@@ -260,8 +410,8 @@ final class WorkerQueueProcessor
             }
         }
 
-        foreach ($this->childProcs as $proc) {
-            proc_close($proc);
+        foreach ($this->childProcs as $entry) {
+            proc_close($entry['proc']);
         }
         $this->childProcs = [];
     }
@@ -279,5 +429,71 @@ final class WorkerQueueProcessor
             $agentMaxRetries[$a->id] = $a->max_retries;
         }
         return $agentMaxRetries;
+    }
+
+    /**
+     * Read up to {@see CHILD_EXCERPT_BUDGET} bytes from a pipe, capped per call
+     * at {@see CHILD_READ_CHUNK}, and bail the moment the budget would be
+     * exceeded. The cap is enforced so a runaway child writing to stdout in a
+     * tight loop can't grow our working set without bound.
+     *
+     * Returns an empty string for null / non-resource / closed handles — the
+     * latter is the normal "child already closed its end" case after
+     * {@see proc_close()}.
+     */
+    private function drainPipe(mixed $pipe): string
+    {
+        if (!is_resource($pipe)) {
+            return '';
+        }
+
+        $budget  = self::CHILD_EXCERPT_BUDGET;
+        $marker  = '[...truncated...]';
+        $maxFill = $budget - strlen($marker);
+
+        $buffer = '';
+        // Read the first chunk up-front so we can short-circuit when the
+        // child produced nothing; the loop handles the EOF case.
+        $chunk = stream_get_contents($pipe, self::CHILD_READ_CHUNK);
+        if (!is_string($chunk) || $chunk === '') {
+            return '';
+        }
+        $buffer .= $chunk;
+        if (strlen($buffer) >= $maxFill) {
+            return substr($buffer, 0, $maxFill) . $marker;
+        }
+
+        while (strlen($buffer) < $maxFill) {
+            $chunk = stream_get_contents($pipe, self::CHILD_READ_CHUNK);
+            if (!is_string($chunk) || $chunk === '') {
+                break;
+            }
+            $buffer .= $chunk;
+        }
+
+        if (strlen($buffer) > $maxFill) {
+            $buffer = substr($buffer, 0, $maxFill) . $marker;
+        }
+        return $buffer;
+    }
+
+    /**
+     * Truncate already-drained pipe bytes to the {@code child_exit} budget.
+     * Separated from {@see drainPipe()} so {@code reapChildren()} can also
+     * truncate the post-EOF append safely.
+     *
+     * The {@code $direction} parameter is purely documentation for the
+     * marker suffix — it does not change the budget. Returning the input
+     * unchanged when under budget keeps the round-trip cost O(1) for the
+     * happy path where the child produced no output.
+     */
+    private function truncateExcerpt(string $bytes, string $direction): string
+    {
+        $marker = '[...truncated...]';
+        $budget = self::CHILD_EXCERPT_BUDGET;
+        if (strlen($bytes) <= $budget - strlen($marker)) {
+            return $bytes;
+        }
+        return substr($bytes, 0, $budget - strlen($marker)) . $marker;
     }
 }

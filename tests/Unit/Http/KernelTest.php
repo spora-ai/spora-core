@@ -431,6 +431,34 @@ test('log stdout configures Monolog to write to stdout', function (): void {
     }
 });
 
+test('Kernel emits a "Spora booting" info line on construction', function (): void {
+    // Capture through a temp log file so the assertion reads the same
+    // pipeline operators see in `docker logs`. The Kernel's constructor
+    // emits the boot line at the very end, AFTER the LoggerInterface has
+    // been registered with the configured stream — so a `SPORA_LOG_PATH`
+    // env var pointing at a temp file catches it without any handler
+    // swapping.
+    $_ENV['SPORA_APP_ENV'] = 'testing';
+    $tmpLog = sys_get_temp_dir() . '/spora_boot_test_' . uniqid();
+    $_ENV['SPORA_LOG_PATH'] = $tmpLog;
+    $_ENV['SPORA_LOG_LEVEL'] = 'debug';
+
+    try {
+        $kernel = new Kernel();
+
+        $logContents = (string) file_get_contents($tmpLog);
+
+        expect($logContents)->toContain('Spora booting')
+            ->and($logContents)->toContain('app_env')
+            ->and($logContents)->toContain('testing');
+
+        $kernel->__destruct();
+    } finally {
+        @unlink($tmpLog);
+        unset($_ENV['SPORA_LOG_PATH'], $_ENV['SPORA_LOG_LEVEL'], $_ENV['SPORA_APP_ENV']);
+    }
+});
+
 test('public route with no middleware works without session or CSRF', function (): void {
     $kernel = new Kernel();
 
