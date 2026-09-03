@@ -464,6 +464,7 @@ it('SseController factory falls back to mercure_url when no publish_url is set',
     $container = Mockery::mock(Psr\Container\ContainerInterface::class);
     $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
     $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+    $container->shouldReceive('get')->with(Spora\Services\PrincipalResolver::class)->andReturn(new Spora\Services\PrincipalResolver());
 
     $controller = $factory($container);
 
@@ -484,6 +485,7 @@ it('SseController factory prefers mercure_publish_url over mercure_url when both
     $container = Mockery::mock(Psr\Container\ContainerInterface::class);
     $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
     $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
+    $container->shouldReceive('get')->with(Spora\Services\PrincipalResolver::class)->andReturn(new Spora\Services\PrincipalResolver());
 
     $controller = $factory($container);
     $reflection = new ReflectionClass($controller);

@@ -54,8 +54,10 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
             return Task::find($id);
         });
 
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publish')->andReturn(true);
+    $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
     $mercure->shouldReceive('publishToUser')->andReturn(true);
 
     $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
@@ -95,7 +97,8 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         ->with($task->id, $userId)
         ->andThrow(new InvalidArgumentException('Cannot abort a task in status PENDING_APPROVAL.'));
 
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
@@ -123,7 +126,8 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         ->with(99999, $userId)
         ->andThrow(new InvalidArgumentException('Task not found.'));
 
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
@@ -158,8 +162,10 @@ it('POST /abort with no body works (no-body call)', function (): void {
         return Task::find($id);
     });
 
-    $mercure = Mockery::mock(MercurePublisherInterface::class);
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publish')->andReturn(true);
+    $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
 
     $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
     $controller = new TaskController(

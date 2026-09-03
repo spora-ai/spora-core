@@ -8,10 +8,12 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
 use Spora\Services\AgentResourceContext;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolIconResolver;
@@ -44,6 +46,7 @@ final class AgentController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
+        private readonly AgentFavoriteServiceInterface $favoriteService,
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
@@ -254,7 +257,10 @@ final class AgentController
      */
     private function applyAgentPatch(int $agentId, int $userId, array $body): Agent|JsonResponse
     {
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived', 'is_favorite'];
+        // Plan A: `is_favorite` is gone from this allowlist — the column
+        // no longer exists on `agents`. The toggle is per-user via
+        // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
 
@@ -284,7 +290,10 @@ final class AgentController
      */
     private function coerceBooleanFlags(array &$data): void
     {
-        foreach (['is_pinned', 'is_archived', 'is_favorite'] as $boolKey) {
+        // Plan A: `is_favorite` is no longer in this list — the column
+        // was dropped in migration 0079 and the per-user pivot is set via
+        // dedicated endpoints (not PATCH).
+        foreach (['is_pinned', 'is_archived'] as $boolKey) {
             if (array_key_exists($boolKey, $data)) {
                 $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
             }
@@ -377,6 +386,42 @@ final class AgentController
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
+    /**
+     * POST /api/v1/agents/{id}/favorite — mark the agent as a favourite
+     * for the calling user. Per-user; idempotent.
+     */
+    public function favorite(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $agentId = (int) $request->attributes->get('id', 0);
+
+        try {
+            $this->favoriteService->setFavorite($userId, $agentId);
+        } catch (AgentNotFoundException) {
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
+        }
+
+        return new JsonResponse(['data' => ['is_favorite' => true]]);
+    }
+
+    /**
+     * DELETE /api/v1/agents/{id}/favorite — drop the favourite for the
+     * calling user. No-op if no row exists.
+     */
+    public function unfavorite(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $agentId = (int) $request->attributes->get('id', 0);
+
+        try {
+            $this->favoriteService->unsetFavorite($userId, $agentId);
+        } catch (AgentNotFoundException) {
+            return $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND);
+        }
+
+        return new JsonResponse(['data' => ['is_favorite' => false]]);
+    }
+
     private function resolveSupportsImageInput(Agent $agent): bool
     {
         if ($this->driverFactory === null) {
@@ -392,10 +437,20 @@ final class AgentController
 
     private function agentResourceContext(Agent $agent): AgentResourceContext
     {
+        // Plan A: pre-load the caller's favourited set so the per-viewer
+        // `is_favorite` field is correct on every single-agent response
+        // (show, store, update, transfer). Without this the field would
+        // default to false (the legacy shared column is gone) and the
+        // dashboard's post-toggle re-fetch would see the wrong value.
+        $favoritedIds = $this->favoriteService->loadFavoritedAgentIdsForViewer(
+            (int) $this->authService->currentUserId(),
+            [(int) $agent->id],
+        );
         return new AgentResourceContext(
             supportsImageInput: $this->resolveSupportsImageInput($agent),
             iconResolver: $this->toolIconResolver,
             pictureService: $this->pictureService,
+            favoritedAgentIds: $favoritedIds,
         );
     }
 }

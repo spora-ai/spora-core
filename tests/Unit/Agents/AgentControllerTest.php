@@ -61,7 +61,7 @@ function makeAgentControllers(): array
     // Tool enablement / overrides / operations moved to AgentToolSettingsService
     // when AgentService was split to satisfy SonarCloud S1448.
     $toolSettings = new AgentToolSettingsService($toolConfig, $llmConfig);
-    $crudController      = new AgentController($authService, $agentService, null, null, null, $principalService);
+    $crudController      = new AgentController($authService, $agentService, new Spora\Services\AgentFavoriteService($agentService), null, null, null, $principalService);
     $toolController      = new AgentToolController($authService, $toolSettings, $toolConfig);
     $overrideController  = new AgentOverrideController($authService, $toolSettings, $toolConfig);
     $authMiddleware = new AuthMiddleware($authService);

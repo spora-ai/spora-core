@@ -37,6 +37,7 @@ function buildIndexAgentController(): array
     $controller = new AgentController(
         $authService,
         $agentService,
+        new \Spora\Services\AgentFavoriteService($agentService),
         null,
         null,
         null,

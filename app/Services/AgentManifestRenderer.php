@@ -92,7 +92,8 @@ final class AgentManifestRenderer
             'max_retries'         => $manifest['max_retries'] ?? null,
             'is_pinned'           => $manifest['is_pinned'] ?? null,
             'is_archived'         => $manifest['is_archived'] ?? null,
-            'is_favorite'         => $manifest['is_favorite'] ?? null,
+            // Plan A: `is_favorite` no longer surfaces — it's a per-user
+            // pivot that the LLM doesn't act on.
         ];
 
         $toolBlock = [

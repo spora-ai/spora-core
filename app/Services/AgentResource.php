@@ -50,7 +50,12 @@ final class AgentResource
             'max_retries'          => (int) ($agent->max_retries ?? 0),
             'is_pinned'            => (bool) ($agent->is_pinned ?? false),
             'is_archived'          => (bool) ($agent->is_archived ?? false),
-            'is_favorite'          => (bool) ($agent->is_favorite ?? false),
+            // Per-viewer favourite: read from the context's pre-loaded pivot
+            // set rather than the legacy shared column (which Plan A
+            // removed in migration 0079). Null context → default false.
+            'is_favorite'          => $context !== null
+                && $context->favoritedAgentIds !== null
+                && $context->favoritedAgentIds->has((int) $agent->id),
             // Ownership: every agent has exactly one owning principal
             // (user or group) since migration 0067. The dashboard filter
             // chips, the agent sidebar grouping, and the agent-card owner

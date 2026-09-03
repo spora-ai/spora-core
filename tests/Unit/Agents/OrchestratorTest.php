@@ -1513,8 +1513,9 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     [$agentId] = seedAgent();
 
     $publishCount = 0;
-    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
-    $mockMercure->allows('publish')
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $mockMercure->allows('publishForPrincipal')
         ->andReturnUsing(static function () use (&$publishCount): bool {
             $publishCount++;
 
@@ -1559,8 +1560,9 @@ it('publishes intermediate state when tools require approval', function (): void
     [$agentId] = seedAgent();
 
     $publishCount = 0;
-    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
-    $mockMercure->allows('publish')
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $mockMercure->allows('publishForPrincipal')
         ->andReturnUsing(static function () use (&$publishCount): bool {
             $publishCount++;
 
@@ -1610,8 +1612,9 @@ it('publishes the final tool batch even when status flips to ABORTED post-batch'
 
     $publishCount = 0;
     $capturedStatuses = [];
-    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
-    $mockMercure->allows('publish')
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $mockMercure->allows('publishForPrincipal')
         ->andReturnUsing(static function (int $taskId, int $userId, array $data) use (&$publishCount, &$capturedStatuses): bool {
             $publishCount++;
             $capturedStatuses[] = $data['status'] ?? null;
@@ -1683,8 +1686,9 @@ it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORT
     [$agentId] = seedAgent();
 
     $capturedStatuses = [];
-    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
-    $mockMercure->allows('publish')
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $mockMercure->allows('publishForPrincipal')
         ->andReturnUsing(static function (int $taskId, int $userId, array $data) use (&$capturedStatuses): bool {
             $capturedStatuses[] = $data['status'] ?? null;
 
@@ -3360,8 +3364,9 @@ it('resolveLlmConfig falls back to default temperature when llmConfigService is 
 it('publishIntermediateState falls back to a default ToolCallSerializer when none is injected', function (): void {
     [$agentId] = seedAgent();
 
-    $mockMercure = Mockery::mock(MercurePublisherInterface::class);
-    $mockMercure->allows('publish')->andReturn(true);
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+    $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $mockMercure->allows('publishForPrincipal')->andReturn(true);
 
     $callCount = 0;
     $mock = Mockery::mock(LLMDriverInterface::class);
@@ -3490,8 +3495,9 @@ describe('Orchestrator::handleToolCalls — happy path', function (): void {
         [$agentId] = seedAgent();
 
         $publishCount = 0;
-        $mockMercure  = Mockery::mock(MercurePublisherInterface::class);
-        $mockMercure->allows('publish')->andReturnUsing(static function () use (&$publishCount): bool {
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
+        $mockMercure  = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $mockMercure->allows('publishForPrincipal')->andReturnUsing(static function () use (&$publishCount): bool {
             $publishCount++;
 
             return true;

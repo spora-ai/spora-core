@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\MercureConfigurationMissingException;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -27,6 +28,7 @@ final class SseController
 
     public function __construct(
         private readonly AuthService $authService,
+        private readonly PrincipalResolver $principalResolver,
         private readonly ?string $hubUrl = null,
         private readonly ?string $jwtKey = null,
         private readonly ?string $publicUrl = null,
@@ -105,16 +107,26 @@ final class SseController
             throw new MercureConfigurationMissingException('Mercure JWT key is not configured. Set SPORA_MERCURE_JWT_KEY.');
         }
 
+        // Task events are principal-keyed (so group peers receive them);
+        // notifications stay user-keyed (the notifications table is per-user).
+        $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        $taskTopics = array_map(
+            static fn(int $pid): string => "principal/{$pid}/tasks",
+            $principalIds,
+        );
+
+        $subscribeTopics = array_merge(
+            $taskTopics,
+            ["user/{$userId}/notifications"],
+        );
+
         $now     = time();
         $header  = $this->base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
         $payload = $this->base64url(json_encode([
             'iat'     => $now,
             'exp'     => $now + self::SUBSCRIBER_TOKEN_TTL_SECONDS,
             'mercure' => [
-                'subscribe' => [
-                    "user/{$userId}/tasks",
-                    "user/{$userId}/notifications",
-                ],
+                'subscribe' => $subscribeTopics,
             ],
         ], JSON_THROW_ON_ERROR));
 

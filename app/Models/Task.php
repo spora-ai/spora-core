@@ -104,14 +104,34 @@ final class Task extends Model
     }
 
     /**
-     * Convenience accessor for the Mercure `user/{userId}/tasks` topic:
-     * the topic still keys off `user_id` (the trigger user's id) so
-     * `trigger_user_id` IS the user_id we want. Returns null when the
-     * task has no trigger (system-generated).
+     * The principal owner of this task. Use this for the Mercure
+     * `principal/{principalId}/tasks` topic so every principal viewer
+     * (group members included) receives the event. Replaces the
+     * user-keyed topic format that only reached the trigger user.
+     */
+    public function principalOwnerId(): int
+    {
+        return (int) $this->principal_id;
+    }
+
+    /**
+     * The user who triggered this task. Replaces the misleadingly-named
+     * `principalUserId()` for the user-keyed notification topic.
+     */
+    public function triggerUserId(): ?int
+    {
+        return $this->trigger_user_id !== null ? (int) $this->trigger_user_id : null;
+    }
+
+    /**
+     * @deprecated Use {@see principalOwnerId()} for Mercure task events
+     *             or {@see triggerUserId()} for the user-keyed notification
+     *             topic. Retained during the Plan B migration window; will
+     *             be removed once all callers are swept.
      */
     public function principalUserId(): ?int
     {
-        return $this->trigger_user_id !== null ? (int) $this->trigger_user_id : null;
+        return $this->triggerUserId();
     }
 
     /** @return HasMany<TaskHistory, $this> */

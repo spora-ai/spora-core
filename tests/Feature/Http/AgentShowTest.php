@@ -98,6 +98,14 @@ function buildAgentController(): AgentController
         {
             return Agent::query()->find($agentId) ?? throw new RuntimeException('agent not found');
         }
+        public function setFavorite(int $userId, int $agentId): Agent
+        {
+            throw new RuntimeException('not used');
+        }
+        public function unsetFavorite(int $userId, int $agentId): Agent
+        {
+            throw new RuntimeException('not used');
+        }
         public function transferAgent(int $agentId, int $targetPrincipalId, int $callerUserId): Agent
         {
             throw new RuntimeException('not implemented in test');
@@ -150,7 +158,7 @@ function buildAgentController(): AgentController
             return [];
         }
     };
-    return new AgentController(bootAuthLayer(), $agentService, $factory);
+    return new AgentController(bootAuthLayer(), $agentService, new \Spora\Services\AgentFavoriteService($agentService), $factory);
 }
 
 function seedShowLlmConfig(int $id, int $userId, string $driverClass, string $model): void

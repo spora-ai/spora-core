@@ -19,11 +19,12 @@ const NOTIFICATIONS_API_PATH = '/api/v1/notifications/';
 function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
-    $mercure = $mercureOverride ?? Mockery::mock(MercurePublisherInterface::class);
+    $mercure = $mercureOverride ?? Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
+    $mercure->allows('publishForPrincipal')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
 
-    return new NotificationService($mercure);
+    return new NotificationService($mercure, new Spora\Services\PrincipalResolver());
 }
 
 function makeNotificationController(): array
@@ -58,17 +59,18 @@ describe('NotificationService', function (): void {
     it('notifyTaskCompleted creates a task_completed notification and publishes to Mercure', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishToUser')
             ->once()
             ->with($userId, Mockery::type('array'))
             ->andReturn(true);
-        $mercure->shouldReceive('publish')
+        $mercure->shouldReceive('publishForPrincipal')
             ->once()
             ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
             ->andReturn(true);
 
-        $service = new NotificationService($mercure);
+        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
 
         $task = Task::create([
             'agent_id'    => $agent->id,
@@ -94,11 +96,12 @@ describe('NotificationService', function (): void {
     it('notifyTaskFailed creates a task_failed notification', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishToUser')->andReturn(true);
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new NotificationService($mercure);
+        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
 
         $task = Task::create([
             'agent_id'       => $agent->id,
@@ -121,17 +124,18 @@ describe('NotificationService', function (): void {
     it('notifyPendingApproval publishes to both user channel and task channel', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->shouldReceive('publishToUser')
             ->once()
             ->with($userId, Mockery::type('array'))
             ->andReturn(true);
-        $mercure->shouldReceive('publish')
+        $mercure->shouldReceive('publishForPrincipal')
             ->once()
             ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
             ->andReturn(true);
 
-        $service = new NotificationService($mercure);
+        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
 
         $task = Task::create([
             'agent_id'    => $agent->id,
@@ -153,10 +157,11 @@ describe('NotificationService', function (): void {
     it('notifyScheduledRunCompleted creates a scheduled_run_completed notification', function (): void {
         [$userId, $agent] = seedUserAndAgentForNotification();
 
-        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishToUser')->andReturn(true);
 
-        $service = new NotificationService($mercure);
+        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
 
         $task = Task::create([
             'agent_id'    => $agent->id,

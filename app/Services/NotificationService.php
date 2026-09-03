@@ -16,6 +16,7 @@ class NotificationService implements NotificationServiceInterface
 {
     public function __construct(
         private readonly MercurePublisherInterface $mercure,
+        private readonly PrincipalResolver $principalResolver,
         private readonly ?SystemMailer $systemMailer = null,
         private readonly array $config = [],
         private readonly ?NotificationSubscriptionService $subscriptions = null,
@@ -23,22 +24,23 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyTaskCompleted(Task $task): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'task_completed',
-            'title'   => 'Task completed',
-            'body'    => $task->user_prompt,
-            'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'task_completed',
+            'title' => 'Task completed',
+            'body'  => $task->user_prompt,
+            'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'task_completed', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'task_completed', 'notification' => $this->toResource($notification)],
+            );
+        }
 
-        // Also publish to the task channel so the UI updates the task status
-        $this->mercure->publish($task->id, $userId, [
+        // Task channel: principal-keyed so every group peer receives the
+        // status update, not just the trigger user.
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), [
             'id'             => $task->id,
             'status'         => 'COMPLETED',
             'final_response' => $task->final_response,
@@ -48,22 +50,21 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyTaskFailed(Task $task): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'task_failed',
-            'title'   => 'Task failed',
-            'body'    => $task->failure_reason ?: 'An error occurred during task execution.',
-            'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'task_failed',
+            'title' => 'Task failed',
+            'body'  => $task->failure_reason ?: 'An error occurred during task execution.',
+            'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'task_failed', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'task_failed', 'notification' => $this->toResource($notification)],
+            );
+        }
 
-        // Also publish to the task channel so the UI updates the task status
-        $this->mercure->publish($task->id, $userId, [
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), [
             'id'             => $task->id,
             'status'         => 'FAILED',
             'error_code'     => $task->error_code,
@@ -75,102 +76,142 @@ class NotificationService implements NotificationServiceInterface
 
     public function notifyPendingApproval(Task $task): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'pending_approval',
-            'title'   => 'Task pending approval',
-            'body'    => $task->user_prompt,
-            'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'pending_approval',
+            'title' => 'Task pending approval',
+            'body'  => $task->user_prompt,
+            'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 
-        // Publish to user channel for notification badge updates
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'pending_approval', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'pending_approval', 'notification' => $this->toResource($notification)],
+            );
+        }
 
-        // Publish to task channel so the UI can update task status in real-time
-        $this->mercure->publish($task->id, $userId, ['event' => 'pending_approval', 'task_id' => $task->id]);
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), [
+            'event'   => 'pending_approval',
+            'task_id' => $task->id,
+        ]);
     }
 
     public function notifyScheduledRunCompleted(int $runId, Task $task): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'scheduled_run_completed',
-            'title'   => 'Scheduled run completed',
-            'body'    => $task->user_prompt,
-            'data'    => ['run_id' => $runId, 'task_id' => $task->id, 'agent_id' => $task->agent_id],
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'scheduled_run_completed',
+            'title' => 'Scheduled run completed',
+            'body'  => $task->user_prompt,
+            'data'  => ['run_id' => $runId, 'task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'scheduled_run_completed', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'scheduled_run_completed', 'notification' => $this->toResource($notification)],
+            );
+        }
     }
 
     public function notifyTaskOrphaned(Task $task): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'task_orphaned',
-            'title'   => 'Task interrupted',
-            'body'    => 'The task was interrupted and has been stopped. You can retry it manually.',
-            'data'    => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'task_orphaned',
+            'title' => 'Task interrupted',
+            'body'  => 'The task was interrupted and has been stopped. You can retry it manually.',
+            'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'task_orphaned', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'task_orphaned', 'notification' => $this->toResource($notification)],
+            );
+        }
     }
 
     public function notifyRetryQueued(Task $retryTask, int $attempt, int $max): void
     {
-        $userId = $retryTask->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'task_retry_queued',
-            'title'   => 'Retry scheduled',
-            'body'    => "Retry {$attempt}/{$max} scheduled.",
-            'data'    => [
-                'task_id'      => $retryTask->id,
-                'agent_id'     => $retryTask->agent_id,
-                'attempt'      => $attempt,
-                'max'          => $max,
-                'retry_after'  => $retryTask->retry_after->toIso8601String(),
+        $rows = $this->fanOutForTask($retryTask, [
+            'type'  => 'task_retry_queued',
+            'title' => 'Retry scheduled',
+            'body'  => "Retry {$attempt}/{$max} scheduled.",
+            'data'  => [
+                'task_id'     => $retryTask->id,
+                'agent_id'    => $retryTask->agent_id,
+                'attempt'     => $attempt,
+                'max'         => $max,
+                'retry_after' => $retryTask->retry_after->toIso8601String(),
             ],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'task_retry_queued', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'task_retry_queued', 'notification' => $this->toResource($notification)],
+            );
+        }
     }
 
     public function notifyTaskRetrying(Task $task, int $attempt, int $max): void
     {
-        $userId = $task->principalUserId();
-        $notification = $this->create([
-            'user_id' => $userId,
-            'type'    => 'task_retrying',
-            'title'   => 'Retrying task',
-            'body'    => "Retrying task (attempt {$attempt}/{$max})...",
-            'data'    => [
-                'task_id' => $task->id,
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'task_retrying',
+            'title' => 'Retrying task',
+            'body'  => "Retrying task (attempt {$attempt}/{$max})...",
+            'data'  => [
+                'task_id'  => $task->id,
                 'agent_id' => $task->agent_id,
                 'attempt'  => $attempt,
                 'max'      => $max,
             ],
         ]);
 
-        $this->mercure->publishToUser(
-            $userId,
-            ['event' => 'notification', 'type' => 'task_retrying', 'notification' => $this->toResource($notification)],
-        );
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'task_retrying', 'notification' => $this->toResource($notification)],
+            );
+        }
+    }
+
+    /**
+     * Insert one notification row per user that can act on this task's
+     * principal. Returns a [userId => Notification] map so the caller can
+     * publishToUser each row. Falls back to the trigger user when the
+     * principal is unknown — keeps the prior behaviour for stale rows
+     * where PrincipalResolver returns [].
+     *
+     * @param array{type: string, title: string, body: string|null, data: array|null} $payload
+     * @return array<int, Notification>
+     */
+    private function fanOutForTask(Task $task, array $payload): array
+    {
+        $userIds = $this->principalResolver->visibleUserIds($task->principalOwnerId());
+        if ($userIds === []) {
+            $triggerUserId = $task->triggerUserId();
+            if ($triggerUserId !== null) {
+                $userIds = [$triggerUserId];
+            }
+        }
+
+        $now  = Carbon::now();
+        $rows = [];
+        foreach ($userIds as $userId) {
+            $notification = new Notification();
+            $notification->fill([
+                'user_id'    => $userId,
+                'type'       => $payload['type'],
+                'title'      => $payload['title'],
+                'body'       => $payload['body'],
+                'data'       => $payload['data'],
+                'created_at' => $now,
+            ]);
+            $notification->save();
+            $rows[$userId] = $notification;
+        }
+
+        return $rows;
     }
 
     public function sendEmailForScheduledRun(Task $task): void
@@ -229,19 +270,6 @@ class NotificationService implements NotificationServiceInterface
         $sep     = $prefix === '' ? '' : '/';
 
         return $baseUrl . $prefix . $sep . 'tasks/' . $taskId;
-    }
-
-    /**
-     * @param array{user_id: int, type: string, title: string, body: string|null, data: array|null} $attributes
-     */
-    private function create(array $attributes): Notification
-    {
-        $notification = new Notification();
-        $notification->fill($attributes);
-        $notification->created_at = Carbon::now();
-        $notification->save();
-
-        return $notification;
     }
 
     private function toResource(Notification $notification): array

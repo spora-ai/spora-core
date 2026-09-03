@@ -9,6 +9,7 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPrincipalServiceInterface;
 use Spora\Services\AgentResource;
@@ -44,6 +45,7 @@ final class AgentTransferController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentPrincipalServiceInterface $principalService,
+        private readonly AgentFavoriteServiceInterface $favoriteService,
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?AgentPictureService $pictureService = null,
@@ -87,6 +89,10 @@ final class AgentTransferController
                     supportsImageInput: $this->resolveSupportsImageInput($agent),
                     iconResolver: $this->toolIconResolver,
                     pictureService: $this->pictureService,
+                    favoritedAgentIds: $this->favoriteService->loadFavoritedAgentIdsForViewer(
+                        (int) $this->authService->currentUserId(),
+                        [(int) $agent->id],
+                    ),
                 )),
             ],
         ]);

@@ -48,7 +48,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'update_agent',
     description: 'Update editable fields on this agent (name, description, system_prompt, max_steps, '
-               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, is_favorite). '
+               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived). '
                . 'Notes MUST go through write_notes / write_notes_overwrite — they are stripped from '
                . 'this patch. Unknown keys (llm_driver_config_id, anything else outside the allowlist) '
                . 'are silently dropped at the database layer; call read_agent afterwards '
@@ -158,12 +158,14 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'agent',
     type: 'object',
     description: 'ONLY for `update_agent`: a partial agent with the fields to update. '
-              . 'Allowed keys: name, description, system_prompt, max_steps, '
-              . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived, '
-              . 'is_favorite. `notes` is intentionally not accepted here — use write_notes. '
-              . 'Ignored by every other operation; omit this key entirely when calling '
-              . 'read_notes, write_notes, write_notes_overwrite, get_available_tools, '
-              . 'configure_tools, read_agent, list_agents, or create_agent.',
+               . 'Allowed keys: name, description, system_prompt, max_steps, '
+               . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived. '
+               . '`notes` is intentionally not accepted here — use write_notes. '
+               . 'Plan A: `is_favorite` was removed from this list because the toggle '
+               . 'is now per-user (POST/DELETE /api/v1/agents/{id}/favorite). '
+               . 'Ignored by every other operation; omit this key entirely when calling '
+               . 'read_notes, write_notes, write_notes_overwrite, get_available_tools, '
+               . 'configure_tools, read_agent, list_agents, or create_agent.',
     required: ['update_agent'],
 )]
 #[ToolParameter(

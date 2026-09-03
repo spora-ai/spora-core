@@ -43,9 +43,10 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         ]);
 
         $captured = [];
-        $publisher = Mockery::mock(MercurePublisherInterface::class);
-        $publisher->shouldReceive('publish')->andReturnUsing(function (int $taskId, int $userId, array $payload) use (&$captured) {
-            $captured[] = ['task_id' => $taskId, 'principal_id' => createUserPrincipalPublic($userId), 'data' => $payload['data'] ?? []];
+        /** @var Mockery\MockInterface&MercurePublisherInterface $publisher */
+        $publisher = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $publisher->shouldReceive('publishForPrincipal')->andReturnUsing(function (int $taskId, int $principalId, array $payload) use (&$captured) {
+            $captured[] = ['task_id' => $taskId, 'principal_id' => $principalId, 'data' => $payload['data'] ?? []];
             return true;
         });
 

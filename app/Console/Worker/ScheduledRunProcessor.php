@@ -247,7 +247,7 @@ final class ScheduledRunProcessor
                         'lease_owner'      => null,
                         'lease_expires_at' => null,
                     ]);
-                $this->mercure->publish($task->id, $userId, [
+                $this->mercure->publishForPrincipal($task->id, $userId, [
                     'task_id'    => $task->id,
                     'status'     => 'FAILED',
                     'error_code' => 'UNKNOWN',
@@ -456,7 +456,7 @@ final class ScheduledRunProcessor
             'status'      => $task->status,
             'user_prompt' => $task->user_prompt,
         ];
-        $this->mercure->publish($task->id, $task->principalUserId(), $taskData);
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $taskData);
     }
 
     private function computeNextDueAt(ScheduledRun $run): ?string

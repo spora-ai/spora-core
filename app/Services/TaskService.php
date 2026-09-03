@@ -115,7 +115,7 @@ final class TaskService implements TaskServiceInterface
         $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
 
         $resource = $this->taskResource($task);
-        $this->mercure->publish($task->id, $task->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -165,7 +165,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -189,7 +189,7 @@ final class TaskService implements TaskServiceInterface
         $fresh = $task->fresh();
 
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -212,7 +212,7 @@ final class TaskService implements TaskServiceInterface
         $retried = $this->orchestrator->retry($task->id);
 
         $resource = $this->taskResource($retried);
-        $this->mercure->publish($retried->id, $retried->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($retried->id, $retried->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -248,7 +248,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $resource = $this->taskResource($continuedTask);
-        $this->mercure->publish($continuedTask->id, $continuedTask->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($continuedTask->id, $continuedTask->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -279,7 +279,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         $resource = $this->taskResource($aborted);
-        $this->mercure->publish($aborted->id, $aborted->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($aborted->id, $aborted->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -314,7 +314,7 @@ final class TaskService implements TaskServiceInterface
 
         $fresh = $abortedChild->fresh();
         $resource = $this->taskResource($fresh);
-        $this->mercure->publish($fresh->id, $fresh->principalUserId(), $resource);
+        $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
     }
@@ -358,7 +358,7 @@ final class TaskService implements TaskServiceInterface
             try {
                 $aborted = $this->orchestrator->abort((int) $target->id);
                 $resource = $this->taskResource($aborted);
-                $this->mercure->publish($aborted->id, $aborted->principalUserId(), $resource);
+                $this->mercure->publishForPrincipal($aborted->id, $aborted->principalOwnerId(), $resource);
             } catch (InvalidTaskTransitionException $e) {
                 // Ancestor transitioned between the cascade scan and the
                 // per-row abort — treat as a no-op for the cascading call.

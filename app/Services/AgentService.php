@@ -9,6 +9,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
+use Spora\Models\UserAgentFavorite;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\Exceptions\AgentCreateLostException;
 use Spora\Services\Exceptions\AgentNotFoundException;
@@ -24,6 +25,10 @@ use Spora\Services\Exceptions\AgentNotFoundException;
  * {@see AgentPrincipalService} for the same reason — the principal axis
  * is a self-contained responsibility (talks to `principals` and
  * `PrincipalService::transferAgent()` only) and earns its own class.
+ *
+ * Per-user favourites moved to {@see AgentFavoriteService} for the same
+ * reason — Plan A replaced the shared `agents.is_favorite` column with
+ * a per-user pivot (migration 0077) and the toggle is its own surface.
  *
  * Principals-and-groups (migration 0067) re-keyed the ownership column from
  * `agents.user_id` to `agents.principal_id`. Every user-scoped read or
@@ -55,7 +60,6 @@ final class AgentService implements AgentServiceInterface
         'max_retries',
         'is_pinned',
         'is_archived',
-        'is_favorite',
         'notes',
     ];
 
@@ -88,11 +92,24 @@ final class AgentService implements AgentServiceInterface
             }
             $query->whereIn('principal_id', $principalIds);
         }
-        return $query
+        $agents = $query
             ->with(['agentTools', 'profilePicture.mediaAsset', 'principal'])
             ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(Agent $a) => $this->agentResource($a))
+            ->get();
+
+        // Plan A: pre-load the per-viewer favourite set so AgentResource's
+        // `is_favorite` field reads from a single Set<int> lookup instead
+        // of running one pivot query per agent. The static helper on the
+        // model keeps this DI-free so AgentService doesn't need to depend
+        // on AgentFavoriteService (which itself depends on AgentService
+        // for the visibility check — would create a cycle).
+        $favoritedIds = UserAgentFavorite::loadFavoritedForViewer(
+            $userId,
+            $agents->pluck('id')->all(),
+        );
+
+        return $agents
+            ->map(fn(Agent $a) => $this->agentResource($a, $favoritedIds))
             ->all();
     }
 
@@ -330,7 +347,7 @@ final class AgentService implements AgentServiceInterface
     }
 
 
-    private function agentResource(Agent $agent): array
+    private function agentResource(Agent $agent, ?\Illuminate\Support\Collection $favoritedIds = null): array
     {
         $picture = $agent->getRelation('profilePicture');
         $media = $picture instanceof AgentPicture && $picture->media_asset_id !== null
@@ -344,6 +361,7 @@ final class AgentService implements AgentServiceInterface
             preloadedPicture: $picture instanceof AgentPicture ? $picture : null,
             preloadedMediaAsset: $media instanceof MediaAsset ? $media : null,
             preloadedPrincipal: $principal instanceof Principal ? $principal : null,
+            favoritedAgentIds: $favoritedIds,
         ));
     }
 }

@@ -130,7 +130,6 @@ function stubManifestAgent(int $id, string $name = 'Test'): Agent
     $agent->allow_followup      = true;
     $agent->is_pinned           = false;
     $agent->is_archived         = false;
-    $agent->is_favorite         = false;
     $agent->retry_after_minutes = 0;
     $agent->max_retries         = 0;
     return $agent;
