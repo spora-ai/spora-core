@@ -122,6 +122,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolConfigService,
             $config->pluginLoader,
             fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+            $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
         $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
