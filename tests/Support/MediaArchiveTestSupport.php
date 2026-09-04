@@ -125,10 +125,26 @@ final class MediaArchiveTestSupport
         return new MediaConverterRegistry($stub);
     }
 
+    public static function buildProducerContainer(): \Psr\Container\ContainerInterface
+    {
+        return new class implements \Psr\Container\ContainerInterface {
+            public function get(string $id): mixed
+            {
+                if (!class_exists($id)) {
+                    throw new RuntimeException("Not registered: {$id}");
+                }
+                return new $id();
+            }
+
+            public function has(string $id): bool
+            {
+                return class_exists($id);
+            }
+        };
+    }
+
     public static function buildAuth(): AuthService
     {
-        // Tests run without a real auth session; the controller's
-        // canEdit() is only consulted in PATCH/refresh flows.
         return new class extends AuthService {
             public function __construct()
             { /* no-op */
