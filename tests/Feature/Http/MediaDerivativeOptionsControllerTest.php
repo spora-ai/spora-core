@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
@@ -50,7 +51,25 @@ function buildDerivativeOptionsControllerFixture(int $userId = 42, bool $isAdmin
 
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $principalService = new PrincipalService(new PrincipalResolver());
-    $derivatives = new MediaDerivativeService($assetStore, $principalService);
+    // The options controller exercises
+    // {@see MediaDerivativeService::availableOptionsFor()} which walks
+    // the discovery list via the DI container; the fake producer below
+    // has a no-arg ctor so a PSR-11 stub that constructs the FQCN by
+    // reflection is enough.
+    $container = new class implements \Psr\Container\ContainerInterface {
+        public function get(string $id): mixed
+        {
+            if (!class_exists($id)) {
+                throw new RuntimeException("Not registered: {$id}");
+            }
+            return new $id();
+        }
+        public function has(string $id): bool
+        {
+            return class_exists($id);
+        }
+    };
+    $derivatives = new MediaDerivativeService($assetStore, $principalService, $container);
     $auth = new class ($userId, $isAdmin) extends AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
         public function currentUserId(): ?int

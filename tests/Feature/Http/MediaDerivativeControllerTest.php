@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
@@ -46,7 +47,27 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
 
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $principalService = new PrincipalService(new PrincipalResolver());
-    $derivatives = new MediaDerivativeService($assetStore, $principalService);
+    // The {@see MediaDerivativeController::findProducer()} path uses
+    // the container to instantiate the discovered producer class; the
+    // fake producer registered via {@see FakeDerivativeProducer} below
+    // has a no-arg ctor so any PSR-11 stub that returns an instance is
+    // enough. Use a tiny in-line container that constructs the FQCN
+    // by reflection (matches the test stub pattern in
+    // {@see MediaArchiveTestSupport::buildConverterRegistry()}).
+    $container = new class implements \Psr\Container\ContainerInterface {
+        public function get(string $id): mixed
+        {
+            if (!class_exists($id)) {
+                throw new RuntimeException("Not registered: {$id}");
+            }
+            return new $id();
+        }
+        public function has(string $id): bool
+        {
+            return class_exists($id);
+        }
+    };
+    $derivatives = new MediaDerivativeService($assetStore, $principalService, $container);
     $serializer = new MediaAssetSerializer(true, $derivatives);
     $auth = new class ($userId, $isAdmin) extends AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
@@ -59,7 +80,7 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
             return $this->admin;
         }
     };
-    $controller = new MediaDerivativeController($derivatives, $auth, $serializer);
+    $controller = new MediaDerivativeController($derivatives, $auth, $container, $serializer);
 
     return [$controller, $service, $auth];
 }

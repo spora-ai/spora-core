@@ -47,7 +47,26 @@ function makeDerivativeServiceFixture(): array
     $assetStore = new AutoAssetStore($database, $local, 1_048_576);
 
     $principalService = new PrincipalService(new PrincipalResolver());
-    $service = new MediaDerivativeService($assetStore, $principalService);
+    // Minimal PSR-11 container stub: resolves any class that exists by
+    // constructing it with no arguments (which is what
+    // {@see FakeDerivativeProducer} does — its constructor takes a
+    // string slug). Anything that needs real DI would not be exercised
+    // through this fixture; the production container is wired in
+    // {@see \Spora\Core\ContainerDefinitions::all()}.
+    $container = new class implements Psr\Container\ContainerInterface {
+        public function get(string $id): mixed
+        {
+            if (!class_exists($id)) {
+                throw new RuntimeException("Not registered: {$id}");
+            }
+            return new $id();
+        }
+        public function has(string $id): bool
+        {
+            return class_exists($id);
+        }
+    };
+    $service = new MediaDerivativeService($assetStore, $principalService, $container);
 
     return ['service' => $service, 'tmp' => $tmp];
 }

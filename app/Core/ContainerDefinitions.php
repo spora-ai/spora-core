@@ -1156,6 +1156,7 @@ final class ContainerDefinitions
                 return new MediaDerivativeService(
                     $c->get(AssetStore::class),
                     $c->get(PrincipalService::class),
+                    $c,
                     $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
                 );
             },
@@ -1164,6 +1165,7 @@ final class ContainerDefinitions
                 return new MediaDerivativeController(
                     $c->get(MediaDerivativeService::class),
                     $c->get(AuthService::class),
+                    $c,
                     new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                 );
             },
