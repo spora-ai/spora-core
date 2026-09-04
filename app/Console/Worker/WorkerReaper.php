@@ -113,21 +113,13 @@ final class WorkerReaper
     }
 
     /**
-     * For each reaped row whose parent is still parked in
-     * AWAITING_SUB_AGENTS, hand control back to SubAgentService so the
-     * parent gets a chance to resume. The handoff happens AFTER the SQL
-     * flip has committed — SubAgentService's per-child and batch-boundary
-     * hooks then see a consistent view (the row the reaper just flipped
-     * is FAILED with the others that were already terminal).
+     * Resumes parents parked in AWAITING_SUB_AGENTS after the reaper flips
+     * their child to FAILED. Without this hook, a child killed by an
+     * OOM/SIGKILL race leaves the parent waiting forever — no terminal
+     * transition runs through SubAgentService's resume gate.
      *
-     * Without this hook, a child killed by an OOM/SIGKILL race with a
-     * concurrent worker leaves the parent AWAITING_SUB_AGENTS forever:
-     * the per-child resume hook never fires because no terminal-state
-     * transition runs through it. Plan D added the AWAITING-sub-agent
-     * sweep but not the resume hook — this closes that gap.
-     *
-     * Hook calls are wrapped in try/catch so a SubAgentService hiccup
-     * (DB locked, missing row) can't break the reaper's main sweep.
+     * Handoff happens AFTER the SQL flip commits so SubAgentService sees a
+     * consistent view.
      *
      * @param list<int> $orphanedIds
      */

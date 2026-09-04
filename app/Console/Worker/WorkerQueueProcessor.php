@@ -50,30 +50,14 @@ final class WorkerQueueProcessor
      */
     private array $childProcs = [];
 
-    /**
-     * Accumulated bytes drained per child pipe across reap cycles. The reaper
-     * drains incrementally (non-blocking on every sweep) so a chatty child
-     * doesn't blow the per-pipe budget — but at log time we need every byte
-     * we've seen up to EOF, not just the last drain's leftovers. Indexed by
-     * the same pid as {@see $childProcs} because pipe resource IDs are
-     * recycled by PHP after fclose, which would otherwise let two overlapping
-     * children share the same accumulator slot.
-     *
-     * @var array<int, array{stdout: string, stderr: string}>
-     */
+    /** @var array<int, array{stdout: string, stderr: string}> */
     private array $childStreams = [];
 
     /** @var Closure(int): list<string> */
     private readonly Closure $cmdFactory;
 
     /**
-     * @param Closure(int): list<string>|null $cmdFactory
-     *   Optional override that returns the argv to spawn for a given task id.
-     *   Defaults to `[$php, bin/spora, 'task:run', $taskId]` — exactly the
-     *   command {@see WorkerRunCommand} relied on inline before extraction.
-     *   Tests inject a smaller command to assert on exit codes, drain
-     *   budgets, and `proc_open`-failure paths without booting a full
-     *   Spora child task.
+     * @param Closure(int): list<string>|null $cmdFactory  Tests inject a tiny command to assert exit codes and budgets without booting a full Spora child task.
      */
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
@@ -314,7 +298,6 @@ final class WorkerQueueProcessor
             return;
         }
 
-        // EOF confirmed. Take the final accumulated bytes for the log.
         $stdout   = $this->childStreams[$pid]['stdout'];
         $stderr   = $this->childStreams[$pid]['stderr'];
         $status   = proc_get_status($proc);
