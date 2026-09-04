@@ -335,3 +335,89 @@ describe('GroupService::deleteGroup extended paths', function (): void {
             ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
     });
 });
+
+describe('GroupService::admin bypass ($isAdmin = true)', function (): void {
+    it('addMember: lets a global admin add a member without being in the group', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM1');
+
+        $adminId = bootAuth($auth, 'adm1@example.com', GROUP_TEST_PASSWORD);
+        $invitee = bootAuth($auth, 'adm1-invitee@example.com', GROUP_TEST_PASSWORD);
+
+        $service->addMember($group->id, $invitee, 'member', $adminId, isAdmin: true);
+
+        $membership = GroupMembership::where('group_id', $group->id)->where('user_id', $invitee)->first();
+        expect($membership)->not->toBeNull();
+        expect((string) $membership->role)->toBe('member');
+    });
+
+    it('addMember: lets a global admin promote a new member to owner', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM2');
+
+        $adminId = bootAuth($auth, 'adm2@example.com', GROUP_TEST_PASSWORD);
+        $invitee = bootAuth($auth, 'adm2-invitee@example.com', GROUP_TEST_PASSWORD);
+
+        $service->addMember($group->id, $invitee, 'owner', $adminId, isAdmin: true);
+
+        expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $invitee)->value('role'))->toBe('owner');
+    });
+
+    it('changeMemberRole: lets a global admin change a member role without being in the group', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM3');
+
+        $target = bootAuth($auth, 'adm3-target@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        $adminId = bootAuth($auth, 'adm3@example.com', GROUP_TEST_PASSWORD);
+        $service->changeMemberRole($group->id, $target, 'admin', $adminId, isAdmin: true);
+
+        expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $target)->value('role'))->toBe('admin');
+    });
+
+    it('removeMember: lets a global admin remove a member without being in the group', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM4');
+
+        $target = bootAuth($auth, 'adm4-target@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $target, 'member', $ownerId);
+
+        $adminId = bootAuth($auth, 'adm4@example.com', GROUP_TEST_PASSWORD);
+        $service->removeMember($group->id, $target, $adminId, isAdmin: true);
+
+        expect(GroupMembership::where('group_id', $group->id)->where('user_id', $target)->count())->toBe(0);
+    });
+
+    it('removeMember: the last-owner guard still fires even when caller is admin', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM5');
+
+        $adminId = bootAuth($auth, 'adm5@example.com', GROUP_TEST_PASSWORD);
+
+        expect(fn() => $service->removeMember($group->id, $ownerId, $adminId, isAdmin: true))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('changeMemberRole: the last-owner demotion guard still fires even when caller is admin', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM6');
+
+        $adminId = bootAuth($auth, 'adm6@example.com', GROUP_TEST_PASSWORD);
+
+        expect(fn() => $service->changeMemberRole($group->id, $ownerId, 'admin', $adminId, isAdmin: true))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+
+    it('addMember: default $isAdmin = false keeps the existing non-member rejection', function (): void {
+        // Regression guard: the new flag is opt-in. Without $isAdmin, a
+        // non-member caller still hits the tier rule and is refused.
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'ADM7');
+        $stranger = bootAuth($auth, 'adm7-stranger@example.com', GROUP_TEST_PASSWORD);
+        $invitee = bootAuth($auth, 'adm7-invitee@example.com', GROUP_TEST_PASSWORD);
+
+        expect(fn() => $service->addMember($group->id, $invitee, 'member', $stranger))
+            ->toThrow(GroupMembershipRuleException::class);
+    });
+});

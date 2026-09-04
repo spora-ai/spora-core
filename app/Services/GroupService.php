@@ -26,8 +26,12 @@ use Spora\Services\Exceptions\PrincipalHasDependentsException;
  *   - `member` — read-only within the group's principal surface.
  *
  * Every mutating method checks caller authorisation against the group's
- * `group_memberships` table. System-admin (global) is delegated upstream
- * — the service models the principal axis only.
+ * `group_memberships` table. System-admin (global) bypass is delegated
+ * to the controller: callers pass `$isAdmin = true` when they have
+ * already verified the global admin bit, and the service treats the
+ * caller as `owner`-tier for tier checks. The "last owner" guards still
+ * fire — admin authority does not let the system remove the final
+ * owner of a group.
  *
  * Concurrency: every write opens a `lockForUpdate` lock on the group row
  * (or membership row) to prevent the kind of "demote the last owner"
@@ -79,23 +83,26 @@ final class GroupService
 
     /**
      * Add a member to a group with the given role. Caller must be
-     * `owner` or `admin` of the group. Adding at `owner` tier requires
-     * `owner` role (admin cannot promote).
+     * `owner` or `admin` of the group, or a global admin (pass
+     * `$isAdmin = true`). Adding at `owner` tier requires `owner`-tier
+     * caller (group `admin` cannot promote; a global admin can).
      *
      * @throws GroupMembershipRuleException When the caller lacks the role
      *         tier needed for the requested target role, or when the
      *         user is already a member.
      */
-    public function addMember(int $groupId, int $userIdToAdd, string $role, int $callerUserId): void
+    public function addMember(int $groupId, int $userIdToAdd, string $role, int $callerUserId, bool $isAdmin = false): void
     {
         if (!in_array($role, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
             throw new InvalidArgumentException("Unknown role: {$role}");
         }
 
         Capsule::connection()->transaction(
-            function () use ($groupId, $userIdToAdd, $role, $callerUserId): void {
+            function () use ($groupId, $userIdToAdd, $role, $callerUserId, $isAdmin): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
-                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
+                $callerRole = $isAdmin
+                    ? GroupMembership::ROLE_OWNER
+                    : self::fetchCallerRole($groupId, $callerUserId);
 
                 self::assertCallerCanAddRole($callerRole, $role);
                 self::assertNotAlreadyMember($groupId, $userIdToAdd);
@@ -143,25 +150,28 @@ final class GroupService
     }
 
     /**
-     * Change a member's role. `owner → anything` requires `owner` caller;
-     * `admin → member` and `member → admin` may also be done by an `admin`
-     * caller; promoting to `owner` requires `owner` caller.
+     * Change a member's role. `owner → anything` requires `owner`-tier
+     * caller; `admin → member` and `member → admin` may also be done by
+     * an `admin` caller; promoting to `owner` requires `owner`-tier caller.
+     * Global admin (pass `$isAdmin = true`) is treated as `owner`-tier.
      *
-     * @throws GroupMembershipRuleException When the caller is not `owner`
-     *         and the requested change is not permitted at their tier, or
-     *         when the change would remove the last `owner`.
+     * @throws GroupMembershipRuleException When the caller is not `owner`-
+     *         tier and the requested change is not permitted at their
+     *         tier, or when the change would remove the last `owner`.
      */
-    public function changeMemberRole(int $groupId, int $memberUserId, string $newRole, int $callerUserId): void
+    public function changeMemberRole(int $groupId, int $memberUserId, string $newRole, int $callerUserId, bool $isAdmin = false): void
     {
         if (!in_array($newRole, [GroupMembership::ROLE_OWNER, GroupMembership::ROLE_ADMIN, GroupMembership::ROLE_MEMBER], true)) {
             throw new InvalidArgumentException("Unknown role: {$newRole}");
         }
 
         Capsule::connection()->transaction(
-            function () use ($groupId, $memberUserId, $newRole, $callerUserId): void {
+            function () use ($groupId, $memberUserId, $newRole, $callerUserId, $isAdmin): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
 
-                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
+                $callerRole = $isAdmin
+                    ? GroupMembership::ROLE_OWNER
+                    : self::fetchCallerRole($groupId, $callerUserId);
                 if ($callerRole === null) {
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }
@@ -235,18 +245,21 @@ final class GroupService
 
     /**
      * Remove a member from a group. Refuses to remove the last `owner`.
+     * Global admin (pass `$isAdmin = true`) is treated as `owner`-tier.
      *
      * @throws GroupMembershipRuleException When the caller lacks authority,
      *         when the target is the last owner, or when the caller is
      *         the target at non-owner tier (admins cannot self-evict).
      */
-    public function removeMember(int $groupId, int $userId, int $callerUserId): void
+    public function removeMember(int $groupId, int $userId, int $callerUserId, bool $isAdmin = false): void
     {
         Capsule::connection()->transaction(
-            function () use ($groupId, $userId, $callerUserId): void {
+            function () use ($groupId, $userId, $callerUserId, $isAdmin): void {
                 Group::where('id', $groupId)->lockForUpdate()->first();
 
-                $callerRole = self::fetchCallerRole($groupId, $callerUserId);
+                $callerRole = $isAdmin
+                    ? GroupMembership::ROLE_OWNER
+                    : self::fetchCallerRole($groupId, $callerUserId);
                 if ($callerRole === null) {
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }

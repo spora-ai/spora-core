@@ -25,9 +25,12 @@ use Symfony\Component\HttpFoundation\Response;
  *   DELETE /api/v1/groups/{id}/members/{uid}  — remove a member
  *
  * Authorisation: global admin OR owner of the group (per
- * {@see GroupService::fetchCallerRole()}). The service enforces the
- * finer-grained role-tier rules (admin can promote/demote to
- * `member`/`admin` but cannot touch `owner` rows).
+ * {@see GroupService::fetchCallerRole()}). The controller passes the
+ * global-admin bit through to {@see GroupService::addMember()} /
+ * {@see GroupService::changeMemberRole()} / {@see GroupService::removeMember()}
+ * so the service treats the caller as `owner`-tier and skips the
+ * membership-existence check that would otherwise refuse non-member
+ * callers. The service still enforces the "last owner" guards.
  */
 final class GroupMemberController
 {
@@ -116,7 +119,7 @@ final class GroupMemberController
     private function attemptAddMember(int $groupId, int $targetUserId, string $role, int $callerUserId): ?JsonResponse
     {
         try {
-            $this->groupService->addMember($groupId, $targetUserId, $role, $callerUserId);
+            $this->groupService->addMember($groupId, $targetUserId, $role, $callerUserId, $this->authService->isAdmin());
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         }
@@ -148,7 +151,7 @@ final class GroupMemberController
         }
 
         try {
-            $this->groupService->changeMemberRole($groupId, $userId, $newRole, $callerUserId);
+            $this->groupService->changeMemberRole($groupId, $userId, $newRole, $callerUserId, $this->authService->isAdmin());
         } catch (GroupMembershipRuleException $e) {
             // role-rule violations surface as 409 — the operator must
             // re-shape the request (add another owner before demoting
@@ -189,7 +192,7 @@ final class GroupMemberController
         [$callerUserId] = $auth;
 
         try {
-            $this->groupService->removeMember($id, $userId, $callerUserId);
+            $this->groupService->removeMember($id, $userId, $callerUserId, $this->authService->isAdmin());
         } catch (GroupMembershipRuleException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'ROLE_RULE_VIOLATION', 'message' => $e->getMessage()]],
