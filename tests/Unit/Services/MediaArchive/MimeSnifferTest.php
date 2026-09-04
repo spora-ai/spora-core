@@ -23,6 +23,15 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
         expect(makeSniffer()->sniffFromBytes(''))->toBe(MimeSniffer::OCTET_STREAM);
     });
 
+    it('refines generic text MIME detection for Typst filenames', function (): void {
+        $sniffer = makeSniffer();
+        $source = '= Hello\n';
+
+        expect($sniffer->sniffFromBytes($source, 'source.typ'))->toBe('text/x-typst');
+        expect($sniffer->sniffFromBytes($source, 'source.txt'))->toBe('text/plain');
+        expect($sniffer->sniffFromBytes('%PDF-1.4', 'source.typ'))->toBe('application/pdf');
+    });
+
     it('identifies PNG via the leading magic', function (): void {
         $bytes = "\x89PNG\r\n\x1a\n" . str_repeat("\x00", 32);
         expect(makeSniffer()->sniffFromBytes($bytes))->toBe('image/png');

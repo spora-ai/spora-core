@@ -6,14 +6,6 @@ namespace Tests\Unit\Services\MediaArchive;
 
 use Spora\Services\MediaArchive\MediaArchiveService;
 
-/**
- * Pins down {@see MediaArchiveService::extensionForMime()} and the
- * reverse {@see MediaArchiveService::mimeForExtension()} for every
- * round-trip the upload pipeline relies on. The static maps live
- * here because no plugin extension point exists — the round-trip
- * is what `MediaAllowedTypesService` and the upload UI use to know
- * "this extension is text, this MIME is its twin".
- */
 describe('MediaArchiveService::extensionForMime', function (): void {
     it('maps every supported MIME to its canonical extension', function (): void {
         $cases = [

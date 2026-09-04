@@ -125,11 +125,12 @@ final class MimeSniffer
     /**
      * Sniff MIME from raw bytes. `finfo` is the primary detector; the
      * magic-byte table is consulted as a tie-breaker for the formats where
-     * `finfo` is unreliable (WebP and MP4 brand variants). Always returns
-     * a non-empty string — falls back to `application/octet-stream` when
-     * nothing matches.
+     * `finfo` is unreliable (WebP and MP4 brand variants). A filename can
+     * refine generic `text/plain` detection for known text formats.
+     * Always returns a non-empty string — falls back to
+     * `application/octet-stream` when nothing matches.
      */
-    public function sniffFromBytes(string $bytes): string
+    public function sniffFromBytes(string $bytes, ?string $filename = null): string
     {
         if ($bytes === '') {
             return self::OCTET_STREAM;
@@ -138,7 +139,14 @@ final class MimeSniffer
         // finfo requires at least a few bytes — pass a 4 KiB prefix.
         $prefix = substr($bytes, 0, 4096);
 
-        return $this->sniffPrefix($prefix);
+        $detected = $this->sniffPrefix($prefix);
+        if ($detected === 'text/plain' && $filename !== null
+            && $this->sniffFromExtension($filename) === 'text/x-typst'
+        ) {
+            return 'text/x-typst';
+        }
+
+        return $detected;
     }
 
     /**

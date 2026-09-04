@@ -198,7 +198,7 @@ final class MediaArchiveIngestPipeline
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
     {
-        $sniffed = $this->sniffer->sniffFromBytes($bytes);
+        $sniffed = $this->sniffer->sniffFromBytes($bytes, $request->filename ?? $sourceUrl);
         $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
         $extracted = $this->metadata->extract($bytes, $sniffed, $mediaType);
 
