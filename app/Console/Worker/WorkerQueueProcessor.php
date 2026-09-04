@@ -55,7 +55,9 @@ final class WorkerQueueProcessor
      * drains incrementally (non-blocking on every sweep) so a chatty child
      * doesn't blow the per-pipe budget — but at log time we need every byte
      * we've seen up to EOF, not just the last drain's leftovers. Indexed by
-     * pipe resource id so concurrent children don't bleed into each other.
+     * the same pid as {@see $childProcs} because pipe resource IDs are
+     * recycled by PHP after fclose, which would otherwise let two overlapping
+     * children share the same accumulator slot.
      *
      * @var array<int, array{stdout: string, stderr: string}>
      */
@@ -250,6 +252,10 @@ final class WorkerQueueProcessor
             'pipes'   => $pipes,
             'task_id' => $taskId,
         ];
+        // Slot the accumulator on the same pid key as $childProcs — pipe
+        // resource IDs get recycled by PHP after fclose, so a fresh child
+        // could otherwise inherit a still-warm slot from a previous one.
+        $this->childStreams[$pid] = ['stdout' => '', 'stderr' => ''];
 
         return $pid;
     }
@@ -261,90 +267,99 @@ final class WorkerQueueProcessor
     public function reapChildren(): void
     {
         foreach ($this->childProcs as $pid => $entry) {
-            $proc    = $entry['proc'];
-            $pipes   = $entry['pipes'];
-            $taskId  = $entry['task_id'];
-
-            $stdoutPipe = $pipes[1] ?? null;
-            $stderrPipe = $pipes[2] ?? null;
-
-            // Drain whatever bytes are ready on this sweep. Non-blocking
-            // reads return whatever's currently in the kernel pipe buffer.
-            // We must call stream_get_contents() — even on an empty pipe
-            // — before feof() will flip true after the child closes its
-            // write end. Reading nothing is enough to advance the file
-            // position past the EOF marker once the child has exited.
-            $drainedStdout = $this->drainPipe($stdoutPipe);
-            $drainedStderr = $this->drainPipe($stderrPipe);
-
-            $pipeKey = is_resource($stdoutPipe) ? (int) $stdoutPipe : 0;
-            if (!isset($this->childStreams[$pipeKey])) {
-                $this->childStreams[$pipeKey] = ['stdout' => '', 'stderr' => ''];
-            }
-            $this->childStreams[$pipeKey]['stdout'] .= $drainedStdout;
-            $this->childStreams[$pipeKey]['stderr'] .= $drainedStderr;
-
-            // Bound the per-pipe accumulator. A runaway child (worse than the
-            // 200 KB test burst) would otherwise grow our working set
-            // unbounded across reap sweeps.
-            if (strlen($this->childStreams[$pipeKey]['stdout']) > self::CHILD_EXCERPT_BUDGET * 4) {
-                $this->childStreams[$pipeKey]['stdout'] = substr(
-                    $this->childStreams[$pipeKey]['stdout'],
-                    0,
-                    self::CHILD_EXCERPT_BUDGET,
-                ) . '[...truncated; reaper safety ceiling reached...]';
-            }
-            if (strlen($this->childStreams[$pipeKey]['stderr']) > self::CHILD_EXCERPT_BUDGET * 4) {
-                $this->childStreams[$pipeKey]['stderr'] = substr(
-                    $this->childStreams[$pipeKey]['stderr'],
-                    0,
-                    self::CHILD_EXCERPT_BUDGET,
-                ) . '[...truncated; reaper safety ceiling reached...]';
-            }
-
-            // Done gate: feof() on stdout is the reliable signal that
-            // (a) the child has closed its write end (i.e. exited) AND
-            // (b) we've consumed everything it wrote. PHP's
-            // `proc_get_status` reports `running === true` until the parent
-            // fully drains the pipes AND calls proc_close, so it isn't
-            // sufficient on its own.
-            if (!is_resource($stdoutPipe) || !feof($stdoutPipe)) {
-                continue;
-            }
-
-            // EOF confirmed. Take the final accumulated bytes for the log.
-            $stdout = $this->childStreams[$pipeKey]['stdout'];
-            $stderr = $this->childStreams[$pipeKey]['stderr'];
-
-            $status  = proc_get_status($proc);
-            $exitCode = $status['exitcode'];
-            $signal   = (int) $status['termsig'];
-
-            $stdoutExcerpt = $this->truncateExcerpt($stdout, 'stdout');
-            $stderrExcerpt = $this->truncateExcerpt($stderr, 'stderr');
-
-            $level = $exitCode === 0 ? 'info' : 'error';
-            $this->logger->{$level}('child_exit', [
-                'task_id'        => $taskId,
-                'pid'            => $pid,
-                'exit_code'      => $exitCode,
-                'signal'         => $signal,
-                'stdout_excerpt' => $stdoutExcerpt,
-                'stderr_excerpt' => $stderrExcerpt,
-            ]);
-
-            foreach ($pipes as $pipe) {
-                if (is_resource($pipe)) {
-                    fclose($pipe);
-                }
-            }
-            proc_close($proc);
-
-            unset(
-                $this->childProcs[$pid],
-                $this->childStreams[$pipeKey],
-            );
+            $this->reapOneChild($pid, $entry);
         }
+    }
+
+    /**
+     * Drain the pipes for a single child, decide whether it has exited, and
+     * if so emit the {@code child_exit} log line and release its handles.
+     *
+     * @param int $pid
+     * @param array{proc: resource, pipes: array<int, resource>, task_id: int} $child
+     */
+    private function reapOneChild(int $pid, array $child): void
+    {
+        $proc       = $child['proc'];
+        $pipes      = $child['pipes'];
+        $taskId     = $child['task_id'];
+        $stdoutPipe = $pipes[1] ?? null;
+        $stderrPipe = $pipes[2] ?? null;
+
+        // Drain whatever bytes are ready on this sweep. Non-blocking
+        // reads return whatever's currently in the kernel pipe buffer.
+        // We must call stream_get_contents() — even on an empty pipe
+        // — before feof() will flip true after the child closes its
+        // write end. Reading nothing is enough to advance the file
+        // position past the EOF marker once the child has exited.
+        $drainedStdout = $this->drainPipe($stdoutPipe);
+        $drainedStderr = $this->drainPipe($stderrPipe);
+
+        $this->childStreams[$pid]['stdout'] .= $drainedStdout;
+        $this->childStreams[$pid]['stderr'] .= $drainedStderr;
+
+        // Bound the per-pipe accumulator. A runaway child (worse than the
+        // 200 KB test burst) would otherwise grow our working set
+        // unbounded across reap sweeps.
+        $this->childStreams[$pid]['stdout'] = $this->capAccumulator($this->childStreams[$pid]['stdout']);
+        $this->childStreams[$pid]['stderr'] = $this->capAccumulator($this->childStreams[$pid]['stderr']);
+
+        // Done gate: feof() on stdout is the reliable signal that
+        // (a) the child has closed its write end (i.e. exited) AND
+        // (b) we've consumed everything it wrote. PHP's
+        // `proc_get_status` reports `running === true` until the parent
+        // fully drains the pipes AND calls proc_close, so it isn't
+        // sufficient on its own.
+        if (!is_resource($stdoutPipe) || !feof($stdoutPipe)) {
+            return;
+        }
+
+        // EOF confirmed. Take the final accumulated bytes for the log.
+        $stdout   = $this->childStreams[$pid]['stdout'];
+        $stderr   = $this->childStreams[$pid]['stderr'];
+        $status   = proc_get_status($proc);
+        $exitCode = $status['exitcode'];
+        $signal   = (int) $status['termsig'];
+
+        $stdoutExcerpt = $this->truncateExcerpt($stdout);
+        $stderrExcerpt = $this->truncateExcerpt($stderr);
+
+        $level = $exitCode === 0 ? 'info' : 'error';
+        $this->logger->{$level}('child_exit', [
+            'task_id'        => $taskId,
+            'pid'            => $pid,
+            'exit_code'      => $exitCode,
+            'signal'         => $signal,
+            'stdout_excerpt' => $stdoutExcerpt,
+            'stderr_excerpt' => $stderrExcerpt,
+        ]);
+
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) {
+                fclose($pipe);
+            }
+        }
+        proc_close($proc);
+
+        unset(
+            $this->childProcs[$pid],
+            $this->childStreams[$pid],
+        );
+    }
+
+    /**
+     * Cap an in-progress accumulator at {@see CHILD_EXCERPT_BUDGET} bytes once
+     * it has grown to 4× that threshold, appending a marker so an operator
+     * reading the {@code child_exit} log line knows the bytes were dropped
+     * (rather than truncated mid-message by an invisible cap).
+     */
+    private function capAccumulator(string $bytes): string
+    {
+        if (strlen($bytes) <= self::CHILD_EXCERPT_BUDGET * 4) {
+            return $bytes;
+        }
+        return substr($bytes, 0, self::CHILD_EXCERPT_BUDGET)
+            . '[...truncated; reaper safety ceiling reached...]';
     }
 
     /**
@@ -432,62 +447,33 @@ final class WorkerQueueProcessor
     }
 
     /**
-     * Read up to {@see CHILD_EXCERPT_BUDGET} bytes from a pipe, capped per call
-     * at {@see CHILD_READ_CHUNK}, and bail the moment the budget would be
-     * exceeded. The cap is enforced so a runaway child writing to stdout in a
-     * tight loop can't grow our working set without bound.
-     *
-     * Returns an empty string for null / non-resource / closed handles — the
-     * latter is the normal "child already closed its end" case after
-     * {@see proc_close()}.
+     * Drain up to {@code $maxBytes} bytes from a non-blocking pipe. Returns
+     * whatever's currently in the kernel pipe buffer — empty for null,
+     * non-resource, or closed handles (the "child already closed its end"
+     * case after `proc_close()`). EOF detection itself lives in the caller;
+     * {@code feof()} is the reliable done-gate, not the byte count.
      */
-    private function drainPipe(mixed $pipe): string
+    private function drainPipe(mixed $pipe, int $maxBytes = self::CHILD_READ_CHUNK): string
     {
         if (!is_resource($pipe)) {
             return '';
         }
-
-        $budget  = self::CHILD_EXCERPT_BUDGET;
-        $marker  = '[...truncated...]';
-        $maxFill = $budget - strlen($marker);
-
-        $buffer = '';
-        // Read the first chunk up-front so we can short-circuit when the
-        // child produced nothing; the loop handles the EOF case.
-        $chunk = stream_get_contents($pipe, self::CHILD_READ_CHUNK);
-        if (!is_string($chunk) || $chunk === '') {
+        $bytes = stream_get_contents($pipe, $maxBytes);
+        if ($bytes === false) {
             return '';
         }
-        $buffer .= $chunk;
-        if (strlen($buffer) >= $maxFill) {
-            return substr($buffer, 0, $maxFill) . $marker;
-        }
-
-        while (strlen($buffer) < $maxFill) {
-            $chunk = stream_get_contents($pipe, self::CHILD_READ_CHUNK);
-            if (!is_string($chunk) || $chunk === '') {
-                break;
-            }
-            $buffer .= $chunk;
-        }
-
-        if (strlen($buffer) > $maxFill) {
-            $buffer = substr($buffer, 0, $maxFill) . $marker;
-        }
-        return $buffer;
+        return $bytes;
     }
 
     /**
      * Truncate already-drained pipe bytes to the {@code child_exit} budget.
-     * Separated from {@see drainPipe()} so {@code reapChildren()} can also
+     * Separated from {@see drainPipe()} so {@code reapOneChild()} can also
      * truncate the post-EOF append safely.
      *
-     * The {@code $direction} parameter is purely documentation for the
-     * marker suffix — it does not change the budget. Returning the input
-     * unchanged when under budget keeps the round-trip cost O(1) for the
-     * happy path where the child produced no output.
+     * Returning the input unchanged when under budget keeps the round-trip
+     * cost O(1) for the happy path where the child produced no output.
      */
-    private function truncateExcerpt(string $bytes, string $direction): string
+    private function truncateExcerpt(string $bytes): string
     {
         $marker = '[...truncated...]';
         $budget = self::CHILD_EXCERPT_BUDGET;

@@ -90,10 +90,7 @@ final class Kernel implements KernelInterface
             $this->pluginBootError = null;
         }
 
-        // One info line per process boot so operators reading `docker logs`
-        // see a startup marker alongside the first work emission. The context
-        // mirrors the Operator's most-asked-questions (which env? where do
-        // logs go?) without dumping the full config.
+        // Surfaces a one-line marker in `docker logs` on every container restart so operators can confirm boot completed.
         $this->container->get(LoggerInterface::class)->info('Spora booting', [
             'app_env' => $this->container->get('config')['app_env'] ?? 'production',
         ]);
