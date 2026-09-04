@@ -9,7 +9,9 @@ use DateTimeZone;
 use Psr\Log\LoggerInterface;
 use Spora\Models\Task;
 use Spora\Services\NotificationService;
+use Spora\Services\SubAgentServiceInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Throwable;
 
 /**
  * Sweeps tasks stuck in RUNNING for longer than $staleMinutes and marks them FAILED.
@@ -26,6 +28,7 @@ final class WorkerReaper
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly NotificationService $notificationService,
+        private readonly ?SubAgentServiceInterface $subAgent = null,
     ) {}
 
     public function reapStaleTasks(OutputInterface $output, int $staleMinutes): void
@@ -82,6 +85,7 @@ final class WorkerReaper
 
         $this->reportReaped($updated, $staleMinutes, $output);
         $this->notifyOrphans($orphanedIds);
+        $this->fireSubAgentResumeHooks($orphanedIds);
     }
 
     private function reportReaped(int $updated, int $staleMinutes, OutputInterface $output): void
@@ -105,6 +109,57 @@ final class WorkerReaper
         $orphaned = Task::findMany($orphanedIds);
         foreach ($orphaned as $task) {
             $this->notificationService->notifyTaskOrphaned($task);
+        }
+    }
+
+    /**
+     * Resumes parents parked in AWAITING_SUB_AGENTS after the reaper flips
+     * their child to FAILED. Without this hook, a child killed by an
+     * OOM/SIGKILL race leaves the parent waiting forever — no terminal
+     * transition runs through SubAgentService's resume gate.
+     *
+     * Handoff happens AFTER the SQL flip commits so SubAgentService sees a
+     * consistent view.
+     *
+     * @param list<int> $orphanedIds
+     */
+    private function fireSubAgentResumeHooks(array $orphanedIds): void
+    {
+        if ($this->subAgent === null) {
+            return;
+        }
+
+        foreach ($orphanedIds as $taskId) {
+            $task = Task::find($taskId);
+            if ($task === null || $task->parent_task_id === null) {
+                continue;
+            }
+
+            $parent = Task::find((int) $task->parent_task_id);
+            if ($parent === null || $parent->status !== 'AWAITING_SUB_AGENTS') {
+                continue;
+            }
+
+            $parentId = (int) $task->parent_task_id;
+
+            try {
+                $this->subAgent->maybeResumeParent($taskId);
+                $this->subAgent->maybeResumeParentForParent($parentId);
+
+                $this->logger->info('reaper_resume_attempt', [
+                    'task_id'        => $taskId,
+                    'parent_task_id' => $parentId,
+                ]);
+            } catch (Throwable $e) {
+                // Defensive: a sub-agent service failure must NEVER kill the
+                // reaper sweep. The orphan rows are already FAILED — we'd
+                // rather log and move on than nuke the whole pass.
+                $this->logger->error('reaper_resume_failed', [
+                    'task_id'        => $taskId,
+                    'parent_task_id' => $parentId,
+                    'exception'      => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

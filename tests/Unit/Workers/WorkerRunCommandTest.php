@@ -60,8 +60,22 @@ function makeWorkerRunCommand(): array
     $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
     $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
 
-    $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+    /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+    $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
     $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+    // WorkerRunCommand now resolves WorkerReaper from the container (DI wiring
+    // shipped in Plan 2). The real container's factory wires the optional
+    // SubAgentServiceInterface as `null`; the test mock returns a fresh
+    // NullLogger-backed reaper so the existing sweep assertions stay in scope.
+    // `shouldIgnoreMissing` lets the mocked container accept any other lookup
+    // the WorkerRunCommand may add later without each test needing a
+    // per-call binding update.
+    $reaperInstance = new Spora\Console\Worker\WorkerReaper(
+        new NullLogger(),
+        $notificationService,
+        null,
+    );
+    $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn($reaperInstance);
 
     $command = new WorkerRunCommand(
         $db,
@@ -501,8 +515,12 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         $notificationService->allows('notifyScheduledRunCompleted')->andReturnNull();
         $notificationService->allows('sendEmailForScheduledRun')->andReturnNull();
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
+        );
 
         $command = new WorkerRunCommand(
             $db,
@@ -904,8 +922,12 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
         $notificationService = Mockery::mock(NotificationService::class);
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
+        );
         $container->allows('get')->with('tool_instances')->andReturn([]);
 
         $command = new WorkerRunCommand(
@@ -970,9 +992,13 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $notificationService = Mockery::mock(NotificationService::class);
         $notificationService->allows('notifyTaskOrphaned')->andReturnNull();
 
-        $container = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 1]);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
+        );
 
         $command = new WorkerRunCommand(
             $db,
@@ -1037,8 +1063,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
-        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
+        );
 
         $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
@@ -1062,8 +1092,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
-        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
+        );
 
         $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
@@ -1087,8 +1121,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
-        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
+        );
 
         $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Server);
 
@@ -1117,7 +1155,11 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $mercure      = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
         $notification = Mockery::mock(NotificationService::class);
-        $container    = Mockery::mock(Psr\Container\ContainerInterface::class);
+        /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
+        $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
+        $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
+            new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
+        );
 
         $command = new WorkerRunCommand($db, $orchestrator, new NullLogger(), $container, $mercure, $notification, $paths, WorkerRuntimeMode::Client);
 

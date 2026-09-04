@@ -89,6 +89,11 @@ final class Kernel implements KernelInterface
             $this->container->get(LoggerInterface::class)->warning($this->pluginBootError);
             $this->pluginBootError = null;
         }
+
+        // Surfaces a one-line marker in `docker logs` on every container restart so operators can confirm boot completed.
+        $this->container->get(LoggerInterface::class)->info('Spora booting', [
+            'app_env' => $this->container->get('config')['app_env'] ?? 'production',
+        ]);
     }
 
     public function __destruct()

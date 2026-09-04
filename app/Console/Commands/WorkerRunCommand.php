@@ -56,7 +56,7 @@ final class WorkerRunCommand extends Command
         private readonly Paths                $paths,
         private readonly WorkerRuntimeMode    $workerRuntimeMode,
     ) {
-        $this->reaper = new WorkerReaper($logger, $notificationService);
+        $this->reaper = $container->get(WorkerReaper::class);
         $this->queueProcessor = new WorkerQueueProcessor(
             $orchestrator,
             $logger,
