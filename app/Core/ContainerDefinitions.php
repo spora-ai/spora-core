@@ -66,6 +66,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -122,6 +123,7 @@ use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaAssetReader;
+use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaConverterRegistry;
@@ -611,6 +613,13 @@ final class ContainerDefinitions
                 return new MediaArchiveService(
                     $c->get(MediaArchiveIngestPipeline::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
+                    $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
+                );
+            },
+
+            MediaAssetResolver::class => static function (ContainerInterface $c): MediaAssetResolver {
+                return new MediaAssetResolver(
+                    $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : new PrincipalResolver(),
                 );
             },
 
@@ -1124,6 +1133,16 @@ final class ContainerDefinitions
                     $c->get(MimeSniffer::class),
                     new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                     $c->get('config'),
+                );
+            },
+
+            MediaResolveController::class => static function (ContainerInterface $c): MediaResolveController {
+                return new MediaResolveController(
+                    $c->get(MediaArchiveService::class),
+                    $c->get(AuthService::class),
+                    // The chat list doesn't need the derivatives strip;
+                    // that's a Media Archive detail-page concern.
+                    new MediaAssetSerializer(includeDerivatives: false),
                 );
             },
 

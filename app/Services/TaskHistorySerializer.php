@@ -19,6 +19,12 @@ use Spora\Models\TaskHistory;
  * (apart from the single `usage`-table read in `loadUsageByHistoryIds`
  * which the orchestrator calls from a `WHERE task_history_id IN (…)`
  * round trip to avoid N+1).
+ *
+ * The `attachments` field is the wire projection of `task_history.attachments`,
+ * the JSON column populated by {@see \Spora\Agents\Orchestrator::appendAttachmentRow()}.
+ * Refs only — the frontend resolves them to `MediaAsset` payloads via
+ * `POST /api/v1/media/resolve` to avoid inlining ~30 KB of asset metadata
+ * per row on every history poll.
  */
 final class TaskHistorySerializer
 {
@@ -99,6 +105,7 @@ final class TaskHistorySerializer
      *     role: string,
      *     content: string|null,
      *     content_blocks: list<array<string, mixed>>,
+     *     attachments: list<array{media_id: string, kind: string}>|null,
      *     tool_call_id: string|null,
      *     tool_name: string|null,
      *     usage?: array<string, mixed>
@@ -112,6 +119,7 @@ final class TaskHistorySerializer
             'role' => $history->role,
             'content' => $history->content,
             'content_blocks' => self::sanitizeContentBlocksForApi($blocks),
+            'attachments' => self::sanitizeAttachmentsForApi($history->attachments),
             'tool_call_id' => $history->tool_call_id,
             'tool_name' => $history->tool_name,
         ];
@@ -121,6 +129,38 @@ final class TaskHistorySerializer
         }
 
         return $message;
+    }
+
+    /**
+     * Normalise the JSON-decoded `attachments` column into the strict
+     * `{media_id: string, kind: string}` shape the chat UI consumes.
+     * Drops unknown keys, rejects entries without `media_id`, and folds
+     * any unknown `kind` value into `'text'` so the frontend never has
+     * to branch on it.
+     *
+     * @param mixed $raw Value from the `attachments` JSON cast; null or
+     *                   array expected.
+     * @return list<array{media_id: string, kind: string}>|null
+     */
+    public static function sanitizeAttachmentsForApi(mixed $raw): ?array
+    {
+        if (!is_array($raw) || $raw === []) {
+            return null;
+        }
+        $out = [];
+        foreach ($raw as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $id = $entry['media_id'] ?? null;
+            if (!is_string($id) || $id === '') {
+                continue;
+            }
+            $kind = ($entry['kind'] ?? null) === 'image' ? 'image' : 'text';
+            $out[] = ['media_id' => $id, 'kind' => $kind];
+        }
+
+        return $out === [] ? null : $out;
     }
 
     /**

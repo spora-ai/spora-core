@@ -119,11 +119,35 @@ final class MediaArchiveService
 
     private readonly PrincipalService $principalService;
 
+    private readonly MediaAssetResolver $resolver;
+
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
         ?PrincipalService $principalService = null,
+        ?MediaAssetResolver $resolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
+        $this->resolver = $resolver ?? new MediaAssetResolver(new PrincipalResolver());
+    }
+
+    /**
+     * Resolve a list of Media Archive UUIDs to their full rows, in input order,
+     * silently dropping any IDs the caller cannot access. Existence-hiding —
+     * a foreign id surfaces as a missing slot in the response, never as 404
+     * or 403, so the chat list cannot probe for archive rows it does not own.
+     *
+     * Delegates to {@see MediaAssetResolver} so the visibility union
+     * (admin bypass + direct upload owner + `PrincipalResolver::isVisibleTo`)
+     * lives in one focused class. The visibility contract mirrors
+     * {@see \Spora\Http\AssetController::ownsAsset()} so a chat-rendered
+     * `asset_url` always resolves when the row is here.
+     *
+     * @param  list<string> $ids
+     * @return list<MediaAsset>
+     */
+    public function resolveMany(array $ids, int $userId, bool $isAdmin): array
+    {
+        return $this->resolver->resolveMany($ids, $userId, $isAdmin);
     }
 
     /**

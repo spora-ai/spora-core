@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Illuminate\Support\Collection;
+use Psr\Log\LoggerInterface;
 use ReflectionClass;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Plugins\PluginLoader;
@@ -24,6 +25,16 @@ use Spora\Tools\Traits\HasOperations;
 final class ToolDefinitionBuilder
 {
     /**
+     * Per-process dedup set for the "missing #[ToolOperation]" loud error:
+     * a multi-tick task would otherwise log once per tick per broken tool,
+     * drowning the alert channel. The set is rebuilt per request, which is
+     * the natural unit for the orchestrator anyway.
+     *
+     * @var array<string, true>
+     */
+    private array $loggedMissingOperations = [];
+
+    /**
      * @param  list<object>  $toolInstances
      * @param  callable(array<string, mixed> $llmSettings): string  $buildLlmConfigBlock
      *         Callback into Orchestrator that renders the LLM-facing config block for a tool.
@@ -33,6 +44,7 @@ final class ToolDefinitionBuilder
         private readonly ?ToolConfigService $toolConfigService = null,
         private readonly ?PluginLoader $pluginLoader = null,
         private $buildLlmConfigBlock = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     /**
@@ -103,6 +115,25 @@ final class ToolDefinitionBuilder
     ): ?array {
         $allowedOps = $this->resolveAllowedOperations($instance, $toolClass, $overrides);
         if ($allowedOps === []) {
+            // The tool declares no #[ToolOperation] attributes (or every
+            // declared op is disabled by overrides with no fallback), so
+            // the LLM-facing schema would silently drop it. The agent
+            // would then complain "the tool isn't in my callable schema"
+            // with no breadcrumb — log loudly on the first hit per
+            // process so the broken tool class surfaces in `storage/spora.log`
+            // and any operator-configured alerting. The dedup set is
+            // per-request (see property docblock); the next request repeats
+            // the log so a fresh deploy with a broken plugin still alerts.
+            if (!isset($this->loggedMissingOperations[$toolClass])) {
+                $this->loggedMissingOperations[$toolClass] = true;
+                $this->logger?->error(
+                    'Tool {tool_class} has no callable #[ToolOperation] attributes and will be missing from the LLM-facing schema. Declare at least one #[ToolOperation(name, enabledByDefault: true)] on the tool class.',
+                    [
+                        'tool_class' => $toolClass,
+                        'agent_id'   => $agentId,
+                    ],
+                );
+            }
             return null;
         }
 
