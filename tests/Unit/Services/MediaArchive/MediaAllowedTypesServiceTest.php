@@ -243,3 +243,45 @@ test('normalizeImageExtensions returns the built-in default when input is null',
 test('normalizeImageExtensions preserves an empty list', function (): void {
     expect(MediaAllowedTypesService::normalizeImageExtensions([]))->toBe([]);
 });
+
+/**
+ * Inline stub converter — declares `text/x-typst` so the
+ * {@see MediaAllowedTypesService} test below can prove the round-trip
+ * from a registered plugin converter → upload allowlist.
+ */
+final class TypstStubConverter implements \Spora\Services\MediaArchive\MediaConverterInterface
+{
+    public function supportedMimeTypes(): array
+    {
+        return ['text/x-typst'];
+    }
+
+    public function supportedExtensions(): array
+    {
+        return ['typ'];
+    }
+
+    public function toMarkdown(string $bytes, string $mime, ?string $filename = null): string
+    {
+        return trim($bytes);
+    }
+}
+
+test('a plugin-registered text/x-typst converter adds the MIME and the typ extension to the allowlist', function (): void {
+    // Without the converter, `text/x-typst` is not in the static text
+    // allowlist and `typ` is not in the explicit extensions list.
+    [$serviceWithout] = buildAllowedTypesService();
+    expect($serviceWithout->allowedMimeTypes())->not->toContain('text/x-typst');
+    expect($serviceWithout->allowedExtensions())->not->toContain('typ');
+
+    // Registering a converter (the way `spora-plugin-typst` ships
+    // `TypstSourcePassthroughConverter`) brings both in.
+    MediaConverterDiscovery::add(TypstStubConverter::class);
+    [$serviceWith] = buildAllowedTypesService();
+    expect($serviceWith->allowedMimeTypes())->toContain('text/x-typst');
+    expect($serviceWith->allowedExtensions())->toContain('typ');
+
+    // And `isAllowed()` accepts the sniffed MIME so the upload
+    // controller does not 415 on a real `.typ` upload.
+    expect($serviceWith->isAllowed('text/x-typst'))->toBeTrue();
+});

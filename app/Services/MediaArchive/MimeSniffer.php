@@ -119,6 +119,7 @@ final class MimeSniffer
         'mov'  => 'video/quicktime',
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
+        'typ'  => 'text/x-typst',
     ];
 
     /**

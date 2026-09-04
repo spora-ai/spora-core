@@ -141,6 +141,7 @@ describe('MimeSniffer::sniffFromExtension', function (): void {
             'foo.mov'  => 'video/quicktime',
             'foo.pdf'  => 'application/pdf',
             'foo.txt'  => 'text/plain',
+            'foo.typ'  => 'text/x-typst',
         ];
         foreach ($cases as $filename => $expected) {
             expect($sniffer->sniffFromExtension($filename))->toBe($expected);
