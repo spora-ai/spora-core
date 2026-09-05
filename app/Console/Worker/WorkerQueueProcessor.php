@@ -13,6 +13,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
@@ -245,13 +246,17 @@ final class WorkerQueueProcessor
     }
 
     /**
-     * Reap any child processes that have exited, draining their pipes and
-     * emitting a {@code child_exit} log line per finished child.
+     * Reap any child processes that have exited, draining their pipes,
+     * emitting a {@code child_exit} log line per finished child, and echoing
+     * a one-line "Task X finished with status: Y" status to {@code $output}
+     * so operators running {@code bin/spora worker:run} in a TTY see one
+     * coherent block per task without child output interleaving across
+     * concurrent workers.
      */
-    public function reapChildren(): void
+    public function reapChildren(OutputInterface $output): void
     {
         foreach ($this->childProcs as $pid => $entry) {
-            $this->reapOneChild($pid, $entry);
+            $this->reapOneChild($pid, $entry, $output);
         }
     }
 
@@ -262,7 +267,7 @@ final class WorkerQueueProcessor
      * @param int $pid
      * @param array{proc: resource, pipes: array<int, resource>, task_id: int} $child
      */
-    private function reapOneChild(int $pid, array $child): void
+    private function reapOneChild(int $pid, array $child, OutputInterface $output): void
     {
         $proc       = $child['proc'];
         $pipes      = $child['pipes'];
@@ -324,10 +329,45 @@ final class WorkerQueueProcessor
         }
         proc_close($proc);
 
+        // Surface one coherent status line per child to the operator's
+        // terminal — replaces the "Task X finished with status: Y" line
+        // that used to come through stdout inheritance before Track 3
+        // routed the child's stdio into bounded pipes. The status is
+        // read from the DB after the child has run, not from the child's
+        // exit code, because Spora tasks can complete successfully (exit
+        // 0) yet land on FAILED via Orchestrator's exception handler, and
+        // vice versa.
+        $output->writeln(sprintf(
+            '<info>Task %d finished with status: %s</info>',
+            $taskId,
+            $this->resolveFinalStatus($taskId),
+        ));
+
         unset(
             $this->childProcs[$pid],
             $this->childStreams[$pid],
         );
+    }
+
+    /**
+     * Read the task's final DB status after the child has exited.
+     * Returns 'UNKNOWN' if the row is missing (deleted mid-run) or the
+     * DB read throws — neither is fatal; the operator still sees a
+     * "finished" line so they know the child exited.
+     */
+    private function resolveFinalStatus(int $taskId): string
+    {
+        try {
+            $task = Task::find($taskId);
+        } catch (Throwable $e) {
+            $this->logger->warning('Failed to read task status after child exit', [
+                'task_id'        => $taskId,
+                'exception_class' => get_class($e),
+                'message'        => $e->getMessage(),
+            ]);
+            return 'UNKNOWN';
+        }
+        return $task === null ? 'UNKNOWN' : $task->status;
     }
 
     /**
@@ -402,7 +442,7 @@ final class WorkerQueueProcessor
 
         $start = hrtime(true);
         while (count($this->childProcs) > 0 && (hrtime(true) - $start) < self::SHUTDOWN_GRACE_MICROS) {
-            $this->reapChildren();
+            $this->reapChildren(new NullOutput());
             if (count($this->childProcs) > 0) {
                 usleep(100_000);
             }

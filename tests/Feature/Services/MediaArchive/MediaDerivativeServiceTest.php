@@ -20,6 +20,7 @@ use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Tests\Support\FakeDerivativeProducer;
+use Tests\Support\MediaArchiveTestSupport;
 
 // `SPORA_STORAGE_DIR` is cleared at every test entry in `tests/Pest.php`
 // (the parallel runner inherits whatever value the previous test left in
@@ -47,7 +48,8 @@ function makeDerivativeServiceFixture(): array
     $assetStore = new AutoAssetStore($database, $local, 1_048_576);
 
     $principalService = new PrincipalService(new PrincipalResolver());
-    $service = new MediaDerivativeService($assetStore, $principalService);
+    $container = MediaArchiveTestSupport::buildProducerContainer();
+    $service = new MediaDerivativeService($assetStore, $principalService, $container);
 
     return ['service' => $service, 'tmp' => $tmp];
 }

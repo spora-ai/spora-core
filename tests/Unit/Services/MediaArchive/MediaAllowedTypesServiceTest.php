@@ -243,3 +243,34 @@ test('normalizeImageExtensions returns the built-in default when input is null',
 test('normalizeImageExtensions preserves an empty list', function (): void {
     expect(MediaAllowedTypesService::normalizeImageExtensions([]))->toBe([]);
 });
+
+final class TypstStubConverter implements \Spora\Services\MediaArchive\MediaConverterInterface
+{
+    public function supportedMimeTypes(): array
+    {
+        return ['text/x-typst'];
+    }
+
+    public function supportedExtensions(): array
+    {
+        return ['typ'];
+    }
+
+    public function toMarkdown(string $bytes, string $mime, ?string $filename = null): string
+    {
+        return trim($bytes);
+    }
+}
+
+test('a plugin-registered text/x-typst converter adds the MIME and the typ extension to the allowlist', function (): void {
+    [$serviceWithout] = buildAllowedTypesService();
+    expect($serviceWithout->allowedMimeTypes())->not->toContain('text/x-typst');
+    expect($serviceWithout->allowedExtensions())->not->toContain('typ');
+
+    MediaConverterDiscovery::add(TypstStubConverter::class);
+    [$serviceWith] = buildAllowedTypesService();
+    expect($serviceWith->allowedMimeTypes())->toContain('text/x-typst');
+    expect($serviceWith->allowedExtensions())->toContain('typ');
+
+    expect($serviceWith->isAllowed('text/x-typst'))->toBeTrue();
+});

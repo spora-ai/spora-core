@@ -6,6 +6,7 @@ namespace Spora\Services\MediaArchive;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Support\Carbon;
+use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetStore;
@@ -29,12 +30,25 @@ use Throwable;
  * `PrincipalService::ensureUserPrincipal($userId)`, otherwise stays
  * NULL — matching the precedence chain used by the ingest pipeline so
  * LIST and CREATE agree on a row's "principal".
+ *
+ * Producer resolution: each registered
+ * {@see MediaDerivativeProducerInterface} is instantiated through the
+ * DI container rather than via `new $class()` — plugin producers
+ * routinely take ctor arguments (e.g. `TypstRenderProducer` needs a
+ * `TypstWorldFactory`), and only the container knows how to wire
+ * them. The previous `new $class()` shape happened to work because
+ * the core `ImageDerivativeProducer` has a no-arg ctor; it broke on
+ * every plugin producer with dependencies, surfacing as
+ * `ArgumentCountError` in `availableOptionsFor()` and
+ * `MediaDerivativeController::findProducer()` whenever a `.typ` (or
+ * any other plugin-driven) asset was opened.
  */
 final class MediaDerivativeService
 {
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly PrincipalService $principalService,
+        private readonly ContainerInterface $container,
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
@@ -119,7 +133,7 @@ final class MediaDerivativeService
         $byFormat = [];
         foreach (MediaDerivativeProducerDiscovery::all() as $class) {
             /** @var MediaDerivativeProducerInterface $producer */
-            $producer = new $class();
+            $producer = $this->container->get($class);
             $sources = array_map('strtolower', $producer->supportedSourceFormats());
             $outputs = array_map('strtolower', $producer->supportedDerivativeFormats());
             $sourceMatches = $mime !== ''
