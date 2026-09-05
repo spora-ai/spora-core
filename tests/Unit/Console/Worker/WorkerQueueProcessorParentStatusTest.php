@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Monolog\Handler\TestHandler;
 use Monolog\Logger as MonologLogger;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Console\Worker\WorkerQueueProcessor;
+use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -166,5 +168,91 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
         // only emitted post-proc_close.
         expect(findChildExitRecord($handler))->toBeNull()
             ->and($output->fetch())->not->toContain('Task 55 finished');
+    });
+
+    it('still emits the completion line with UNKNOWN when the DB throws during Task::find', function (): void {
+        // resolveFinalStatus() catches Throwable from Task::find() so a
+        // brief DB hiccup during reap doesn't crash the worker. The
+        // operator still sees the line — just with UNKNOWN — and the
+        // reap continues. Force the throw by disconnecting the
+        // underlying PDO before the reap sweep so the next Eloquent
+        // SELECT raises a QueryException.
+        [$logger, $handler] = makeParentStatusLogger();
+        $cmdFactory = static fn(int $taskId): array => [
+            PHP_BINARY,
+            '-r',
+            'exit(0);',
+        ];
+
+        $processor = makeParentStatusProcessor($logger, $cmdFactory);
+        $output = new BufferedOutput();
+
+        $processor->spawnChild(404);
+
+        // Give the child a moment to actually exit before we tear the
+        // DB down — a still-running child would mask the catch branch
+        // because the reap would bail at feof() == false.
+        usleep(100_000);
+        Capsule::connection()->disconnect();
+
+        $processor->reapChildren($output);
+        $rendered = $output->fetch();
+
+        expect($rendered)
+            ->toContain('Task 404 finished with status: ')
+            ->toContain('UNKNOWN');
+
+        // The warning should also have landed in Monolog so an operator
+        // tailing the log can correlate the UNKNOWN with the DB hiccup.
+        $warning = null;
+        foreach ($handler->getRecords() as $record) {
+            if ($record['message'] === 'Failed to read task status after child exit') {
+                $warning = $record;
+                break;
+            }
+        }
+        expect($warning)->not->toBeNull()
+            ->and($warning->context['task_id'])->toBe(404)
+            ->and($warning->level)->toBe(Monolog\Level::Warning);
+
+        // Restore the connection so downstream tests in the same worker
+        // process can boot a fresh Database (afterEach would do this
+        // anyway, but explicit is cheaper than a test-ordering surprise).
+        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+        $db->boot();
+    });
+
+    it('shutdownParent uses NullOutput and reaps without throwing when children are alive', function (): void {
+        // shutdownParent() calls reapChildren(new NullOutput()) in its
+        // SIGTERM-driven loop — the buffered loop discards writes so the
+        // signal handler can keep iterating without leaking the operator
+        // TTY (which may already be torn down by the time the parent
+        // gets there). Spawn a child that runs long enough for the loop
+        // to see it, then verify shutdownParent terminates without
+        // surfacing an exception.
+        [$logger] = makeParentStatusLogger();
+        $cmdFactory = static fn(int $taskId): array => [
+            PHP_BINARY,
+            '-r',
+            'sleep(2); exit(0);',
+        ];
+
+        $processor = makeParentStatusProcessor($logger, $cmdFactory);
+        $processor->spawnChild(606);
+
+        // The reaper inside shutdownParent calls reapChildren(new
+        // NullOutput()) up to SHUTDOWN_GRACE_MICROS (30s); we don't
+        // wait that long. proc_terminate() returns true even when the
+        // child ignores it, so the loop bails on the count check and
+        // the foreach at the bottom does the actual proc_close.
+        $start = hrtime(true);
+        $processor->shutdownParent();
+        $elapsedMs = (hrtime(true) - $start) / 1_000_000;
+
+        // Sanity: shutdown returned within a sane wall-clock window.
+        // SHUTDOWN_GRACE_MICROS is 30s but proc_terminate on a
+        // long-running PHP child makes the loop bail on the count
+        // check immediately — well under a second in practice.
+        expect($elapsedMs)->toBeLessThan(5_000.0);
     });
 });
