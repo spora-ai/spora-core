@@ -33,6 +33,13 @@ final class MimeSniffer
     public const OCTET_STREAM = 'application/octet-stream';
 
     /**
+     * Typst source MIME. `finfo` reports `.typ` files as `text/plain`, so the
+     * byte sniffer upgrades a `text/plain` hit to this value when the filename
+     * extension confirms Typst.
+     */
+    private const string TYPST_MIME = 'text/x-typst';
+
+    /**
      * Magic-byte signatures indexed by their canonical MIME type. The
      * structure is `MIME => list<list<signature>>`. Each MIME has a list
      * of alternative signature *groups*; every signature inside one group
@@ -119,7 +126,7 @@ final class MimeSniffer
         'mov'  => 'video/quicktime',
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
-        'typ'  => 'text/x-typst',
+        'typ'  => self::TYPST_MIME,
     ];
 
     /**
@@ -141,9 +148,9 @@ final class MimeSniffer
 
         $detected = $this->sniffPrefix($prefix);
         if ($detected === 'text/plain' && $filename !== null
-            && $this->sniffFromExtension($filename) === 'text/x-typst'
+            && $this->sniffFromExtension($filename) === self::TYPST_MIME
         ) {
-            return 'text/x-typst';
+            return self::TYPST_MIME;
         }
 
         return $detected;
