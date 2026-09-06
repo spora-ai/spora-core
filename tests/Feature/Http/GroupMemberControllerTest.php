@@ -473,3 +473,105 @@ describe('GroupMemberController', function (): void {
         expect($body['error']['code'])->toBe('ROLE_RULE_VIOLATION');
     });
 });
+
+describe('GroupMemberController admin bypass', function (): void {
+    // Regression for the bug where `GroupMemberController::callerMayManageMembers()`
+    // passed for global admins but `GroupService::addMember()` /
+    // `changeMemberRole()` / `removeMember()` then re-checked
+    // `fetchCallerRole()` and refused non-member callers with a 403/409.
+    // After the fix, $isAdmin flows through to the service so admin can
+    // manage members of any group without being a member themselves.
+
+    it('store lets a global admin add a member to a group they are not in', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-adm-store-owner@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdmStore');
+
+        $adminId = bootAuth($auth, 'gmc-adm-store@example.com', GMC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        $target = bootAuth($auth, 'gmc-adm-store-target@example.com', GMC_TEST_PASSWORD);
+
+        simulateLoggedInSession($adminId, 'gmc-adm-store@example.com');
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'user_id' => $target,
+            'role'    => 'member',
+        ]);
+        $response = $controller->store((int) $group->id, $request);
+        expect($response->getStatusCode())->toBe(201);
+
+        $row = Spora\Models\GroupMembership::where('group_id', $group->id)
+            ->where('user_id', $target)->first();
+        expect($row)->not->toBeNull();
+        expect((string) $row->role)->toBe('member');
+    });
+
+    it('store lets a global admin promote a new member to owner', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-adm-promote-owner@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdmPromote');
+
+        $adminId = bootAuth($auth, 'gmc-adm-promote@example.com', GMC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        $target = bootAuth($auth, 'gmc-adm-promote-target@example.com', GMC_TEST_PASSWORD);
+
+        simulateLoggedInSession($adminId, 'gmc-adm-promote@example.com');
+        $request = jsonRequest('POST', '/api/v1/groups/' . $group->id . '/members', [
+            'user_id' => $target,
+            'role'    => 'owner',
+        ]);
+        $response = $controller->store((int) $group->id, $request);
+        expect($response->getStatusCode())->toBe(201);
+    });
+
+    it('update lets a global admin change a member role without being in the group', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-adm-update-owner@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdmUpdate');
+        $target = bootAuth($auth, 'gmc-adm-update-target@example.com', GMC_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, (int) $target, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $adminId = bootAuth($auth, 'gmc-adm-update@example.com', GMC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gmc-adm-update@example.com');
+
+        $request = jsonRequest('PATCH', '/api/v1/groups/' . $group->id . '/members/' . $target, [
+            'role' => 'admin',
+        ]);
+        $response = $controller->update((int) $group->id, (int) $target, $request);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['member']['role'])->toBe('admin');
+    });
+
+    it('destroy lets a global admin remove a member without being in the group', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-adm-destroy-owner@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdmDestroy');
+        $target = bootAuth($auth, 'gmc-adm-destroy-target@example.com', GMC_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, (int) $target, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+
+        $adminId = bootAuth($auth, 'gmc-adm-destroy@example.com', GMC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gmc-adm-destroy@example.com');
+
+        $response = $controller->destroy((int) $group->id, (int) $target);
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['deleted'])->toBe(true);
+    });
+
+    it('destroy still returns 409 ROLE_RULE_VIOLATION when admin tries to remove the last owner', function (): void {
+        [$controller, $auth, $groupService] = makeGroupMemberController();
+        $ownerId = bootAuth($auth, 'gmc-adm-last-owner@example.com', GMC_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdmLastOwner');
+
+        $adminId = bootAuth($auth, 'gmc-adm-last@example.com', GMC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gmc-adm-last@example.com');
+
+        $response = $controller->destroy((int) $group->id, (int) $ownerId);
+        expect($response->getStatusCode())->toBe(409);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('ROLE_RULE_VIOLATION');
+    });
+});
