@@ -10,6 +10,7 @@ use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 /**
  * Build a WorkerQueueProcessor with collaborators silenced via
@@ -103,9 +104,10 @@ describe('WorkerQueueProcessor — childStreams keyed by pid (no cross-child con
 
         // Drain until both pids have shown up in the child_exit record.
         // Two children, two exits — the loop bound is small.
+        $output = new BufferedOutput();
         $deadline = microtime(true) + 5.0;
         while (microtime(true) < $deadline) {
-            $processor->reapChildren();
+            $processor->reapChildren($output);
             usleep(20_000);
             if (childExitRecordsForPid($handler, $pid1) !== []
                 && childExitRecordsForPid($handler, $pid2) !== []) {

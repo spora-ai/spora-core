@@ -10,6 +10,7 @@ use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Symfony\Component\Console\Output\BufferedOutput;
 
 /**
  * Build a WorkerQueueProcessor with no real workers behind it — the
@@ -91,9 +92,10 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
         // Poll for child completion — the small one-liner exits quickly,
         // but PHP's proc scheduling is non-zero so we may need a second
         // reap sweep after a short wait.
+        $output = new BufferedOutput();
         $deadline = microtime(true) + 2.0;
         while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
-            $processor->reapChildren();
+            $processor->reapChildren($output);
             usleep(20_000);
         }
 
@@ -123,9 +125,10 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
         $processor = makeChildCaptureProcessor($logger, $cmdFactory);
         $processor->spawnChild(1);
 
+        $output = new BufferedOutput();
         $deadline = microtime(true) + 3.0;
         while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
-            $processor->reapChildren();
+            $processor->reapChildren($output);
             usleep(50_000);
         }
 
@@ -151,9 +154,10 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
         $processor = makeChildCaptureProcessor($logger, $cmdFactory);
         $processor->spawnChild(7);
 
+        $output = new BufferedOutput();
         $deadline = microtime(true) + 3.0;
         while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
-            $processor->reapChildren();
+            $processor->reapChildren($output);
             usleep(20_000);
         }
 
@@ -210,9 +214,10 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
         // If we got a pid, the reap must also not throw and must surface
         // a (possibly error-level) child_exit entry.
         if ($pid !== null) {
+            $output = new BufferedOutput();
             $deadline = microtime(true) + 2.0;
             while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
-                $processor->reapChildren();
+                $processor->reapChildren($output);
                 usleep(20_000);
             }
         }

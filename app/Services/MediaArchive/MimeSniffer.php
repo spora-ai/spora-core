@@ -33,6 +33,13 @@ final class MimeSniffer
     public const OCTET_STREAM = 'application/octet-stream';
 
     /**
+     * Typst source MIME. `finfo` reports `.typ` files as `text/plain`, so the
+     * byte sniffer upgrades a `text/plain` hit to this value when the filename
+     * extension confirms Typst.
+     */
+    private const string TYPST_MIME = 'text/x-typst';
+
+    /**
      * Magic-byte signatures indexed by their canonical MIME type. The
      * structure is `MIME => list<list<signature>>`. Each MIME has a list
      * of alternative signature *groups*; every signature inside one group
@@ -119,16 +126,18 @@ final class MimeSniffer
         'mov'  => 'video/quicktime',
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
+        'typ'  => self::TYPST_MIME,
     ];
 
     /**
      * Sniff MIME from raw bytes. `finfo` is the primary detector; the
      * magic-byte table is consulted as a tie-breaker for the formats where
-     * `finfo` is unreliable (WebP and MP4 brand variants). Always returns
-     * a non-empty string — falls back to `application/octet-stream` when
-     * nothing matches.
+     * `finfo` is unreliable (WebP and MP4 brand variants). A filename can
+     * refine generic `text/plain` detection for known text formats.
+     * Always returns a non-empty string — falls back to
+     * `application/octet-stream` when nothing matches.
      */
-    public function sniffFromBytes(string $bytes): string
+    public function sniffFromBytes(string $bytes, ?string $filename = null): string
     {
         if ($bytes === '') {
             return self::OCTET_STREAM;
@@ -137,7 +146,14 @@ final class MimeSniffer
         // finfo requires at least a few bytes — pass a 4 KiB prefix.
         $prefix = substr($bytes, 0, 4096);
 
-        return $this->sniffPrefix($prefix);
+        $detected = $this->sniffPrefix($prefix);
+        if ($detected === 'text/plain' && $filename !== null
+            && $this->sniffFromExtension($filename) === self::TYPST_MIME
+        ) {
+            return self::TYPST_MIME;
+        }
+
+        return $detected;
     }
 
     /**

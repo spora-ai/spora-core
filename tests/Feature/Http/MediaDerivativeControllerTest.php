@@ -46,7 +46,8 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
 
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $principalService = new PrincipalService(new PrincipalResolver());
-    $derivatives = new MediaDerivativeService($assetStore, $principalService);
+    $container = MediaArchiveTestSupport::buildProducerContainer();
+    $derivatives = new MediaDerivativeService($assetStore, $principalService, $container);
     $serializer = new MediaAssetSerializer(true, $derivatives);
     $auth = new class ($userId, $isAdmin) extends AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
@@ -59,7 +60,7 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
             return $this->admin;
         }
     };
-    $controller = new MediaDerivativeController($derivatives, $auth, $serializer);
+    $controller = new MediaDerivativeController($derivatives, $auth, $container, $serializer);
 
     return [$controller, $service, $auth];
 }

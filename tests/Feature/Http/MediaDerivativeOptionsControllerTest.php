@@ -50,7 +50,8 @@ function buildDerivativeOptionsControllerFixture(int $userId = 42, bool $isAdmin
 
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $principalService = new PrincipalService(new PrincipalResolver());
-    $derivatives = new MediaDerivativeService($assetStore, $principalService);
+    $container = MediaArchiveTestSupport::buildProducerContainer();
+    $derivatives = new MediaDerivativeService($assetStore, $principalService, $container);
     $auth = new class ($userId, $isAdmin) extends AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
         public function currentUserId(): ?int

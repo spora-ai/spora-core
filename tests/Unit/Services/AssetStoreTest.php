@@ -138,6 +138,25 @@ test('LocalAssetStore::readFromAsset() looks up the file via the row asset_token
     }
 });
 
+test('LocalAssetStore::readFromAsset() resolves Typst files by MIME', function (): void {
+    [$store, , $restore] = buildLocalStore();
+    try {
+        $ref = $store->store('= Hello\n', mime: 'text/x-typst', filename: 'source.typ');
+        expect($ref->url)->toEndWith('.typ');
+
+        $asset = new MediaAsset();
+        $asset->asset_token  = $ref->token;
+        $asset->mime_type    = 'text/x-typst';
+        $asset->storage_mode = 'local';
+
+        $resolved = $store->readFromAsset($asset);
+        expect($resolved['mime'])->toBe('text/x-typst');
+        expect(file_get_contents($resolved['path']))->toBe('= Hello\n');
+    } finally {
+        $restore();
+    }
+});
+
 test('LocalAssetStore::resolve() returns null for an unknown filename', function (): void {
     [$store, , $restore] = buildLocalStore();
     try {

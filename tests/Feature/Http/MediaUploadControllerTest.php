@@ -13,15 +13,38 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaConverterInterface;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Support\MediaArchiveTestSupport;
 
+beforeEach(function (): void {
+    MediaConverterDiscovery::reset();
+});
+
 afterEach(function (): void {
     MediaConverterDiscovery::reset();
 });
+
+final class TypstUploadTestConverter implements MediaConverterInterface
+{
+    public function supportedMimeTypes(): array
+    {
+        return ['text/x-typst'];
+    }
+
+    public function supportedExtensions(): array
+    {
+        return ['typ'];
+    }
+
+    public function toMarkdown(string $bytes, string $mime, ?string $filename = null): string
+    {
+        return 'converted:' . trim($bytes);
+    }
+}
 
 /**
  * Plan §12 B2b — MediaUploadController end-to-end surface tests.
@@ -41,6 +64,42 @@ test('multipart upload with a text file populates markdown_content via PlainText
     // PlainTextPassthroughConverter returns the bytes verbatim (trimmed).
     expect($asset->markdown_content)->not->toBeNull();
     expect($asset->markdown_content)->toContain('hello');
+    unlink($tmp);
+});
+
+test('multipart upload rejects Typst source without its converter', function (): void {
+    [, , , , , $controller] = buildUploadControllerFixtures();
+    $tmp = tempnam(sys_get_temp_dir(), 'typst');
+    file_put_contents($tmp, "= Hello\n");
+    $req = Request::create('/api/v1/media', 'POST', files: [
+        'file' => new UploadedFile($tmp, 'source.typ', 'text/plain', null, true),
+    ]);
+
+    $resp = $controller->store($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_UNSUPPORTED_MEDIA_TYPE);
+    unlink($tmp);
+});
+
+test('multipart Typst upload persists its canonical MIME and local asset', function (): void {
+    MediaConverterDiscovery::add(TypstUploadTestConverter::class);
+    [, $service, , , , $controller] = buildUploadControllerFixtures(null, 4);
+    $tmp = tempnam(sys_get_temp_dir(), 'typst');
+    $source = str_repeat("= Hello\n", 1000);
+    file_put_contents($tmp, $source);
+    $req = Request::create('/api/v1/media', 'POST', files: [
+        'file' => new UploadedFile($tmp, 'source.typ', 'text/plain', null, true),
+    ]);
+
+    $resp = $controller->store($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+    $body = json_decode($resp->getContent(), true);
+    $asset = $service->find($body['data']['id']);
+    expect($asset->mime_type)->toBe('text/x-typst');
+    expect($asset->storage_mode)->toBe('local');
+    expect($asset->asset_url)->toEndWith('.typ');
+    expect($asset->markdown_content)->toBe('converted:' . trim($source));
     unlink($tmp);
 });
 
@@ -201,7 +260,7 @@ test('upload with principal_id=0 (non-numeric string) is silently ignored (legac
 /**
  * @return array{0: AutoAssetStore, 1: MediaArchiveService, 2: \Spora\Auth\AuthService, 3: MediaAllowedTypesService, 4: MimeSniffer, 5: MediaUploadController}
  */
-function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null): array
+function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null, int $thresholdBytes = 1_048_576): array
 {
     $tmp = sys_get_temp_dir() . '/spora-upload-ctrl-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -212,7 +271,7 @@ function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null): a
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $database = new DatabaseAssetStore(50 * 1024 * 1024);
     $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-    $assetStore = new AutoAssetStore($database, $local, 1_048_576);
+    $assetStore = new AutoAssetStore($database, $local, $thresholdBytes);
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $auth ??= MediaArchiveTestSupport::buildAuth();
     $registry = MediaArchiveTestSupport::buildConverterRegistry();

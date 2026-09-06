@@ -81,6 +81,7 @@ final class MediaArchiveService
             'image/svg+xml'    => 'svg',
             'application/pdf'  => 'pdf',
             'text/plain'       => 'txt',
+            'text/x-typst'     => 'typ',
         ];
         return $map[strtolower($mime)] ?? null;
     }
@@ -111,8 +112,9 @@ final class MediaArchiveService
             'gif' => 'image/gif',
             'webp' => 'image/webp',
             'svg' => 'image/svg+xml',
-            'pdf' => 'application/pdf',
-            'txt' => 'text/plain',
+            'pdf'  => 'application/pdf',
+            'txt'  => 'text/plain',
+            'typ'  => 'text/x-typst',
         ];
         return $reverse[strtolower(ltrim($ext, '.'))] ?? null;
     }

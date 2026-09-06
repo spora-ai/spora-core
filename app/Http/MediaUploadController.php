@@ -53,7 +53,8 @@ final class MediaUploadController
 
         /** @var UploadedFile $file */
         [$file, $bytes, $userId] = $validated;
-        $sniffedMime = $this->sniffer->sniffFromBytes($bytes);
+        $clientName = $file->getClientOriginalName();
+        $sniffedMime = $this->sniffer->sniffFromBytes($bytes, $clientName);
 
         // The allowlist must use the sniffed MIME, never the client header.
         $agentIdRaw = $request->request->get('agent_id');
@@ -69,7 +70,6 @@ final class MediaUploadController
             return $error;
         }
 
-        $clientName = $file->getClientOriginalName();
         $prompt = $request->request->get('prompt');
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,

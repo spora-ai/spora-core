@@ -36,6 +36,7 @@ final class LocalAssetStore implements AssetStore
         'svg'  => 'image/svg+xml',
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
+        'typ'  => 'text/x-typst',
     ];
 
     public function __construct(
@@ -191,6 +192,7 @@ final class LocalAssetStore implements AssetStore
                 'image/svg+xml' => 'svg',
                 'application/pdf' => 'pdf',
                 'text/plain'    => 'txt',
+                'text/x-typst'  => 'typ',
             ];
             if (isset($fromMime[strtolower($mime)])) {
                 return $fromMime[strtolower($mime)];

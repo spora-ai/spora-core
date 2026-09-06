@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
+use Psr\Container\ContainerInterface;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
@@ -45,6 +46,7 @@ final class MediaDerivativeController
     public function __construct(
         private readonly MediaDerivativeService $derivatives,
         private readonly AuthService $auth,
+        private readonly ContainerInterface $container,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
 
@@ -134,7 +136,7 @@ final class MediaDerivativeController
         $ext    = strtolower(pathinfo((string) $parent->filename, PATHINFO_EXTENSION));
         foreach (MediaDerivativeProducerDiscovery::all() as $class) {
             /** @var MediaDerivativeProducerInterface $producer */
-            $producer = new $class();
+            $producer = $this->container->get($class);
             $sources = array_map('strtolower', $producer->supportedSourceFormats());
             $outputs = array_map('strtolower', $producer->supportedDerivativeFormats());
             if (

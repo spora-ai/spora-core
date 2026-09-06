@@ -344,7 +344,7 @@ final class WorkerRunCommand extends Command
             $this->lastScheduledProcessedCount = $this->scheduledRunProcessor->lastProcessed;
         }
 
-        $this->queueProcessor->reapChildren();
+        $this->queueProcessor->reapChildren($output);
 
         if ($this->shouldProcessQueue($options->isDaemon, $options->isOnce, $options->includeQueue)) {
             $this->queueProcessor->processRetryQueue();
