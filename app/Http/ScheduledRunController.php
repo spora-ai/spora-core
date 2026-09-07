@@ -30,6 +30,11 @@ final class ScheduledRunController
 
     /**
      * GET /api/v1/agents/{agentId}/scheduled-runs
+     *
+     * Empty list (200) when the agent exists and the caller can see it but
+     * no runs are scheduled yet — this is the common case for a freshly
+     * created agent. 404 only when the agent itself is missing or hidden
+     * by the principal-visibility gate.
      */
     public function index(Request $request): JsonResponse
     {
@@ -39,7 +44,7 @@ final class ScheduledRunController
         $runs = $this->scheduledRunService->getRunsForAgent($agentId, $userId);
 
         if ($runs === null) {
-            return $this->notFound();
+            return $this->agentNotFound();
         }
 
         return new JsonResponse(['data' => ['scheduled_runs' => $runs]]);
@@ -332,6 +337,25 @@ final class ScheduledRunController
         // shared trait's response shape.
         return new JsonResponse(
             ['error' => ['code' => 'SCHEDULED_RUN_NOT_FOUND', 'message' => 'Scheduled run not found.']],
+            Response::HTTP_NOT_FOUND,
+        );
+    }
+
+    /**
+     * The `getRunsForAgent()` service returns `null` only when the agent is
+     * missing OR hidden by the principal-visibility gate — it never collapses
+     * "agent visible, no runs yet" into null (the latter is a valid empty
+     * 200). Surface that case with the more accurate `AGENT_NOT_FOUND` code
+     * so SPA error-handling can distinguish it from "scheduled run row
+     * missing" (which never happens for the index endpoint).
+     *
+     * Existence-hiding is preserved: callers can't tell from the response
+     * whether the agent exists.
+     */
+    private function agentNotFound(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'AGENT_NOT_FOUND', 'message' => 'Agent not found.']],
             Response::HTTP_NOT_FOUND,
         );
     }

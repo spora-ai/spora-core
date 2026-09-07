@@ -199,7 +199,9 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_GROUPS, [GroupController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_GROUPS_ID, [GroupController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_GROUPS_ID, [GroupController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID, [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
+        // DELETE is gated by `GroupService::deleteGroup` (admin OR group owner),
+        // not by AdminMiddleware, so the group owner can clear their own group.
+        $r->addRoute('DELETE', self::ROUTE_GROUPS_ID, [GroupController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_GROUPS_ID_MEMBERS, [GroupMemberController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);

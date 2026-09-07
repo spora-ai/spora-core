@@ -411,9 +411,9 @@ Update `name` / `description` / `profile_picture`. **Admin only.** The `profile_
 
 ### `DELETE /api/v1/groups/{id}`
 
-Delete a group. **Admin only.** Returns `409 GROUP_HAS_AGENTS` with `agent_ids` and `reassign_endpoint: /api/v1/agents/{id}/transfer` if any agent still references the group's principal — the operator must transfer or delete those agents first.
+Delete a group. Caller must be a global admin OR the group's `owner` member (plain `admin` / `member` tier callers receive `403 FORBIDDEN`). Returns `409 GROUP_HAS_AGENTS` with `agent_ids` and `reassign_endpoint: /api/v1/agents/{id}/transfer` if any agent still references the group's principal — the operator must transfer or delete those agents first.
 
-**Auth:** admin + CSRF.
+**Auth:** session + CSRF; the owner-or-admin gate is in `GroupService::deleteGroup()`.
 
 ## Group members — admin surface
 

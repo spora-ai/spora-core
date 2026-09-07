@@ -75,15 +75,28 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
         expect($middleware)->not->toContain(Spora\Http\Middleware\AdminMiddleware::class);
     });
 
-    it('leaves PATCH and DELETE on AdminMiddleware regardless of the flag', function (): void {
+    it('keeps PATCH on AdminMiddleware regardless of the flag', function (): void {
         foreach ([true, false] as $value) {
             $routes = routeRegCollectRoutes(['allow_group_creation' => $value]);
 
             $patch = routeRegMiddleware($routes, 'PATCH', '/api/v1/groups/{id}');
             expect($patch)->toContain(Spora\Http\Middleware\AdminMiddleware::class);
+        }
+    });
+
+    it('registers DELETE without AdminMiddleware (gate moves to the controller so the group owner can delete)', function (): void {
+        foreach ([true, false] as $value) {
+            $routes = routeRegCollectRoutes(['allow_group_creation' => $value]);
 
             $delete = routeRegMiddleware($routes, 'DELETE', '/api/v1/groups/{id}');
-            expect($delete)->toContain(Spora\Http\Middleware\AdminMiddleware::class);
+            expect($delete)->toContain(Spora\Http\Middleware\AuthMiddleware::class);
+            expect($delete)->toContain(Spora\Http\Middleware\CsrfMiddleware::class);
+            // The owner-or-admin gate lives in `GroupService::deleteGroup()`
+            // (verified by `GroupControllerTest::destroy returns 200 when
+            // the group is owned and empty` / `destroy returns 403 for a
+            // non-owner caller`); the middleware here only enforces auth
+            // + CSRF so the service can see who's calling.
+            expect($delete)->not->ToContain(Spora\Http\Middleware\AdminMiddleware::class);
         }
     });
 
