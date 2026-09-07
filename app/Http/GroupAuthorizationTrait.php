@@ -105,7 +105,7 @@ trait GroupAuthorizationTrait
             return $userId;
         }
 
-        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $authService, $principalService);
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $principalService);
         if ($principal instanceof JsonResponse) {
             return $principal;
         }
@@ -161,7 +161,6 @@ trait GroupAuthorizationTrait
     protected function loadGroupPrincipalIfVisible(
         int $id,
         int $userId,
-        AuthService $authService,
         PrincipalService $principalService,
     ): Principal|JsonResponse {
         $group = Group::find($id);
