@@ -114,7 +114,7 @@ final class MediaAssetResolver
         if ($this->isAdminBypassed($isAdmin) || $this->callerOwnsAsset($asset, $userId)) {
             return true;
         }
-        return $this->isInPrincipalSet($asset, $principalIdSet)
+        return ($asset->principal_id !== null && isset($principalIdSet[(int) $asset->principal_id]))
             || $this->agentIsVisibleToCaller($asset, $userId);
     }
 
@@ -126,11 +126,6 @@ final class MediaAssetResolver
     private function callerOwnsAsset(MediaAsset $asset, int $userId): bool
     {
         return $asset->user_id !== null && (int) $asset->user_id === $userId;
-    }
-
-    private function isInPrincipalSet(MediaAsset $asset, array $principalIdSet): bool
-    {
-        return $asset->principal_id !== null && isset($principalIdSet[(int) $asset->principal_id]);
     }
 
     private function agentIsVisibleToCaller(MediaAsset $asset, int $userId): bool
