@@ -4,7 +4,7 @@
 
 ## Authorisation
 
-- **Read** endpoints use `callerCanSeeGroup()` — members of the group OR global admin. Non-members receive `404 GROUP_NOT_FOUND` (existence-hiding).
+- **Read** endpoints use `callerCanSeeGroup()` — members of the group only. Non-members (including global admins without membership) receive `404 GROUP_NOT_FOUND` (existence-hiding). Global admins manage members via the admin-panel overlay instead.
 - **Write** endpoints additionally require `callerCanManageGroup()` — `role ∈ {owner, admin}` OR global admin. Members receive `403 FORBIDDEN`.
 - The `tools` and `preferences` upserts always write to the **group's** group-principal; the `principal_id` in the request body is ignored for the LLM-config POST to prevent redirection to a different principal.
 

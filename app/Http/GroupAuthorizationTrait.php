@@ -15,11 +15,16 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 /**
  * Shared per-group authorisation gate and request-resolution helpers.
  *
- * The two `callerCan*()` methods are the locked rules for write access
- * on the group-settings pages: the caller is a global admin, or has
- * the `owner` / `admin` role inside the group. `member`-only callers
- * see the read-only view; non-members are 404-ed upstream by
- * `callerCanSeeGroup()` so existence-hiding is preserved.
+ * Two distinct read rules live here:
+ * - `callerCanSeeGroup()` is membership-only: only callers with a row in
+ *   `group_memberships` for the group can read its detail page (show,
+ *   agents, preferences, llm-configs, tools). Global admins without
+ *   membership are 404-ed so existence-hiding is preserved; they manage
+ *   members via the admin-panel overlay, which has its own dedicated
+ *   read rule in `GroupMemberController::callerCanReadGroup()`.
+ * - `callerCanManageGroup()` keeps the global-admin bypass for write
+ *   access on the group-settings pages: global admin OR
+ *   `role ∈ {owner, admin}` for the group.
  *
  * The four `resolve*()` / `requireCurrentUserIdOrFail()` /
  * `loadGroupPrincipalIfVisible()` helpers compose the canonical
@@ -65,16 +70,15 @@ trait GroupAuthorizationTrait
     }
 
     /**
-     * `true` when the caller can see the group at all: global admin OR
-     * a row in `group_memberships` for this group. Used to make the
-     * read paths existence-hiding (404 instead of 403) for non-members.
+     * `true` when the caller can see the group at all: a row in
+     * `group_memberships` for this group. Global admin does NOT bypass
+     * here — admins without membership must use the admin-panel overlay
+     * for member management, not the group detail page. Used to make
+     * the read paths existence-hiding (404 instead of 403) for
+     * non-members.
      */
     protected function callerCanSeeGroup(int $groupId, int $userId, AuthService $authService): bool
     {
-        if ($authService->isAdmin()) {
-            return true;
-        }
-
         return Capsule::table('group_memberships')
             ->where('group_id', $groupId)
             ->where('user_id', $userId)

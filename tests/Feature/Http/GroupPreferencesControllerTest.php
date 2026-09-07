@@ -166,6 +166,24 @@ describe('GroupPreferencesController', function (): void {
         expect($response->getStatusCode())->toBe(404);
     });
 
+    it('returns 404 for a global admin who is not a member of the group', function (): void {
+        // `callerCanSeeGroup()` no longer bypasses for admins without
+        // membership. The PUT path also returns 404 because it routes
+        // through `resolveWritableGroup()` → `resolveReadableGroup()`
+        // → `loadGroupPrincipalIfVisible()` → `callerCanSeeGroup()`.
+        // Admins manage members via the admin-panel overlay instead.
+        [$controller, $auth, $principalService] = makeGroupPreferencesController();
+        $ownerId = bootAuth($auth, 'gp-admin-stranger-owner@example.com', GP_TEST_PASSWORD);
+        $group = (new Spora\Services\GroupService($principalService))->createGroup($ownerId, 'PrefAdminBlock');
+
+        $adminId = bootAuth($auth, 'gp-admin-stranger@example.com', GP_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gp-admin-stranger@example.com');
+
+        $response = $controller->show($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
     it('returns 422 when preferred_llm_config_id is missing', function (): void {
         [$controller, $auth, $principalService] = makeGroupPreferencesController();
         $ownerId = bootAuth($auth, 'gp1i-owner@example.com', GP_TEST_PASSWORD);
@@ -195,7 +213,12 @@ describe('GroupPreferencesController', function (): void {
         expect($response->getStatusCode())->toBe(400);
     });
 
-    it('returns 200 on PUT for an admin caller who is not a member', function (): void {
+    it('returns 404 on PUT for an admin caller who is not a member', function (): void {
+        // `resolveWritableGroup()` delegates the membership check to
+        // `callerCanSeeGroup()` before applying the manage-tier check,
+        // so an admin without membership gets a 404 here too — same as
+        // the read paths. Admin-side preference management has no admin
+        // surface; the admin panel doesn't expose it.
         [$controller, $auth, $principalService] = makeGroupPreferencesController();
         $ownerId = bootAuth($auth, 'gp1k-owner@example.com', GP_TEST_PASSWORD);
         $group = (new Spora\Services\GroupService($principalService))->createGroup($ownerId, 'PrefGroup10');
@@ -207,6 +230,6 @@ describe('GroupPreferencesController', function (): void {
         $response = $controller->update($group->id, jsonRequest('PUT', '/api/v1/groups/' . $group->id . '/preferences', [
             'preferred_llm_config_id' => null,
         ]));
-        expect($response->getStatusCode())->toBe(200);
+        expect($response->getStatusCode())->toBe(404);
     });
 });

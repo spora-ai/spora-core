@@ -281,6 +281,18 @@ describe('GroupLlmConfigsController', function (): void {
         expect($response->getStatusCode())->toBe(404);
     });
 
+    it('returns 404 for a global admin who is not a member of the group', function (): void {
+        [$controller, $auth, $principalService] = makeGroupLlmConfigsController();
+        $ownerId = bootAuth($auth, 'glc-admin-stranger-owner@example.com', GLC_TEST_PASSWORD);
+        $group = (new Spora\Services\GroupService($principalService))->createGroup($ownerId, 'LlmCfgAdminBlock');
+        $adminId = bootAuth($auth, 'glc-admin-stranger@example.com', GLC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'glc-admin-stranger@example.com');
+
+        $response = $controller->index($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
     it('returns 404 on update when cid is not scoped to this group principal', function (): void {
         [$controller, $auth, $principalService] = makeGroupLlmConfigsController();
         $ownerId = bootAuth($auth, 'glc1k-owner@example.com', GLC_TEST_PASSWORD);
