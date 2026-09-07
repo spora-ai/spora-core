@@ -325,9 +325,17 @@ final class SubAgentService implements SubAgentServiceInterface
      * set. The gate check in {@see maybeResumeParentForParent} runs *after*
      * this clears, so a gate failure (count mismatch, non-terminal
      * sibling) means the next batch-boundary call must re-open and
-     * re-evaluate. The unsetting here is unconditional so the per-child
-     * hook can resume normally once the gate has been satisfied by
-     * subsequent sibling completions.
+     * re-evaluate.
+     *
+     * Idempotent — the unset fires only when `sub_agent_batch_open` is
+     * currently set, so a no-op re-entry on the same parent row does not
+     * generate a redundant DB write. The shared race with
+     * {@see recordSpawnedChild()} / {@see incrementExpectedCount()} is
+     * still mitigated only by the {@see LeaseGuard} on
+     * `AWAITING_SUB_AGENTS` (no row lock here) — the only invariant this
+     * read-modify-write enforces is that the flag ends up unset by the
+     * end of the call, not that a concurrent writer's snapshot stays
+     * untouched.
      */
     private function closeBatch(Task $parent): void
     {

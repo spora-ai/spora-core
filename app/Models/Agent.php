@@ -8,7 +8,6 @@ use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
@@ -144,17 +143,6 @@ final class Agent extends Model
     public function profilePicture(): HasOne
     {
         return $this->hasOne(AgentPicture::class, 'agent_id');
-    }
-
-    /**
-     * Per-user favourite pivot. Plan A: the shared `agents.is_favorite`
-     * column was visible to every group member; the pivot makes the
-     * toggle private to each user.
-     */
-    public function favoritedByUsers(): BelongsToMany
-    {
-        return $this->belongsToMany(User::class, 'user_agent_favorites')
-            ->withPivot('created_at');
     }
 
     /**

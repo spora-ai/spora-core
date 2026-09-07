@@ -309,8 +309,8 @@ final class WorkerQueueProcessor
         $exitCode = $status['exitcode'];
         $signal   = (int) $status['termsig'];
 
-        $stdoutExcerpt = $this->truncateExcerpt($stdout);
-        $stderrExcerpt = $this->truncateExcerpt($stderr);
+        $stdoutExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stdout));
+        $stderrExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stderr));
 
         $level = $exitCode === 0 ? 'info' : 'error';
         $this->logger->{$level}('child_exit', [
@@ -504,5 +504,28 @@ final class WorkerQueueProcessor
             return $bytes;
         }
         return substr($bytes, 0, $budget - strlen($marker)) . $marker;
+    }
+
+    /**
+     * Strip C0 control bytes and normalise newlines so a single child
+     * with a stray CR or LF in its output cannot smuggle an extra record
+     * into a downstream log shipper that re-splits on newlines. The child
+     * is the trusted {@code bin/spora} process so this isn't a security
+     * boundary — it's defensive against noisy / buggy output that would
+     * otherwise look like an injection attack to a SIEM regex.
+     *
+     *  - {@code \r\n} and lone {@code \r} collapse to {@code \n}.
+     *  - {@code \t} is preserved (legitimate in tabular output).
+     *  - Every other C0 byte (0x00–0x08, 0x0B–0x1F) is dropped.
+     *  - {@code \n} is also dropped so the log line stays one record.
+     *  - DEL (0x7F) is dropped for the same reason.
+     *
+     * Sanitised AFTER {@see truncateExcerpt()} so the marker stays intact
+     * even when the cut lands mid-line.
+     */
+    private function sanitizeExcerpt(string $bytes): string
+    {
+        $normalised = str_replace(["\r\n", "\r"], "\n", $bytes);
+        return preg_replace('/[\x00-\x08\x0A-\x1F\x7F]/', '', $normalised) ?? $normalised;
     }
 }
