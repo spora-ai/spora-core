@@ -91,11 +91,9 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
             $delete = routeRegMiddleware($routes, 'DELETE', '/api/v1/groups/{id}');
             expect($delete)->toContain(Spora\Http\Middleware\AuthMiddleware::class);
             expect($delete)->toContain(Spora\Http\Middleware\CsrfMiddleware::class);
-            // The owner-or-admin gate lives in `GroupService::deleteGroup()`
-            // (verified by `GroupControllerTest::destroy returns 200 when
-            // the group is owned and empty` / `destroy returns 403 for a
-            // non-owner caller`); the middleware here only enforces auth
-            // + CSRF so the service can see who's calling.
+            // The owner-or-admin gate lives in `GroupService::deleteGroup()`;
+            // the middleware here only enforces auth + CSRF so the
+            // service can see who's calling.
             expect($delete)->not->ToContain(Spora\Http\Middleware\AdminMiddleware::class);
         }
     });

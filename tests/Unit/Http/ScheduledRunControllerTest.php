@@ -135,12 +135,9 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('index returns 200 with an empty list for an agent owned by a group the caller is a plain member of (regression for empty-list-after-create race)', function (): void {
-        // The pre-#233 era collapsed "agent hidden from caller" and
-        // "agent visible, no runs yet" into the same `SCHEDULED_RUN_NOT_FOUND`
-        // 404, which produced a confusing toast right after creating an
-        // agent in a group. The visibility gate via `isVisibleTo` widens
-        // for plain members (any group role is enough to *read* runs);
-        // an empty list is a valid 200 with `scheduled_runs: []`.
+        // The index endpoint widens visibility to any group member and
+        // returns an empty list (not a 404) when no runs are scheduled
+        // — the case right after creating an agent in a group.
         $authService = bootAuthLayer();
         $ownerId = $authService->register('group-owner@example.com', TEST_PASSWORD_SCHEDULED, 'GroupOwner');
         $memberId = $authService->register('plain-member@example.com', TEST_PASSWORD_SCHEDULED, 'Member');
@@ -171,10 +168,9 @@ describe('ScheduledRunController', function (): void {
     });
 
     it('index returns AGENT_NOT_FOUND (not SCHEDULED_RUN_NOT_FOUND) when the agent is hidden from the caller', function (): void {
-        // The 404 envelope's `code` was previously `SCHEDULED_RUN_NOT_FOUND`
-        // for the index endpoint, which is misleading — the index never
-        // returns null on "no runs yet", only on "agent missing/hidden".
-        // Pin the accurate error code so the SPA can branch on it.
+        // Pin the error code so the SPA can branch on it — the index
+        // endpoint's 404 is always an agent-visibility miss, never a
+        // missing scheduled-run row.
         $authService = bootAuthLayer();
         $userId = $authService->register('owner@example.com', TEST_PASSWORD_SCHEDULED, 'Owner');
         $otherUserId = $authService->register('other@example.com', TEST_PASSWORD_SCHEDULED, 'Other');

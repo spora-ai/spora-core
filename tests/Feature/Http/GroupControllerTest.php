@@ -114,9 +114,9 @@ describe('GroupController error paths', function (): void {
     });
 
     it('show returns 404 for a global admin who is not a member of the group', function (): void {
-        // `callerCanSeeGroup()` is membership-only — global admin no longer
-        // bypasses. Admins manage members via the admin-panel overlay
-        // (covered by GroupMemberControllerTest::admin bypass) instead.
+        // `callerCanSeeGroup()` is membership-only — global admin no
+        // longer bypasses. Admins manage members via the admin-panel
+        // overlay instead.
         [$controller, $auth, $groupService] = makeGroupController();
         $adminId = bootAuth($auth, 'gc3g@example.com', GROUPCONTROLLER_TEST_PASSWORD);
         makeAdmin($auth, $adminId);
@@ -218,9 +218,8 @@ describe('GroupController success paths', function (): void {
     });
 
     it('show returns 200 for a global admin who IS a member of the group', function (): void {
-        // Membership is the only thing `callerCanSeeGroup()` checks now,
-        // so an admin who is also a member must still get 200. Guards
-        // against an over-tightening regression.
+        // Positive guard against an over-tightening regression: an
+        // admin who is also a member must still get 200.
         [$controller, $auth, $groupService] = makeGroupController();
         $ownerId = bootAuth($auth, 'gc-admin-member-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
         $group = $groupService->createGroup($ownerId, 'AdminIsMember');

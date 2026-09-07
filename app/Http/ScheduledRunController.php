@@ -31,10 +31,9 @@ final class ScheduledRunController
     /**
      * GET /api/v1/agents/{agentId}/scheduled-runs
      *
-     * Empty list (200) when the agent exists and the caller can see it but
-     * no runs are scheduled yet — this is the common case for a freshly
-     * created agent. 404 only when the agent itself is missing or hidden
-     * by the principal-visibility gate.
+     * Empty list (200) is the common case for a freshly created agent.
+     * 404 (with `AGENT_NOT_FOUND`) only when the agent is missing or
+     * hidden by the principal-visibility gate.
      */
     public function index(Request $request): JsonResponse
     {
@@ -333,13 +332,10 @@ final class ScheduledRunController
 
     private function notFound(string $code = 'SCHEDULED_RUN_NOT_FOUND', string $message = 'Scheduled run not found.'): JsonResponse
     {
-        // Override to provide a domain-specific error code; delegates to the
-        // shared trait's response shape.
-        //
-        // The index endpoint passes AGENT_NOT_FOUND because its service
-        // returns null only on agent-missing-or-hidden (existence-hiding),
-        // never on "agent visible, no runs yet" — the previous code label
-        // implied the latter and produced a misleading toast right after
+        // The index endpoint passes AGENT_NOT_FOUND — its service returns
+        // null only on agent-missing-or-hidden (existence-hiding), never
+        // on "agent visible, no runs yet" — the previous label implied
+        // the latter and produced a misleading toast right after
         // creating an agent in a group.
         return new JsonResponse(
             ['error' => ['code' => $code, 'message' => $message]],
