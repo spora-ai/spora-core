@@ -44,7 +44,7 @@ final class ScheduledRunController
         $runs = $this->scheduledRunService->getRunsForAgent($agentId, $userId);
 
         if ($runs === null) {
-            return $this->agentNotFound();
+            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
 
         return new JsonResponse(['data' => ['scheduled_runs' => $runs]]);
@@ -331,31 +331,18 @@ final class ScheduledRunController
         }
     }
 
-    private function notFound(): JsonResponse
+    private function notFound(string $code = 'SCHEDULED_RUN_NOT_FOUND', string $message = 'Scheduled run not found.'): JsonResponse
     {
         // Override to provide a domain-specific error code; delegates to the
         // shared trait's response shape.
+        //
+        // The index endpoint passes AGENT_NOT_FOUND because its service
+        // returns null only on agent-missing-or-hidden (existence-hiding),
+        // never on "agent visible, no runs yet" — the previous code label
+        // implied the latter and produced a misleading toast right after
+        // creating an agent in a group.
         return new JsonResponse(
-            ['error' => ['code' => 'SCHEDULED_RUN_NOT_FOUND', 'message' => 'Scheduled run not found.']],
-            Response::HTTP_NOT_FOUND,
-        );
-    }
-
-    /**
-     * The `getRunsForAgent()` service returns `null` only when the agent is
-     * missing OR hidden by the principal-visibility gate — it never collapses
-     * "agent visible, no runs yet" into null (the latter is a valid empty
-     * 200). Surface that case with the more accurate `AGENT_NOT_FOUND` code
-     * so SPA error-handling can distinguish it from "scheduled run row
-     * missing" (which never happens for the index endpoint).
-     *
-     * Existence-hiding is preserved: callers can't tell from the response
-     * whether the agent exists.
-     */
-    private function agentNotFound(): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'AGENT_NOT_FOUND', 'message' => 'Agent not found.']],
+            ['error' => ['code' => $code, 'message' => $message]],
             Response::HTTP_NOT_FOUND,
         );
     }

@@ -87,7 +87,7 @@ final class GroupController
         }
 
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId, $this->authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -406,7 +406,7 @@ final class GroupController
     private function loadGroupPrincipalOrFail(int $id, int $userId): Principal|JsonResponse
     {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $this->authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 

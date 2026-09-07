@@ -77,7 +77,7 @@ trait GroupAuthorizationTrait
      * the read paths existence-hiding (404 instead of 403) for
      * non-members.
      */
-    protected function callerCanSeeGroup(int $groupId, int $userId, AuthService $authService): bool
+    protected function callerCanSeeGroup(int $groupId, int $userId): bool
     {
         return Capsule::table('group_memberships')
             ->where('group_id', $groupId)
@@ -165,7 +165,7 @@ trait GroupAuthorizationTrait
         PrincipalService $principalService,
     ): Principal|JsonResponse {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
