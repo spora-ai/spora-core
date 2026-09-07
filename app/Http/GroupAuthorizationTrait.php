@@ -15,27 +15,23 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 /**
  * Shared per-group authorisation gate and request-resolution helpers.
  *
- * The two `callerCan*()` methods are the locked rules for write access
- * on the group-settings pages: the caller is a global admin, or has
- * the `owner` / `admin` role inside the group. `member`-only callers
- * see the read-only view; non-members are 404-ed upstream by
- * `callerCanSeeGroup()` so existence-hiding is preserved.
+ * Two distinct read rules:
+ * - `callerCanSeeGroup()` is membership-only — global admins without
+ *   membership are 404-ed so existence-hiding is preserved; they
+ *   manage members via the admin-panel overlay, which has its own
+ *   dedicated read rule in `GroupMemberController::callerCanReadGroup()`.
+ * - `callerCanManageGroup()` keeps the global-admin bypass for write
+ *   access on the group-settings pages.
  *
- * The four `resolve*()` / `requireCurrentUserIdOrFail()` /
+ * The `resolve*()` / `requireCurrentUserIdOrFail()` /
  * `loadGroupPrincipalIfVisible()` helpers compose the canonical
  * "401 → 404 → principal" short-circuit chain every group-settings
- * controller needs. They live on the trait (rather than a base class
- * or service) because they cross the boundary between HTTP response
- * shaping (`JsonResponse` short-circuits via `JsonControllerHelpers`)
- * and a small slice of business lookup (`principalForGroup`), which
- * keeps the controllers reading as a flat list of actions.
- *
- * Lives as a trait because every group-settings controller needs the
- * full set; a trait keeps the lookup colocated with the rules instead
- * of a one-method service. `AuthService` and `PrincipalService` are
- * passed explicitly to every helper so the using class doesn't have
- * to expose them as properties (which would tie the trait to a
- * specific constructor signature).
+ * controller needs. They live on a trait (not a base class or
+ * service) because they cross the boundary between HTTP response
+ * shaping and a small slice of business lookup, which keeps the
+ * controllers reading as a flat list of actions. `AuthService` and
+ * `PrincipalService` are passed explicitly so the trait doesn't
+ * pin the using class to a specific constructor signature.
  */
 trait GroupAuthorizationTrait
 {
@@ -65,16 +61,13 @@ trait GroupAuthorizationTrait
     }
 
     /**
-     * `true` when the caller can see the group at all: global admin OR
-     * a row in `group_memberships` for this group. Used to make the
-     * read paths existence-hiding (404 instead of 403) for non-members.
+     * `true` when the caller can see the group at all — a row in
+     * `group_memberships` for this group. Global admin does NOT
+     * bypass; non-member admins use the admin-panel overlay instead.
+     * Existence-hiding: non-members get 404, not 403.
      */
-    protected function callerCanSeeGroup(int $groupId, int $userId, AuthService $authService): bool
+    protected function callerCanSeeGroup(int $groupId, int $userId): bool
     {
-        if ($authService->isAdmin()) {
-            return true;
-        }
-
         return Capsule::table('group_memberships')
             ->where('group_id', $groupId)
             ->where('user_id', $userId)
@@ -82,10 +75,7 @@ trait GroupAuthorizationTrait
     }
 
     /**
-     * Auth → 401 short-circuit, then group visibility → 404 short-circuit
-     * (so non-members can't probe ids), then return `[principalId, userId]`
-     * for the caller. Controllers destructure the tuple and proceed.
-     *
+     * Auth → 401, then visibility → 404, then return `[principalId, userId]`.
      * Visibility is collapsed into the principal lookup so the caller
      * only has to check `instanceof JsonResponse` once.
      *
@@ -101,7 +91,7 @@ trait GroupAuthorizationTrait
             return $userId;
         }
 
-        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $authService, $principalService);
+        $principal = $this->loadGroupPrincipalIfVisible($id, $userId, $principalService);
         if ($principal instanceof JsonResponse) {
             return $principal;
         }
@@ -150,18 +140,15 @@ trait GroupAuthorizationTrait
     /**
      * Group existence + caller visibility + group-principal existence
      * in one pass — all three failures collapse to the same 404
-     * (existence-hiding) and the principal itself is the success path,
-     * which keeps the caller at one `instanceof` short-circuit instead
-     * of three.
+     * (existence-hiding) and the principal itself is the success path.
      */
     protected function loadGroupPrincipalIfVisible(
         int $id,
         int $userId,
-        AuthService $authService,
         PrincipalService $principalService,
     ): Principal|JsonResponse {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 

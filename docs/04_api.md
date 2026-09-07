@@ -4,7 +4,7 @@
 
 ## Authorisation
 
-- **Read** endpoints use `callerCanSeeGroup()` — members of the group OR global admin. Non-members receive `404 GROUP_NOT_FOUND` (existence-hiding).
+- **Read** endpoints use `callerCanSeeGroup()` — members of the group only. Non-members (including global admins without membership) receive `404 GROUP_NOT_FOUND` (existence-hiding). Global admins manage members via the admin-panel overlay instead.
 - **Write** endpoints additionally require `callerCanManageGroup()` — `role ∈ {owner, admin}` OR global admin. Members receive `403 FORBIDDEN`.
 - The `tools` and `preferences` upserts always write to the **group's** group-principal; the `principal_id` in the request body is ignored for the LLM-config POST to prevent redirection to a different principal.
 
@@ -411,9 +411,9 @@ Update `name` / `description` / `profile_picture`. **Admin only.** The `profile_
 
 ### `DELETE /api/v1/groups/{id}`
 
-Delete a group. **Admin only.** Returns `409 GROUP_HAS_AGENTS` with `agent_ids` and `reassign_endpoint: /api/v1/agents/{id}/transfer` if any agent still references the group's principal — the operator must transfer or delete those agents first.
+Delete a group. Caller must be a global admin OR the group's `owner` member (plain `admin` / `member` tier callers receive `403 FORBIDDEN`). Returns `409 GROUP_HAS_AGENTS` with `agent_ids` and `reassign_endpoint: /api/v1/agents/{id}/transfer` if any agent still references the group's principal — the operator must transfer or delete those agents first.
 
-**Auth:** admin + CSRF.
+**Auth:** session + CSRF; the owner-or-admin gate is in `GroupService::deleteGroup()`.
 
 ## Group members — admin surface
 

@@ -185,6 +185,18 @@ describe('GroupToolsController', function (): void {
         expect($response->getStatusCode())->toBe(404);
     });
 
+    it('returns 404 for a global admin who is not a member of the group', function (): void {
+        [$controller, $auth, $principalService] = makeGroupToolsController();
+        $ownerId = bootAuth($auth, 'gt-admin-stranger-owner@example.com', GT_TEST_PASSWORD);
+        $group = (new Spora\Services\GroupService($principalService))->createGroup($ownerId, 'ToolsAdminBlock');
+        $adminId = bootAuth($auth, 'gt-admin-stranger@example.com', GT_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gt-admin-stranger@example.com');
+
+        $response = $controller->index($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
     it('returns 400 on malformed JSON upsert', function (): void {
         [$controller, $auth, $principalService] = makeGroupToolsController();
         $ownerId = bootAuth($auth, 'gt1j-owner@example.com', GT_TEST_PASSWORD);

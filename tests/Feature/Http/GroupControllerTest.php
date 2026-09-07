@@ -113,16 +113,19 @@ describe('GroupController error paths', function (): void {
         expect($response->getStatusCode())->toBe(422);
     });
 
-    it('show returns 200 for an existing group the caller is admin of', function (): void {
+    it('show returns 404 for a global admin who is not a member of the group', function (): void {
+        // `callerCanSeeGroup()` is membership-only — global admin no
+        // longer bypasses. Admins manage members via the admin-panel
+        // overlay instead.
         [$controller, $auth, $groupService] = makeGroupController();
-        $userId = bootAuth($auth, 'gc3g@example.com', GROUPCONTROLLER_TEST_PASSWORD);
-        makeAdmin($auth, $userId);
-        simulateLoggedInSession($userId, 'gc3g@example.com');
+        $adminId = bootAuth($auth, 'gc3g@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
         $owner = bootAuth($auth, 'gc3g-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
         $group = $groupService->createGroup($owner, 'Hidden');
+        simulateLoggedInSession($adminId, 'gc3g@example.com');
 
         $response = $controller->show($group->id);
-        expect($response->getStatusCode())->toBe(200);
+        expect($response->getStatusCode())->toBe(404);
     });
 });
 
@@ -212,6 +215,21 @@ describe('GroupController success paths', function (): void {
 
         $response = $controller->show($group->id);
         expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('show returns 200 for a global admin who IS a member of the group', function (): void {
+        // Positive guard against an over-tightening regression: an
+        // admin who is also a member must still get 200.
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-admin-member-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdminIsMember');
+        $adminId = bootAuth($auth, 'gc-admin-member@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        $groupService->addMember((int) $group->id, $adminId, 'admin', $ownerId);
+        simulateLoggedInSession($adminId, 'gc-admin-member@example.com');
+
+        $response = $controller->show($group->id);
+        expect($response->getStatusCode())->toBe(200);
     });
 
     it('update accepts a description change and returns 200', function (): void {
@@ -431,6 +449,18 @@ describe('GroupController success paths', function (): void {
         $group = $groupService->createGroup($ownerId, 'Private');
         $strangerId = bootAuth($auth, 'gc-agents-stranger@example.com', GROUPCONTROLLER_TEST_PASSWORD);
         simulateLoggedInSession($strangerId, 'gc-agents-stranger@example.com');
+        $response = $controller->agents($group->id);
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('agents returns 404 for a global admin who is not a member of the group', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-agents-admin-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'AdminNoAccess');
+        $adminId = bootAuth($auth, 'gc-agents-admin@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gc-agents-admin@example.com');
+
         $response = $controller->agents($group->id);
         expect($response->getStatusCode())->toBe(404);
     });

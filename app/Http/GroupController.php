@@ -28,17 +28,15 @@ use Symfony\Component\HttpFoundation\Response;
  *   GET    /api/v1/groups/{id}            — show one group
  *   POST   /api/v1/groups                 — create (admin-only); creator becomes owner + group-principal is materialised
  *   PATCH  /api/v1/groups/{id}            — update (admin-only)
- *   DELETE /api/v1/groups/{id}            — destroy (admin-only); 409 if agents still reference the group-principal
+ *   DELETE /api/v1/groups/{id}            — destroy (admin OR group owner); 409 if agents still reference the group-principal
  *   GET    /api/v1/groups/{id}/agents     — list agents whose principal_id matches the group's group-principal
  *
- * Authorisation is principally driven by the middleware stack
- * ({@see Middleware\AdminMiddleware} gates the writes), but the
- * destroy path also surfaces a structured 409 with the orphan agent
- * ids so the operator can either transfer them first or delete them.
- *
- * Wire-format mapping moved to {@see GroupDetailResource} so the
- * controller stays under SonarCloud's S1448 20-method-per-class cap
- * (single source of truth shared with {@see GroupDetailResource}).
+ * DELETE is the one write that *isn't* AdminMiddleware-only — the
+ * gate is `GroupService::deleteGroup()` (admin OR owner; plain
+ * `admin`/`member` tier callers get 403). The middleware stack
+ * still enforces auth + CSRF. Wire-format mapping lives in
+ * {@see GroupDetailResource} so this class stays under SonarCloud's
+ * S1448 20-method-per-class cap.
  */
 final class GroupController
 {
@@ -85,7 +83,7 @@ final class GroupController
         }
 
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId, $this->authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, (int) $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 
@@ -184,9 +182,12 @@ final class GroupController
     /**
      * DELETE /api/v1/groups/{id}
      *
-     * Admin-only via middleware. The GroupService pre-flight refuses if
-     * any agent still references the group-principal; we surface a 409
-     * with the orphan ids so the operator can transfer or delete them.
+     * Caller must be a global admin OR the group's `owner` member —
+     * the gate lives in `GroupService::deleteGroup()`; this controller
+     * just passes `$authService->isAdmin()` through. Plain `admin`
+     * and `member` tier callers receive 403. The GroupService
+     * pre-flight refuses if any agent still references the
+     * group-principal; we surface a 409 with the orphan ids.
      */
     public function destroy(int $id): JsonResponse
     {
@@ -399,7 +400,7 @@ final class GroupController
     private function loadGroupPrincipalOrFail(int $id, int $userId): Principal|JsonResponse
     {
         $group = Group::find($id);
-        if ($group === null || !$this->callerCanSeeGroup($id, $userId, $this->authService)) {
+        if ($group === null || !$this->callerCanSeeGroup($id, $userId)) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
         }
 

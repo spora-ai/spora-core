@@ -134,6 +134,64 @@ describe('ScheduledRunController', function (): void {
         expect($response->getStatusCode())->toBe(404);
     });
 
+    it('index returns 200 with an empty list for an agent owned by a group the caller is a plain member of (regression for empty-list-after-create race)', function (): void {
+        // The index endpoint widens visibility to any group member and
+        // returns an empty list (not a 404) when no runs are scheduled
+        // — the case right after creating an agent in a group.
+        $authService = bootAuthLayer();
+        $ownerId = $authService->register('group-owner@example.com', TEST_PASSWORD_SCHEDULED, 'GroupOwner');
+        $memberId = $authService->register('plain-member@example.com', TEST_PASSWORD_SCHEDULED, 'Member');
+        createUserPrincipalPublic($ownerId);
+        createUserPrincipalPublic($memberId);
+
+        $principalService = new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver());
+        $groupService = new \Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'ReaderGroup');
+        $groupService->addMember((int) $group->id, (int) $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupPrincipal = $principalService->principalForGroup((int) $group->id);
+
+        $agent = Agent::create([
+            'principal_id' => (int) $groupPrincipal->id,
+            'name' => 'GroupOwnedAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+        simulateLoggedInSession($memberId, 'plain-member@example.com');
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agent->id}/scheduled-runs", [], ['id' => $agent->id]);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['scheduled_runs'])->toBe([]);
+    });
+
+    it('index returns AGENT_NOT_FOUND (not SCHEDULED_RUN_NOT_FOUND) when the agent is hidden from the caller', function (): void {
+        // Pin the error code so the SPA can branch on it — the index
+        // endpoint's 404 is always an agent-visibility miss, never a
+        // missing scheduled-run row.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('owner@example.com', TEST_PASSWORD_SCHEDULED, 'Owner');
+        $otherUserId = $authService->register('other@example.com', TEST_PASSWORD_SCHEDULED, 'Other');
+        simulateLoggedInSession($otherUserId, 'other@example.com');
+
+        $agent = Agent::create([
+            'principal_id' => $this->createUserPrincipal($userId),
+            'name' => 'OtherUserAgent',
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
+
+        [$controller, , , , , $authMiddleware] = makeScheduledRunController();
+        $request = makeJsonRequestWithAttrs('GET', "/api/v1/agents/{$agent->id}/scheduled-runs", [], ['id' => $agent->id]);
+        $response = callController($controller, 'index', $request, [$authMiddleware]);
+
+        expect($response->getStatusCode())->toBe(404);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('AGENT_NOT_FOUND');
+    });
+
     it('store creates a recurring scheduled run with cron_expression', function (): void {
         [, $agentId] = registerAndGetAgentForScheduledRun();
 
