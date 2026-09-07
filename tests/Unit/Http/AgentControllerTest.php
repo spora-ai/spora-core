@@ -385,3 +385,25 @@ describe('AgentController::patchOperationOverride', function (): void {
         expect($response->getStatusCode())->toBe(Response::HTTP_BAD_REQUEST);
     });
 });
+
+describe('AgentController::favorite / unfavorite', function (): void {
+    test('favorite returns 401 when caller is not logged in', function (): void {
+        [$controller] = makeAgentControllers();
+
+        $request = new Request();
+        $request->attributes->set('id', 1);
+        $response = $controller->favorite($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    });
+
+    test('unfavorite returns 401 when caller is not logged in', function (): void {
+        [$controller] = makeAgentControllers();
+
+        $request = new Request();
+        $request->attributes->set('id', 1);
+        $response = $controller->unfavorite($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    });
+});

@@ -393,6 +393,9 @@ final class AgentController
     public function favorite(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->error('UNAUTHORIZED', 'Login required.', Response::HTTP_UNAUTHORIZED);
+        }
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {
@@ -411,6 +414,9 @@ final class AgentController
     public function unfavorite(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->error('UNAUTHORIZED', 'Login required.', Response::HTTP_UNAUTHORIZED);
+        }
         $agentId = (int) $request->attributes->get('id', 0);
 
         try {

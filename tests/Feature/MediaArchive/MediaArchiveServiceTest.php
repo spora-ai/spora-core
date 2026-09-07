@@ -761,6 +761,35 @@ describe('MediaArchiveService::resolveMany', function (): void {
         $resolved = $this->ctx['service']->resolveMany([$b->id, $this->assetUser1->id], 1, false);
         expect(array_column($resolved, 'id'))->toBe([$b->id, $this->assetUser1->id]);
     });
+
+    it('resolves an asset whose principal_id is in the caller\'s visible-principal set even when the caller did not upload it', function (): void {
+        // Post-0075 fast path: a group member can resolve an asset
+        // uploaded by another member of the same group. The asset's
+        // `user_id` is the other member, but its `principal_id` is the
+        // shared group principal — which lives in the caller's
+        // `visiblePrincipalIds()` set. The visibility union returns
+        // true via the principal-set branch, not the direct-ownership
+        // branch.
+        $callerId = bootAuthLayer()->register('principal-share@example.com', 'Password1!', 'Sharer');
+        $callerPrincipalId = createUserPrincipalPublic($callerId);
+        $otherUserId = $callerId + 1000;
+        createUserPrincipalPublic($otherUserId);
+        $shared = MediaAsset::create([
+            'id'                            => '22222222-3333-4444-5555-666666666666',
+            'storage_mode'                  => 'data_url',
+            'media_type'                    => 'image',
+            'mime_type'                     => 'image/png',
+            'byte_size'                     => 67,
+            'asset_url'                     => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . '22222222-3333-4444-5555-666666666666.png',
+            'payload'                       => $this->png,
+            'asset_token'                   => bin2hex(random_bytes(16)),
+            'user_id'                       => $otherUserId,
+            'principal_id'                  => $callerPrincipalId,
+            'migrated_from_inline_data_url' => true,
+        ]);
+        $resolved = $this->ctx['service']->resolveMany([$shared->id], $callerId, false);
+        expect(array_column($resolved, 'id'))->toBe([$shared->id]);
+    });
 });
 
 // ----- Idempotency: tool_call_id upsert path ----------------------------------

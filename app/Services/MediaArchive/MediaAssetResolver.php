@@ -41,7 +41,14 @@ final class MediaAssetResolver
             return [];
         }
         $byId = $this->loadAssetsById($ids);
-        return $this->filterByVisibility($ids, $byId, $userId, $isAdmin);
+        // Pre-compute the caller's visible-principal set once so the
+        // post-0075 fast path (asset.principal_id is in the set) stays an
+        // O(1) in-memory check per asset instead of issuing a per-asset
+        // `visiblePrincipalIds()` + `whereIn` round-trip via
+        // {@see PrincipalResolver::isVisibleTo()}.
+        $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        $principalIdSet = array_flip($visiblePrincipalIds);
+        return $this->filterByVisibility($ids, $byId, $userId, $isAdmin, $principalIdSet);
     }
 
     /**
@@ -65,17 +72,24 @@ final class MediaAssetResolver
      *
      * @param  list<string> $ids
      * @param  array<string, MediaAsset> $byId
+     * @param  array<int, int> $principalIdSet Caller's visible principal ids,
+     *         flipped for O(1) `isset` checks; built once in {@see resolveMany()}.
      * @return list<MediaAsset>
      */
-    private function filterByVisibility(array $ids, array $byId, int $userId, bool $isAdmin): array
-    {
+    private function filterByVisibility(
+        array $ids,
+        array $byId,
+        int $userId,
+        bool $isAdmin,
+        array $principalIdSet,
+    ): array {
         $resolved = [];
         foreach ($ids as $id) {
             $asset = $byId[$id] ?? null;
             if ($asset === null) {
                 continue;
             }
-            if ($this->canResolveAsset($asset, $userId, $isAdmin)) {
+            if ($this->canResolveAsset($asset, $userId, $isAdmin, $principalIdSet)) {
                 $resolved[] = $asset;
             }
         }
@@ -84,15 +98,23 @@ final class MediaAssetResolver
 
     /**
      * Visibility check for {@see resolveMany()}. Returns `true` for
-     * admins, callers who uploaded the asset directly, or callers whose
-     * visible-principal set covers the asset's owning agent.
+     * admins, callers who uploaded the asset directly, callers whose
+     * precomputed visible-principal set covers the asset's `principal_id`
+     * (the post-0075 fast path), or — as a last-resort fallback — the
+     * per-asset `PrincipalResolver::isVisibleTo()` check that resolves
+     * legacy rows where `principal_id` was left NULL but `agent_id`
+     * points at an agent whose principal is in the set.
      */
-    private function canResolveAsset(MediaAsset $asset, int $userId, bool $isAdmin): bool
-    {
-        if ($this->isAdminBypassed($isAdmin)) {
+    private function canResolveAsset(
+        MediaAsset $asset,
+        int $userId,
+        bool $isAdmin,
+        array $principalIdSet,
+    ): bool {
+        if ($this->isAdminBypassed($isAdmin) || $this->callerOwnsAsset($asset, $userId)) {
             return true;
         }
-        return $this->callerOwnsAsset($asset, $userId)
+        return ($asset->principal_id !== null && isset($principalIdSet[(int) $asset->principal_id]))
             || $this->agentIsVisibleToCaller($asset, $userId);
     }
 
