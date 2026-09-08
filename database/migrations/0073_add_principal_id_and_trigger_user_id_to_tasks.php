@@ -31,6 +31,8 @@ use Illuminate\Database\Schema\Blueprint;
  */
 return new class extends Migration
 {
+    use Spora\Core\Database\MigrationHelpers;
+
     public function up(): void
     {
         $schema = Capsule::schema();
@@ -168,104 +170,6 @@ return new class extends Migration
         // principal_id + trigger_user_id is not losslessly reversible
         // (we cannot tell whether the original user_id was meant to
         // represent ownership, attribution, or both).
-    }
-
-    /** Driver-aware FK existence check. Mirrors `0067_introduce_principals_and_groups`. */
-    private function foreignKeyExists(string $table, string $constraintName): bool
-    {
-        $driver = Capsule::connection()->getDriverName();
-        if ($driver === 'mysql' || $driver === 'mariadb') {
-            $row = Capsule::selectOne(
-                'SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS '
-                . 'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? '
-                . "AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
-                [$table, $constraintName],
-            );
-            return $row !== null;
-        }
-
-        $column = substr($constraintName, strlen("fk_{$table}_"));
-        $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
-        foreach ($fks as $fk) {
-            if ($fk->from === $column) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Driver-aware index existence check. Mirrors `0067`. */
-    private function indexExists(string $table, string $indexName): bool
-    {
-        $driver = Capsule::connection()->getDriverName();
-        if ($driver === 'mysql' || $driver === 'mariadb') {
-            $row = Capsule::selectOne(
-                'SELECT INDEX_NAME FROM information_schema.STATISTICS '
-                . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? '
-                . 'AND INDEX_NAME = ? LIMIT 1',
-                [$table, $indexName],
-            );
-            return $row !== null;
-        }
-
-        $rows = Capsule::select("PRAGMA index_list('{$table}')");
-        foreach ($rows as $row) {
-            if ($row->name === $indexName) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Driver-aware lookup for the FK that references $column on $table. Mirrors `0067`. */
-    private function findForeignKeyOn(string $table, string $column): ?string
-    {
-        $driver = Capsule::connection()->getDriverName();
-        if ($driver === 'mysql' || $driver === 'mariadb') {
-            $row = Capsule::selectOne(
-                'SELECT kcu.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE kcu '
-                . 'INNER JOIN information_schema.TABLE_CONSTRAINTS tc '
-                . 'ON tc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA '
-                . 'AND tc.TABLE_NAME = kcu.TABLE_NAME '
-                . 'AND tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME '
-                . 'WHERE kcu.TABLE_SCHEMA = DATABASE() '
-                . 'AND kcu.TABLE_NAME = ? '
-                . 'AND kcu.COLUMN_NAME = ? '
-                . "AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
-                [$table, $column],
-            );
-            return $row?->CONSTRAINT_NAME;
-        }
-        return null;
-    }
-
-    /** Driver-aware lookup for the index whose leftmost column is $column. Mirrors `0067`. */
-    private function findIndexOn(string $table, string $column): ?string
-    {
-        $driver = Capsule::connection()->getDriverName();
-        if ($driver === 'mysql' || $driver === 'mariadb') {
-            $row = Capsule::selectOne(
-                'SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS '
-                . 'WHERE TABLE_SCHEMA = DATABASE() '
-                . 'AND TABLE_NAME = ? '
-                . 'AND COLUMN_NAME = ? '
-                . 'AND SEQ_IN_INDEX = 1 '
-                . "AND INDEX_NAME <> 'PRIMARY' LIMIT 1",
-                [$table, $column],
-            );
-            return $row?->INDEX_NAME;
-        }
-        $rows = Capsule::select("PRAGMA index_list('{$table}')");
-        foreach ($rows as $row) {
-            if ($row->origin !== 'c') {
-                continue;
-            }
-            $cols = Capsule::select("PRAGMA index_info('{$row->name}')");
-            if ($cols !== [] && $cols[0]->name === $column) {
-                return $row->name;
-            }
-        }
-        return null;
     }
 
     /**

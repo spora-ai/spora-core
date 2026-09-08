@@ -6,6 +6,7 @@ parameters:
     paths:
         - app
         - tests
+        - database/migrations
     level: 5
     excludePaths:
         - vendor
@@ -17,3 +18,7 @@ parameters:
         - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
         # Pest dynamic property access on TestCall (e.g. $userId, $agentId set by test)
         - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
+        # Capsule Manager __callStatic forwarding (migrations) — select / selectOne /
+        # statement / insert / transaction are dispatched through __callStatic to
+        # static::connection()->$method(...), which PHPStan cannot trace.
+        - '#Call to an undefined static method Illuminate\\Database\\Capsule\\Manager::#'

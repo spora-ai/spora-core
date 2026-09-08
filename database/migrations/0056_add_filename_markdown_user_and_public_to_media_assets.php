@@ -75,7 +75,7 @@ return new class extends Migration
             return;
         }
 
-        $schema->table('media_assets', static function (Blueprint $table): void {
+        $schema->table('media_assets', static function (Blueprint $table) use ($schema): void {
             if ($schema->hasColumn('media_assets', 'public_access_token')) {
                 $table->dropUnique('media_assets_public_access_token_unique');
                 $table->dropColumn('public_access_token');
