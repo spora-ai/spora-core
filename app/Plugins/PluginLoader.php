@@ -519,7 +519,7 @@ final class PluginLoader
      */
     public function wireEventSubscribers(): void
     {
-        foreach ($this->plugins as $slug => $plugin) {
+        foreach ($this->plugins as $plugin) {
             if ($plugin instanceof EventSubscriberInterface) {
                 $this->dispatcher->addSubscriber($plugin);
             }
@@ -575,7 +575,7 @@ final class PluginLoader
 
         $this->registerManifestAutoload($manifest, $classLoader, $dir);
 
-        $this->instantiatePlugin($slug, $class, $classLoader, $dir, $manifest, $dir . '/plugin.json');
+        $this->instantiatePlugin($slug, $class, $dir, $manifest, $dir . '/plugin.json');
     }
 
     /**
@@ -628,7 +628,7 @@ final class PluginLoader
         // PSR-4 mappings must register before instantiatePlugin() resolves the class.
         $this->registerManifestAutoload($manifest, $classLoader, $pluginDir);
 
-        $this->instantiatePlugin($slug, $fqcn, $classLoader, $pluginDir, $manifest, $manifestFile);
+        $this->instantiatePlugin($slug, $fqcn, $pluginDir, $manifest, $manifestFile);
     }
 
     /**
@@ -709,7 +709,6 @@ final class PluginLoader
     private function instantiatePlugin(
         string $slug,
         string $fqcn,
-        ?\Composer\Autoload\ClassLoader $classLoader,
         string $pluginDir,
         array $manifest,
         string $manifestFile = '',
