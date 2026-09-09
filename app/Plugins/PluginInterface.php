@@ -9,8 +9,9 @@ use Spora\Extensions\SporaExtensionInterface;
 /**
  * Marker interface for Composer-distributed Spora plugins.
  *
- * PluginInterface is now a pure marker — the actual hook surface
- * (`tools()`, `drivers()`, `register()`, …) lives on the parent
+ * PluginInterface is a pure marker — the actual hook surface
+ * (`tools()`, `apps()`, `skillPaths()`, `agentTemplatePaths()`,
+ * `schemaVersion()`, `migrationsPath()`) lives on the parent
  * {@see SporaExtensionInterface}, so an `AppInterface` and a
  * `PluginInterface` share the same contract and the same wiring.
  *

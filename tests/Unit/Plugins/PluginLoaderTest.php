@@ -32,13 +32,6 @@ test('plugin is keyed by its manifest slug in getPlugins()', function (): void {
     expect($loader->getPlugins()['manifest-plugin']->getName())->toBe('Manifest Plugin');
 });
 
-test('drivers() returns driver map from loaded plugin', function (): void {
-    $loader = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
-    $loader->boot();
-
-    expect($loader->drivers())->toHaveKey('manifest_driver');
-});
-
 test('toolClasses() returns empty array when plugin contributes no tools', function (): void {
     $loader = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
     $loader->boot();
@@ -55,7 +48,6 @@ test('PSR-4 autoload resolves the entry-point class without a "file" key in the 
     expect($loader->getPlugins())->toHaveCount(1);
     expect($loader->getPlugins())->toHaveKey('named-plugin');
     expect($loader->getPlugins()['named-plugin']->getName())->toBe('Named Plugin');
-    expect($loader->drivers())->toHaveKey('named_driver');
 });
 
 test('manifest missing "slug" throws PluginLoadFailedException', function (): void {
@@ -286,26 +278,21 @@ test('multi-path discovery merges plugins from multiple directories and dedupes 
 });
 
 // ---------------------------------------------------------------------------
-// Tests for the four extension-point hooks (register / apps / routes / boot)
-// wired in PluginLoader. These verify that the now-load-bearing hooks are
-// actually invoked during the plugin lifecycle.
+// Tests for the apps() hook (the only remaining per-plugin hook besides
+// getName/tools/skillPaths/agentTemplatePaths/schemaVersion/migrationsPath).
+// The register/routes/boot hooks were moved to PSR-14 events in PR-3 — see
+// `tests/Unit/Plugins/PluginLoaderSubscriberTest.php` for the lifecycle
+// event coverage.
 // ---------------------------------------------------------------------------
 
 /**
- * SpyPlugin records calls to register/apps/routes/boot and returns canned
- * values for apps()/tools(). Used to assert the loader invokes each hook.
+ * SpyPlugin records calls to apps() and returns canned values. Used to
+ * assert PluginLoader::appClasses() flattens the apps() contribution.
  */
 final class SpyPlugin extends Spora\Plugins\AbstractPlugin
 {
-    public int $registerCalls  = 0;
-    public int $routesCalls   = 0;
-    public int $bootCalls     = 0;
-
     /** @var array<class-string> */
     public array $appClasses = [];
-
-    public ?DI\ContainerBuilder $builderSeen = null;
-    public ?Spora\Core\MiddlewareRouteCollector $routesSeen = null;
 
     public function getName(): string
     {
@@ -317,23 +304,6 @@ final class SpyPlugin extends Spora\Plugins\AbstractPlugin
     {
         return $this->appClasses;
     }
-
-    public function register(DI\ContainerBuilder $builder): void
-    {
-        $this->registerCalls++;
-        $this->builderSeen = $builder;
-    }
-
-    public function routes(Spora\Core\MiddlewareRouteCollector $routes): void
-    {
-        $this->routesCalls++;
-        $this->routesSeen = $routes;
-    }
-
-    public function boot(): void
-    {
-        $this->bootCalls++;
-    }
 }
 
 test('appClasses() flattens apps() from every loaded plugin', function (): void {
@@ -342,25 +312,23 @@ test('appClasses() flattens apps() from every loaded plugin', function (): void 
     // fabricate two AbstractPlugin subclasses in this scope, so we test the
     // flattening with the existing ManifestPlugin (returns []) and an empty
     // plugin (also []). The actual multi-plugin case is covered by the
-    // loaders() / toolClasses() / recipePaths() tests in this file.
+    // toolClasses() tests in this file.
     $loader = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
     $loader->boot();
 
     expect($loader->appClasses())->toBe([]);
 });
 
-test('registerPlugins() invokes register() on each loaded plugin once', function (): void {
+test('registerPlugins() dispatches ContainerBuildingEvent and does not throw', function (): void {
     $builder = new DI\ContainerBuilder();
     $loader  = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
     $loader->boot();
 
-    $plugins = $loader->getPlugins();
+    // After PR-3 the loader just fires the lifecycle event — subscribers do
+    // the work. We assert the call is a clean no-throw for both populated and
+    // empty loaders.
     $loader->registerPlugins($builder);
-
-    foreach ($plugins as $slug => $plugin) {
-        // ManifestPlugin fixture has the no-op default register() — we just
-        // assert the loader doesn't throw when calling it. A separate test
-        // below covers the SpyPlugin path with a concrete recorder.
+    foreach ($loader->getPlugins() as $plugin) {
         expect($plugin)->toBeInstanceOf(Spora\Plugins\PluginInterface::class);
     }
 });
@@ -376,37 +344,23 @@ test('registerPlugins() is a no-op when no plugins are loaded', function (): voi
     expect($loader->getPlugins())->toHaveCount(0);
 });
 
-test('registerPlugins() swallows exceptions from a misbehaving plugin and continues', function (): void {
-    // Stub plugin whose register() throws. The loader must catch the throw
-    // so one bad plugin cannot break boot — the rest of the plugins still
-    // get their register() called.
-    $throwing = new class extends Spora\Plugins\AbstractPlugin {
-        public function getName(): string
-        {
-            return 'Throwing';
-        }
-        public function register(DI\ContainerBuilder $builder): void
-        {
-            throw new RuntimeException('register() exploded');
-        }
-    };
-    $good = new SpyPlugin();
-
-    // Manually inject both stub plugins into the loader's internal state.
-    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null);
-    $loader->boot();
-    $reflection = new ReflectionClass($loader);
-    $pluginsProperty = $reflection->getProperty('plugins');
-    $pluginsProperty->setValue($loader, ['throwing' => $throwing, 'good' => $good]);
-
+test('registerPlugins() dispatches ContainerBuildingEvent to attached subscribers', function (): void {
     $builder = new DI\ContainerBuilder();
+    $dispatcher = new Symfony\Component\EventDispatcher\EventDispatcher();
+    $loader  = new PluginLoader([FIXTURE_MANIFEST_PLUGINS], null, $dispatcher);
+    $loader->boot();
+
+    $fired = false;
+    $dispatcher->addListener(
+        Spora\Events\ContainerBuildingEvent::class,
+        function () use (&$fired): void {
+            $fired = true;
+        },
+    );
+
     $loader->registerPlugins($builder);
 
-    // The good plugin's register() was still called.
-    expect($good->registerCalls)->toBe(1);
-    // The throwing plugin's register() was attempted (the throw was caught).
-    // No exception escaped to the caller.
-    expect(true)->toBeTrue();
+    expect($fired)->toBeTrue();
 });
 
 test('bootExtensions() is idempotent within a process', function (): void {

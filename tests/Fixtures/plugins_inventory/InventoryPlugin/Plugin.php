@@ -19,11 +19,6 @@ final class Plugin extends AbstractPlugin
         return [ReadUrlTool::class];
     }
 
-    public function drivers(): array
-    {
-        return ['inventory_driver' => InventoryDriver::class];
-    }
-
     public function schemaVersion(): int
     {
         return 1;

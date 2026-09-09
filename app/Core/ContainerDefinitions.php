@@ -753,18 +753,13 @@ final class ContainerDefinitions
                 AnthropicCompatibleDriver::class,
             ],
 
-            // Plugin and App drivers are merged into this separate entry at
-            // container-build time. Kept distinct from `llm_driver_classes`
-            // so that the static list remains inspectable in tests and so
-            // LLMConfigService can opt into the merged view via constructor
+            // Plugin and App LLM drivers used to be merged into this entry at
+            // container-build time. The `drivers()` extension hook was removed
+            // in 1.0 (see `spora-workspace/plans/extension-interface-events.md`),
+            // so the merged view is now identical to the static list — kept as
+            // a separate alias so LLMConfigService can opt into it via constructor
             // injection without rewriting the core list contract.
-            'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique(array_merge(
-                $c->get('llm_driver_classes'),
-                array_values($c->get(PluginLoader::class)->drivers()),
-                $c->has(AppLoader::class)
-                    ? array_values($c->get(AppLoader::class)->getApp()?->drivers() ?? [])
-                    : [],
-            ))),
+            'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique($c->get('llm_driver_classes'))),
 
             'app_apps' => [
                 PluginsApp::class,

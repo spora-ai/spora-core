@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Extensions;
 
-use DI\ContainerBuilder;
-use Spora\Core\MiddlewareRouteCollector;
-
 /**
  * Common contract for every Spora extension point — a plugin (Composer
  * package, manifest-driven) or an app (project-level, reflection-driven).
@@ -15,10 +12,12 @@ use Spora\Core\MiddlewareRouteCollector;
  * extend this interface as pure markers; the hook surface is shared so
  * migrating an app to a plugin is a rename + manifest, not a rewrite.
  *
- * New hook methods (`apps()`, `routes()`, `boot()`) were added in v0.5.
- * Existing concrete plugin classes that don't extend {@see AbstractExtension}
- * must implement them explicitly (return [] / no-op); the tests ship
- * fixtures that extend AbstractExtension for free defaults.
+ * Historical context: in 1.0 the hook surface was trimmed. The deleted
+ * hooks were `autoload()`, `drivers()`, `recipePaths()`, `register()`,
+ * `routes()`, `boot()`. The first three had no callers; the last three
+ * became PSR-14 events (see `Spora\Events\*`). See
+ * `spora-workspace/plans/extension-interface-events.md` for the
+ * migration guide and the design rationale.
  */
 interface SporaExtensionInterface
 {
@@ -26,33 +25,11 @@ interface SporaExtensionInterface
     public function getName(): string;
 
     /**
-     * PSR-4 autoload mappings for the extension's own classes.
-     *
-     * @return array<string, string> namespace prefix => absolute path
-     */
-    public function autoload(): array;
-
-    /**
      * Tool classes this extension contributes to the Tool Registry.
      *
      * @return array<class-string<\Spora\Tools\ToolInterface>>
      */
     public function tools(): array;
-
-    /**
-     * LLM drivers this extension contributes.
-     * Keys are the llm_provider string stored in agents.llm_provider.
-     *
-     * @return array<string, class-string<\Spora\Drivers\LLMDriverInterface>>
-     */
-    public function drivers(): array;
-
-    /**
-     * Absolute paths to directories or individual files containing recipe definitions.
-     *
-     * @return string[]
-     */
-    public function recipePaths(): array;
 
     /**
      * Absolute paths to agent-template files (.json / .yaml / .yml) this
@@ -94,37 +71,4 @@ interface SporaExtensionInterface
      * @return array<class-string<\Spora\Apps\AppInterface>>
      */
     public function apps(): array;
-
-    /**
-     * Register arbitrary DI bindings, middleware, or services.
-     * Applied to the container builder BEFORE the container is built.
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
-     *             instead.
-     */
-    public function register(ContainerBuilder $builder): void;
-
-    /**
-     * Register HTTP routes into the running middleware collector.
-     * Called after core routes are registered, before the router is built.
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
-     *             instead.
-     */
-    public function routes(MiddlewareRouteCollector $routes): void;
-
-    /**
-     * Called once after the container is built, before the request is handled.
-     * Safe to use container services here.
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\BootingEvent}
-     *             instead.
-     */
-    public function boot(): void;
 }

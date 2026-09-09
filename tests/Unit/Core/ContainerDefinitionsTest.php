@@ -717,176 +717,30 @@ it('tool_instances factory returns only core tools when no plugin is loaded', fu
 
 // llm_driver_classes_merged factory
 
-/**
- * PHPStan-friendly replacement for `array_values(...)[0]`: $source is
- * typed `array<string, class-string>` and `array_values` widens the key
- * to `array{}` at static-analysis time.
- *
- * @param  array<string, mixed>  $source
- */
-function firstValueOf(array $source): string
-{
-    foreach ($source as $value) {
-        return (string) $value;
-    }
-    throw new RuntimeException('Source array is empty.');
-}
-
-/**
- * Count how often $needle appears in $haystack. PHPStan-friendly version
- * of `array_count_values($h)[$n]` since dynamic offsets on a freshly-built
- * array<string, int> are typed as `array{}` at static-analysis time.
- *
- * @param  array<int, mixed>  $haystack
- */
-function countOfOccurrences(array $haystack, string $needle): int
-{
-    $count = 0;
-    foreach ($haystack as $value) {
-        if ((string) $value === $needle) {
-            $count++;
-        }
-    }
-    return $count;
-}
-
-/**
- * Build a fake container that resolves every entry the merge closure reads:
- * - llm_driver_classes (data)
- * - PluginLoader::class
- * - AppLoader::class (optional, signals whether the App is loaded)
- */
-function makeContainerForLlmMerge(
-    array $llmDriverClasses,
-    ?PluginLoader $pluginLoader,
-    ?AppLoader $appLoader = null,
-): Psr\Container\ContainerInterface {
-    return new class ($llmDriverClasses, $pluginLoader, $appLoader) implements Psr\Container\ContainerInterface {
-        public function __construct(
-            private readonly array $llmDriverClasses,
-            private readonly ?PluginLoader $pluginLoader,
-            private readonly ?AppLoader $appLoader,
-        ) {}
+it('llm_driver_classes_merged equals the static core list (PR-3: no plugin or App driver contributions)', function (): void {
+    // The `drivers()` extension hook was removed in 1.0, so the merged entry
+    // is now structurally identical to `llm_driver_classes` — kept as a
+    // separate alias for back-compat with consumers that resolve it directly.
+    $c = new class implements Psr\Container\ContainerInterface {
         public function get(string $id): mixed
         {
             return match ($id) {
-                'llm_driver_classes' => $this->llmDriverClasses,
-                PluginLoader::class   => $this->pluginLoader ?? throw new RuntimeException("Missing PluginLoader"),
-                AppLoader::class => $this->appLoader ?? throw new RuntimeException("Missing AppLoader"),
+                'llm_driver_classes' => [
+                    Spora\Drivers\OpenAICompatibleDriver::class,
+                    Spora\Drivers\AnthropicCompatibleDriver::class,
+                ],
                 default => throw new RuntimeException("Unexpected: $id"),
             };
         }
         public function has(string $id): bool
         {
-            if ($id === 'llm_driver_classes') {
-                return true;
-            }
-            if ($id === PluginLoader::class) {
-                return $this->pluginLoader !== null;
-            }
-            if ($id === AppLoader::class) {
-                return $this->appLoader !== null;
-            }
-            return false;
-        }
-    };
-}
-
-it('llm_driver_classes_merged returns the static core list when no plugin and no App contribute drivers', function (): void {
-    $emptyLoader = new PluginLoader([], null);
-    $emptyLoader->boot();
-
-    $c = makeContainerForLlmMerge(
-        [Spora\Drivers\OpenAICompatibleDriver::class, Spora\Drivers\AnthropicCompatibleDriver::class],
-        $emptyLoader,
-    );
-
-    $def = callContainerMethod('llmDefinitions');
-    $merged = ($def['llm_driver_classes_merged'])($c);
-
-    expect($merged)->toBe([
-        Spora\Drivers\OpenAICompatibleDriver::class,
-        Spora\Drivers\AnthropicCompatibleDriver::class,
-    ]);
-});
-
-it('llm_driver_classes_merged appends plugin drivers and dedupes overlap with the core list', function (): void {
-    // The plugins_with_manifest fixture contributes a single LLM driver that
-    // PHPStan can resolve via PluginLoader (the fixture is excluded from
-    // Composer's classmap, but PluginLoader::boot() loads it via require_once).
-    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_manifest'], null);
-    $loader->boot();
-    $pluginDriverClass = firstValueOf($loader->drivers());
-
-    // Use the same plugin driver in the core list to prove dedup.
-    $c = makeContainerForLlmMerge(
-        [$pluginDriverClass, Spora\Drivers\AnthropicCompatibleDriver::class],
-        $loader,
-    );
-
-    $def = callContainerMethod('llmDefinitions');
-    $merged = ($def['llm_driver_classes_merged'])($c);
-
-    expect($merged)->toContain($pluginDriverClass);
-    expect($merged)->toContain(Spora\Drivers\AnthropicCompatibleDriver::class);
-    // Overlap (plugin driver is in both lists) must dedupe to a single occurrence.
-    expect(countOfOccurrences($merged, $pluginDriverClass))->toBe(1);
-});
-
-it('llm_driver_classes_merged appends App drivers when the AppLoader has an App loaded', function (): void {
-    // Re-use the existing plugins_with_manifest driver — its FQCN is only
-    // resolvable after PluginLoader::boot(), not through Composer's autoloader
-    // (the fixture is excluded from the classmap, intentionally).
-    $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_manifest'], null);
-    $loader->boot();
-    $appDriverClass = firstValueOf($loader->drivers());
-
-    $app = new class ($appDriverClass) extends Spora\Extensions\AbstractExtension {
-        public function __construct(private readonly string $appDriver) {}
-        public function getName(): string
-        {
-            return 'MyApp';
-        }
-        public function drivers(): array
-        {
-            return ['app' => $this->appDriver];
+            return $id === 'llm_driver_classes';
         }
     };
 
-    $appLoader = new AppLoader();
-    (new ReflectionProperty($appLoader, 'app'))->setValue($appLoader, $app);
-
-    $emptyPluginLoader = new PluginLoader([], null);
-    $emptyPluginLoader->boot();
-
-    $c = makeContainerForLlmMerge(
-        [Spora\Drivers\OpenAICompatibleDriver::class, Spora\Drivers\AnthropicCompatibleDriver::class],
-        $emptyPluginLoader,
-        $appLoader,
-    );
-
     $def = callContainerMethod('llmDefinitions');
     $merged = ($def['llm_driver_classes_merged'])($c);
 
-    expect($merged)->toContain($appDriverClass);
-    expect($merged)->toContain(Spora\Drivers\AnthropicCompatibleDriver::class);
-});
-
-it('llm_driver_classes_merged is unchanged when the container has no AppLoader (test ergonomics)', function (): void {
-    // The factory uses `$c->has(AppLoader::class)` so an absent AppLoader
-    // (typical for unit tests) must NOT add anything to the merged list.
-    $emptyLoader = new PluginLoader([], null);
-    $emptyLoader->boot();
-
-    $c = makeContainerForLlmMerge(
-        [Spora\Drivers\OpenAICompatibleDriver::class, Spora\Drivers\AnthropicCompatibleDriver::class],
-        $emptyLoader,
-    );
-
-    $def = callContainerMethod('llmDefinitions');
-    $merged = ($def['llm_driver_classes_merged'])($c);
-
-    // Same as the no-contributions case — the AppLoader branch is silently skipped.
     expect($merged)->toBe([
         Spora\Drivers\OpenAICompatibleDriver::class,
         Spora\Drivers\AnthropicCompatibleDriver::class,

@@ -34,7 +34,7 @@ trait MigrationHelpers
                 'SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS '
                 . 'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? '
                 . "AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
-                [$table, $constraintName]
+                [$table, $constraintName],
             );
             return $row !== null;
         }
@@ -65,7 +65,7 @@ trait MigrationHelpers
                 'SELECT INDEX_NAME FROM information_schema.STATISTICS '
                 . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? '
                 . 'AND INDEX_NAME = ? LIMIT 1',
-                [$table, $indexName]
+                [$table, $indexName],
             );
             return $row !== null;
         }
@@ -95,7 +95,7 @@ trait MigrationHelpers
                 . 'AND kcu.TABLE_NAME = ? '
                 . 'AND kcu.COLUMN_NAME = ? '
                 . "AND tc.CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1",
-                [$table, $column]
+                [$table, $column],
             );
             return $row?->CONSTRAINT_NAME;
         }
@@ -119,7 +119,7 @@ trait MigrationHelpers
                 . 'AND COLUMN_NAME = ? '
                 . 'AND SEQ_IN_INDEX = 1 '
                 . "AND INDEX_NAME <> 'PRIMARY' LIMIT 1",
-                [$table, $column]
+                [$table, $column],
             );
             return $row?->INDEX_NAME;
         }
@@ -148,7 +148,7 @@ trait MigrationHelpers
             'SELECT INDEX_NAME FROM information_schema.STATISTICS '
             . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? '
             . "AND INDEX_NAME = 'PRIMARY' LIMIT 1",
-            [$table]
+            [$table],
         );
         return $row !== null;
     }

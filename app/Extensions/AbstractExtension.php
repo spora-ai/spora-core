@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Extensions;
 
-use DI\ContainerBuilder;
 use ReflectionClass;
-use Spora\Core\MiddlewareRouteCollector;
 
 /**
  * Convenience base class for any SporaExtensionInterface implementer.
@@ -42,25 +40,8 @@ abstract class AbstractExtension implements SporaExtensionInterface
         return $this->path;
     }
 
-    public function autoload(): array
-    {
-        return [];
-    }
-
     /** @return array<class-string<\Spora\Tools\ToolInterface>> */
     public function tools(): array
-    {
-        return [];
-    }
-
-    /** @return array<string, class-string<\Spora\Drivers\LLMDriverInterface>> */
-    public function drivers(): array
-    {
-        return [];
-    }
-
-    /** @return string[] */
-    public function recipePaths(): array
     {
         return [];
     }
@@ -103,28 +84,4 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
-
-    /**
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
-     *             instead.
-     */
-    public function register(ContainerBuilder $builder): void {}
-
-    /**
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
-     *             instead.
-     */
-    public function routes(MiddlewareRouteCollector $routes): void {}
-
-    /**
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\BootingEvent}
-     *             instead.
-     */
-    public function boot(): void {}
 }

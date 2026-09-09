@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Extensions;
 
-use DI\ContainerBuilder;
 use FilesystemIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
-use ReflectionClass;
-use Spora\Core\MiddlewareRouteCollector;
+use ReflectionProperty;
 use Spora\Core\Paths;
 use Spora\Extensions\AbstractExtension;
 use Spora\Extensions\AppLoader;
@@ -21,7 +19,7 @@ beforeEach(function (): void {
     mkdir($this->tmpDir, 0755, true);
     mkdir($this->tmpDir . '/app', 0755, true);
     $this->paths = new Paths($this->tmpDir);
-    $this->builder = new ContainerBuilder();
+    $this->builder = new \DI\ContainerBuilder();
     $this->loader = new AppLoader();
     // Unique app class name per test so PHP doesn't choke on redeclaration
     // when require_once is a no-op for already-loaded classes from a previous test.
@@ -67,53 +65,6 @@ it('loads a valid App class and exposes it via getApp()', function (): void {
 
     expect($app)->toBeInstanceOf(SpyApp::class);
     expect($this->loader->getApp())->toBe($app);
-});
-
-it('invokes App::register(ContainerBuilder) during load()', function (): void {
-    file_put_contents(
-        $this->tmpDir . '/app/App.php',
-        "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
-    );
-
-    $this->loader->load($this->paths, $this->builder);
-
-    expect($this->loader->getApp()->registerCalls)->toBe(1);
-});
-
-it('invokes App::routes() when registerRoutes() is called', function (): void {
-    file_put_contents(
-        $this->tmpDir . '/app/App.php',
-        "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
-    );
-
-    $this->loader->load($this->paths, $this->builder);
-    $collector = new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
-    $this->loader->registerRoutes($collector);
-
-    expect($this->loader->getApp()->routesCalls)->toBe(1);
-});
-
-it('is a no-op when registerRoutes() is called without a loaded App', function (): void {
-    $collector = new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
-    expect(fn() => $this->loader->registerRoutes($collector))->not->toThrow(Throwable::class);
-});
-
-it('invokes App::boot() on first call only (idempotent)', function (): void {
-    file_put_contents(
-        $this->tmpDir . '/app/App.php',
-        "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
-    );
-
-    $this->loader->load($this->paths, $this->builder);
-    $this->loader->boot();
-    $this->loader->boot();
-    $this->loader->boot();
-
-    expect($this->loader->getApp()->bootCalls)->toBe(1);
-});
-
-it('is a no-op when boot() is called without a loaded App', function (): void {
-    expect(fn() => $this->loader->boot())->not->toThrow(Throwable::class);
 });
 
 it('throws when app/App.php exists but declares a non-SporaExtension class', function (): void {
@@ -165,38 +116,65 @@ it('picks the concrete App over an abstract parent newly declared alongside it',
     expect($app)->toBeInstanceOf(SporaExtensionInterface::class);
 });
 
-it('registers PSR-4 mappings declared by App::autoload() with the Composer ClassLoader', function (): void {
-    $mappingApp = new class extends AbstractExtension {
-        public function getName(): string
+it('registerRoutes() and boot() are silent no-ops without a loaded App', function (): void {
+    // After PR-3 the deprecated register/routes/boot hooks were removed in
+    // favour of PSR-14 events. Without a loaded App, the loader should
+    // still accept the calls without throwing.
+    expect(fn() => $this->loader->registerRoutes(
+        new \Spora\Core\MiddlewareRouteCollector(
+            new \FastRoute\RouteParser\Std(),
+            new \FastRoute\DataGenerator\GroupCountBased(),
+        ),
+    ))->not->toThrow(Throwable::class);
+    expect(fn() => $this->loader->boot())->not->toThrow(Throwable::class);
+    expect(fn() => $this->loader->boot(new class implements \Psr\Container\ContainerInterface {
+        public function get(string $id): mixed
         {
-            return 'MappingApp';
+            return null;
         }
-        public function autoload(): array
+        public function has(string $id): bool
         {
-            // Pick a directory the project's own autoloader already uses — then we
-            // can introspect it before/after to verify the registration is idempotent.
-            return ['Tests\\Fixtures\\' => __DIR__ . '/../../Fixtures'];
+            return false;
         }
-    };
+    }))->not->toThrow(Throwable::class);
+});
 
-    // Inject via reflection: AppLoader normally loads the App from a file path,
-    // but this test only needs to exercise the autoload() branch.
-    $ref = new ReflectionClass($this->loader);
-    $appProp = $ref->getProperty('app');
-    $appProp->setValue($this->loader, $mappingApp);
+it('registerRoutes() dispatches RoutesRegisteringEvent after App load', function (): void {
+    file_put_contents(
+        $this->tmpDir . '/app/App.php',
+        "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
+    );
 
-    $classLoader = null;
-    foreach (spl_autoload_functions() as $fn) {
-        if (is_array($fn) && $fn[0] instanceof \Composer\Autoload\ClassLoader) {
-            $classLoader = $fn[0];
-            break;
-        }
-    }
-    expect($classLoader)->toBeInstanceOf(\Composer\Autoload\ClassLoader::class);
+    $this->loader->load($this->paths, $this->builder);
 
-    // No exception is raised even when the ClassLoader already maps the namespace.
-    $this->loader->registerRoutes(new MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased()));
+    $dispatcher = new \Symfony\Component\EventDispatcher\EventDispatcher();
+    $loader     = new AppLoader($dispatcher);
+    (new ReflectionProperty($loader, 'app'))->setValue($loader, $this->loader->getApp());
 
-    // The namespace must still be resolvable after re-registration.
-    expect(class_exists(\Tests\Fixtures\TestTool::class))->toBeTrue();
+    $fired = false;
+    $dispatcher->addListener(\Spora\Events\RoutesRegisteringEvent::class, function () use (&$fired): void {
+        $fired = true;
+    });
+
+    $loader->registerRoutes(new \Spora\Core\MiddlewareRouteCollector(
+        new \FastRoute\RouteParser\Std(),
+        new \FastRoute\DataGenerator\GroupCountBased(),
+    ));
+
+    expect($fired)->toBeTrue();
+});
+
+it('boot() is idempotent within a process', function (): void {
+    file_put_contents(
+        $this->tmpDir . '/app/App.php',
+        "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
+    );
+
+    $this->loader->load($this->paths, $this->builder);
+
+    $this->loader->boot();
+    $this->loader->boot();
+    $this->loader->boot();
+
+    expect($this->loader->getApp())->toBeInstanceOf(SpyApp::class);
 });

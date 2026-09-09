@@ -79,10 +79,6 @@ describe('PluginsController', function (): void {
             ],
         ]);
 
-        expect($plugin['bundledDrivers'])->toBe([
-            ['provider' => 'inventory_driver', 'class' => 'Tests\\Fixtures\\Plugins\\InventoryPlugin\\InventoryDriver'],
-        ]);
-
         // Migrations status: 1 file on disk, 0 applied yet → pending_migrations.
         expect($plugin['migrations']['declared'])->toBe(1);
         expect($plugin['migrations']['filesOnDisk'])->toBe(1);

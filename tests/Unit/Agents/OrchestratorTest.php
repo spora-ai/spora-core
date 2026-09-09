@@ -3201,8 +3201,6 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     $mockPlugin = Mockery::mock(PluginInterface::class);
     $mockPlugin->allows('getName')->andReturn('Test Plugin');
     $mockPlugin->allows('tools')->andReturn([$pluginToolClass]);
-    $mockPlugin->allows('autoload')->andReturn([]);
-    $mockPlugin->allows('recipePaths')->andReturn([]);
     $mockPlugin->allows('schemaVersion')->andReturn(0);
     $mockPlugin->allows('migrationsPath')->andReturn(null);
 

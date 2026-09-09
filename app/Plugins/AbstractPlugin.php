@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins;
 
-use DI\ContainerBuilder;
 use ReflectionClass;
-use Spora\Core\MiddlewareRouteCollector;
 
 /**
  * Base implementation of {@see PluginInterface} with sensible no-op defaults
@@ -18,22 +16,20 @@ use Spora\Core\MiddlewareRouteCollector;
  * compatibility — but every direct implementer ends up writing the same six
  * empty methods.
  *
- * Hook lifecycle (all four are now actually invoked at boot — see
- * {@see PluginLoader::registerPlugins()}, {@see PluginLoader::registerRoutes()},
- * {@see PluginLoader::bootExtensions()}, and the AppRegistry merge in
- * {@see \Spora\Core\ContainerDefinitions::all()}):
+ * Hook lifecycle (the three side-effect hooks were moved to PSR-14 events
+ * in 1.0 — see `spora-workspace/plans/extension-interface-events.md`):
  *
- * - `register(ContainerBuilder)` → runs once per process, BEFORE the DI
- *   container is built. Use this to add bindings (`$builder->addDefinitions`)
+ * - `ContainerBuildingEvent` → fires once per process, BEFORE the DI
+ *   container is built. Listeners add bindings (`$event->builder()->addDefinitions`)
  *   so plugin tools can be autowired. The container is not yet resolvable
- *   here — use `boot()` for post-build init.
+ *   here — use `BootingEvent` for post-build init.
  * - `apps()` → merged into the host's AppRegistry at container build time
  *   so plugin-supplied admin panels surface in `GET /api/v1/apps`.
- * - `routes(MiddlewareRouteCollector)` → runs per request, after the project's
+ * - `RoutesRegisteringEvent` → fires per request, after the project's
  *   App routes are registered. Plugin routes can extend or override them.
- * - `boot()` → runs per request, after the App boots. Idempotent within a
- *   process. Use this for stateful init that needs container services
- *   (Database, LoggerInterface, etc.).
+ * - `BootingEvent` → fires per request, after the App boots. Idempotent
+ *   within a process. Use this for stateful init that needs container
+ *   services (Database, LoggerInterface, etc.).
  */
 abstract class AbstractPlugin implements PluginInterface
 {
@@ -52,42 +48,11 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
-     * PSR-4 autoload mappings the plugin contributes at runtime, in addition
-     * to whatever its composer.json declares. Most plugins can leave this empty.
-     *
-     * @return array<string, string>
-     */
-    public function autoload(): array
-    {
-        return [];
-    }
-
-    /**
      * Tool classes this plugin contributes to the Tool Registry.
      *
      * @return array<class-string<\Spora\Tools\ToolInterface>>
      */
     public function tools(): array
-    {
-        return [];
-    }
-
-    /**
-     * LLM driver classes this plugin contributes. Most plugins leave this empty.
-     *
-     * @return array<string, class-string<\Spora\Drivers\LLMDriverInterface>>
-     */
-    public function drivers(): array
-    {
-        return [];
-    }
-
-    /**
-     * Absolute paths to recipe directories or files this plugin ships.
-     *
-     * @return string[]
-     */
-    public function recipePaths(): array
     {
         return [];
     }
@@ -138,20 +103,6 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
-     * Register arbitrary DI bindings, middleware, or services into the
-     * host application. Invoked once per process during boot, BEFORE the
-     * container is built. Add bindings via `$builder->addDefinitions([...])`.
-     * The container is not yet resolvable here — use `boot()` for any
-     * post-build init that needs live services.
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
-     *             instead.
-     */
-    public function register(ContainerBuilder $builder): void {}
-
-    /**
      * UI side-panels this plugin contributes to the App Registry. Merged into
      * the host's AppRegistry at container build time. Return [] unless the
      * plugin ships new admin panels.
@@ -162,29 +113,4 @@ abstract class AbstractPlugin implements PluginInterface
     {
         return [];
     }
-
-    /**
-     * Register HTTP routes into the running middleware collector. Invoked
-     * per request, after the project's App routes are registered. Plugins
-     * can override or extend App-registered routes.
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
-     *             instead.
-     */
-    public function routes(MiddlewareRouteCollector $routes): void {}
-
-    /**
-     * Lifecycle hook fired once per request after the DI container is built
-     * and the App has booted, but before the request is dispatched. Use for
-     * stateful init that needs container services. Idempotent within a process
-     * (subsequent calls in the same process are no-ops).
-     *
-     * @deprecated since 0.6, removed in 1.0. Implement
-     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
-     *             and subscribe to {@see \Spora\Events\BootingEvent}
-     *             instead.
-     */
-    public function boot(): void {}
 }

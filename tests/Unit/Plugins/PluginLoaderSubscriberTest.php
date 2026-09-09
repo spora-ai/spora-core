@@ -85,10 +85,6 @@ test('wireEventSubscribers() attaches a plugin implementing EventSubscriberInter
         $loader->boot();
         $loader->wireEventSubscribers();
 
-        // Dispatching ContainerBuildingEvent via the loader's dispatcher must
-        // invoke the plugin's listener. Cold boot path: full discovery, no
-        // sidecar. Production calls this exact line from PluginLoader::registerPlugins
-        // once commit 2 wires it in.
         $builder = new \DI\ContainerBuilder();
         $dispatcher->dispatch(new ContainerBuildingEvent($builder));
 
@@ -112,7 +108,6 @@ test('wireEventSubscribers() re-attaches the plugin on warm boot (PluginLoaderCa
     $loader1->boot();
     $loader1->wireEventSubscribers();
 
-    // Cold-boot sanity: one dispatch, one call.
     $builder1 = new \DI\ContainerBuilder();
     $dispatcher1->dispatch(new ContainerBuildingEvent($builder1));
 
@@ -121,16 +116,11 @@ test('wireEventSubscribers() re-attaches the plugin on warm boot (PluginLoaderCa
     expect($coldPlugin->containerBuildingCalls)->toBe(1);
 
     try {
-        // Warm boot: second loader re-instantiates plugins from the sidecar
-        // without re-reading manifests. Subscriber wiring must still happen.
         $dispatcher2 = new EventDispatcher();
         $loader2 = new PluginLoader([$dir], $stamp, $dispatcher2);
         $loader2->boot();
         $loader2->wireEventSubscribers();
 
-        // Warm-boot loader has its own subscriber (a fresh instance from
-        // sidecar restoration). Assert that one — not the cold-boot one —
-        // received the event through the warm-boot dispatcher.
         /** @var SubscriberPlugin $warmPlugin */
         $warmPlugin = $loader2->getPlugins()['subscriber'];
         expect($warmPlugin)->not->toBe($coldPlugin);
@@ -154,9 +144,6 @@ test('wireEventSubscribers() is a no-op for plugins that do not implement EventS
         $loader = new PluginLoader([$dir], null, $dispatcher);
         $loader->boot();
 
-        // Replace the subscriber plugin with a plain AbstractPlugin (no
-        // EventSubscriberInterface). wireEventSubscribers() must silently
-        // skip it; no exception, no listener added.
         $plain = new class extends AbstractPlugin {
             public function getName(): string
             {
@@ -182,183 +169,77 @@ test('PluginLoader without an explicit dispatcher constructs its own (autowire f
         $loader->boot();
         $loader->wireEventSubscribers();
 
-        // The fallback dispatcher must still receive subscribers — the
-        // dispatcher attached to a plugin is internal to the loader.
         expect(true)->toBeTrue();
     } finally {
         $cleanup();
     }
 });
 
-test('registerPlugins() does NOT call register() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
-    // A plugin that implements both the deprecated register() hook AND the
-    // new EventSubscriberInterface surface. Only the listener should fire —
-    // the double-fire guard in PluginLoader::registerPlugins() must skip the
-    // old hook so DI bindings are not applied twice.
-    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
-        public int $registerCalls = 0;
-        public int $containerBuildingCalls = 0;
+test('registerPlugins() fires ContainerBuildingEvent and the subscriber receives it', function (): void {
+    $subscriber = new SubscriberPlugin();
 
-        public function getName(): string
-        {
-            return 'Hybrid';
-        }
-
-        public static function getSubscribedEvents(): array
-        {
-            return [
-                ContainerBuildingEvent::class => 'onContainerBuilding',
-            ];
-        }
-
-        public function onContainerBuilding(ContainerBuildingEvent $event): void
-        {
-            $this->containerBuildingCalls++;
-        }
-
-        public function register(\DI\ContainerBuilder $builder): void
-        {
-            $this->registerCalls++;
-        }
-    };
-
-    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $dispatcher = new EventDispatcher();
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
     $loader->boot();
 
-    // Inject the hybrid plugin via reflection — same seam used by other
-    // PluginLoader tests for plug-in patterns that don't need filesystem
-    // backing (PSR-4 quirks, double-fire guard, exception swallowing).
     $reflection = new ReflectionClass($loader);
     $pluginsProperty = $reflection->getProperty('plugins');
-    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+    $pluginsProperty->setValue($loader, ['subscriber' => $subscriber]);
 
-    // The PluginLoader's wireEventSubscribers() is what attaches the plugin
-    // to the dispatcher; production Kernel wires it from handle() once per
-    // request. Mirror that here so the listener actually fires when the
-    // event is dispatched.
     $loader->wireEventSubscribers();
 
     $loader->registerPlugins(new \DI\ContainerBuilder());
 
-    // Listener fired once (from the event dispatch).
-    expect($hybrid->containerBuildingCalls)->toBe(1);
-    // Old hook was SKIPPED — the double-fire guard worked.
-    expect($hybrid->registerCalls)->toBe(0);
+    expect($subscriber->containerBuildingCalls)->toBe(1);
 });
 
-test('registerRoutes() does NOT call routes() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
-    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
-        public int $routesCalls = 0;
-        public int $routesRegisteringCalls = 0;
+test('registerRoutes() fires RoutesRegisteringEvent and the subscriber receives it', function (): void {
+    $subscriber = new SubscriberPlugin();
 
-        public function getName(): string
-        {
-            return 'Hybrid';
-        }
-
-        public static function getSubscribedEvents(): array
-        {
-            return [
-                RoutesRegisteringEvent::class => 'onRoutesRegistering',
-            ];
-        }
-
-        public function onRoutesRegistering(RoutesRegisteringEvent $event): void
-        {
-            $this->routesRegisteringCalls++;
-        }
-
-        public function routes(\Spora\Core\MiddlewareRouteCollector $routes): void
-        {
-            $this->routesCalls++;
-        }
-    };
-
-    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $dispatcher = new EventDispatcher();
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
     $loader->boot();
 
     $reflection = new ReflectionClass($loader);
     $pluginsProperty = $reflection->getProperty('plugins');
-    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+    $pluginsProperty->setValue($loader, ['subscriber' => $subscriber]);
 
     $loader->wireEventSubscribers();
 
     $loader->registerRoutes(new \Spora\Core\MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased()));
 
-    expect($hybrid->routesRegisteringCalls)->toBe(1);
-    expect($hybrid->routesCalls)->toBe(0);
+    expect($subscriber->routesRegisteringCalls)->toBe(1);
 });
 
-test('bootExtensions() does NOT call boot() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
-    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
-        public int $bootCalls = 0;
+test('bootExtensions() fires BootingEvent and the subscriber receives it', function (): void {
+    $subscriber = new class extends AbstractPlugin implements EventSubscriberInterface {
         public int $bootingCalls = 0;
-
         public function getName(): string
         {
-            return 'Hybrid';
+            return 'Booting';
         }
-
         public static function getSubscribedEvents(): array
         {
-            return [
-                \Spora\Events\BootingEvent::class => 'onBooting',
-            ];
+            return [\Spora\Events\BootingEvent::class => 'onBooting'];
         }
-
         public function onBooting(\Spora\Events\BootingEvent $event): void
         {
             $this->bootingCalls++;
         }
-
-        public function boot(): void
-        {
-            $this->bootCalls++;
-        }
     };
 
-    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $dispatcher = new EventDispatcher();
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
     $loader->boot();
 
     $reflection = new ReflectionClass($loader);
     $pluginsProperty = $reflection->getProperty('plugins');
-    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+    $pluginsProperty->setValue($loader, ['booting' => $subscriber]);
 
     $loader->wireEventSubscribers();
 
     $container = new \DI\Container();
     $loader->bootExtensions($container);
 
-    expect($hybrid->bootingCalls)->toBe(1);
-    expect($hybrid->bootCalls)->toBe(0);
-});
-
-test('registerPlugins() still calls register() on a plain AbstractPlugin (non-subscriber fallback)', function (): void {
-    // Symmetric negative test for the double-fire guard — a plugin that
-    // does NOT implement EventSubscriberInterface must keep receiving the
-    // deprecated register() call so existing plugins work unmodified.
-    $plain = new class extends AbstractPlugin {
-        public int $registerCalls = 0;
-
-        public function getName(): string
-        {
-            return 'Plain';
-        }
-
-        public function register(\DI\ContainerBuilder $builder): void
-        {
-            $this->registerCalls++;
-        }
-    };
-
-    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
-    $loader->boot();
-
-    $reflection = new ReflectionClass($loader);
-    $pluginsProperty = $reflection->getProperty('plugins');
-    $pluginsProperty->setValue($loader, ['plain' => $plain]);
-
-    $loader->registerPlugins(new \DI\ContainerBuilder());
-
-    expect($plain->registerCalls)->toBe(1);
+    expect($subscriber->bootingCalls)->toBe(1);
 });

@@ -15,7 +15,6 @@ use Spora\Events\RoutesRegisteringEvent;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
-use Throwable;
 
 /**
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
@@ -23,15 +22,20 @@ use Throwable;
  * Discovery is reflection-based — no manifest, no slug, no plugin.json — because
  * the App is a one-per-installation concern, unlike Composer-distributed plugins.
  *
- * Hooks are applied in this order so the App's contributions are baked into the
- * compiled container:
+ * The three side-effect hooks (`register()`, `routes()`, `boot()`) were moved
+ * to PSR-14 events in 1.0. The App opts in by implementing
+ * `Symfony\Component\EventDispatcher\EventSubscriberInterface` and subscribing
+ * to `ContainerBuildingEvent`, `RoutesRegisteringEvent`, and `BootingEvent`.
+ * See `spora-workspace/plans/extension-interface-events.md` for the migration
+ * guide. The class names below are unchanged — only the wiring is.
  *
- *   1. App's PSR-4 mappings are registered with Composer's ClassLoader so e.g.
- *      `App\Tools\Greeter` is resolvable during container build.
- *   2. App::register(ContainerBuilder) is called BEFORE build — its bindings are
- *      merged into the container that PHP-DI compiles.
- *   3. After the container is built, Kernel calls App::routes() and App::boot()
- *      with the now-live container and route collector.
+ * Hooks are applied in this order so the App's contributions are baked into
+ * the compiled container:
+ *
+ *   1. `ContainerBuildingEvent` fires once per process, BEFORE build. The App
+ *      may register DI bindings via the event's `builder()` accessor.
+ *   2. After the container is built, `RoutesRegisteringEvent` and then
+ *      `BootingEvent` fire per request with the live collector and container.
  *
  * No app/App.php? AppLoader is a silent no-op — Spora runs as it always has.
  */
@@ -49,12 +53,6 @@ final class AppLoader
     private readonly EventDispatcher $dispatcher;
 
     /**
-     * Empty constructor — AppLoader must be autowireable as a normal
-     * container service (PHP-DI calls `new` on it via `$c->get()`), but
-     * its `load()` step is the only thing that needs project paths and
-     * a ContainerBuilder. Both are passed at call time, not construction,
-     * to keep the dependency direction simple.
-     *
      * The dispatcher is required in the constructor (not at wire time) so
      * `wireEventSubscribers()` can rely on it being non-null without a
      * null-check on the hot path. Tests can pass a fresh dispatcher to
@@ -66,13 +64,14 @@ final class AppLoader
     }
 
     /**
-     * Discover and bind the App. Returns the loaded App instance, or null
-     * if no app/App.php exists.
+     * Discover the App and dispatch `ContainerBuildingEvent` so subscribers
+     * can register DI bindings before build. Returns the loaded App instance,
+     * or null if no app/App.php exists.
      *
      * Called once by the Kernel BEFORE the container is built. $paths and
      * $builder are passed here (not via the constructor) because:
-     * - The App's `register()` hook must modify the ContainerBuilder BEFORE
-     *   build.
+     * - Subscribers to `ContainerBuildingEvent` must mutate the
+     *   ContainerBuilder BEFORE build.
      * - AppLoader itself needs to be resolvable as a normal container
      *   service for the post-build factories that depend on it (Database,
      *   RecipeScanner, AppRegistry, tool_instances).
@@ -91,32 +90,7 @@ final class AppLoader
             return null;
         }
 
-        // PSR-4 mappings must be registered before App::register() so the App's
-        // own tool classes are resolvable during container build.
-        $this->registerAutoloadMappings($app);
-
-        // Dispatch ContainerBuildingEvent first; if the App opted into the
-        // PSR-14 subscriber surface, it already added its DI bindings to the
-        // builder when the event fired. Falling through to register() in that
-        // case would double-apply the bindings. Non-subscribers hit the
-        // deprecated hook wrapped in try/catch — a single misbehaving App
-        // must not break boot.
         $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
-        if (!$app instanceof EventSubscriberInterface) {
-            try {
-                // Deprecated SporaExtensionInterface::register() — removed in PR-3.
-                $app->register($builder);
-            } catch (Throwable $e) {
-                // Pre-container: error_log() is the only channel reliably
-                // available (LoggerInterface isn't built until Kernel::buildContainer).
-                error_log(sprintf(
-                    '[spora] app %s register() failed: %s',
-                    $app->getName(),
-                    $e->getMessage(),
-                ));
-            }
-        }
-
         $this->app = $app;
         return $this->app;
     }
@@ -162,50 +136,21 @@ final class AppLoader
         return new $fqcn();
     }
 
-    private function registerAutoloadMappings(SporaExtensionInterface $app): void
-    {
-        $classLoader = $this->findClassLoader();
-        if ($classLoader === null) {
-            return;
-        }
-        foreach ($app->autoload() as $namespace => $path) {
-            $classLoader->addPsr4($namespace, $path);
-        }
-    }
-
     /**
-     * Dispatch {@see RoutesRegisteringEvent} and, when the loaded App has
-     * NOT opted into the PSR-14 subscriber surface, fall through to the
-     * deprecated App::routes() hook. Called after core routes are registered,
-     * before the router is built.
-     *
-     * Double-fire guard mirrors {@see PluginLoader::registerRoutes()} —
-     * subscribers responded to RoutesRegisteringEvent; non-subscribers
-     * fall through. Throws from the deprecated hook are caught and logged.
+     * Dispatch `RoutesRegisteringEvent` so subscribers can register HTTP
+     * routes against the running middleware collector. Called by Kernel
+     * after core routes are registered, before the router is built.
      */
     public function registerRoutes(MiddlewareRouteCollector $routes): void
     {
         $this->dispatcher->dispatch(new RoutesRegisteringEvent($routes));
-        if ($this->app === null || $this->app instanceof EventSubscriberInterface) {
-            return;
-        }
-        try {
-            // Deprecated SporaExtensionInterface::routes() — removed in PR-3.
-            $this->app->routes($routes);
-        } catch (Throwable $e) {
-            error_log(sprintf(
-                '[spora] app %s routes() failed: %s',
-                $this->app->getName(),
-                $e->getMessage(),
-            ));
-        }
     }
 
     /**
-     * Dispatch {@see BootingEvent} and, when the loaded App has NOT opted
-     * into the PSR-14 subscriber surface, fall through to the deprecated
-     * App::boot() hook. Idempotent — repeat calls within the same process
-     * are no-ops. Safe to use container services inside boot().
+     * Dispatch `BootingEvent` so subscribers can run init logic that needs
+     * container services. Idempotent — repeat calls within the same process
+     * are no-ops. Safe to use container services inside `BootingEvent`
+     * listeners.
      *
      * The container is required to dispatch BootingEvent; passing null is
      * permitted only so legacy callers (and idempotency tests that do not
@@ -220,19 +165,6 @@ final class AppLoader
 
         if ($container !== null) {
             $this->dispatcher->dispatch(new BootingEvent($container));
-        }
-        if ($this->app === null || $this->app instanceof EventSubscriberInterface) {
-            return;
-        }
-        try {
-            // Deprecated SporaExtensionInterface::boot() — removed in PR-3.
-            $this->app->boot();
-        } catch (Throwable $e) {
-            error_log(sprintf(
-                '[spora] app %s boot() failed: %s',
-                $this->app->getName(),
-                $e->getMessage(),
-            ));
         }
     }
 
@@ -292,15 +224,5 @@ final class AppLoader
         }
 
         return $candidates[array_key_last($candidates)];
-    }
-
-    private function findClassLoader(): ?\Composer\Autoload\ClassLoader
-    {
-        foreach (spl_autoload_functions() as $fn) {
-            if (is_array($fn) && $fn[0] instanceof \Composer\Autoload\ClassLoader) {
-                return $fn[0];
-            }
-        }
-        return null;
     }
 }
