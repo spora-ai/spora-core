@@ -64,9 +64,12 @@ final class AppLoader
     }
 
     /**
-     * Discover the App and dispatch `ContainerBuildingEvent` so subscribers
-     * can register DI bindings before build. Returns the loaded App instance,
-     * or null if no app/App.php exists.
+     * Discover the App. Returns the loaded App instance, or null if no
+     * app/App.php exists. Does NOT dispatch lifecycle events — see
+     * {@see \Spora\Plugins\PluginLoader::registerPlugins()}, which is the
+     * single dispatch site for `ContainerBuildingEvent`. Dispatching here
+     * would double-fire every plugin's subscriber (AppLoader and
+     * PluginLoader share the dispatcher).
      *
      * Called once by the Kernel BEFORE the container is built. $paths and
      * $builder are passed here (not via the constructor) because:
@@ -90,7 +93,6 @@ final class AppLoader
             return null;
         }
 
-        $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
         $this->app = $app;
         return $this->app;
     }
@@ -137,24 +139,27 @@ final class AppLoader
     }
 
     /**
-     * Dispatch `RoutesRegisteringEvent` so subscribers can register HTTP
-     * routes against the running middleware collector. Called by Kernel
-     * after core routes are registered, before the router is built.
+     * No-op placeholder retained for Kernel API compatibility.
+     *
+     * `RoutesRegisteringEvent` is dispatched from
+     * {@see \Spora\Plugins\PluginLoader::registerRoutes()} — the single
+     * dispatch site for the request lifecycle. AppLoader's prior dispatch
+     * here caused every plugin's `onRoutesRegistering` to fire twice on
+     * the shared dispatcher, producing duplicate FastRoute entries.
      */
-    public function registerRoutes(MiddlewareRouteCollector $routes): void
-    {
-        $this->dispatcher->dispatch(new RoutesRegisteringEvent($routes));
-    }
+    public function registerRoutes(MiddlewareRouteCollector $routes): void {}
 
     /**
-     * Dispatch `BootingEvent` so subscribers can run init logic that needs
-     * container services. Idempotent — repeat calls within the same process
-     * are no-ops. Safe to use container services inside `BootingEvent`
-     * listeners.
+     * No-op placeholder retained for Kernel API compatibility.
      *
-     * The container is required to dispatch BootingEvent; passing null is
-     * permitted only so legacy callers (and idempotency tests that do not
-     * care about the event) can still invoke the method.
+     * `BootingEvent` is dispatched from
+     * {@see \Spora\Plugins\PluginLoader::bootExtensions()} — the single
+     * dispatch site for the boot phase. The idempotent `$booted` guard
+     * stays so callers passing null continue to get silent-acceptance
+     * semantics.
+     *
+     * Safe to use container services inside `BootingEvent` listeners
+     * (the listener fires after `Kernel::__construct` builds the container).
      */
     public function boot(?ContainerInterface $container = null): void
     {
@@ -162,10 +167,6 @@ final class AppLoader
             return;
         }
         $this->booted = true;
-
-        if ($container !== null) {
-            $this->dispatcher->dispatch(new BootingEvent($container));
-        }
     }
 
     private bool $appSubscriberWired = false;

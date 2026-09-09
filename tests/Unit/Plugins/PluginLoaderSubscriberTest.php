@@ -243,3 +243,51 @@ test('bootExtensions() fires BootingEvent and the subscriber receives it', funct
 
     expect($subscriber->bootingCalls)->toBe(1);
 });
+
+// Regression: when AppLoader and PluginLoader share a dispatcher, every
+// lifecycle event must fire exactly once per phase across the two loaders.
+// Earlier AppLoader also dispatched the same events on the same dispatcher,
+// causing plugin subscribers to receive the event twice — e.g. each plugin
+// route was added to the FastRoute collector twice and a duplicate GET
+// /api/v1/media/{id} threw BadRouteException at boot.
+test('lifecycle events fire exactly once across AppLoader + PluginLoader sharing a dispatcher', function (): void {
+    $dispatcher = new EventDispatcher();
+
+    $appLoader = new \Spora\Extensions\AppLoader($dispatcher);
+    $pluginLoader = new PluginLoader(
+        ['/tmp/spora_no_plugins_' . uniqid()],
+        null,
+        $dispatcher,
+    );
+    $pluginLoader->boot();
+
+    $subscriber = new SubscriberPlugin();
+    $reflection = new ReflectionClass($pluginLoader);
+    $pluginsProperty = $reflection->getProperty('plugins');
+    $pluginsProperty->setValue($pluginLoader, ['subscriber' => $subscriber]);
+
+    $pluginLoader->wireEventSubscribers();
+
+    // Phase 1 — container building. AppLoader::load() no longer dispatches
+    // (it just instantiates the App). PluginLoader::registerPlugins() is the
+    // single dispatch site.
+    $builder = new \DI\ContainerBuilder();
+    $appLoader->load(
+        new \Spora\Core\Paths(sys_get_temp_dir() . '/spora_no_paths_' . uniqid()),
+        $builder,
+    );
+    $pluginLoader->registerPlugins($builder);
+    expect($subscriber->containerBuildingCalls)->toBe(1);
+
+    // Phase 2 — routes. AppLoader::registerRoutes() is a no-op; PluginLoader
+    // is the single dispatch site. This is the regression — duplicate
+    // dispatch here used to throw FastRoute\BadRouteException on duplicate
+    // /api/v1/media/{id} GET registrations.
+    $routes = new \Spora\Core\MiddlewareRouteCollector(
+        new \FastRoute\RouteParser\Std(),
+        new \FastRoute\DataGenerator\GroupCountBased(),
+    );
+    $appLoader->registerRoutes($routes);
+    $pluginLoader->registerRoutes($routes);
+    expect($subscriber->routesRegisteringCalls)->toBe(1);
+});

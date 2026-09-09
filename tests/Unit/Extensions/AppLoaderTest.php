@@ -139,7 +139,7 @@ it('registerRoutes() and boot() are silent no-ops without a loaded App', functio
     }))->not->toThrow(Throwable::class);
 });
 
-it('registerRoutes() dispatches RoutesRegisteringEvent after App load', function (): void {
+it('registerRoutes() is a no-op (event dispatch moved to PluginLoader to avoid double-fire)', function (): void {
     file_put_contents(
         $this->tmpDir . '/app/App.php',
         "<?php class $this->appClass extends \\Tests\\Unit\\Extensions\\SpyApp {}",
@@ -161,7 +161,7 @@ it('registerRoutes() dispatches RoutesRegisteringEvent after App load', function
         new \FastRoute\DataGenerator\GroupCountBased(),
     ));
 
-    expect($fired)->toBeTrue();
+    expect($fired)->toBeFalse();
 });
 
 it('boot() is idempotent within a process', function (): void {
