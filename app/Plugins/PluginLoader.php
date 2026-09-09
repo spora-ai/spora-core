@@ -505,24 +505,30 @@ final class PluginLoader
         }
     }
 
+    /** @var array<int, true> Spl_object_id set, guards against duplicate listeners on long-running workers. */
+    private array $wiredSubscriberIds = [];
+
     /**
      * Attach every loaded plugin implementing {@see EventSubscriberInterface}
      * to the dispatcher so it receives lifecycle events.
      *
-     * Subscriber wiring runs OUTSIDE the PluginLoaderCache hit/miss branch.
-     * The cache short-circuits manifest parsing on warm boot
-     * (PluginLoaderCache.php:19-22 documents the trade-off), but a listener
-     * subscribed during ContainerBuildingEvent handling would silently
-     * disappear on warm boot if we honoured the cache here. The cost is a
-     * cheap reflection-based subscriber re-bind per plugin per request; the
-     * gain is correct DI bindings and route registration on warm boots.
+     * Idempotent per plugin instance (tracked via spl_object_id) — safe to
+     * call multiple times. Kernel wires once in the constructor after
+     * {@see boot()} populates $this->plugins and before any event dispatch;
+     * tests may invoke it freely on isolated loader instances.
      */
     public function wireEventSubscribers(): void
     {
         foreach ($this->plugins as $plugin) {
-            if ($plugin instanceof EventSubscriberInterface) {
-                $this->dispatcher->addSubscriber($plugin);
+            if (!$plugin instanceof EventSubscriberInterface) {
+                continue;
             }
+            $id = spl_object_id($plugin);
+            if (isset($this->wiredSubscriberIds[$id])) {
+                continue;
+            }
+            $this->wiredSubscriberIds[$id] = true;
+            $this->dispatcher->addSubscriber($plugin);
         }
     }
 

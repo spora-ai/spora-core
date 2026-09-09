@@ -168,17 +168,21 @@ final class AppLoader
         }
     }
 
+    private bool $appSubscriberWired = false;
+
     /**
      * Attach the loaded App to the dispatcher when it implements
      * {@see EventSubscriberInterface}. Mirrors
      * {@see \Spora\Plugins\PluginLoader::wireEventSubscribers()} — same
-     * PSR-14 wiring, same out-of-cache-warmth rationale.
+     * PSR-14 wiring, idempotent across calls.
      */
     public function wireEventSubscribers(): void
     {
-        if ($this->app instanceof EventSubscriberInterface) {
-            $this->dispatcher->addSubscriber($this->app);
+        if ($this->appSubscriberWired || !$this->app instanceof EventSubscriberInterface) {
+            return;
         }
+        $this->dispatcher->addSubscriber($this->app);
+        $this->appSubscriberWired = true;
     }
 
     public function getApp(): ?SporaExtensionInterface

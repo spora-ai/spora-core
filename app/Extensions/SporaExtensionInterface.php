@@ -9,13 +9,15 @@ namespace Spora\Extensions;
  * package, manifest-driven) or an app (project-level, reflection-driven).
  *
  * Both `Spora\Plugins\PluginInterface` and `Spora\Extensions\AppInterface`
- * extend this interface as pure markers; the hook surface is shared so
- * migrating an app to a plugin is a rename + manifest, not a rewrite.
+ * extend this interface as markers; the data-hook surface is shared so the
+ * two are interchangeable from the loader's perspective.
  *
  * Historical context: in 1.0 the hook surface was trimmed. The deleted
  * hooks were `autoload()`, `drivers()`, `recipePaths()`, `register()`,
  * `routes()`, `boot()`. The first three had no callers; the last three
- * became PSR-14 events (see `Spora\Events\*`). See
+ * became PSR-14 events — extensions that need them implement
+ * `Symfony\Contracts\EventDispatcher\EventSubscriberInterface` and react to
+ * the matching `Spora\Events\*` events. See
  * `spora-workspace/plans/extension-interface-events.md` for the
  * migration guide and the design rationale.
  */

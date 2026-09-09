@@ -92,8 +92,9 @@ final class Kernel implements KernelInterface
         // Subscribers MUST be wired before the first ContainerBuildingEvent
         // dispatch in registerPlugins() — otherwise listeners never fire and
         // plugin-supplied DI bindings (e.g. EmailPlugin's ImapClientInterface)
-        // are silently missing. Wire on every construction too, so PHP-FPM /
-        // long-running workers can't drop the binding set between requests.
+        // are silently missing. Wire once per process; the loaders' wire
+        // methods are idempotent, so long-running workers can't accumulate
+        // duplicate listeners across requests.
         $this->appLoader->wireEventSubscribers();
         $this->pluginLoader->wireEventSubscribers();
         $this->pluginLoader->registerPlugins($builder);
@@ -126,14 +127,6 @@ final class Kernel implements KernelInterface
     {
         try {
             $this->container->get(Database::class)->boot();
-            // Wire PSR-14 subscribers BEFORE buildRouter() so RoutesRegisteringEvent
-            // listeners receive the dispatch. The constructor's wire pass already
-            // ran for registerPlugins(); this re-wire is the safety net for long-
-            // running workers and the BootingEvent listeners on bootExtensions().
-            // See PluginLoader::wireEventSubscribers() for the cache-warmth
-            // wrinkle that forces wiring to stay OUTSIDE the cache hit branch.
-            $this->appLoader->wireEventSubscribers();
-            $this->pluginLoader->wireEventSubscribers();
             $router = $this->buildRouter();
             // App::boot() runs once per request, after the container is built
             // and the DB is up — services are safe to use here. The container

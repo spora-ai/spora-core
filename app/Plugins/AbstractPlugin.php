@@ -7,17 +7,20 @@ namespace Spora\Plugins;
 use ReflectionClass;
 
 /**
- * Base implementation of {@see PluginInterface} with sensible no-op defaults
- * for the optional extension points.
+ * Base implementation of {@see PluginInterface} with no-op defaults for the
+ * data hooks plugins can opt into (tools, apps, skill/agent template paths,
+ * schema version + migrations).
  *
  * Plugins SHOULD extend this class and override only the hooks they actually
  * use (typically {@see getName()} and {@see tools()}). Direct implementations
- * of PluginInterface remain valid — the interface is unchanged for backward
- * compatibility — but every direct implementer ends up writing the same six
- * empty methods.
+ * of PluginInterface remain valid but require implementing the full hook
+ * surface.
  *
- * Hook lifecycle (the three side-effect hooks were moved to PSR-14 events
- * in 1.0 — see `spora-workspace/plans/extension-interface-events.md`):
+ * Behavioural hooks (DI registration, routes, boot) are NOT here — plugins
+ * opt into those via {@see EventSubscriberInterface}. See
+ * `spora-workspace/plans/extension-interface-events.md`.
+ *
+ * Hook lifecycle (PSR-14 events fired by `Spora\Plugins\PluginLoader`):
  *
  * - `ContainerBuildingEvent` → fires once per process, BEFORE the DI
  *   container is built. Listeners add bindings (`$event->builder()->addDefinitions`)
