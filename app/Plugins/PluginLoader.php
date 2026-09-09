@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
+use Psr\Container\ContainerInterface;
 use Spora\Apps\AppInterface;
 use Spora\Core\MiddlewareRouteCollector;
+use Spora\Events\BootingEvent;
+use Spora\Events\ContainerBuildingEvent;
+use Spora\Events\RoutesRegisteringEvent;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -487,17 +491,27 @@ final class PluginLoader
     }
 
     /**
-     * Invoke each loaded plugin's `register(ContainerBuilder)` hook. Called by
-     * Kernel AFTER appLoader->load() (so App::register() ran first) and BEFORE
-     * $builder->build() (so plugin DI bindings are part of the container graph).
+     * Dispatch {@see ContainerBuildingEvent} and, for any plugin NOT yet opted
+     * into the PSR-14 subscriber surface, fall through to the deprecated
+     * `register(ContainerBuilder)` hook. Called by Kernel AFTER appLoader->load()
+     * (so App::register() ran first) and BEFORE $builder->build() (so plugin
+     * DI bindings are part of the container graph).
      *
-     * Plugin-throws are caught and logged (or stderr'd) so a single misbehaving
-     * plugin does not break boot.
+     * The skip-on-subscriber branch is the double-fire guard — plugins that
+     * subscribe to ContainerBuildingEvent already responded when the event
+     * fired above, so calling `register()` on them would add the same DI
+     * bindings twice. Throws from the deprecated hook are caught and logged
+     * so a single misbehaving plugin does not break boot.
      */
     public function registerPlugins(ContainerBuilder $builder): void
     {
+        $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
         foreach ($this->plugins as $slug => $plugin) {
+            if ($plugin instanceof EventSubscriberInterface) {
+                continue;
+            }
             try {
+                // Deprecated SporaExtensionInterface::register() — removed in PR-3.
                 $plugin->register($builder);
             } catch (Throwable $e) {
                 // Pre-container: error_log() is the only channel reliably
@@ -512,33 +526,77 @@ final class PluginLoader
     }
 
     /**
-     * Invoke each loaded plugin's `routes(MiddlewareRouteCollector)` hook.
-     * Called per-request by Kernel::buildRouter() after the project's App routes
-     * have been registered — plugin routes can override or extend those.
+     * Dispatch {@see RoutesRegisteringEvent} and, for any plugin NOT opted
+     * into the PSR-14 subscriber surface, fall through to the deprecated
+     * `routes(MiddlewareRouteCollector)` hook. Called per-request by
+     * Kernel::buildRouter() after the project's App routes have been
+     * registered — plugin routes can override or extend those.
+     *
+     * Same double-fire guard as {@see registerPlugins()} — subscribers
+     * responded when the event fired; non-subscribers fall through. Throws
+     * from the deprecated hook are caught and logged so one bad plugin does
+     * not break the others.
      */
     public function registerRoutes(MiddlewareRouteCollector $routes): void
     {
-        foreach ($this->plugins as $plugin) {
-            $plugin->routes($routes);
+        $this->dispatcher->dispatch(new RoutesRegisteringEvent($routes));
+        foreach ($this->plugins as $slug => $plugin) {
+            if ($plugin instanceof EventSubscriberInterface) {
+                continue;
+            }
+            try {
+                // Deprecated SporaExtensionInterface::routes() — removed in PR-3.
+                $plugin->routes($routes);
+            } catch (Throwable $e) {
+                error_log(sprintf(
+                    '[spora] plugin %s routes() failed: %s',
+                    $slug,
+                    $e->getMessage(),
+                ));
+            }
         }
     }
 
     private bool $extensionsBooted = false;
 
     /**
-     * Invoke each loaded plugin's `boot()` hook. Called per-request by
-     * Kernel::handle() after the project's App has booted. Idempotent — repeat
-     * calls within the same process are no-ops.
+     * Dispatch {@see BootingEvent} and, for any plugin NOT opted into the
+     * PSR-14 subscriber surface, fall through to the deprecated `boot()` hook.
+     * Called per-request by Kernel::handle() after the project's App has
+     * booted. Idempotent — repeat calls within the same process are no-ops.
+     *
+     * The container is required to dispatch BootingEvent; passing null is
+     * permitted only so legacy callers (and idempotency tests that do not
+     * care about the event) can still invoke the method without bootstrapping
+     * a full container.
+     *
+     * Same double-fire guard as {@see registerPlugins()} — subscribers
+     * responded when the event fired; non-subscribers fall through.
      */
-    public function bootExtensions(): void
+    public function bootExtensions(?ContainerInterface $container = null): void
     {
         if ($this->extensionsBooted) {
             return;
         }
         $this->extensionsBooted = true;
 
-        foreach ($this->plugins as $plugin) {
-            $plugin->boot();
+        if ($container !== null) {
+            $this->dispatcher->dispatch(new BootingEvent($container));
+        }
+        foreach ($this->plugins as $slug => $plugin) {
+            if ($plugin instanceof EventSubscriberInterface) {
+                continue;
+            }
+            try {
+                // Deprecated SporaExtensionInterface::boot() — removed in PR-3.
+                $plugin->boot();
+            } catch (Throwable $e) {
+                error_log(sprintf(
+                    '[spora] plugin %s boot() failed: %s',
+                    $slug,
+                    $e->getMessage(),
+                ));
+            }
         }
     }
 

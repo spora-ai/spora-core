@@ -143,6 +143,11 @@ abstract class AbstractPlugin implements PluginInterface
      * container is built. Add bindings via `$builder->addDefinitions([...])`.
      * The container is not yet resolvable here — use `boot()` for any
      * post-build init that needs live services.
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
+     *             instead.
      */
     public function register(ContainerBuilder $builder): void {}
 
@@ -162,6 +167,11 @@ abstract class AbstractPlugin implements PluginInterface
      * Register HTTP routes into the running middleware collector. Invoked
      * per request, after the project's App routes are registered. Plugins
      * can override or extend App-registered routes.
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
+     *             instead.
      */
     public function routes(MiddlewareRouteCollector $routes): void {}
 
@@ -170,6 +180,11 @@ abstract class AbstractPlugin implements PluginInterface
      * and the App has booted, but before the request is dispatched. Use for
      * stateful init that needs container services. Idempotent within a process
      * (subsequent calls in the same process are no-ops).
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\BootingEvent}
+     *             instead.
      */
     public function boot(): void {}
 }

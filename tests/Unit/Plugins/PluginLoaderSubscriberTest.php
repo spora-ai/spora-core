@@ -189,3 +189,176 @@ test('PluginLoader without an explicit dispatcher constructs its own (autowire f
         $cleanup();
     }
 });
+
+test('registerPlugins() does NOT call register() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
+    // A plugin that implements both the deprecated register() hook AND the
+    // new EventSubscriberInterface surface. Only the listener should fire —
+    // the double-fire guard in PluginLoader::registerPlugins() must skip the
+    // old hook so DI bindings are not applied twice.
+    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
+        public int $registerCalls = 0;
+        public int $containerBuildingCalls = 0;
+
+        public function getName(): string
+        {
+            return 'Hybrid';
+        }
+
+        public static function getSubscribedEvents(): array
+        {
+            return [
+                ContainerBuildingEvent::class => 'onContainerBuilding',
+            ];
+        }
+
+        public function onContainerBuilding(ContainerBuildingEvent $event): void
+        {
+            $this->containerBuildingCalls++;
+        }
+
+        public function register(\DI\ContainerBuilder $builder): void
+        {
+            $this->registerCalls++;
+        }
+    };
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $loader->boot();
+
+    // Inject the hybrid plugin via reflection — same seam used by other
+    // PluginLoader tests for plug-in patterns that don't need filesystem
+    // backing (PSR-4 quirks, double-fire guard, exception swallowing).
+    $reflection = new ReflectionClass($loader);
+    $pluginsProperty = $reflection->getProperty('plugins');
+    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+
+    // The PluginLoader's wireEventSubscribers() is what attaches the plugin
+    // to the dispatcher; production Kernel wires it from handle() once per
+    // request. Mirror that here so the listener actually fires when the
+    // event is dispatched.
+    $loader->wireEventSubscribers();
+
+    $loader->registerPlugins(new \DI\ContainerBuilder());
+
+    // Listener fired once (from the event dispatch).
+    expect($hybrid->containerBuildingCalls)->toBe(1);
+    // Old hook was SKIPPED — the double-fire guard worked.
+    expect($hybrid->registerCalls)->toBe(0);
+});
+
+test('registerRoutes() does NOT call routes() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
+    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
+        public int $routesCalls = 0;
+        public int $routesRegisteringCalls = 0;
+
+        public function getName(): string
+        {
+            return 'Hybrid';
+        }
+
+        public static function getSubscribedEvents(): array
+        {
+            return [
+                RoutesRegisteringEvent::class => 'onRoutesRegistering',
+            ];
+        }
+
+        public function onRoutesRegistering(RoutesRegisteringEvent $event): void
+        {
+            $this->routesRegisteringCalls++;
+        }
+
+        public function routes(\Spora\Core\MiddlewareRouteCollector $routes): void
+        {
+            $this->routesCalls++;
+        }
+    };
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $loader->boot();
+
+    $reflection = new ReflectionClass($loader);
+    $pluginsProperty = $reflection->getProperty('plugins');
+    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+
+    $loader->wireEventSubscribers();
+
+    $loader->registerRoutes(new \Spora\Core\MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased()));
+
+    expect($hybrid->routesRegisteringCalls)->toBe(1);
+    expect($hybrid->routesCalls)->toBe(0);
+});
+
+test('bootExtensions() does NOT call boot() on a plugin that implements EventSubscriberInterface (double-fire guard)', function (): void {
+    $hybrid = new class extends AbstractPlugin implements EventSubscriberInterface {
+        public int $bootCalls = 0;
+        public int $bootingCalls = 0;
+
+        public function getName(): string
+        {
+            return 'Hybrid';
+        }
+
+        public static function getSubscribedEvents(): array
+        {
+            return [
+                \Spora\Events\BootingEvent::class => 'onBooting',
+            ];
+        }
+
+        public function onBooting(\Spora\Events\BootingEvent $event): void
+        {
+            $this->bootingCalls++;
+        }
+
+        public function boot(): void
+        {
+            $this->bootCalls++;
+        }
+    };
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $loader->boot();
+
+    $reflection = new ReflectionClass($loader);
+    $pluginsProperty = $reflection->getProperty('plugins');
+    $pluginsProperty->setValue($loader, ['hybrid' => $hybrid]);
+
+    $loader->wireEventSubscribers();
+
+    $container = new \DI\Container();
+    $loader->bootExtensions($container);
+
+    expect($hybrid->bootingCalls)->toBe(1);
+    expect($hybrid->bootCalls)->toBe(0);
+});
+
+test('registerPlugins() still calls register() on a plain AbstractPlugin (non-subscriber fallback)', function (): void {
+    // Symmetric negative test for the double-fire guard — a plugin that
+    // does NOT implement EventSubscriberInterface must keep receiving the
+    // deprecated register() call so existing plugins work unmodified.
+    $plain = new class extends AbstractPlugin {
+        public int $registerCalls = 0;
+
+        public function getName(): string
+        {
+            return 'Plain';
+        }
+
+        public function register(\DI\ContainerBuilder $builder): void
+        {
+            $this->registerCalls++;
+        }
+    };
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, new EventDispatcher());
+    $loader->boot();
+
+    $reflection = new ReflectionClass($loader);
+    $pluginsProperty = $reflection->getProperty('plugins');
+    $pluginsProperty->setValue($loader, ['plain' => $plain]);
+
+    $loader->registerPlugins(new \DI\ContainerBuilder());
+
+    expect($plain->registerCalls)->toBe(1);
+});

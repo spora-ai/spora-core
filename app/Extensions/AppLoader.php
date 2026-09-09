@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Spora\Extensions;
 
 use DI\ContainerBuilder;
+use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
+use Spora\Events\BootingEvent;
+use Spora\Events\ContainerBuildingEvent;
+use Spora\Events\RoutesRegisteringEvent;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Throwable;
 
 /**
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
@@ -90,9 +95,27 @@ final class AppLoader
         // own tool classes are resolvable during container build.
         $this->registerAutoloadMappings($app);
 
-        // FINALLY wired — App::register() applies DI bindings to the
-        // ContainerBuilder BEFORE the container is built.
-        $app->register($builder);
+        // Dispatch ContainerBuildingEvent first; if the App opted into the
+        // PSR-14 subscriber surface, it already added its DI bindings to the
+        // builder when the event fired. Falling through to register() in that
+        // case would double-apply the bindings. Non-subscribers hit the
+        // deprecated hook wrapped in try/catch — a single misbehaving App
+        // must not break boot.
+        $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
+        if (!$app instanceof EventSubscriberInterface) {
+            try {
+                // Deprecated SporaExtensionInterface::register() — removed in PR-3.
+                $app->register($builder);
+            } catch (Throwable $e) {
+                // Pre-container: error_log() is the only channel reliably
+                // available (LoggerInterface isn't built until Kernel::buildContainer).
+                error_log(sprintf(
+                    '[spora] app %s register() failed: %s',
+                    $app->getName(),
+                    $e->getMessage(),
+                ));
+            }
+        }
 
         $this->app = $app;
         return $this->app;
@@ -151,25 +174,66 @@ final class AppLoader
     }
 
     /**
-     * Forward to App::routes(). Called after core routes are registered,
+     * Dispatch {@see RoutesRegisteringEvent} and, when the loaded App has
+     * NOT opted into the PSR-14 subscriber surface, fall through to the
+     * deprecated App::routes() hook. Called after core routes are registered,
      * before the router is built.
+     *
+     * Double-fire guard mirrors {@see PluginLoader::registerRoutes()} —
+     * subscribers responded to RoutesRegisteringEvent; non-subscribers
+     * fall through. Throws from the deprecated hook are caught and logged.
      */
     public function registerRoutes(MiddlewareRouteCollector $routes): void
     {
-        $this->app?->routes($routes);
+        $this->dispatcher->dispatch(new RoutesRegisteringEvent($routes));
+        if ($this->app === null || $this->app instanceof EventSubscriberInterface) {
+            return;
+        }
+        try {
+            // Deprecated SporaExtensionInterface::routes() — removed in PR-3.
+            $this->app->routes($routes);
+        } catch (Throwable $e) {
+            error_log(sprintf(
+                '[spora] app %s routes() failed: %s',
+                $this->app->getName(),
+                $e->getMessage(),
+            ));
+        }
     }
 
     /**
-     * Forward to App::boot(). Called once after the container is built.
-     * Safe to use container services inside boot().
+     * Dispatch {@see BootingEvent} and, when the loaded App has NOT opted
+     * into the PSR-14 subscriber surface, fall through to the deprecated
+     * App::boot() hook. Idempotent — repeat calls within the same process
+     * are no-ops. Safe to use container services inside boot().
+     *
+     * The container is required to dispatch BootingEvent; passing null is
+     * permitted only so legacy callers (and idempotency tests that do not
+     * care about the event) can still invoke the method.
      */
-    public function boot(): void
+    public function boot(?ContainerInterface $container = null): void
     {
         if ($this->booted) {
             return;
         }
         $this->booted = true;
-        $this->app?->boot();
+
+        if ($container !== null) {
+            $this->dispatcher->dispatch(new BootingEvent($container));
+        }
+        if ($this->app === null || $this->app instanceof EventSubscriberInterface) {
+            return;
+        }
+        try {
+            // Deprecated SporaExtensionInterface::boot() — removed in PR-3.
+            $this->app->boot();
+        } catch (Throwable $e) {
+            error_log(sprintf(
+                '[spora] app %s boot() failed: %s',
+                $this->app->getName(),
+                $e->getMessage(),
+            ));
+        }
     }
 
     /**

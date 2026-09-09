@@ -98,18 +98,33 @@ interface SporaExtensionInterface
     /**
      * Register arbitrary DI bindings, middleware, or services.
      * Applied to the container builder BEFORE the container is built.
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
+     *             instead.
      */
     public function register(ContainerBuilder $builder): void;
 
     /**
      * Register HTTP routes into the running middleware collector.
      * Called after core routes are registered, before the router is built.
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
+     *             instead.
      */
     public function routes(MiddlewareRouteCollector $routes): void;
 
     /**
      * Called once after the container is built, before the request is handled.
      * Safe to use container services here.
+     *
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\BootingEvent}
+     *             instead.
      */
     public function boot(): void;
 }

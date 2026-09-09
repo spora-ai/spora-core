@@ -104,9 +104,27 @@ abstract class AbstractExtension implements SporaExtensionInterface
         return [];
     }
 
+    /**
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\ContainerBuildingEvent}
+     *             instead.
+     */
     public function register(ContainerBuilder $builder): void {}
 
+    /**
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\RoutesRegisteringEvent}
+     *             instead.
+     */
     public function routes(MiddlewareRouteCollector $routes): void {}
 
+    /**
+     * @deprecated since 0.6, removed in 1.0. Implement
+     *             {@see \Symfony\Contracts\EventDispatcher\EventSubscriberInterface}
+     *             and subscribe to {@see \Spora\Events\BootingEvent}
+     *             instead.
+     */
     public function boot(): void {}
 }

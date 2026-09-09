@@ -126,11 +126,13 @@ final class Kernel implements KernelInterface
             $this->appLoader->wireEventSubscribers();
             $this->pluginLoader->wireEventSubscribers();
             // App::boot() runs once per request, after the container is built
-            // and the DB is up — services are safe to use here.
-            $this->appLoader->boot();
+            // and the DB is up — services are safe to use here. The container
+            // is passed so AppLoader can dispatch BootingEvent.
+            $this->appLoader->boot($this->container);
             // Plugin::boot() runs after App::boot() so plugin authors can use
             // any service the App registered. Idempotent within a process.
-            $this->pluginLoader->bootExtensions();
+            // Container passed so PluginLoader can dispatch BootingEvent.
+            $this->pluginLoader->bootExtensions($this->container);
             return $router->dispatch($request);
         } catch (Throwable $e) {
             return $this->handleException($e);
