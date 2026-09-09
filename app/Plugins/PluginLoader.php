@@ -8,6 +8,8 @@ use DI\ContainerBuilder;
 use Spora\Apps\AppInterface;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Throwable;
 
 /**
@@ -59,6 +61,8 @@ final class PluginLoader
 
     private readonly PluginLoaderCache $cache;
 
+    private readonly EventDispatcher $dispatcher;
+
     /**
      * @param list<string>  $pluginDirectories Absolute paths to scan for `<plugin>/plugin.json`.
      *                                        Non-existent directories are silently skipped.
@@ -66,12 +70,18 @@ final class PluginLoader
      *                                        current, the loader re-instantiates plugins
      *                                        from a sidecar JSON. When null, the loader
      *                                        always performs a full discovery (used in tests).
+     * @param ?EventDispatcher $dispatcher    Dispatcher plugins attach {@see EventSubscriberInterface}
+     *                                        implementations to. Required in production;
+     *                                        tests may pass a fresh dispatcher (or null to
+     *                                        auto-create one) to observe listener wiring.
      */
     public function __construct(
         array $pluginDirectories,
         ?string $stampPath = null,
+        ?EventDispatcher $dispatcher = null,
     ) {
         $this->cache = new PluginLoaderCache($pluginDirectories, $stampPath);
+        $this->dispatcher = $dispatcher ?? new EventDispatcher();
     }
 
     /**
@@ -529,6 +539,27 @@ final class PluginLoader
 
         foreach ($this->plugins as $plugin) {
             $plugin->boot();
+        }
+    }
+
+    /**
+     * Attach every loaded plugin implementing {@see EventSubscriberInterface}
+     * to the dispatcher so it receives lifecycle events.
+     *
+     * Subscriber wiring runs OUTSIDE the PluginLoaderCache hit/miss branch.
+     * The cache short-circuits register()/manifest parsing on warm boot
+     * (PluginLoaderCache.php:19-22 documents the trade-off), but a listener
+     * subscribed during register() would silently disappear on warm boot if
+     * we honoured the cache here. The cost is a cheap reflection-based
+     * subscriber re-bind per plugin per request; the gain is correct DI
+     * bindings and route registration on warm boots.
+     */
+    public function wireEventSubscribers(): void
+    {
+        foreach ($this->plugins as $slug => $plugin) {
+            if ($plugin instanceof EventSubscriberInterface) {
+                $this->dispatcher->addSubscriber($plugin);
+            }
         }
     }
 

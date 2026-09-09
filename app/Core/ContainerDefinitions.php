@@ -40,6 +40,7 @@ use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
@@ -438,6 +439,14 @@ final class ContainerDefinitions
             Paths::class => static function (): Paths {
                 return new Paths(self::resolveBasePath());
             },
+
+            // Plugins and the project App subscribe to lifecycle events via
+            // Symfony\Contracts\EventDispatcher\EventSubscriberInterface. The
+            // dispatcher is built once and shared; subscribers are wired by
+            // PluginLoader::wireEventSubscribers() / AppLoader::wireEventSubscribers()
+            // each request (see Kernel::handle()).
+            'event_dispatcher' => static fn(): \Symfony\Component\EventDispatcher\EventDispatcher
+                => EventDispatcherFactory::create(),
 
             SecurityManagerInterface::class => static fn(ContainerInterface $c): SecurityManager
                 => SecurityKeyDefinitions::build($c),

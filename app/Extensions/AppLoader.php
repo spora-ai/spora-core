@@ -9,6 +9,8 @@ use ReflectionClass;
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
@@ -39,14 +41,24 @@ final class AppLoader
 
     private bool $booted = false;
 
+    private readonly EventDispatcher $dispatcher;
+
     /**
      * Empty constructor — AppLoader must be autowireable as a normal
      * container service (PHP-DI calls `new` on it via `$c->get()`), but
      * its `load()` step is the only thing that needs project paths and
      * a ContainerBuilder. Both are passed at call time, not construction,
      * to keep the dependency direction simple.
+     *
+     * The dispatcher is required in the constructor (not at wire time) so
+     * `wireEventSubscribers()` can rely on it being non-null without a
+     * null-check on the hot path. Tests can pass a fresh dispatcher to
+     * observe listener wiring without booting the full Kernel.
      */
-    public function __construct() {}
+    public function __construct(?EventDispatcher $dispatcher = null)
+    {
+        $this->dispatcher = $dispatcher ?? new EventDispatcher();
+    }
 
     /**
      * Discover and bind the App. Returns the loaded App instance, or null
@@ -158,6 +170,19 @@ final class AppLoader
         }
         $this->booted = true;
         $this->app?->boot();
+    }
+
+    /**
+     * Attach the loaded App to the dispatcher when it implements
+     * {@see EventSubscriberInterface}. Mirrors
+     * {@see \Spora\Plugins\PluginLoader::wireEventSubscribers()} — same
+     * PSR-14 wiring, same out-of-cache-warmth rationale.
+     */
+    public function wireEventSubscribers(): void
+    {
+        if ($this->app instanceof EventSubscriberInterface) {
+            $this->dispatcher->addSubscriber($this->app);
+        }
     }
 
     public function getApp(): ?SporaExtensionInterface

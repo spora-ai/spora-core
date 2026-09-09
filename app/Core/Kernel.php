@@ -10,6 +10,7 @@ use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
+use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\FeatureDisabledException;
 use Spora\Http\Exceptions\ForbiddenException;
@@ -52,10 +53,19 @@ final class Kernel implements KernelInterface
         $builder = new ContainerBuilder();
         $builder->addDefinitions($this->loadContainerDefinitions());
 
+        // Single dispatcher shared by the loaders AND the `'event_dispatcher'`
+        // container entry: subscribers wired by AppLoader/PluginLoader must
+        // land on the same instance the container hands out, otherwise
+        // `$container->get('event_dispatcher')` would see zero listeners.
+        // The ContainerDefinitions default factory is overridden here with
+        // the concrete instance.
+        $dispatcher = EventDispatcherFactory::create();
+        $builder->addDefinitions(['event_dispatcher' => $dispatcher]);
+
         // AppLoader is owned by the Kernel (not lazily constructed inside a factory)
         // because its `load()` step applies App::register() to the ContainerBuilder
         // BEFORE the container is built — DI bindings must be in place first.
-        $this->appLoader = new AppLoader();
+        $this->appLoader = new AppLoader($dispatcher);
         $this->appLoader->load($this->paths, $builder);
 
         // Register the live AppLoader instance so container-managed services
@@ -69,6 +79,7 @@ final class Kernel implements KernelInterface
         $this->pluginLoader = new PluginLoader(
             [$this->paths->plugins()],
             $this->paths->storage('.plugins_stamp'),
+            $dispatcher,
         );
         // A bad manifest should not crash boot — fall through with an empty
         // loader. Mirrors registerPlugins()' per-plugin tolerance below.
@@ -109,6 +120,11 @@ final class Kernel implements KernelInterface
         try {
             $this->container->get(Database::class)->boot();
             $router = $this->buildRouter();
+            // Wire PSR-14 subscribers on every request — see the wrinkle
+            // comment in PluginLoader::wireEventSubscribers() for why this
+            // runs OUTSIDE the PluginLoaderCache short-circuit.
+            $this->appLoader->wireEventSubscribers();
+            $this->pluginLoader->wireEventSubscribers();
             // App::boot() runs once per request, after the container is built
             // and the DB is up — services are safe to use here.
             $this->appLoader->boot();
