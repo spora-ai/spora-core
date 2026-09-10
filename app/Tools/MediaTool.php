@@ -24,8 +24,13 @@ use Symfony\Component\HttpFoundation\Request;
  * Four operations:
  *
  *   - `search`         — paginated list of `media_assets` rows (auto-approved read)
- *   - `get_media`      — fetch one asset + its opaque `/api/v1/assets/<uuid>` URL
- *                        (auto-approved read)
+ *   - `get_media`      — fetch one asset + a markdown embed snippet
+ *                        (image / audio / video / link) the LLM can echo
+ *                        verbatim so the chat UI renders the asset
+ *                        inline. The reply also surfaces the original
+ *                        generation prompt (for AI-produced assets) and
+ *                        any extracted text (`markdown_content`) the
+ *                        asset carries. Auto-approved read.
  *   - `get_public_url` — mint or fetch the public shareable URL of a single
  *                        asset. Hidden by default (`enabledByDefault: false`)
  *                        and always requires approval. Operators opt the
@@ -52,7 +57,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, and share media from the media library. Reads use the local /api/v1/assets/<uuid> URL; use get_public_url to mint a shareable link, or get_embed_code to render the asset inline.',
+    description: 'Search, retrieve, and share media from the media library. `get_media` returns a markdown embed (image / audio / video / link) you can echo verbatim so the chat UI renders the asset inline, plus any extracted text the asset carries. Use `get_embed_code` for a clean embed snippet, or `get_public_url` to mint a shareable link.',
     category: 'data',
     icon: 'image',
 )]
@@ -76,7 +81,7 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + local /api/v1/assets/<uuid> URL for a single asset.',
+    description: 'Return metadata + a markdown embed (image / audio / video / link) for a single asset. Echo the embed verbatim so the chat UI renders it inline; use `get_embed_code` for a clean snippet or `get_public_url` to share externally.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -192,6 +197,18 @@ final class MediaTool extends AbstractTool
     }
 
     /**
+     * Max bytes of `markdown_content` we inline into the `get_media`
+     * response. Documents whose extracted text exceeds this cap are
+     * surfaced as a preview + truncation notice — the full content is
+     * still on `ToolResult.data.markdown_content` for the operator UI
+     * (ToolResult.data is never sent to the LLM). Picked at 8 KB so a
+     * chat reply that quotes a single PDF chapter stays under the
+     * typical tool-result cap without losing the structure that lets
+     * the LLM reason over it.
+     */
+    private const GET_MEDIA_MARKDOWN_PREVIEW_BYTES = 8 * 1024;
+
+    /**
      * @param  array<string, mixed> $arguments
      */
     private function getMedia(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
@@ -206,10 +223,68 @@ final class MediaTool extends AbstractTool
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
-        return ToolResult::ok(
-            "Media asset {$asset->id}: {$asset->filename}",
-            $this->summarizeAsset($asset),
-        );
+        $assetUrl  = $asset->publicUrl();
+        $mediaType = $asset->typedMediaType();
+        $filename  = (string) ($asset->filename ?? '');
+        $altText   = $filename !== '' ? $filename : $asset->id;
+        $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
+
+        $content = "Media asset {$asset->id}: " . ($asset->filename ?? '(no filename)') . "\n\n" . $embed
+            . "\n\nEcho the markdown block above verbatim so the chat UI renders the asset inline."
+            . ' For a clean embed snippet without this header, call `get_embed_code`.'
+            . ' For a shareable external link, call `get_public_url` (approval-gated).';
+
+        $prompt          = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
+            ? trim((string) $asset->prompt)
+            : null;
+        $markdownContent = $asset->markdown_content;
+
+        if ($prompt !== null) {
+            $content .= "\n\nPrompt: " . $prompt;
+        }
+        if (is_string($markdownContent) && $markdownContent !== '') {
+            $content .= "\n\nExtracted text:\n" . $this->previewMarkdownContent($markdownContent);
+        }
+
+        return ToolResult::ok($content, $this->describeAsset($asset, $mediaType, $assetUrl));
+    }
+
+    /**
+     * Build the same embed snippet `get_embed_code` returns. Shared so
+     * `get_media` and `get_embed_code` stay in lockstep — if a new
+     * media type is added, the change lands in one place.
+     */
+    private function embedForAsset(
+        MediaAsset $asset,
+        MediaType $mediaType,
+        string $assetUrl,
+        string $altText,
+    ): string {
+        return match ($mediaType) {
+            MediaType::Image => MediaEmbed::image($assetUrl, $altText),
+            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
+            MediaType::Video => MediaEmbed::videoFromUrl(
+                $assetUrl,
+                $asset->width !== null ? (int) $asset->width : null,
+                $asset->height !== null ? (int) $asset->height : null,
+            ),
+            default => self::markdownLink($assetUrl, $altText),
+        };
+    }
+
+    /**
+     * Truncate `markdown_content` to {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}
+     * for the LLM-facing reply, appending a notice when we did. Keeps the
+     * preview from blowing the chat context on a long PDF / text dump
+     * while still giving the LLM enough to reason over.
+     */
+    private function previewMarkdownContent(string $markdownContent): string
+    {
+        if (strlen($markdownContent) <= self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES) {
+            return $markdownContent;
+        }
+        return substr($markdownContent, 0, self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES)
+            . "\n\n[…truncated — full extracted text is on ToolResult.data.markdown_content]";
     }
 
     /**
@@ -262,20 +337,11 @@ final class MediaTool extends AbstractTool
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
 
-        $assetUrl = $asset->publicUrl();
+        $assetUrl  = $asset->publicUrl();
         $mediaType = $asset->typedMediaType();
-        $filename = (string) ($asset->filename ?? '');
-
-        $embed = match ($mediaType) {
-            MediaType::Image => MediaEmbed::image($assetUrl, $filename !== '' ? $filename : $asset->id),
-            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
-            MediaType::Video => MediaEmbed::videoFromUrl(
-                $assetUrl,
-                $asset->width !== null ? (int) $asset->width : null,
-                $asset->height !== null ? (int) $asset->height : null,
-            ),
-            default => self::markdownLink($assetUrl, $filename !== '' ? $filename : $asset->id),
-        };
+        $filename  = (string) ($asset->filename ?? '');
+        $altText   = $filename !== '' ? $filename : $asset->id;
+        $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
 
         return ToolResult::ok(
             $embed,
@@ -368,6 +434,53 @@ final class MediaTool extends AbstractTool
             'asset_url'  => $asset->publicUrl(),
             'created_at' => $asset->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Richer per-asset payload for `get_media` — superset of {@see summarizeAsset()}
+     * with the metadata the LLM-side workflow needs to render the embed
+     * (width / height for `<video>`, prompt for AI-generated media) and
+     * to expose the extracted text the operator UI can inspect
+     * (`markdown_content`). `search` keeps using the leaner
+     * `summarizeAsset` to avoid N KB of converter output per row.
+     *
+     * @return array<string, mixed>
+     */
+    private function describeAsset(MediaAsset $asset, MediaType $mediaType, string $assetUrl): array
+    {
+        return [
+            'id'               => $asset->id,
+            'filename'         => $asset->filename,
+            'media_type'       => $mediaType->value,
+            'mime_type'        => $asset->mime_type,
+            'byte_size'        => $asset->byte_size,
+            'width'            => $asset->width,
+            'height'           => $asset->height,
+            'duration_seconds' => $asset->duration_seconds,
+            'prompt'           => $asset->prompt,
+            'markdown_content' => $asset->markdown_content,
+            'tags'             => $asset->tags,
+            'metadata'         => $asset->metadata,
+            'asset_url'        => $assetUrl,
+            'public_url'       => $asset->public_access_token !== null && $asset->public_access_token !== ''
+                ? $this->maybeBuildPublicUrl($asset)
+                : null,
+            'created_at'       => $asset->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Build the share URL only when both the token is minted AND the
+     * operator has configured `app_url`. Mirrors {@see MediaAssetSerializer::buildPublicUrl()}
+     * so the tool output matches what the REST endpoint returns.
+     */
+    private function maybeBuildPublicUrl(MediaAsset $asset): ?string
+    {
+        $host = (string) ($this->config['app_url'] ?? '');
+        if ($host === '') {
+            return null;
+        }
+        return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
     }
 
     private function publicUrl(MediaAsset $asset): string
