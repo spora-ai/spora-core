@@ -26,6 +26,8 @@ use Spora\Services\MediaArchive\MediaType;
  * @property string|null                            $prompt
  * @property string|null                            $filename
  * @property string|null                            $markdown_content
+ * @property string|null                            $transcript
+ * @property string|null                            $transcript_language
  * @property array<string>|null                      $tags
  * @property array<string, mixed>|null              $metadata
  * @property string                                 $asset_url

@@ -116,4 +116,10 @@ abstract class AbstractPlugin implements PluginInterface
     {
         return [];
     }
+
+    /** @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>> */
+    public function speechToTextProviders(): array
+    {
+        return [];
+    }
 }

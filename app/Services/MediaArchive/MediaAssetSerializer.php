@@ -51,6 +51,8 @@ final class MediaAssetSerializer
             'prompt'              => $asset->prompt,
             'filename'            => $asset->filename,
             'markdown_content'    => $asset->markdown_content,
+            'transcript'          => $asset->transcript,
+            'transcript_language'  => $asset->transcript_language,
             'tags'                => $asset->tags,
             'metadata'            => $asset->metadata,
             'asset_url'           => $asset->publicUrl(),

@@ -15,6 +15,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Speech\TranscriptionResult;
 
 /**
  * Single entry point for listing, finding, deleting, and ingest-facading
@@ -298,6 +299,30 @@ final class MediaArchiveService
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void
     {
         $this->ingestPipeline->writePayloadToAsset($asset, $bytes);
+    }
+
+    /**
+     * Cache a successful speech-to-text transcription on the asset row.
+     *
+     * Called by {@see \Spora\Http\SpeechTranscribeController} after every
+     * successful provider call. Subsequent chat re-renders read the
+     * cached value from {@see MediaAsset::$transcript} without re-billing
+     * the upstream STT API.
+     *
+     * Idempotent on re-call (overwrites the previous transcript). The
+     * `language` column is written only when the result carries a
+     * detected language; null leaves the column unchanged so an
+     * auto-detect failure doesn't wipe a previously known language.
+     */
+    public function writeTranscript(string $mediaId, TranscriptionResult $result): void
+    {
+        $updates = ['transcript' => $result->text];
+        if ($result->language !== null) {
+            $updates['transcript_language'] = $result->language;
+        }
+        Capsule::table('media_assets')
+            ->where('id', $mediaId)
+            ->update($updates);
     }
 
     /**

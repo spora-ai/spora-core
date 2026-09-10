@@ -84,4 +84,10 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
+
+    /** @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>> */
+    public function speechToTextProviders(): array
+    {
+        return [];
+    }
 }

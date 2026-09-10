@@ -139,6 +139,28 @@ final class PluginLoader
     }
 
     /**
+     * Speech-to-text provider class FQCNs contributed by loaded plugins.
+     *
+     * Mirrors {@see toolClasses()} — the speech registry uses this list
+     * to discover plugin-contributed
+     * {@see \Spora\Speech\SpeechToTextProviderInterface} implementations.
+     *
+     * @return list<class-string>
+     */
+    public function speechToTextProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->speechToTextProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All agent-template directory paths contributed by loaded plugins.
      * The scanner aggregates these alongside core-shipped and
      * app-contributed templates.

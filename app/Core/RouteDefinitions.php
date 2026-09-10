@@ -42,6 +42,8 @@ use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SkillController;
+use Spora\Http\SpeechCapabilityController;
+use Spora\Http\SpeechTranscribeController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
@@ -94,6 +96,7 @@ final class RouteDefinitions
         self::registerToolRoutes($r);
         self::registerTaskRoutes($r);
         self::registerMediaRoutes($r);
+        self::registerSpeechRoutes($r);
         self::registerTemplateRoutes($r);
         self::registerSkillRoutes($r);
         self::registerLlmConfigRoutes($r);
@@ -315,6 +318,26 @@ final class RouteDefinitions
         // itself is the credential. The id is always a UUID shape; the
         // controller returns 404 on any mismatch.
         $r->addRoute('GET', '/api/v1/public/media/{id}', [PublicMediaController::class, 'show'], []);
+    }
+
+    private static function registerSpeechRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
+        // GET capability endpoint is auth-only (matches /media/allowed-types
+        // at line 298 — read-only state, no CSRF required).
+        $r->addRoute(
+            'GET',
+            '/api/v1/speech/capability',
+            [SpeechCapabilityController::class, 'index'],
+            [AuthMiddleware::class],
+        );
+
+        // POST transcribe is state-changing — full auth + CSRF.
+        $r->addRoute(
+            'POST',
+            '/api/v1/speech/transcribe',
+            [SpeechTranscribeController::class, 'transcribe'],
+            [AuthMiddleware::class, CsrfMiddleware::class],
+        );
     }
 
     private static function registerTemplateRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void

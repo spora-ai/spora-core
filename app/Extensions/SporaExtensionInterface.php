@@ -73,4 +73,17 @@ interface SporaExtensionInterface
      * @return array<class-string<\Spora\Apps\AppInterface>>
      */
     public function apps(): array;
+
+    /**
+     * Speech-to-text provider classes this extension contributes.
+     *
+     * Plugins returning a non-empty list participate in the
+     * {@see \Spora\Speech\SpeechToTextRegistry} — the first
+     * `isConfigured()` provider wins. Core ships zero concrete
+     * providers; {@see spora-plugin-mistral} and
+     * {@see spora-plugin-muse} are the v1 contributors.
+     *
+     * @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>>
+     */
+    public function speechToTextProviders(): array;
 }
