@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests\Unit\Plugins;
 
 use ReflectionClass;
+use RuntimeException;
 use Spora\Events\ContainerBuildingEvent;
 use Spora\Events\RoutesRegisteringEvent;
 use Spora\Plugins\AbstractPlugin;
 use Spora\Plugins\PluginLoader;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Throwable;
 
 /**
  * A plugin that also subscribes to lifecycle events. Used to verify
@@ -244,6 +246,58 @@ test('bootExtensions() fires BootingEvent and the subscriber receives it', funct
     expect($subscriber->bootingCalls)->toBe(1);
 });
 
+// Pre-1.0 the per-plugin register/routes/boot hooks were wrapped in
+// try/catch in PluginLoader so a single bad plugin couldn't break the
+// rest of the set. After moving to PSR-14 events, the same tolerance has
+// to live at the dispatch site (Symfony's EventDispatcher propagates
+// listener exceptions by default). These tests pin the contract: a
+// throwing listener is logged, not propagated.
+test('registerPlugins() swallows a listener exception so a bad subscriber does not abort the boot', function (): void {
+    $dispatcher = new EventDispatcher();
+    $dispatcher->addListener(
+        ContainerBuildingEvent::class,
+        static function (): void {
+            throw new RuntimeException('boom');
+        },
+    );
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
+    $loader->boot();
+
+    expect(fn() => $loader->registerPlugins(new \DI\ContainerBuilder()))->not->toThrow(Throwable::class);
+});
+
+test('registerRoutes() swallows a listener exception', function (): void {
+    $dispatcher = new EventDispatcher();
+    $dispatcher->addListener(
+        RoutesRegisteringEvent::class,
+        static function (): void {
+            throw new RuntimeException('boom');
+        },
+    );
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
+    $loader->boot();
+
+    $routes = new \Spora\Core\MiddlewareRouteCollector(new \FastRoute\RouteParser\Std(), new \FastRoute\DataGenerator\GroupCountBased());
+    expect(fn() => $loader->registerRoutes($routes))->not->toThrow(Throwable::class);
+});
+
+test('bootExtensions() swallows a listener exception', function (): void {
+    $dispatcher = new EventDispatcher();
+    $dispatcher->addListener(
+        \Spora\Events\BootingEvent::class,
+        static function (): void {
+            throw new RuntimeException('boom');
+        },
+    );
+
+    $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()], null, $dispatcher);
+    $loader->boot();
+
+    expect(fn() => $loader->bootExtensions(new \DI\Container()))->not->toThrow(Throwable::class);
+});
+
 // Regression: when AppLoader and PluginLoader share a dispatcher, every
 // lifecycle event must fire exactly once per phase across the two loaders.
 // Earlier AppLoader also dispatched the same events on the same dispatcher,
@@ -268,26 +322,24 @@ test('lifecycle events fire exactly once across AppLoader + PluginLoader sharing
 
     $pluginLoader->wireEventSubscribers();
 
-    // Phase 1 — container building. AppLoader::load() no longer dispatches
-    // (it just instantiates the App). PluginLoader::registerPlugins() is the
+    // Phase 1 — container building. AppLoader::load() only instantiates the
+    // App; it does not dispatch. PluginLoader::registerPlugins() is the
     // single dispatch site.
     $builder = new \DI\ContainerBuilder();
     $appLoader->load(
         new \Spora\Core\Paths(sys_get_temp_dir() . '/spora_no_paths_' . uniqid()),
-        $builder,
     );
     $pluginLoader->registerPlugins($builder);
     expect($subscriber->containerBuildingCalls)->toBe(1);
 
-    // Phase 2 — routes. AppLoader::registerRoutes() is a no-op; PluginLoader
-    // is the single dispatch site. This is the regression — duplicate
-    // dispatch here used to throw FastRoute\BadRouteException on duplicate
-    // /api/v1/media/{id} GET registrations.
+    // Phase 2 — routes. AppLoader no longer exposes registerRoutes();
+    // PluginLoader is the single dispatch site. This is the regression —
+    // duplicate dispatch here used to throw FastRoute\BadRouteException
+    // on duplicate /api/v1/media/{id} GET registrations.
     $routes = new \Spora\Core\MiddlewareRouteCollector(
         new \FastRoute\RouteParser\Std(),
         new \FastRoute\DataGenerator\GroupCountBased(),
     );
-    $appLoader->registerRoutes($routes);
     $pluginLoader->registerRoutes($routes);
     expect($subscriber->routesRegisteringCalls)->toBe(1);
 });

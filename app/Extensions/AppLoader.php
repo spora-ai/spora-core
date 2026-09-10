@@ -4,14 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Extensions;
 
-use DI\ContainerBuilder;
-use Psr\Container\ContainerInterface;
 use ReflectionClass;
-use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
-use Spora\Events\BootingEvent;
-use Spora\Events\ContainerBuildingEvent;
-use Spora\Events\RoutesRegisteringEvent;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -29,13 +23,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * See `spora-workspace/plans/extension-interface-events.md` for the migration
  * guide. The class names below are unchanged — only the wiring is.
  *
- * Hooks are applied in this order so the App's contributions are baked into
- * the compiled container:
- *
- *   1. `ContainerBuildingEvent` fires once per process, BEFORE build. The App
- *      may register DI bindings via the event's `builder()` accessor.
- *   2. After the container is built, `RoutesRegisteringEvent` and then
- *      `BootingEvent` fire per request with the live collector and container.
+ * `load()` only instantiates the App — it does NOT dispatch lifecycle events.
+ * `ContainerBuildingEvent` is fired by
+ * {@see \Spora\Plugins\PluginLoader::registerPlugins()}, the single dispatch
+ * site for that phase. Dispatching here would double-fire every plugin's
+ * subscriber (AppLoader and PluginLoader share the dispatcher).
  *
  * No app/App.php? AppLoader is a silent no-op — Spora runs as it always has.
  */
@@ -48,7 +40,7 @@ final class AppLoader
      */
     private ?SporaExtensionInterface $app = null;
 
-    private bool $booted = false;
+    private bool $appSubscriberWired = false;
 
     private readonly EventDispatcher $dispatcher;
 
@@ -65,24 +57,19 @@ final class AppLoader
 
     /**
      * Discover the App. Returns the loaded App instance, or null if no
-     * app/App.php exists. Does NOT dispatch lifecycle events — see
-     * {@see \Spora\Plugins\PluginLoader::registerPlugins()}, which is the
-     * single dispatch site for `ContainerBuildingEvent`. Dispatching here
-     * would double-fire every plugin's subscriber (AppLoader and
-     * PluginLoader share the dispatcher).
+     * app/App.php exists.
      *
-     * Called once by the Kernel BEFORE the container is built. $paths and
-     * $builder are passed here (not via the constructor) because:
-     * - Subscribers to `ContainerBuildingEvent` must mutate the
-     *   ContainerBuilder BEFORE build.
-     * - AppLoader itself needs to be resolvable as a normal container
-     *   service for the post-build factories that depend on it (Database,
-     *   RecipeScanner, AppRegistry, tool_instances).
+     * Called once by the Kernel BEFORE the container is built. $paths is
+     * passed here (not via the constructor) because AppLoader itself must
+     * be resolvable as a normal container service for the post-build
+     * factories that depend on it (Database, RecipeScanner, AppRegistry,
+     * tool_instances) — those factories receive a `Paths` via the
+     * container, but AppLoader's ctor signature is dispatcher-only.
      *
      * @throws InvalidAppClassException When app/App.php exists but does not declare
      *                                  a class implementing {@see SporaExtensionInterface}.
      */
-    public function load(Paths $paths, ContainerBuilder $builder): ?SporaExtensionInterface
+    public function load(Paths $paths): ?SporaExtensionInterface
     {
         if ($this->app !== null) {
             return $this->app;
@@ -137,39 +124,6 @@ final class AppLoader
 
         return new $fqcn();
     }
-
-    /**
-     * No-op placeholder retained for Kernel API compatibility.
-     *
-     * `RoutesRegisteringEvent` is dispatched from
-     * {@see \Spora\Plugins\PluginLoader::registerRoutes()} — the single
-     * dispatch site for the request lifecycle. AppLoader's prior dispatch
-     * here caused every plugin's `onRoutesRegistering` to fire twice on
-     * the shared dispatcher, producing duplicate FastRoute entries.
-     */
-    public function registerRoutes(MiddlewareRouteCollector $routes): void {}
-
-    /**
-     * No-op placeholder retained for Kernel API compatibility.
-     *
-     * `BootingEvent` is dispatched from
-     * {@see \Spora\Plugins\PluginLoader::bootExtensions()} — the single
-     * dispatch site for the boot phase. The idempotent `$booted` guard
-     * stays so callers passing null continue to get silent-acceptance
-     * semantics.
-     *
-     * Safe to use container services inside `BootingEvent` listeners
-     * (the listener fires after `Kernel::__construct` builds the container).
-     */
-    public function boot(?ContainerInterface $container = null): void
-    {
-        if ($this->booted) {
-            return;
-        }
-        $this->booted = true;
-    }
-
-    private bool $appSubscriberWired = false;
 
     /**
      * Attach the loaded App to the dispatcher when it implements

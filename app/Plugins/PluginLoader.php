@@ -14,6 +14,7 @@ use Spora\Events\RoutesRegisteringEvent;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Throwable;
 
 /**
  * Discovers and boots PluginInterface implementations from one or more plugin directories.
@@ -25,7 +26,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *
  * The directory scan and manifest parse are cached via {@see PluginLoaderCache};
  * a warm boot re-instantiates plugins from a sidecar JSON without re-reading
- * manifests or calling each plugin's `register()` hook.
+ * manifests or dispatching `ContainerBuildingEvent`.
  *
  * Directories are scanned in the order given; if the same slug appears in more
  * than one, the first one wins.
@@ -466,7 +467,7 @@ final class PluginLoader
      */
     public function registerPlugins(ContainerBuilder $builder): void
     {
-        $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
+        $this->dispatchWithTolerance(new ContainerBuildingEvent($builder));
     }
 
     /**
@@ -478,7 +479,7 @@ final class PluginLoader
      */
     public function registerRoutes(MiddlewareRouteCollector $routes): void
     {
-        $this->dispatcher->dispatch(new RoutesRegisteringEvent($routes));
+        $this->dispatchWithTolerance(new RoutesRegisteringEvent($routes));
     }
 
     private bool $extensionsBooted = false;
@@ -501,7 +502,7 @@ final class PluginLoader
         $this->extensionsBooted = true;
 
         if ($container !== null) {
-            $this->dispatcher->dispatch(new BootingEvent($container));
+            $this->dispatchWithTolerance(new BootingEvent($container));
         }
     }
 
@@ -509,13 +510,41 @@ final class PluginLoader
     private array $wiredSubscriberIds = [];
 
     /**
+     * Dispatch an event, swallowing listener exceptions so a single bad
+     * subscriber doesn't abort the rest of the plugin set. Pre-1.0, the
+     * per-plugin `register()`/`routes()`/`boot()` hooks were wrapped in
+     * try/catch in the same spirit; this restores that tolerance on the
+     * new event-dispatch path.
+     */
+    private function dispatchWithTolerance(object $event): void
+    {
+        try {
+            $this->dispatcher->dispatch($event, $event::class);
+        } catch (Throwable $e) {
+            error_log(sprintf(
+                '[spora plugin listener] %s failed: %s',
+                $event::class,
+                $e->getMessage(),
+            ));
+        }
+    }
+
+    /**
      * Attach every loaded plugin implementing {@see EventSubscriberInterface}
      * to the dispatcher so it receives lifecycle events.
      *
      * Idempotent per plugin instance (tracked via spl_object_id) — safe to
-     * call multiple times. Kernel wires once in the constructor after
-     * {@see boot()} populates $this->plugins and before any event dispatch;
-     * tests may invoke it freely on isolated loader instances.
+     * call multiple times. Kernel wires once per process in the constructor
+     * after {@see boot()} populates $this->plugins and before any event
+     * dispatch; tests may invoke it freely on isolated loader instances.
+     *
+     * Wiring runs OUTSIDE the {@see PluginLoaderCache} hit/miss branch
+     * deliberately. The cache short-circuits manifest re-parsing on warm
+     * boot — but a subscriber registered during plugin discovery would
+     * silently disappear on warm boot if we honoured the cache here. The
+     * cost is a cheap reflection-based `instanceof` check per plugin per
+     * process; the gain is correct DI bindings and route registration on
+     * every boot, cold or warm.
      */
     public function wireEventSubscribers(): void
     {

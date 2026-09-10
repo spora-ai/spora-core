@@ -444,7 +444,7 @@ final class ContainerDefinitions
             // Symfony\Contracts\EventDispatcher\EventSubscriberInterface. The
             // dispatcher is built once and shared; subscribers are wired by
             // PluginLoader::wireEventSubscribers() / AppLoader::wireEventSubscribers()
-            // each request (see Kernel::handle()).
+            // once per process (see Kernel::__construct()).
             'event_dispatcher' => static fn(): \Symfony\Component\EventDispatcher\EventDispatcher
                 => EventDispatcherFactory::create(),
 
