@@ -598,10 +598,9 @@ describe('MediaTool::get_media', function (): void {
     });
 
     it('emits a markdown image embed + echo instruction in the content', function (): void {
-        // The OpenAI image tool's pattern: the LLM-facing content must
-        // include a ready-to-echo markdown image tag plus a one-line
-        // instruction so the chat UI renders the asset inline instead of
-        // the LLM asking the operator to click a raw URL.
+        // Mirrors the OpenAI image tool's pattern: the chat UI only
+        // renders the image when the LLM echoes the markdown tag
+        // verbatim, so the echo instruction must live next to the tag.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
@@ -718,9 +717,9 @@ describe('MediaTool::get_media', function (): void {
     });
 
     it('surfaces the prompt in the content when set on the asset', function (): void {
-        // AI-generated assets carry the original prompt on
-        // `media_assets.prompt`; surfacing it lets the LLM reference it
-        // without re-asking the operator.
+        // AI-generated assets (e.g. OpenAI Image) persist the original
+        // prompt on `media_assets.prompt`; the LLM needs it to write
+        // follow-up variations without re-asking the operator.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
         Illuminate\Database\Capsule\Manager::table('media_assets')
@@ -744,9 +743,8 @@ describe('MediaTool::get_media', function (): void {
     });
 
     it('surfaces markdown_content in the content when present and small', function (): void {
-        // Documents (PDF, plain-text passthrough, …) get a converter
-        // run that populates `markdown_content`; the LLM needs to know
-        // what's inside without having to call another tool.
+        // PDF / plain-text converters populate `markdown_content`;
+        // surfacing it saves a second tool call.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
         Illuminate\Database\Capsule\Manager::table('media_assets')
@@ -773,10 +771,9 @@ describe('MediaTool::get_media', function (): void {
     });
 
     it('truncates markdown_content in the content when it exceeds the preview cap', function (): void {
-        // 16 KB of text is well over the 8 KB preview cap; the LLM-facing
-        // reply should still mention the cap and that the full content
-        // lives on the data channel — the LLM context must not balloon
-        // because someone dropped a 200-page PDF into the archive.
+        // Prevents a 200-page PDF from ballooning the chat context —
+        // the LLM gets a preview + pointer to the data channel, where
+        // the full text is preserved for the operator UI.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
         $huge = str_repeat('A', 16 * 1024);
@@ -796,9 +793,8 @@ describe('MediaTool::get_media', function (): void {
                 ->toContain('Extracted text:')
                 ->toContain('truncated')
                 ->toContain('ToolResult.data.markdown_content');
-            // The data channel carries the full content even though the
-            // content channel was truncated — the operator UI shows the
-            // whole extracted text.
+            // The data channel carries the full content even when the
+            // content channel was truncated — operator UI gets the whole text.
             expect($result->data['markdown_content'])->toBe($huge);
         } finally {
             $restore();
@@ -808,9 +804,7 @@ describe('MediaTool::get_media', function (): void {
     it('exposes the full metadata set on the data channel', function (): void {
         // `summarizeAsset` (used by search) is intentionally lean;
         // `describeAsset` (used by get_media) carries the richer
-        // metadata — width/height for video, prompt for AI-generated
-        // media, markdown_content for documents, and a public_url
-        // shortcut when one is already minted.
+        // metadata the operator UI needs.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
@@ -856,9 +850,8 @@ describe('MediaTool::get_media', function (): void {
     });
 
     it('omits public_url on the data channel when app_url is not configured', function (): void {
-        // The token can be minted, but without `app_url` there is no
-        // absolute origin to share against — `null` keeps the data
-        // honest and matches the REST serializer.
+        // No `app_url` = no absolute origin to share against; null
+        // matches the REST serializer's behavior.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
