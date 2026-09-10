@@ -28,8 +28,13 @@ final class FixtureProvider implements SpeechToTextProviderInterface
     {
         return false;
     }
-    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null): TranscriptionResult
-    {
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
         throw new InvalidAudioException('not implemented in fixture');
     }
 }
