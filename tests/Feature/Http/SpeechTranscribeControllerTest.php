@@ -58,8 +58,13 @@ final class TransStubConfigured implements SpeechToTextProviderInterface
         return true;
     }
 
-    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null): TranscriptionResult
-    {
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
         $this->calls[] = ['bytes' => $bytes, 'mime' => $mimeType, 'lang' => $languageHint];
         if ($this->throws !== null) {
             throw $this->throws;
@@ -82,9 +87,14 @@ final class TransStubUnconfigured implements SpeechToTextProviderInterface
     {
         return false;
     }
-    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null): TranscriptionResult
-    {
-        throw new LogicException('configuredProvider() should never pick me');
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
+        throw new \LogicException('configuredProvider() should never pick me');
     }
 }
 

@@ -25,7 +25,7 @@ final class CapConfiguredProvider implements SpeechToTextProviderInterface
     {
         return true;
     }
-    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null): TranscriptionResult
+    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
         return new TranscriptionResult('unused');
     }
@@ -45,7 +45,7 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
     {
         return false;
     }
-    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null): TranscriptionResult
+    public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
         return new TranscriptionResult('unused');
     }

@@ -119,11 +119,17 @@ final class SpeechTranscribeController
             );
         }
 
+        // agent_id is intentionally null here — MediaAssetReader::readAsset()
+        // returns bytes+mime only. Provider settings cascade from global down
+        // (and through the user principal level via $userId). Per-agent
+        // override is out of scope for v1.
         try {
             $result = $provider->transcribe(
                 $asset['bytes'],
                 $asset['mime'],
                 is_string($language) ? $language : null,
+                null,
+                $userId,
             );
         } catch (InvalidAudioException $e) {
             return $this->error(Response::HTTP_UNPROCESSABLE_ENTITY, 'INVALID_AUDIO', $e->getMessage());

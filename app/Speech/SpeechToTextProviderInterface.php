@@ -44,19 +44,31 @@ interface SpeechToTextProviderInterface
     /**
      * Transcribe raw audio bytes to text.
      *
+     * The optional `$agentId` and `$userId` let providers with per-agent
+     * settings (via {@see \Spora\Services\ToolConfigService}) resolve the
+     * correct cascade level. Plugins that don't need agent-scoped settings
+     * can ignore both. The controller always passes them when available.
+     *
      * @param string      $bytes        Raw audio bytes (already validated
      *                                   by the MIME sniffer upstream).
      * @param string      $mimeType     Container MIME, e.g. 'audio/webm;codecs=opus'.
      * @param string|null $languageHint BCP-47 hint (e.g. 'en-US') or null
      *                                   for auto-detect.
+     * @param int|null     $agentId     Agent whose settings cascade applies,
+     *                                   or null for global-only lookup.
+     * @param int|null     $userId      Caller's user id (cascade principal),
+     *                                   or null for anonymous.
      *
      * @throws InvalidAudioException  when the provider cannot ingest the MIME.
-     * @throws SpeechToTextException  on provider error / network failure.
-     *                                  Messages MUST NOT contain API keys.
+     * @throws SpeechToTextException  on provider error / network failure /
+     *                                  missing settings. Messages MUST NOT
+     *                                  contain API keys.
      */
     public function transcribe(
         string $bytes,
         string $mimeType,
         ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
     ): TranscriptionResult;
 }
