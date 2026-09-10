@@ -8,7 +8,6 @@ use Spora\Http\SpeechCapabilityController;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Speech\TranscriptionResult;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 final class CapConfiguredProvider implements SpeechToTextProviderInterface
@@ -54,7 +53,7 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
 test('capability returns 200 with available=false and configured=false when no providers are loaded', function (): void {
     $controller = new SpeechCapabilityController(new SpeechToTextRegistry([]));
 
-    $resp = $controller->index(new Request());
+    $resp = $controller->index();
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($resp->getContent(), true);
@@ -68,7 +67,7 @@ test('capability reports available=true and configured=true when a configured pr
         new CapConfiguredProvider(),
     ]));
 
-    $resp = $controller->index(new Request());
+    $resp = $controller->index();
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($resp->getContent(), true);
@@ -84,7 +83,7 @@ test('capability reports available=true but configured=false when every provider
         new CapUnconfiguredProvider(),
     ]));
 
-    $resp = $controller->index(new Request());
+    $resp = $controller->index();
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
     $body = json_decode($resp->getContent(), true);

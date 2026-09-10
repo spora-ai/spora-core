@@ -94,7 +94,7 @@ final class TransStubUnconfigured implements SpeechToTextProviderInterface
         ?int $agentId = null,
         ?int $userId = null,
     ): TranscriptionResult {
-        throw new \LogicException('configuredProvider() should never pick me');
+        throw new LogicException('configuredProvider() should never pick me');
     }
 }
 

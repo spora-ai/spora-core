@@ -8,14 +8,16 @@ use JsonException;
 use OpenApi\Attributes as OA;
 use Psr\Log\LoggerInterface;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\SpeechTranscribeException;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\SpeechToTextException;
+use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
+use Spora\Speech\TranscriptionResult;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Transcribe a recorded audio asset via the first-configured STT plugin.
@@ -27,7 +29,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   3. Read the asset bytes via {@see MediaAssetReader::readAsset()}.
  *      null return covers missing / unauthorized / legacy storage mode —
  *      all three map to 404 (no existence leak between reasons).
- *   4. Call the provider's `transcribe(bytes, mime, language?)`.
+ *   4. Call the provider's `transcribe(bytes, mime, language?, agentId?, userId?)`.
  *      422 on InvalidAudioException (client-side fix);
  *      502 on SpeechToTextException (provider-side failure).
  *   5. Write the transcript back to `media_assets.transcript` /
@@ -39,6 +41,11 @@ use Symfony\Component\HttpFoundation\Response;
  * message is logged server-side (operator-visible) and the sanitised
  * form is forwarded to the API per the {@see SpeechToTextException}
  * contract.
+ *
+ * Branches raise {@see SpeechTranscribeException} instead of building a
+ * JsonResponse inline so the success path stays readable and the
+ * `return` count of the handler stays below the Sonar brain-overload
+ * threshold.
  */
 final class SpeechTranscribeController
 {
@@ -88,60 +95,26 @@ final class SpeechTranscribeController
     )]
     public function transcribe(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null) {
-            return $this->error(Response::HTTP_UNAUTHORIZED, 'UNAUTHORIZED', 'You must be logged in to transcribe audio.');
-        }
-
-        $payload = $this->decodeBody($request);
-        if ($payload instanceof JsonResponse) {
-            return $payload;
-        }
-
-        $mediaId = $payload['media_id'];
-        $language = $payload['language'] ?? null;
-
-        $provider = $this->registry->configuredProvider();
-        if ($provider === null) {
-            return $this->error(
-                Response::HTTP_SERVICE_UNAVAILABLE,
-                'SPEECH_PROVIDER_UNAVAILABLE',
-                'No speech-to-text provider is configured. Install spora-plugin-mistral or spora-plugin-muse and add an API key.',
-            );
-        }
-
-        $asset = $this->mediaReader->readAsset($mediaId, $userId);
-        if ($asset === null) {
-            return $this->error(
-                Response::HTTP_NOT_FOUND,
-                'MEDIA_NOT_FOUND',
-                'Media asset not found or not accessible.',
-            );
-        }
-
-        // agent_id is intentionally null here — MediaAssetReader::readAsset()
-        // returns bytes+mime only. Provider settings cascade from global down
-        // (and through the user principal level via $userId). Per-agent
-        // override is out of scope for v1.
         try {
-            $result = $provider->transcribe(
-                $asset['bytes'],
-                $asset['mime'],
-                is_string($language) ? $language : null,
-                null,
+            $userId   = $this->requireUserId();
+            $payload  = $this->decodeBody($request);
+            $provider = $this->requireConfiguredProvider();
+            $asset    = $this->loadAsset($payload['media_id'], $userId);
+            // agent_id is intentionally null — MediaAssetReader::readAsset()
+            // returns bytes+mime only. Provider settings cascade from global
+            // down (and through the user principal level via $userId).
+            // Per-agent override is out of scope for v1.
+            $result   = $this->transcribeWithProvider(
+                $provider,
+                $asset,
+                $payload['language'] ?? null,
                 $userId,
             );
-        } catch (InvalidAudioException $e) {
-            return $this->error(Response::HTTP_UNPROCESSABLE_ENTITY, 'INVALID_AUDIO', $e->getMessage());
-        } catch (SpeechToTextException $e) {
-            $this->logger?->error('STT provider failed', [
-                'provider' => $provider->getName(),
-                'message'  => $e->getMessage(),
-            ]);
-            return $this->error(Response::HTTP_BAD_GATEWAY, 'SPEECH_PROVIDER_FAILED', $e->getMessage());
+        } catch (SpeechTranscribeException $e) {
+            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
         }
 
-        $this->mediaArchive->writeTranscript($mediaId, $result);
+        $this->mediaArchive->writeTranscript($payload['media_id'], $result);
 
         return new JsonResponse([
             'data' => [
@@ -153,27 +126,103 @@ final class SpeechTranscribeController
     }
 
     /**
-     * Decode + validate the request body.
+     * @return array{media_id: string, language?: string}
      *
-     * @return array{media_id: string, language?: string}|JsonResponse
+     * @throws SpeechTranscribeException 422 on malformed body.
      */
-    private function decodeBody(Request $request): array|JsonResponse
+    private function decodeBody(Request $request): array
     {
         try {
             $body = json_decode($request->getContent(), true, 8, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            return $this->error(Response::HTTP_UNPROCESSABLE_ENTITY, 'VALIDATION_ERROR', 'Request body must be valid JSON.');
+            throw SpeechTranscribeException::validation('Request body must be valid JSON.');
         }
 
         if (!is_array($body) || !isset($body['media_id']) || !is_string($body['media_id']) || $body['media_id'] === '') {
-            return $this->error(Response::HTTP_UNPROCESSABLE_ENTITY, 'VALIDATION_ERROR', 'Body must include a non-empty "media_id" string.');
+            throw SpeechTranscribeException::validation('Body must include a non-empty "media_id" string.');
         }
 
         if (isset($body['language']) && !is_string($body['language'])) {
-            return $this->error(Response::HTTP_UNPROCESSABLE_ENTITY, 'VALIDATION_ERROR', '"language" must be a string when present.');
+            throw SpeechTranscribeException::validation('"language" must be a string when present.');
         }
 
+        /** @var array{media_id: string, language?: string} $body */
         return $body;
+    }
+
+    /**
+     * @throws SpeechTranscribeException 401 when no session is bound to the request.
+     */
+    private function requireUserId(): int
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw SpeechTranscribeException::unauthorized('You must be logged in to transcribe audio.');
+        }
+
+        return $userId;
+    }
+
+    /**
+     * @throws SpeechTranscribeException 503 when no provider reports configured.
+     */
+    private function requireConfiguredProvider(): SpeechToTextProviderInterface
+    {
+        $provider = $this->registry->configuredProvider();
+        if ($provider === null) {
+            throw SpeechTranscribeException::providerUnavailable(
+                'No speech-to-text provider is configured. Install spora-plugin-mistral or spora-plugin-muse and add an API key.',
+            );
+        }
+
+        return $provider;
+    }
+
+    /**
+     * @return non-empty-array
+     *
+     * @throws SpeechTranscribeException 404 when the asset is missing or
+     *         not accessible to the caller (the reader returns null for
+     *         both — no existence leak between reasons).
+     */
+    private function loadAsset(string $mediaId, int $userId): array
+    {
+        $asset = $this->mediaReader->readAsset($mediaId, $userId);
+        if ($asset === null) {
+            throw SpeechTranscribeException::mediaNotFound('Media asset not found or not accessible.');
+        }
+
+        return $asset;
+    }
+
+    /**
+     * @param non-empty-array $asset  whatever shape {@see MediaAssetReader::readAsset()} returned.
+     *
+     * @throws SpeechTranscribeException 422 / 502 on provider failure.
+     */
+    private function transcribeWithProvider(
+        SpeechToTextProviderInterface $provider,
+        array $asset,
+        ?string $language,
+        int $userId,
+    ): TranscriptionResult {
+        try {
+            return $provider->transcribe(
+                $asset['bytes'],
+                $asset['mime'],
+                $language,
+                null,
+                $userId,
+            );
+        } catch (InvalidAudioException $e) {
+            throw SpeechTranscribeException::invalidAudio($e->getMessage());
+        } catch (SpeechToTextException $e) {
+            $this->logger?->error('STT provider failed', [
+                'provider' => $provider->getName(),
+                'message'  => $e->getMessage(),
+            ]);
+            throw SpeechTranscribeException::providerFailed($e->getMessage());
+        }
     }
 
     private function error(int $status, string $code, string $message): JsonResponse

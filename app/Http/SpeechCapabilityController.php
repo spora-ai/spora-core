@@ -7,7 +7,6 @@ namespace Spora\Http;
 use OpenApi\Attributes as OA;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Read-only capability endpoint that powers the recording button's
@@ -53,7 +52,7 @@ final class SpeechCapabilityController
             ),
         ],
     )]
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         $providers = $this->registry->describe();
 
