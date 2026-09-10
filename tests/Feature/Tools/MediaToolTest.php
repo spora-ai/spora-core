@@ -596,6 +596,282 @@ describe('MediaTool::get_media', function (): void {
             $restore();
         }
     });
+
+    it('emits a markdown image embed + echo instruction in the content', function (): void {
+        // Mirrors the OpenAI image tool's pattern: the chat UI only
+        // renders the image when the LLM echoes the markdown tag
+        // verbatim, so the echo instruction must live next to the tag.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            idOverride: '11111111-aaaa-bbbb-cccc-111111111111',
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->content)
+                ->toContain('![sample.png](/api/v1/assets/11111111-aaaa-bbbb-cccc-111111111111.png)')
+                ->toContain('Echo the markdown block above verbatim')
+                ->toContain('`get_embed_code`')
+                ->toContain('`get_public_url`');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('emits an <audio> embed for audio assets', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'audio/mpeg',
+            idOverride: '22222222-aaaa-bbbb-cccc-222222222222',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'audio']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)->toContain(
+                '<audio controls preload="metadata" src="/api/v1/assets/22222222-aaaa-bbbb-cccc-222222222222.mp3"></audio>',
+            );
+        } finally {
+            $restore();
+        }
+    });
+
+    it('emits a <video> embed with width and height when present', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'video/mp4',
+            idOverride: '33333333-aaaa-bbbb-cccc-333333333333',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update([
+                'media_type' => 'video',
+                'width'      => 1280,
+                'height'     => 720,
+            ]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)->toContain(
+                '<video controls preload="metadata" playsinline width="1280" height="720" '
+                . 'src="/api/v1/assets/33333333-aaaa-bbbb-cccc-333333333333.mp4"></video>',
+            );
+        } finally {
+            $restore();
+        }
+    });
+
+    it('emits a markdown link for document assets', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            mime: 'application/pdf',
+            idOverride: '44444444-aaaa-bbbb-cccc-444444444444',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['media_type' => 'document']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)->toContain(
+                '[sample.png](/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf)',
+            );
+        } finally {
+            $restore();
+        }
+    });
+
+    it('surfaces the prompt in the content when set on the asset', function (): void {
+        // AI-generated assets (e.g. OpenAI Image) persist the original
+        // prompt on `media_assets.prompt`; the LLM needs it to write
+        // follow-up variations without re-asking the operator.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['prompt' => 'A neon sign over a rainy alleyway, synthwave palette']);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)
+                ->toContain('Prompt: A neon sign over a rainy alleyway, synthwave palette');
+            expect($result->data['prompt'])->toBe('A neon sign over a rainy alleyway, synthwave palette');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('surfaces markdown_content in the content when present and small', function (): void {
+        // PDF / plain-text converters populate `markdown_content`;
+        // surfacing it saves a second tool call.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['markdown_content' => "Chapter 1\n\nIt was the best of times."]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)
+                ->toContain('Extracted text:')
+                ->toContain('Chapter 1')
+                ->toContain('best of times');
+            expect($result->content)->not->toContain('truncated');
+            expect($result->data['markdown_content'])->toContain('best of times');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('truncates markdown_content in the content when it exceeds the preview cap', function (): void {
+        // Prevents a 200-page PDF from ballooning the chat context —
+        // the LLM gets a preview + pointer to the data channel, where
+        // the full text is preserved for the operator UI.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+        $huge = str_repeat('A', 16 * 1024);
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update(['markdown_content' => $huge]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->content)
+                ->toContain('Extracted text:')
+                ->toContain('truncated')
+                ->toContain('ToolResult.data.markdown_content');
+            // The data channel carries the full content even when the
+            // content channel was truncated — operator UI gets the whole text.
+            expect($result->data['markdown_content'])->toBe($huge);
+        } finally {
+            $restore();
+        }
+    });
+
+    it('exposes the full metadata set on the data channel', function (): void {
+        // `summarizeAsset` (used by search) is intentionally lean;
+        // `describeAsset` (used by get_media) carries the richer
+        // metadata the operator UI needs.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            publicToken: 'already-minted-token',
+        );
+        Illuminate\Database\Capsule\Manager::table('media_assets')
+            ->where('id', $asset->id)
+            ->update([
+                'width'             => 1920,
+                'height'            => 1080,
+                'duration_seconds'  => 12.5,
+                'prompt'            => 'A stormtrooper baking sourdough',
+                'markdown_content'  => null,
+                'tags'              => json_encode(['demo', 'stormtrooper']),
+                'metadata'          => json_encode(['source' => 'unit-test']),
+            ]);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            ['app_url' => 'https://configured.example/'],
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->data['width'])->toBe(1920);
+            expect($result->data['height'])->toBe(1080);
+            expect($result->data['duration_seconds'])->toBe(12.5);
+            expect($result->data['prompt'])->toBe('A stormtrooper baking sourdough');
+            expect($result->data['markdown_content'])->toBeNull();
+            expect($result->data['tags'])->toBe(['demo', 'stormtrooper']);
+            expect($result->data['metadata'])->toBe(['source' => 'unit-test']);
+            expect($result->data['public_url'])
+                ->toBe('https://configured.example/api/v1/public/media/' . $asset->id . '?token=already-minted-token');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('omits public_url on the data channel when app_url is not configured', function (): void {
+        // No `app_url` = no absolute origin to share against; null
+        // matches the REST serializer's behavior.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(
+            agentId: $agentA,
+            userId: 99,
+            publicToken: 'a-token',
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+                userId: 99,
+            );
+
+            expect($result->data['public_url'])->toBeNull();
+        } finally {
+            $restore();
+        }
+    });
 });
 
 describe('MediaTool::get_public_url', function (): void {

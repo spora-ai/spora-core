@@ -24,8 +24,9 @@ use Symfony\Component\HttpFoundation\Request;
  * Four operations:
  *
  *   - `search`         — paginated list of `media_assets` rows (auto-approved read)
- *   - `get_media`      — fetch one asset + its opaque `/api/v1/assets/<uuid>` URL
- *                        (auto-approved read)
+ *   - `get_media`      — fetch one asset + a markdown embed snippet the LLM
+ *                        can echo verbatim so the chat UI renders the
+ *                        asset inline. Auto-approved read.
  *   - `get_public_url` — mint or fetch the public shareable URL of a single
  *                        asset. Hidden by default (`enabledByDefault: false`)
  *                        and always requires approval. Operators opt the
@@ -52,7 +53,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, and share media from the media library. Reads use the local /api/v1/assets/<uuid> URL; use get_public_url to mint a shareable link, or get_embed_code to render the asset inline.',
+    description: 'Search, retrieve, and share media from the media library. `get_media` echoes a markdown embed; `get_embed_code` returns the embed alone; `get_public_url` mints a shareable link.',
     category: 'data',
     icon: 'image',
 )]
@@ -76,7 +77,7 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + local /api/v1/assets/<uuid> URL for a single asset.',
+    description: 'Return metadata + a markdown embed (image / audio / video / link) for a single asset. The LLM should echo the embed verbatim so the chat UI renders it inline.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -192,24 +193,102 @@ final class MediaTool extends AbstractTool
     }
 
     /**
-     * @param  array<string, mixed> $arguments
+     * Cap on the `markdown_content` preview inlined into `get_media`.
+     * 8 KB keeps a single PDF chapter under the typical tool-result
+     * cap; anything larger gets a truncation notice — the full content
+     * stays on `ToolResult.data.markdown_content` (which is never sent
+     * to the LLM, only to the operator UI).
      */
-    private function getMedia(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
-    {
+    private const GET_MEDIA_MARKDOWN_PREVIEW_BYTES = 8 * 1024;
+
+    /**
+     * @param  array<string, mixed> $arguments
+     * @return MediaAsset|ToolResult
+     */
+    private function resolveAssetOrFail(
+        string $operation,
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): MediaAsset|ToolResult {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
-            return ToolResult::fail('asset_id is required for get_media.');
+            return ToolResult::fail("asset_id is required for {$operation}.");
         }
-
         $asset = $this->archive->find($assetId);
         if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
             return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
         }
+        return $asset;
+    }
 
-        return ToolResult::ok(
-            "Media asset {$asset->id}: {$asset->filename}",
-            $this->summarizeAsset($asset),
-        );
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function getMedia(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
+    {
+        $asset = $this->resolveAssetOrFail('get_media', $arguments, $agentId, $userId, $context);
+        if ($asset instanceof ToolResult) {
+            return $asset;
+        }
+
+        $assetUrl  = $asset->publicUrl();
+        $mediaType = $asset->typedMediaType();
+        $filename  = (string) ($asset->filename ?? '');
+        $altText   = $filename !== '' ? $filename : $asset->id;
+        $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
+
+        $content = "Media asset {$asset->id}: " . ($asset->filename ?? '(no filename)') . "\n\n" . $embed
+            . "\n\nEcho the markdown block above verbatim so the chat UI renders the asset inline."
+            . ' For a clean embed snippet without this header, call `get_embed_code`.'
+            . ' For a shareable external link, call `get_public_url` (approval-gated).';
+
+        $prompt = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
+            ? trim((string) $asset->prompt)
+            : null;
+        $markdownContent = $asset->markdown_content;
+
+        if ($prompt !== null) {
+            $content .= "\n\nPrompt: " . $prompt;
+        }
+        if (is_string($markdownContent) && $markdownContent !== '') {
+            $content .= "\n\nExtracted text:\n" . $this->previewMarkdownContent($markdownContent);
+        }
+
+        return ToolResult::ok($content, $this->describeAsset($asset, $mediaType, $assetUrl));
+    }
+
+    /** Shared by `get_media` and `get_embed_code` so the two stay in lockstep. */
+    private function embedForAsset(
+        MediaAsset $asset,
+        MediaType $mediaType,
+        string $assetUrl,
+        string $altText,
+    ): string {
+        return match ($mediaType) {
+            MediaType::Image => MediaEmbed::image($assetUrl, $altText),
+            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
+            MediaType::Video => MediaEmbed::videoFromUrl(
+                $assetUrl,
+                $asset->width !== null ? (int) $asset->width : null,
+                $asset->height !== null ? (int) $asset->height : null,
+            ),
+            default => self::markdownLink($assetUrl, $altText),
+        };
+    }
+
+    /**
+     * Truncate `markdown_content` to {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}
+     * so a 200-page PDF doesn't blow the chat context.
+     */
+    private function previewMarkdownContent(string $markdownContent): string
+    {
+        if (strlen($markdownContent) <= self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES) {
+            return $markdownContent;
+        }
+        return substr($markdownContent, 0, self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES)
+            . "\n\n[…truncated — full extracted text is on ToolResult.data.markdown_content]";
     }
 
     /**
@@ -217,26 +296,15 @@ final class MediaTool extends AbstractTool
      */
     private function getPublicUrl(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
-        $assetId = trim((string) ($arguments['asset_id'] ?? ''));
-        if ($assetId === '') {
-            return ToolResult::fail('asset_id is required for get_public_url.');
+        $asset = $this->resolveAssetOrFail('get_public_url', $arguments, $agentId, $userId, $context);
+        if ($asset instanceof ToolResult) {
+            return $asset;
         }
 
-        $asset = $this->archive->find($assetId);
-        $host = (string) ($this->config['app_url'] ?? '');
-        $inScope = $asset !== null && $this->assetInScope($asset, $agentId, $userId, $context);
-        if (!$inScope || $host === '') {
-            return ToolResult::fail(!$inScope
-                ? self::ERR_ASSET_NOT_FOUND
-                : 'Public origin is not configured.');
+        $url = $this->ensurePublicUrl($asset);
+        if ($url === null) {
+            return ToolResult::fail('Public origin is not configured.');
         }
-
-        if ($asset->public_access_token === null || $asset->public_access_token === '') {
-            $asset->public_access_token = MediaArchiveService::mintPublicAccessToken();
-            $asset->save();
-        }
-
-        $url = $this->publicUrl($asset);
 
         return ToolResult::ok(
             "Public URL for {$asset->id}: {$url}",
@@ -252,30 +320,16 @@ final class MediaTool extends AbstractTool
      */
     private function getEmbedCode(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
     {
-        $assetId = trim((string) ($arguments['asset_id'] ?? ''));
-        if ($assetId === '') {
-            return ToolResult::fail('asset_id is required for get_embed_code.');
+        $asset = $this->resolveAssetOrFail('get_embed_code', $arguments, $agentId, $userId, $context);
+        if ($asset instanceof ToolResult) {
+            return $asset;
         }
 
-        $asset = $this->archive->find($assetId);
-        if ($asset === null || !$this->assetInScope($asset, $agentId, $userId, $context)) {
-            return ToolResult::fail(self::ERR_ASSET_NOT_FOUND);
-        }
-
-        $assetUrl = $asset->publicUrl();
+        $assetUrl  = $asset->publicUrl();
         $mediaType = $asset->typedMediaType();
-        $filename = (string) ($asset->filename ?? '');
-
-        $embed = match ($mediaType) {
-            MediaType::Image => MediaEmbed::image($assetUrl, $filename !== '' ? $filename : $asset->id),
-            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
-            MediaType::Video => MediaEmbed::videoFromUrl(
-                $assetUrl,
-                $asset->width !== null ? (int) $asset->width : null,
-                $asset->height !== null ? (int) $asset->height : null,
-            ),
-            default => self::markdownLink($assetUrl, $filename !== '' ? $filename : $asset->id),
-        };
+        $filename  = (string) ($asset->filename ?? '');
+        $altText   = $filename !== '' ? $filename : $asset->id;
+        $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
 
         return ToolResult::ok(
             $embed,
@@ -370,15 +424,57 @@ final class MediaTool extends AbstractTool
         ];
     }
 
-    private function publicUrl(MediaAsset $asset): string
+    /**
+     * Richer per-asset payload for `get_media` — superset of {@see summarizeAsset()}
+     * with the metadata the operator UI needs (width / height, prompt,
+     * extracted text, public URL when minted). `search` stays on the
+     * leaner {@see summarizeAsset()} to avoid N KB of converter output per row.
+     *
+     * @return array<string, mixed>
+     */
+    private function describeAsset(MediaAsset $asset, MediaType $mediaType, string $assetUrl): array
     {
-        // The public base URL is the resolved global config value
-        // (`config.app_url` — configured via config.php / SPORA_APP_URL, or
-        // detected by RequestOrigin::detect() at boot). Reading it from the
-        // global config rather than the per-request host keeps share URLs
-        // stable across requests and immune to Host-header spoofing on a
-        // single request.
+        return [
+            'id'               => $asset->id,
+            'filename'         => $asset->filename,
+            'media_type'       => $mediaType->value,
+            'mime_type'        => $asset->mime_type,
+            'byte_size'        => $asset->byte_size,
+            'width'            => $asset->width,
+            'height'           => $asset->height,
+            'duration_seconds' => $asset->duration_seconds,
+            'prompt'           => $asset->prompt,
+            'markdown_content' => $asset->markdown_content,
+            'tags'             => $asset->tags,
+            'metadata'         => $asset->metadata,
+            'asset_url'        => $assetUrl,
+            'public_url'       => $this->ensurePublicUrl($asset),
+            'created_at'       => $asset->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Mint the public access token if needed and return the share URL.
+     * Returns null when no `app_url` is configured. Has a write
+     * side-effect on the asset (token mint + save) — both `get_public_url`
+     * and `get_media` need the URL, so the side-effect lives here.
+     *
+     * Reading the host from `config.app_url` (not the per-request host)
+     * keeps share URLs stable across requests and immune to Host-header
+     * spoofing. Mirrors {@see MediaAssetSerializer::buildPublicUrl()} so
+     * the tool payload matches what the REST endpoint returns.
+     */
+    private function ensurePublicUrl(MediaAsset $asset): ?string
+    {
         $host = (string) ($this->config['app_url'] ?? '');
+        if ($host === '') {
+            return null;
+        }
+
+        if ($asset->public_access_token === null || $asset->public_access_token === '') {
+            $asset->public_access_token = MediaArchiveService::mintPublicAccessToken();
+            $asset->save();
+        }
 
         return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
     }
