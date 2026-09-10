@@ -16,10 +16,12 @@ use JsonException;
  * The cache is a sha256 hash of every discovered manifest (path, mtime,
  * content hash) written to $stampPath after a successful boot. On a cache
  * hit, the loader re-instantiates plugins from the sidecar JSON without
- * re-parsing or re-validating the manifest, and without calling each
- * plugin's `register()` hook. The boot path still does a full directory
+ * re-parsing or re-validating the manifest, and without dispatching
+ * `ContainerBuildingEvent`. The boot path still does a full directory
  * scan to compute the stamp hash; what the cache saves is the more
- * expensive parse + autoload-register + instantiate cycle.
+ * expensive parse + autoload-register + instantiate cycle. Subscriber
+ * wiring is done by `PluginLoader::wireEventSubscribers()` separately,
+ * OUTSIDE the cache branch, so warm boots keep their listeners.
  */
 final class PluginLoaderCache
 {

@@ -35,6 +35,7 @@
         "psr/log": "^3.0",
         "spora-ai/installer": "^1.1",
         "symfony/console": "^8.0",
+        "symfony/event-dispatcher": "^8.0",
         "symfony/http-client": "^8.0",
         "symfony/http-foundation": "^8.0",
         "symfony/mailer": "^8.0",

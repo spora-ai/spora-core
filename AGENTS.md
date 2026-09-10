@@ -178,7 +178,7 @@ Start: `docker compose -f docker/docker-compose.yml up`
    }
    ```
 
-2. **Register it** via `ToolConfigService` or a plugin's `register()` hook.
+2. **Register it** via `ToolConfigService` or a plugin's `ContainerBuildingEvent` subscriber.
 
 3. **Add tests** in `tests/` using Pest.
 

@@ -13,7 +13,7 @@ use Spora\Plugins\PluginLoader;
  * Builds the inventory of installed plugins surfaced by GET /api/v1/plugins.
  *
  * Combines three sources of truth:
- *  - PluginInterface metadata (name, version, tools, drivers, recipe paths)
+ *  - PluginInterface metadata (name, version, tools)
  *  - plugin.json manifest (description, slug)
  *  - schema_versions + Laravel `migrations` tables (applied migration state)
  *
@@ -56,8 +56,6 @@ final class PluginsService
     {
         $manifest          = $this->pluginLoader->getPluginManifest($slug) ?? [];
         $toolClasses       = $plugin->tools();
-        $driverClasses     = $plugin->drivers();
-        $recipePaths       = $plugin->recipePaths();
         $schemaVersion     = $plugin->schemaVersion();
         $migrationsPath    = $plugin->migrationsPath();
 
@@ -70,8 +68,6 @@ final class PluginsService
             'version'          => $schemaVersion,
             'path'             => $directory,
             'bundledTools'     => $this->metadataExtractor->extract($toolClasses),
-            'bundledDrivers'   => $this->buildDriverList($driverClasses),
-            'recipePaths'      => array_values($recipePaths),
             'migrations'       => $this->buildMigrationStatus($slug, $schemaVersion, $migrationsPath),
             'suggests'         => $suggests,
         ];
@@ -119,23 +115,6 @@ final class PluginsService
         }
         $icon = trim($icon);
         return $icon !== '' ? $icon : 'puzzle';
-    }
-
-    /**
-     * @param array<string, class-string> $driverClasses
-     *
-     * @return list<array{provider: string, class: string}>
-     */
-    private function buildDriverList(array $driverClasses): array
-    {
-        $out = [];
-        foreach ($driverClasses as $provider => $class) {
-            $out[] = [
-                'provider' => (string) $provider,
-                'class'    => (string) $class,
-            ];
-        }
-        return $out;
     }
 
     /**

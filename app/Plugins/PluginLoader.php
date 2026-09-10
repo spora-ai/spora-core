@@ -5,9 +5,15 @@ declare(strict_types=1);
 namespace Spora\Plugins;
 
 use DI\ContainerBuilder;
+use Psr\Container\ContainerInterface;
 use Spora\Apps\AppInterface;
 use Spora\Core\MiddlewareRouteCollector;
+use Spora\Events\BootingEvent;
+use Spora\Events\ContainerBuildingEvent;
+use Spora\Events\RoutesRegisteringEvent;
 use Spora\Plugins\Exceptions\PluginLoadFailedException;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Throwable;
 
 /**
@@ -20,7 +26,7 @@ use Throwable;
  *
  * The directory scan and manifest parse are cached via {@see PluginLoaderCache};
  * a warm boot re-instantiates plugins from a sidecar JSON without re-reading
- * manifests or calling each plugin's `register()` hook.
+ * manifests or dispatching `ContainerBuildingEvent`.
  *
  * Directories are scanned in the order given; if the same slug appears in more
  * than one, the first one wins.
@@ -59,6 +65,8 @@ final class PluginLoader
 
     private readonly PluginLoaderCache $cache;
 
+    private readonly EventDispatcher $dispatcher;
+
     /**
      * @param list<string>  $pluginDirectories Absolute paths to scan for `<plugin>/plugin.json`.
      *                                        Non-existent directories are silently skipped.
@@ -66,12 +74,18 @@ final class PluginLoader
      *                                        current, the loader re-instantiates plugins
      *                                        from a sidecar JSON. When null, the loader
      *                                        always performs a full discovery (used in tests).
+     * @param ?EventDispatcher $dispatcher    Dispatcher plugins attach {@see EventSubscriberInterface}
+     *                                        implementations to. Required in production;
+     *                                        tests may pass a fresh dispatcher (or null to
+     *                                        auto-create one) to observe listener wiring.
      */
     public function __construct(
         array $pluginDirectories,
         ?string $stampPath = null,
+        ?EventDispatcher $dispatcher = null,
     ) {
         $this->cache = new PluginLoaderCache($pluginDirectories, $stampPath);
+        $this->dispatcher = $dispatcher ?? new EventDispatcher();
     }
 
     /**
@@ -125,45 +139,9 @@ final class PluginLoader
     }
 
     /**
-     * All LLM driver class FQCNs contributed by loaded plugins, keyed by provider name.
-     *
-     * @return array<string, class-string>
-     */
-    public function drivers(): array
-    {
-        $drivers = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->drivers() as $provider => $class) {
-                $drivers[$provider] = $class;
-            }
-        }
-
-        return $drivers;
-    }
-
-    /**
-     * All recipe directory paths contributed by loaded plugins.
-     *
-     * @return string[]
-     */
-    public function recipePaths(): array
-    {
-        $paths = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->recipePaths() as $path) {
-                $paths[] = $path;
-            }
-        }
-
-        return $paths;
-    }
-
-    /**
      * All agent-template directory paths contributed by loaded plugins.
-     * Mirrors {@see recipePaths()}; the scanner aggregates these alongside
-     * core-shipped and app-contributed templates.
+     * The scanner aggregates these alongside core-shipped and
+     * app-contributed templates.
      *
      * @return string[]
      */
@@ -477,58 +455,109 @@ final class PluginLoader
     }
 
     /**
-     * Invoke each loaded plugin's `register(ContainerBuilder)` hook. Called by
-     * Kernel AFTER appLoader->load() (so App::register() ran first) and BEFORE
-     * $builder->build() (so plugin DI bindings are part of the container graph).
+     * Dispatch {@see ContainerBuildingEvent}. Called by Kernel AFTER
+     * appLoader->load() (so the App's subscribers ran first) and BEFORE
+     * $builder->build() (so plugin DI bindings are part of the container
+     * graph).
      *
-     * Plugin-throws are caught and logged (or stderr'd) so a single misbehaving
-     * plugin does not break boot.
+     * Plugins must implement {@see EventSubscriberInterface} and subscribe
+     * to ContainerBuildingEvent to register DI bindings — there is no
+     * per-plugin fallback hook. See `spora-workspace/plans/extension-interface-events.md`
+     * for the migration guide.
      */
     public function registerPlugins(ContainerBuilder $builder): void
     {
-        foreach ($this->plugins as $slug => $plugin) {
-            try {
-                $plugin->register($builder);
-            } catch (Throwable $e) {
-                // Pre-container: error_log() is the only channel reliably
-                // available (LoggerInterface isn't built until Kernel::buildContainer).
-                error_log(sprintf(
-                    '[spora] plugin %s register() failed: %s',
-                    $slug,
-                    $e->getMessage(),
-                ));
-            }
-        }
+        $this->dispatchWithTolerance(new ContainerBuildingEvent($builder));
     }
 
     /**
-     * Invoke each loaded plugin's `routes(MiddlewareRouteCollector)` hook.
-     * Called per-request by Kernel::buildRouter() after the project's App routes
-     * have been registered — plugin routes can override or extend those.
+     * Dispatch {@see RoutesRegisteringEvent}. Called per-request by
+     * Kernel::buildRouter() after the project's App routes have been
+     * registered — plugin routes can override or extend those.
+     *
+     * Same opt-in shape as {@see registerPlugins()}: subscribers only.
      */
     public function registerRoutes(MiddlewareRouteCollector $routes): void
     {
-        foreach ($this->plugins as $plugin) {
-            $plugin->routes($routes);
-        }
+        $this->dispatchWithTolerance(new RoutesRegisteringEvent($routes));
     }
 
     private bool $extensionsBooted = false;
 
     /**
-     * Invoke each loaded plugin's `boot()` hook. Called per-request by
-     * Kernel::handle() after the project's App has booted. Idempotent — repeat
-     * calls within the same process are no-ops.
+     * Dispatch {@see BootingEvent}. Called per-request by Kernel::handle()
+     * after the project's App has booted. Idempotent — repeat calls within
+     * the same process are no-ops.
+     *
+     * The container is required to dispatch BootingEvent; passing null is
+     * permitted only so legacy callers (and idempotency tests that do not
+     * care about the event) can still invoke the method without bootstrapping
+     * a full container.
      */
-    public function bootExtensions(): void
+    public function bootExtensions(?ContainerInterface $container = null): void
     {
         if ($this->extensionsBooted) {
             return;
         }
         $this->extensionsBooted = true;
 
+        if ($container !== null) {
+            $this->dispatchWithTolerance(new BootingEvent($container));
+        }
+    }
+
+    /** @var array<int, true> Spl_object_id set, guards against duplicate listeners on long-running workers. */
+    private array $wiredSubscriberIds = [];
+
+    /**
+     * Dispatch an event, swallowing listener exceptions so a single bad
+     * subscriber doesn't abort the rest of the plugin set. Pre-1.0, the
+     * per-plugin `register()`/`routes()`/`boot()` hooks were wrapped in
+     * try/catch in the same spirit; this restores that tolerance on the
+     * new event-dispatch path.
+     */
+    private function dispatchWithTolerance(object $event): void
+    {
+        try {
+            $this->dispatcher->dispatch($event, $event::class);
+        } catch (Throwable $e) {
+            error_log(sprintf(
+                '[spora plugin listener] %s failed: %s',
+                $event::class,
+                $e->getMessage(),
+            ));
+        }
+    }
+
+    /**
+     * Attach every loaded plugin implementing {@see EventSubscriberInterface}
+     * to the dispatcher so it receives lifecycle events.
+     *
+     * Idempotent per plugin instance (tracked via spl_object_id) — safe to
+     * call multiple times. Kernel wires once per process in the constructor
+     * after {@see boot()} populates $this->plugins and before any event
+     * dispatch; tests may invoke it freely on isolated loader instances.
+     *
+     * Wiring runs OUTSIDE the {@see PluginLoaderCache} hit/miss branch
+     * deliberately. The cache short-circuits manifest re-parsing on warm
+     * boot — but a subscriber registered during plugin discovery would
+     * silently disappear on warm boot if we honoured the cache here. The
+     * cost is a cheap reflection-based `instanceof` check per plugin per
+     * process; the gain is correct DI bindings and route registration on
+     * every boot, cold or warm.
+     */
+    public function wireEventSubscribers(): void
+    {
         foreach ($this->plugins as $plugin) {
-            $plugin->boot();
+            if (!$plugin instanceof EventSubscriberInterface) {
+                continue;
+            }
+            $id = spl_object_id($plugin);
+            if (isset($this->wiredSubscriberIds[$id])) {
+                continue;
+            }
+            $this->wiredSubscriberIds[$id] = true;
+            $this->dispatcher->addSubscriber($plugin);
         }
     }
 
@@ -581,7 +610,7 @@ final class PluginLoader
 
         $this->registerManifestAutoload($manifest, $classLoader, $dir);
 
-        $this->instantiatePlugin($slug, $class, $classLoader, $dir, $manifest, $dir . '/plugin.json');
+        $this->instantiatePlugin($slug, $class, $dir, $manifest, $dir . '/plugin.json');
     }
 
     /**
@@ -634,7 +663,7 @@ final class PluginLoader
         // PSR-4 mappings must register before instantiatePlugin() resolves the class.
         $this->registerManifestAutoload($manifest, $classLoader, $pluginDir);
 
-        $this->instantiatePlugin($slug, $fqcn, $classLoader, $pluginDir, $manifest, $manifestFile);
+        $this->instantiatePlugin($slug, $fqcn, $pluginDir, $manifest, $manifestFile);
     }
 
     /**
@@ -715,7 +744,6 @@ final class PluginLoader
     private function instantiatePlugin(
         string $slug,
         string $fqcn,
-        ?\Composer\Autoload\ClassLoader $classLoader,
         string $pluginDir,
         array $manifest,
         string $manifestFile = '',
@@ -744,12 +772,6 @@ final class PluginLoader
 
         /** @var PluginInterface $plugin */
         $plugin = new $fqcn();
-
-        if ($classLoader !== null) {
-            foreach ($plugin->autoload() as $namespace => $path) {
-                $classLoader->addPsr4($namespace, $path);
-            }
-        }
 
         $this->plugins[$slug] = $plugin;
         $this->pluginDirs[$slug] = $pluginDir;

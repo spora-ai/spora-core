@@ -10,6 +10,7 @@ use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
+use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\Exceptions\FeatureDisabledException;
 use Spora\Http\Exceptions\ForbiddenException;
@@ -52,23 +53,34 @@ final class Kernel implements KernelInterface
         $builder = new ContainerBuilder();
         $builder->addDefinitions($this->loadContainerDefinitions());
 
+        // Single dispatcher shared by the loaders AND the `'event_dispatcher'`
+        // container entry: subscribers wired by AppLoader/PluginLoader must
+        // land on the same instance the container hands out, otherwise
+        // `$container->get('event_dispatcher')` would see zero listeners.
+        // The ContainerDefinitions default factory is overridden here with
+        // the concrete instance.
+        $dispatcher = EventDispatcherFactory::create();
+        $builder->addDefinitions(['event_dispatcher' => $dispatcher]);
+
         // AppLoader is owned by the Kernel (not lazily constructed inside a factory)
-        // because its `load()` step applies App::register() to the ContainerBuilder
-        // BEFORE the container is built — DI bindings must be in place first.
-        $this->appLoader = new AppLoader();
-        $this->appLoader->load($this->paths, $builder);
+        // because it must be reachable BEFORE the container is built — the
+        // Kernel hands it to the container below so post-build factories
+        // (Database → DatabaseSchemaInstaller) can resolve it via DI.
+        $this->appLoader = new AppLoader($dispatcher);
+        $this->appLoader->load($this->paths);
 
         // Register the live AppLoader instance so container-managed services
         // (e.g. Database → DatabaseSchemaInstaller) can resolve it later.
         $builder->addDefinitions([AppLoader::class => $this->appLoader]);
 
         // Eager-construct the PluginLoader (same pattern as AppLoader above) so
-        // its `register()` hook can add DI bindings to the ContainerBuilder BEFORE
-        // it is built. The previous lazy factory inside ContainerDefinitions
-        // closed the window for any plugin-supplied bindings.
+        // it can scan manifests and dispatch ContainerBuildingEvent on
+        // registerPlugins() BEFORE the container is built. DI bindings from
+        // plugin subscribers must be in place first.
         $this->pluginLoader = new PluginLoader(
             [$this->paths->plugins()],
             $this->paths->storage('.plugins_stamp'),
+            $dispatcher,
         );
         // A bad manifest should not crash boot — fall through with an empty
         // loader. Mirrors registerPlugins()' per-plugin tolerance below.
@@ -78,6 +90,14 @@ final class Kernel implements KernelInterface
             $this->pluginBootError = 'Plugin manifest in ' . $this->paths->plugins()
                 . ' is not loadable; plugin boot was skipped.';
         }
+        // Subscribers MUST be wired before the first ContainerBuildingEvent
+        // dispatch in registerPlugins() — otherwise listeners never fire and
+        // plugin-supplied DI bindings (e.g. EmailPlugin's ImapClientInterface)
+        // are silently missing. Wire once per process; the loaders' wire
+        // methods are idempotent, so long-running workers can't accumulate
+        // duplicate listeners across requests.
+        $this->appLoader->wireEventSubscribers();
+        $this->pluginLoader->wireEventSubscribers();
         $this->pluginLoader->registerPlugins($builder);
         $builder->addDefinitions([PluginLoader::class => $this->pluginLoader]);
 
@@ -109,12 +129,10 @@ final class Kernel implements KernelInterface
         try {
             $this->container->get(Database::class)->boot();
             $router = $this->buildRouter();
-            // App::boot() runs once per request, after the container is built
-            // and the DB is up — services are safe to use here.
-            $this->appLoader->boot();
-            // Plugin::boot() runs after App::boot() so plugin authors can use
-            // any service the App registered. Idempotent within a process.
-            $this->pluginLoader->bootExtensions();
+            // BootingEvent is dispatched per request once the container is
+            // live and the DB is up — services are safe to resolve inside
+            // BootingEvent listeners. Idempotent within a process.
+            $this->pluginLoader->bootExtensions($this->container);
             return $router->dispatch($request);
         } catch (Throwable $e) {
             return $this->handleException($e);
@@ -177,9 +195,9 @@ final class Kernel implements KernelInterface
             $this->container,
             function (MiddlewareRouteCollector $r) use ($config): void {
                 RouteDefinitions::register($r, is_array($config) ? $config : []);
-                $this->appLoader->registerRoutes($r);
-                // Plugin::routes() runs after App::routes() so plugin authors
-                // can override or extend App-registered routes.
+                // PluginLoader::registerRoutes() is the single dispatch
+                // site for RoutesRegisteringEvent; plugin subscribers
+                // extend the core routes registered above.
                 $this->pluginLoader->registerRoutes($r);
             },
         );

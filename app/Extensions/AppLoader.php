@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Extensions;
 
-use DI\ContainerBuilder;
 use ReflectionClass;
-use Spora\Core\MiddlewareRouteCollector;
 use Spora\Core\Paths;
 use Spora\Extensions\Exceptions\InvalidAppClassException;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
  * Discovers and boots the project-level App extension at `<BASE_PATH>/app/App.php`.
@@ -16,15 +16,18 @@ use Spora\Extensions\Exceptions\InvalidAppClassException;
  * Discovery is reflection-based — no manifest, no slug, no plugin.json — because
  * the App is a one-per-installation concern, unlike Composer-distributed plugins.
  *
- * Hooks are applied in this order so the App's contributions are baked into the
- * compiled container:
+ * The three side-effect hooks (`register()`, `routes()`, `boot()`) were moved
+ * to PSR-14 events in 1.0. The App opts in by implementing
+ * `Symfony\Component\EventDispatcher\EventSubscriberInterface` and subscribing
+ * to `ContainerBuildingEvent`, `RoutesRegisteringEvent`, and `BootingEvent`.
+ * See `spora-workspace/plans/extension-interface-events.md` for the migration
+ * guide. The class names below are unchanged — only the wiring is.
  *
- *   1. App's PSR-4 mappings are registered with Composer's ClassLoader so e.g.
- *      `App\Tools\Greeter` is resolvable during container build.
- *   2. App::register(ContainerBuilder) is called BEFORE build — its bindings are
- *      merged into the container that PHP-DI compiles.
- *   3. After the container is built, Kernel calls App::routes() and App::boot()
- *      with the now-live container and route collector.
+ * `load()` only instantiates the App — it does NOT dispatch lifecycle events.
+ * `ContainerBuildingEvent` is fired by
+ * {@see \Spora\Plugins\PluginLoader::registerPlugins()}, the single dispatch
+ * site for that phase. Dispatching here would double-fire every plugin's
+ * subscriber (AppLoader and PluginLoader share the dispatcher).
  *
  * No app/App.php? AppLoader is a silent no-op — Spora runs as it always has.
  */
@@ -37,33 +40,36 @@ final class AppLoader
      */
     private ?SporaExtensionInterface $app = null;
 
-    private bool $booted = false;
+    private bool $appSubscriberWired = false;
+
+    private readonly EventDispatcher $dispatcher;
 
     /**
-     * Empty constructor — AppLoader must be autowireable as a normal
-     * container service (PHP-DI calls `new` on it via `$c->get()`), but
-     * its `load()` step is the only thing that needs project paths and
-     * a ContainerBuilder. Both are passed at call time, not construction,
-     * to keep the dependency direction simple.
+     * The dispatcher is required in the constructor (not at wire time) so
+     * `wireEventSubscribers()` can rely on it being non-null without a
+     * null-check on the hot path. Tests can pass a fresh dispatcher to
+     * observe listener wiring without booting the full Kernel.
      */
-    public function __construct() {}
+    public function __construct(?EventDispatcher $dispatcher = null)
+    {
+        $this->dispatcher = $dispatcher ?? new EventDispatcher();
+    }
 
     /**
-     * Discover and bind the App. Returns the loaded App instance, or null
-     * if no app/App.php exists.
+     * Discover the App. Returns the loaded App instance, or null if no
+     * app/App.php exists.
      *
-     * Called once by the Kernel BEFORE the container is built. $paths and
-     * $builder are passed here (not via the constructor) because:
-     * - The App's `register()` hook must modify the ContainerBuilder BEFORE
-     *   build.
-     * - AppLoader itself needs to be resolvable as a normal container
-     *   service for the post-build factories that depend on it (Database,
-     *   RecipeScanner, AppRegistry, tool_instances).
+     * Called once by the Kernel BEFORE the container is built. $paths is
+     * passed here (not via the constructor) because AppLoader itself must
+     * be resolvable as a normal container service for the post-build
+     * factories that depend on it (Database, RecipeScanner, AppRegistry,
+     * tool_instances) — those factories receive a `Paths` via the
+     * container, but AppLoader's ctor signature is dispatcher-only.
      *
      * @throws InvalidAppClassException When app/App.php exists but does not declare
      *                                  a class implementing {@see SporaExtensionInterface}.
      */
-    public function load(Paths $paths, ContainerBuilder $builder): ?SporaExtensionInterface
+    public function load(Paths $paths): ?SporaExtensionInterface
     {
         if ($this->app !== null) {
             return $this->app;
@@ -73,14 +79,6 @@ final class AppLoader
         if ($app === null) {
             return null;
         }
-
-        // PSR-4 mappings must be registered before App::register() so the App's
-        // own tool classes are resolvable during container build.
-        $this->registerAutoloadMappings($app);
-
-        // FINALLY wired — App::register() applies DI bindings to the
-        // ContainerBuilder BEFORE the container is built.
-        $app->register($builder);
 
         $this->app = $app;
         return $this->app;
@@ -127,37 +125,19 @@ final class AppLoader
         return new $fqcn();
     }
 
-    private function registerAutoloadMappings(SporaExtensionInterface $app): void
+    /**
+     * Attach the loaded App to the dispatcher when it implements
+     * {@see EventSubscriberInterface}. Mirrors
+     * {@see \Spora\Plugins\PluginLoader::wireEventSubscribers()} — same
+     * PSR-14 wiring, idempotent across calls.
+     */
+    public function wireEventSubscribers(): void
     {
-        $classLoader = $this->findClassLoader();
-        if ($classLoader === null) {
+        if ($this->appSubscriberWired || !$this->app instanceof EventSubscriberInterface) {
             return;
         }
-        foreach ($app->autoload() as $namespace => $path) {
-            $classLoader->addPsr4($namespace, $path);
-        }
-    }
-
-    /**
-     * Forward to App::routes(). Called after core routes are registered,
-     * before the router is built.
-     */
-    public function registerRoutes(MiddlewareRouteCollector $routes): void
-    {
-        $this->app?->routes($routes);
-    }
-
-    /**
-     * Forward to App::boot(). Called once after the container is built.
-     * Safe to use container services inside boot().
-     */
-    public function boot(): void
-    {
-        if ($this->booted) {
-            return;
-        }
-        $this->booted = true;
-        $this->app?->boot();
+        $this->dispatcher->addSubscriber($this->app);
+        $this->appSubscriberWired = true;
     }
 
     public function getApp(): ?SporaExtensionInterface
@@ -203,15 +183,5 @@ final class AppLoader
         }
 
         return $candidates[array_key_last($candidates)];
-    }
-
-    private function findClassLoader(): ?\Composer\Autoload\ClassLoader
-    {
-        foreach (spl_autoload_functions() as $fn) {
-            if (is_array($fn) && $fn[0] instanceof \Composer\Autoload\ClassLoader) {
-                return $fn[0];
-            }
-        }
-        return null;
     }
 }
