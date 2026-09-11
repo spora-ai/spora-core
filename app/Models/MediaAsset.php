@@ -76,6 +76,8 @@ final class MediaAsset extends Model
         'prompt',
         'filename',
         'markdown_content',
+        'transcript',
+        'transcript_language',
         'tags',
         'metadata',
         'asset_url',

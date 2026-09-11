@@ -300,6 +300,40 @@ test('returns 422 on InvalidAudioException from the provider', function (): void
         ->and($body['error']['message'])->toBe('cannot ingest audio/webm');
 });
 
+test('returns 422 INVALID_AUDIO for externally-stored media and never invokes the provider', function (): void {
+    // Regression: `MediaAssetReader::readAsset()` returns
+    // `['status' => 'external', 'sourceUrl' => '…']` for rows whose
+    // `storage_mode = 'external'`. The provider can't consume a URL —
+    // the controller must short-circuit with 422 and skip `transcribe()`.
+    $provider = new TransStubConfigured();
+    [$controller, $service, $userId] = buildTransFixtures($provider);
+
+    $row = new MediaAsset();
+    $row->id           = '00000000-0000-4000-8000-000000000abc';
+    $row->user_id      = $userId;
+    $row->media_type   = MediaType::Audio->value;
+    $row->mime_type    = 'audio/mp3';
+    $row->storage_mode = 'external';
+    $row->source_url   = 'https://example.invalid/recording.mp3';
+    $row->asset_url    = 'https://example.invalid/recording.mp3';
+    $row->save();
+
+    $resp = $controller->transcribe(jsonTransRequest(['media_id' => $row->id]));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('INVALID_AUDIO');
+
+    // Provider must never be invoked — the asset had no bytes to forward.
+    expect($provider->calls)->toBe([]);
+
+    // And the cached transcript must remain unset (no provider call,
+    // no writeTranscript).
+    expect(MediaAsset::query()->find($row->id)->transcript)->toBeNull();
+
+    // Touch the unused destructors so static analysers don't flag them.
+    unset($service);
+});
+
 test('returns 502 on SpeechToTextException from the provider', function (): void {
     $provider = new TransStubConfigured();
     $provider->throws = new SpeechToTextException('upstream 502 from provider');

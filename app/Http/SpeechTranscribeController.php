@@ -26,9 +26,13 @@ use Symfony\Component\HttpFoundation\Request;
  *   1. Decode the JSON body, validate `{ media_id, language? }`.
  *   2. Resolve the configured provider from {@see SpeechToTextRegistry}.
  *      503 if none is configured.
- *   3. Read the asset bytes via {@see MediaAssetReader::readAsset()}.
- *      null return covers missing / unauthorized / legacy storage mode —
- *      all three map to 404 (no existence leak between reasons).
+ *   3. Read the asset via {@see MediaAssetReader::readAsset()} — three
+ *      outcomes, mapped to wire status codes (no existence leak
+ *      between the 404 variants):
+ *        - `null` (missing / unauthorized / legacy storage mode) → 404
+ *        - `external` (asset is just a `source_url` pointer) → 422
+ *          INVALID_AUDIO; the provider needs bytes, not a URL
+ *        - `data_url` / `local` → continue with `bytes` + `mime`
  *   4. Call the provider's `transcribe(bytes, mime, language?, agentId?, userId?)`.
  *      422 on InvalidAudioException (client-side fix);
  *      502 on SpeechToTextException (provider-side failure).
@@ -179,11 +183,14 @@ final class SpeechTranscribeController
     }
 
     /**
-     * @return non-empty-array
+     * @return array{status: 'data_url', bytes: string, mime: string}
+     *         | array{status: 'local', bytes: string, mime: string}
      *
-     * @throws SpeechTranscribeException 404 when the asset is missing or
-     *         not accessible to the caller (the reader returns null for
-     *         both — no existence leak between reasons).
+     * @throws SpeechTranscribeException 404 when the reader yields null
+     *         (missing / unauthorized / legacy storage mode — no
+     *         existence leak between reasons);
+     *         422 INVALID_AUDIO when the asset is only an external
+     *         `source_url` pointer (the provider needs bytes, not a URL).
      */
     private function loadAsset(string $mediaId, int $userId): array
     {
@@ -192,11 +199,21 @@ final class SpeechTranscribeController
             throw SpeechTranscribeException::mediaNotFound('Media asset not found or not accessible.');
         }
 
-        return $asset;
+        $status = $asset['status'];
+        if ($status === 'data_url' || $status === 'local') {
+            return $asset;
+        }
+        // The reader's PHPDoc union is exhaustive (data_url | local | external);
+        // the only remaining value is `external`, which the provider can't
+        // consume (it needs bytes, not a URL).
+        throw SpeechTranscribeException::invalidAudio(
+            'External media assets cannot be transcribed without first being promoted to local storage.',
+        );
     }
 
     /**
-     * @param non-empty-array $asset  whatever shape {@see MediaAssetReader::readAsset()} returned.
+     * @param array{status: 'data_url', bytes: string, mime: string}
+     *       | array{status: 'local', bytes: string, mime: string} $asset
      *
      * @throws SpeechTranscribeException 422 / 502 on provider failure.
      */
