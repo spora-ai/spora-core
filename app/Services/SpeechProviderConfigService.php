@@ -5,20 +5,18 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use DateTimeInterface;
-use ReflectionClass;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
-use Spora\Tools\Attributes\ToolSetting;
 
 /**
  * CRUD orchestrator for speech-to-text provider configurations.
  *
  * The controller stays a thin HTTP layer; this service owns auth,
- * schema validation, and the (scope, table) mapping so callers can
- * reason about the storage rules from one place:
+ * scope resolution, schema validation, and the (scope, table) mapping
+ * so callers can reason about the storage rules from one place:
  *
  *   - `scope = 'global'` → `tool_configurations` rows (keyed by
  *     `tool_class`; admin-only writes via {@see ToolConfigService::putGlobalSettings()})
@@ -33,6 +31,10 @@ use Spora\Tools\Attributes\ToolSetting;
  * so the round-trip follows the `"***"` convention the existing
  * `ToolController` uses.
  *
+ * Per-provider-class schema reflection + required/regex enforcement
+ * lives in {@see SpeechProviderConfigValidator} so this class stays
+ * under the SonarCloud S1448 20-method ceiling.
+ *
  * Singleton scope is `request`-lifetime (the DI container builds a new
  * instance per resolve); the underlying `ToolConfigService` is the
  * shared facade over the storage tables.
@@ -43,6 +45,7 @@ final class SpeechProviderConfigService
         private readonly ToolConfigService $toolConfigService,
         private readonly SpeechToTextRegistry $registry,
         private readonly PrincipalService $principalService,
+        private readonly SpeechProviderConfigValidator $validator,
     ) {}
 
     /**
@@ -89,7 +92,7 @@ final class SpeechProviderConfigService
         foreach ($userRows as $row) {
             /** @var ToolUserSetting $row */
             $toolClass = (string) $row->tool_class;
-            if (!$this->isRegisteredProviderClass($toolClass)) {
+            if (!$this->validator->isRegisteredProviderClass($toolClass)) {
                 continue;
             }
             $decoded = $this->toolConfigService->getPrincipalSettings($toolClass, $principalId);
@@ -122,32 +125,10 @@ final class SpeechProviderConfigService
         $rows = [];
         foreach ($this->registry->all() as $provider) {
             $class = $provider::class;
-            if (!class_exists($class)) {
-                continue;
-            }
-
-            $settings = [];
-            $ref = new ReflectionClass($class);
-            foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-                /** @var ToolSetting $instance */
-                $instance = $attr->newInstance();
-                $entry = [
-                    'key'         => $instance->key,
-                    'label'       => $instance->label,
-                    'type'        => $instance->type,
-                    'description' => $instance->description,
-                    'default'     => $instance->default,
-                    'required'    => $instance->required,
-                    'options'     => $instance->options,
-                    'validation'  => $instance->validation,
-                ];
-                $settings[] = $entry;
-            }
-
+            $settings = $this->validator->collectSettingsSchema($class);
             if ($settings === []) {
                 continue;
             }
-
             $rows[] = [
                 'class'           => $class,
                 'display_name'    => $provider->getDisplayName(),
@@ -177,7 +158,7 @@ final class SpeechProviderConfigService
         string $scope,
         array $settings,
     ): array {
-        $this->assertRegisteredProviderClass($providerClass);
+        $this->validator->assertRegisteredProviderClass($providerClass);
 
         if ($scope === 'global') {
             return $this->upsertGlobalConfig($providerClass, $isAdmin, $settings);
@@ -202,7 +183,7 @@ final class SpeechProviderConfigService
                 'Only admins can write global speech provider configurations.',
             );
         }
-        $this->assertSettingsAgainstSchema($providerClass, $settings);
+        $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
         $this->toolConfigService->putGlobalSettings($providerClass, $settings);
 
         $rowId = $this->toolConfigService->globalConfigId($providerClass);
@@ -228,7 +209,7 @@ final class SpeechProviderConfigService
      */
     private function upsertUserConfig(int $userId, string $providerClass, array $settings): array
     {
-        $this->assertSettingsAgainstSchema($providerClass, $settings);
+        $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
         $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
         $this->toolConfigService->putPrincipalSettings($providerClass, $principalId, $settings);
 
@@ -258,19 +239,28 @@ final class SpeechProviderConfigService
      */
     public function getConfig(int $userId, bool $isAdmin, int $id): ?array
     {
+        $resource = $this->resolveConfigResource($id);
+        if ($resource === null) {
+            return null;
+        }
+        $userRow = ToolUserSetting::find($id);
+        if ($userRow !== null && !$this->callerCanReadUserRow($userId, $isAdmin, (int) $userRow->principal_id)) {
+            return null;
+        }
+        return $resource;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function resolveConfigResource(int $id): ?array
+    {
         $globalRow = ToolConfiguration::find($id);
         if ($globalRow !== null) {
             return $this->buildGlobalResource($globalRow);
         }
-
         $userRow = ToolUserSetting::find($id);
-        if ($userRow === null) {
-            return null;
-        }
-        if (!$this->callerCanReadUserRow($userId, $isAdmin, (int) $userRow->principal_id)) {
-            return null;
-        }
-        return $this->buildUserResource($userRow);
+        return $userRow !== null ? $this->buildUserResource($userRow) : null;
     }
 
     private function callerCanReadUserRow(int $userId, bool $isAdmin, int $rowPrincipalId): bool
@@ -396,99 +386,6 @@ final class SpeechProviderConfigService
     // Internal helpers
     // -----------------------------------------------------------------
 
-    private function isRegisteredProviderClass(string $class): bool
-    {
-        foreach ($this->registry->all() as $provider) {
-            if ($provider::class === $class) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * @throws SpeechProviderConfigException
-     */
-    private function assertRegisteredProviderClass(string $class): void
-    {
-        if (!$this->isRegisteredProviderClass($class)) {
-            throw SpeechProviderConfigException::notFound(
-                "Speech provider class '{$class}' is not registered.",
-            );
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     *
-     * @throws SpeechProviderConfigException
-     */
-    private function assertSettingsAgainstSchema(string $providerClass, array $settings): void
-    {
-        if (!class_exists($providerClass)) {
-            throw SpeechProviderConfigException::notFound(
-                "Speech provider class '{$providerClass}' is not registered.",
-            );
-        }
-
-        [$allowed, $schema] = $this->loadSchema($providerClass);
-
-        foreach ($settings as $key => $value) {
-            if (!isset($allowed[$key])) {
-                throw SpeechProviderConfigException::validation(
-                    "Settings key '{$key}' is not declared on {$providerClass}.",
-                );
-            }
-        }
-
-        foreach ($schema as $setting) {
-            if (!$setting->required) {
-                continue;
-            }
-            $this->assertRequiredSetting($setting, $settings);
-        }
-    }
-
-    /**
-     * Walk `#[ToolSetting]` attributes on a provider class and return
-     * `(allowed_keys, schema_instances)`.
-     *
-     * @return array{0: array<string, true>, 1: list<ToolSetting>}
-     */
-    private function loadSchema(string $providerClass): array
-    {
-        $ref = new ReflectionClass($providerClass);
-        $allowed = [];
-        $schema = [];
-        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $instance */
-            $instance = $attr->newInstance();
-            $allowed[$instance->key] = true;
-            $schema[] = $instance;
-        }
-        return [$allowed, $schema];
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     *
-     * @throws SpeechProviderConfigException
-     */
-    private function assertRequiredSetting(ToolSetting $setting, array $settings): void
-    {
-        $value = $settings[$setting->key] ?? null;
-        if ($value === null || $value === '') {
-            throw SpeechProviderConfigException::validation(
-                "Field '{$setting->label}' is required.",
-            );
-        }
-        if ($setting->validation !== '' && is_string($value) && !preg_match($setting->validation, $value)) {
-            throw SpeechProviderConfigException::validation(
-                "Field '{$setting->label}' has an invalid value.",
-            );
-        }
-    }
-
     /**
      * @param array<string, mixed> $settings
      * @return array<string, mixed>
@@ -555,15 +452,11 @@ final class SpeechProviderConfigService
         if ($value === null) {
             return null;
         }
-        if ($value instanceof DateTimeInterface) {
-            return $value->format(DateTimeInterface::ATOM);
-        }
-        if (is_string($value) && $value !== '') {
-            $ts = strtotime($value);
-            if ($ts !== false) {
-                return gmdate(DateTimeInterface::ATOM, $ts);
-            }
-        }
-        return null;
+        return match (true) {
+            $value instanceof DateTimeInterface => $value->format(DateTimeInterface::ATOM),
+            is_string($value) && $value !== '' && ($ts = strtotime($value)) !== false
+                => gmdate(DateTimeInterface::ATOM, $ts),
+            default => null,
+        };
     }
 }

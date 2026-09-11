@@ -41,6 +41,7 @@ function makeSpeechProviderConfigController(): array
         $toolConfig,
         $registry,
         $principalService,
+        new \Spora\Services\SpeechProviderConfigValidator($registry),
     );
 
     $controller = new SpeechProviderConfigController($auth, $service);

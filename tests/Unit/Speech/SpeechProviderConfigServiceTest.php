@@ -8,12 +8,30 @@ use Spora\Models\Principal;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
+use Spora\Services\SpeechProviderConfigValidator;
 use Spora\Services\ToolConfigService;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Speech\TranscriptionResult;
+
+/**
+ * Wrap {@see SpeechProviderConfigService} so the tests don't have to
+ * hand-roll the validator for every fixture.
+ */
+function buildService(
+    ToolConfigService $toolConfig,
+    SpeechToTextRegistry $registry,
+    PrincipalService $principalService,
+): SpeechProviderConfigService {
+    return new SpeechProviderConfigService(
+        $toolConfig,
+        $registry,
+        $principalService,
+        new SpeechProviderConfigValidator($registry),
+    );
+}
 
 /**
  * Stub provider that opts into the `instanceof` gate
@@ -73,7 +91,7 @@ test('listConfigs returns every global config to an admin (one row per registere
     $toolConfig->shouldReceive('fetchCreatedAt')->andReturnUsing(static fn(): ?string => null);
     $toolConfig->shouldReceive('fetchUpdatedAt')->andReturnUsing(static fn(): ?string => null);
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -96,7 +114,7 @@ test('listConfigs returns only the caller user-scoped configs to a non-admin', f
     $toolConfig->shouldReceive('getPrincipalSettings')->andReturn(['display_name' => 'Mine', 'api_key' => 'sk-x']);
     $toolConfig->shouldReceive('maskForApi')->andReturnUsing(static fn(array $settings): array => $settings);
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -129,7 +147,7 @@ test('getSchema enumerates registered provider classes and walks #[ToolSetting] 
     $stub = new StubSpeechProviderWithSettings();
     $toolConfig = Mockery::mock(ToolConfigService::class);
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry([$oai, $stub], $toolConfig),
         new PrincipalService(new PrincipalResolver()),
@@ -155,7 +173,7 @@ test('upsertConfig rejects global scope for non-admin callers with a forbidden e
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -176,7 +194,7 @@ test('upsertConfig rejects global scope for non-admin callers with a forbidden e
 test('upsertConfig throws notFound when provider_class is not registered', function (): void {
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry([], $toolConfig),
         new PrincipalService(new PrincipalResolver()),
@@ -207,7 +225,7 @@ test('upsertConfig writes global settings via putGlobalSettings when scope=globa
     $toolConfig->shouldReceive('maskForApi')
         ->andReturnUsing(static fn(array $settings): array => $settings);
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -251,7 +269,7 @@ test('upsertConfig resolves the caller principal and writes user settings when s
     $toolConfig->shouldReceive('maskForApi')
         ->andReturnUsing(static fn(array $settings): array => $settings);
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -280,7 +298,7 @@ test('upsertConfig rejects unknown settings keys with a validation exception', f
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -302,7 +320,7 @@ test('upsertConfig rejects values that fail the declared regex validation', func
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -324,7 +342,7 @@ test('updateConfig rejects non-admin updates to a global config', function (): v
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -358,7 +376,7 @@ test('deleteConfig calls deleteGlobalSettings when the row is global and caller 
             $captured['class'] = $class;
         });
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -397,7 +415,7 @@ test('deleteConfig calls deletePrincipalSettings when the row is user-scoped', f
             $captured['principal'] = $p;
         });
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
@@ -429,7 +447,7 @@ test('deleteConfig returns false for a non-existent id', function (): void {
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry([], $toolConfig),
         new PrincipalService(new PrincipalResolver()),
@@ -442,7 +460,7 @@ test('getConfig returns null for an unknown id', function (): void {
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldIgnoreMissing();
 
-    $service = new SpeechProviderConfigService(
+    $service = buildService(
         $toolConfig,
         new SpeechToTextRegistry([], $toolConfig),
         new PrincipalService(new PrincipalResolver()),

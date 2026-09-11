@@ -9,6 +9,7 @@ use Spora\Http\SpeechProviderConfigController;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
+use Spora\Services\SpeechProviderConfigValidator;
 use Spora\Services\ToolConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 
@@ -34,6 +35,7 @@ final class SpeechProviderConfigContainerBindings
                     $c->get(ToolConfigService::class),
                     $c->get(SpeechToTextRegistry::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
+                    new SpeechProviderConfigValidator($c->get(SpeechToTextRegistry::class)),
                 );
             },
 
