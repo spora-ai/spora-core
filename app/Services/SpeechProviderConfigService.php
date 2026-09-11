@@ -6,8 +6,10 @@ namespace Spora\Services;
 
 use DateTimeInterface;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
+use Spora\Models\Principal;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
+use Spora\Services\GroupService;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
 
@@ -23,11 +25,15 @@ use Spora\Speech\SpeechToTextRegistry;
  *   - `scope = 'user'`   → `tool_user_settings` rows keyed by
  *     (`tool_class`, `principal_id`); the user-principal id is resolved
  *     on demand via {@see PrincipalService::ensureUserPrincipal()}
+ *   - `scope = 'group'`  → `tool_user_settings` rows keyed by
+ *     (`tool_class`, `principal_id`) where `principal_id` is the
+ *     group's group-principal id; the controller enforces that the
+ *     caller is group admin OR global admin
  *
  * The `ConfigResource` wire shape mirrors what the SPA needs to render
  * the settings page: `{id, provider_class, provider_display_name,
- * scope, display_name, settings, created_at, updated_at}`. Password
- * fields are masked via {@see ToolConfigSchemaInspector::maskForApi()}
+ * scope, display_name, settings, principal_id, created_at, updated_at}`.
+ * Password fields are masked via {@see ToolConfigSchemaInspector::maskForApi()}
  * so the round-trip follows the `"***"` convention the existing
  * `ToolController` uses.
  *
@@ -63,10 +69,18 @@ final class SpeechProviderConfigService
      * surfaces (`Admin → Speech` and `User Settings → Speech`) call the
      * same endpoint and let the auth flag filter.
      *
+     * When `$groupId` is provided, the list is narrowed to that group's
+     * configs (admin/non-admin members can read their group's config;
+     * group admins and global admins can read+edit it).
+     *
      * @return list<array<string, mixed>>
      */
-    public function listConfigs(int $userId, bool $isAdmin): array
+    public function listConfigs(int $userId, bool $isAdmin, ?int $groupId = null): array
     {
+        if ($groupId !== null) {
+            return $this->listGroupConfigs($userId, $isAdmin, $groupId);
+        }
+
         $rows = [];
 
         if ($isAdmin) {
@@ -112,6 +126,58 @@ final class SpeechProviderConfigService
     }
 
     /**
+     * List the speech provider configs attached to a single group. The
+     * caller must be a member of the group (or a global admin) to read
+     * the group-scoped configs; non-members receive an empty list so
+     * the existence-hide invariant matches the rest of the group
+     * surface (a non-member doesn't know the group has STT configs).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listGroupConfigs(int $userId, bool $isAdmin, int $groupId): array
+    {
+        $groupPrincipal = $this->principalService->principalForGroup($groupId);
+        if ($groupPrincipal === null) {
+            return [];
+        }
+
+        // Existence-hide: non-members (including non-member global
+        // admins — they go through the admin overlay for cross-group
+        // inspection) see an empty list so they can't tell whether the
+        // group has any STT configs.
+        $isMember = \Illuminate\Database\Capsule\Manager::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->exists();
+        if (!$isMember && !$isAdmin) {
+            return [];
+        }
+
+        $principalId = (int) $groupPrincipal->id;
+        $rows = [];
+
+        $groupRows = ToolUserSetting::where('principal_id', $principalId)->get();
+        foreach ($groupRows as $row) {
+            /** @var ToolUserSetting $row */
+            $toolClass = (string) $row->tool_class;
+            if (!$this->validator->isRegisteredProviderClass($toolClass)) {
+                continue;
+            }
+            $rows[] = $this->buildConfigResource(
+                rowId: (int) $row->id,
+                providerClass: $toolClass,
+                scope: 'group',
+                settings: $this->toolConfigService->getPrincipalSettings($toolClass, $principalId),
+                principalId: $principalId,
+                createdAt: $row->created_at,
+                updatedAt: $row->updated_at,
+            );
+        }
+
+        return $rows;
+    }
+
+    /**
      * Return the provider-class picker schema: every registered
      * `SpeechToTextProviderInterface` with its declared
      * `#[ToolSetting]` attributes (label, type, default, required,
@@ -147,6 +213,11 @@ final class SpeechProviderConfigService
      *  - `scope = 'user'` resolves the caller's user-principal and
      *    writes to `tool_user_settings`. Idempotent on
      *    `(tool_class, principal_id)`.
+     *  - `scope = 'group'` requires `$groupId`, resolves the group's
+     *    group-principal via {@see PrincipalService::ensureGroupPrincipal()},
+     *    and writes to `tool_user_settings`. Auth: caller must be group
+     *    admin (`GroupService::callerCanManage`) OR a global admin.
+     *    Idempotent on `(tool_class, principal_id)`.
      *
      * @param array<string, mixed> $settings
      *
@@ -158,19 +229,33 @@ final class SpeechProviderConfigService
         string $providerClass,
         string $scope,
         array $settings,
+        ?int $groupId = null,
     ): array {
         $this->validator->assertRegisteredProviderClass($providerClass);
 
         if ($scope === 'global') {
             return $this->upsertGlobalConfig($providerClass, $isAdmin, $settings);
         }
-        if ($scope !== 'user') {
-            throw SpeechProviderConfigException::validation(
-                'scope must be either "global" or "user".',
-            );
+        if ($scope === 'user') {
+            return $this->upsertUserConfig($userId, $providerClass, $settings);
+        }
+        if ($scope === 'group') {
+            if ($groupId === null || $groupId <= 0) {
+                throw SpeechProviderConfigException::validation(
+                    'scope "group" requires a positive "group_id".',
+                );
+            }
+            if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
+                throw SpeechProviderConfigException::forbidden(
+                    'Only group owners, group admins, or global admins can write group speech provider configurations.',
+                );
+            }
+            return $this->upsertGroupConfig($groupId, $providerClass, $settings);
         }
 
-        return $this->upsertUserConfig($userId, $providerClass, $settings);
+        throw SpeechProviderConfigException::validation(
+            'scope must be either "global", "user", or "group".',
+        );
     }
 
     /**
@@ -226,6 +311,35 @@ final class SpeechProviderConfigService
             rowId: $rowId,
             providerClass: $providerClass,
             scope: 'user',
+            settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
+            principalId: $principalId,
+            createdAt: $row?->created_at,
+            updatedAt: $row?->updated_at,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @return array<string, mixed>
+     */
+    private function upsertGroupConfig(int $groupId, string $providerClass, array $settings): array
+    {
+        $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
+        $principalId = $this->principalService->ensureGroupPrincipal($groupId)->id;
+        $this->toolConfigService->putPrincipalSettings($providerClass, $principalId, $settings);
+
+        $rowId = $this->idResolver->principalSettingsId($providerClass, $principalId);
+        if ($rowId === null) {
+            throw SpeechProviderConfigException::notFound(
+                "Group-scoped config row for {$providerClass} disappeared after write.",
+            );
+        }
+        $row = ToolUserSetting::find($rowId);
+
+        return $this->buildConfigResource(
+            rowId: $rowId,
+            providerClass: $providerClass,
+            scope: 'group',
             settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
             principalId: $principalId,
             createdAt: $row?->created_at,
@@ -312,6 +426,10 @@ final class SpeechProviderConfigService
      * Update an existing config by id. Resolves scope by which table
      * the id came from, then delegates to {@see upsertConfig()}.
      *
+     * Group-scoped rows are gated by `GroupService::callerCanManage()`
+     * against the row's underlying group id (no `group_id` is required
+     * on the PUT body — the controller looks it up from the row).
+     *
      * @param array<string, mixed> $settings
      */
     public function updateConfig(int $userId, bool $isAdmin, int $id, array $settings): array
@@ -328,8 +446,31 @@ final class SpeechProviderConfigService
 
         $userRow = ToolUserSetting::find($id);
         if ($userRow !== null) {
+            $principalId = (int) $userRow->principal_id;
+            $principal = \Spora\Models\Principal::find($principalId);
+            $scope = ($principal !== null && $principal->type === Principal::TYPE_GROUP)
+                ? 'group'
+                : 'user';
+
+            if ($scope === 'group') {
+                $groupId = (int) $principal->group_id;
+                if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
+                    throw SpeechProviderConfigException::forbidden(
+                        'Only group owners, group admins, or global admins can update group speech provider configurations.',
+                    );
+                }
+                return $this->upsertConfig(
+                    userId: $userId,
+                    isAdmin: $isAdmin,
+                    providerClass: (string) $userRow->tool_class,
+                    scope: 'group',
+                    settings: $settings,
+                    groupId: $groupId,
+                );
+            }
+
             $callerPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
-            if (!$isAdmin && (int) $userRow->principal_id !== $callerPrincipalId) {
+            if (!$isAdmin && $principalId !== $callerPrincipalId) {
                 throw SpeechProviderConfigException::forbidden(
                     'You can only update your own speech provider configurations.',
                 );
@@ -351,6 +492,9 @@ final class SpeechProviderConfigService
     /**
      * Delete a config by id. Returns true on success, false when the
      * id didn't exist (or the caller isn't allowed to see/delete it).
+     *
+     * Group-scoped rows are gated by `GroupService::callerCanManage()`
+     * against the row's underlying group id.
      */
     public function deleteConfig(int $userId, bool $isAdmin, int $id): bool
     {
@@ -367,15 +511,28 @@ final class SpeechProviderConfigService
 
         $userRow = ToolUserSetting::find($id);
         if ($userRow !== null) {
-            $callerPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
-            if (!$isAdmin && (int) $userRow->principal_id !== $callerPrincipalId) {
-                throw SpeechProviderConfigException::forbidden(
-                    'You can only delete your own speech provider configurations.',
-                );
+            $principalId = (int) $userRow->principal_id;
+            $principal = \Spora\Models\Principal::find($principalId);
+
+            if ($principal !== null && $principal->type === Principal::TYPE_GROUP) {
+                $groupId = (int) $principal->group_id;
+                if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
+                    throw SpeechProviderConfigException::forbidden(
+                        'Only group owners, group admins, or global admins can delete group speech provider configurations.',
+                    );
+                }
+            } elseif (!$isAdmin) {
+                $callerPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
+                if ($principalId !== $callerPrincipalId) {
+                    throw SpeechProviderConfigException::forbidden(
+                        'You can only delete your own speech provider configurations.',
+                    );
+                }
             }
+
             $this->toolConfigService->deletePrincipalSettings(
                 (string) $userRow->tool_class,
-                (int) $userRow->principal_id,
+                $principalId,
             );
             return true;
         }

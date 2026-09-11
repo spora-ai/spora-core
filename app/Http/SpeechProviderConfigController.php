@@ -17,7 +17,9 @@ use Symfony\Component\HttpFoundation\Response;
  * REST API for speech-to-text provider configurations.
  *
  * Endpoints (all behind `AuthMiddleware`; mutations also behind `CsrfMiddleware`):
- *   GET    /api/v1/speech/provider-configs          — list (admin: globals; user: own overrides)
+ *   GET    /api/v1/speech/provider-configs?group_id=N
+ *                                              — list (admin: globals; user: own overrides;
+ *                                                with group_id: that group's configs)
  *   GET    /api/v1/speech/provider-configs/schema   — provider-class picker schema
  *   POST   /api/v1/speech/provider-configs          — create or update a config (upsert)
  *   PUT    /api/v1/speech/provider-configs/{id}     — update an existing config
@@ -27,6 +29,10 @@ use Symfony\Component\HttpFoundation\Response;
  *   - `scope = 'global'` writes to `tool_configurations` (admin-only).
  *   - `scope = 'user'`   writes to `tool_user_settings` keyed by the
  *     caller's user-principal id (auto-materialised on demand).
+ *   - `scope = 'group'`  writes to `tool_user_settings` keyed by the
+ *     group-principal id of the `group_id` field in the body. The
+ *     caller must be group admin OR global admin
+ *     (`GroupService::callerCanManage()`).
  *
  * The controller stays a thin HTTP layer. The service owns auth,
  * scope resolution, schema validation, and the (scope, table) mapping.
@@ -44,6 +50,15 @@ final class SpeechProviderConfigController
     #[OA\Get(
         path: '/api/v1/speech/provider-configs',
         summary: 'List speech provider configurations visible to the caller',
+        parameters: [
+            new OA\Parameter(
+                name: 'group_id',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'integer'),
+                description: 'When set, returns the speech provider configs attached to that group. The caller must be a member of the group or a global admin; non-members receive an empty list.',
+            ),
+        ],
         responses: [
             new OA\Response(
                 response: 200,
@@ -66,11 +81,16 @@ final class SpeechProviderConfigController
             ),
         ],
     )]
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         try {
             $userId = $this->requireUserId();
-            $configs = $this->configService->listConfigs($userId, $this->authService->isAdmin());
+            $groupId = $this->optionalIntQueryParam($request, 'group_id');
+            $configs = $this->configService->listConfigs(
+                userId: $userId,
+                isAdmin: $this->authService->isAdmin(),
+                groupId: $groupId,
+            );
         } catch (SpeechProviderConfigException $e) {
             return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
         }
@@ -116,7 +136,13 @@ final class SpeechProviderConfigController
                 required: ['provider_class', 'scope', 'settings'],
                 properties: [
                     new OA\Property(property: 'provider_class', type: 'string'),
-                    new OA\Property(property: 'scope', type: 'string', enum: ['global', 'user']),
+                    new OA\Property(property: 'scope', type: 'string', enum: ['global', 'user', 'group']),
+                    new OA\Property(
+                        property: 'group_id',
+                        type: 'integer',
+                        nullable: true,
+                        description: 'Required when scope="group". Names the group the config is attached to. Caller must be group admin or global admin.',
+                    ),
                     new OA\Property(property: 'settings', type: 'object'),
                 ],
             ),
@@ -140,12 +166,27 @@ final class SpeechProviderConfigController
             $rawSettings = $body['settings'] ?? [];
             $settings = is_array($rawSettings) ? $rawSettings : [];
 
+            $groupId = null;
+            if ($scope === 'group') {
+                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+                    throw SpeechProviderConfigException::validation(
+                        'group_id must be a positive integer when scope="group".',
+                    );
+                }
+                $groupId = $body['group_id'];
+            } elseif (isset($body['group_id']) && $body['group_id'] !== null) {
+                throw SpeechProviderConfigException::validation(
+                    'group_id may only be set when scope="group".',
+                );
+            }
+
             $config = $this->configService->upsertConfig(
                 userId: $userId,
                 isAdmin: $isAdmin,
                 providerClass: $providerClass,
                 scope: $scope,
                 settings: $settings,
+                groupId: $groupId,
             );
         } catch (SpeechProviderConfigException $e) {
             return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
@@ -252,6 +293,26 @@ final class SpeechProviderConfigController
         }
         /** @var array<string, mixed> $decoded */
         return $decoded;
+    }
+
+    /**
+     * Read an optional integer query parameter from the request. Returns
+     * `null` when the parameter is absent or empty; throws 422 when the
+     * parameter is present but not a positive integer (callers explicitly
+     * requesting a numeric id expect a hard failure on a typo'd value).
+     */
+    private function optionalIntQueryParam(Request $request, string $name): ?int
+    {
+        $raw = $request->query->get($name);
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_numeric($raw) || (int) $raw <= 0) {
+            throw SpeechProviderConfigException::validation(
+                "Query parameter '{$name}' must be a positive integer when present.",
+            );
+        }
+        return (int) $raw;
     }
 
     /**

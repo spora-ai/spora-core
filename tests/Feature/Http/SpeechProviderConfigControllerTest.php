@@ -116,7 +116,7 @@ describe('SpeechProviderConfigController', function (): void {
         $configId = $createBody['data']['config']['id'];
 
         // LIST — admin sees globals
-        $listResp = $controller->index();
+        $listResp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
         expect($listResp->getStatusCode())->toBe(200);
         $listBody = json_decode($listResp->getContent(), true);
         expect($listBody['data']['configs'])->toHaveCount(1);
@@ -163,7 +163,7 @@ describe('SpeechProviderConfigController', function (): void {
         $configId = $createBody['data']['config']['id'];
 
         // LIST — non-admin sees own user-scope config
-        $listResp = $controller->index();
+        $listResp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
         expect($listResp->getStatusCode())->toBe(200);
         $listBody = json_decode($listResp->getContent(), true);
         expect($listBody['data']['configs'])->toHaveCount(1);
@@ -306,7 +306,294 @@ describe('SpeechProviderConfigController', function (): void {
     it('returns 403 (forbidden) for anonymous index requests', function (): void {
         [$controller] = makeSpeechProviderConfigController();
         // No session — currentUserId() returns null → requireUserId throws.
-        $resp = $controller->index();
+        $resp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
         expect($resp->getStatusCode())->toBe(403);
+    });
+});
+
+describe('SpeechProviderConfigController — scope=group', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+        Capsule::table('tool_user_settings')->delete();
+        Capsule::table('tool_configurations')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('groups')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+    });
+
+    it('200: group admin creates a group-scoped config; principal_id points at the group-principal', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
+
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGrpA');
+        $groupPrincipalId = (int) \Illuminate\Database\Capsule\Manager::table('principals')
+            ->where('type', \Spora\Models\Principal::TYPE_GROUP)
+            ->where('group_id', $group->id)
+            ->value('id');
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group',
+            'group_id'       => (int) $group->id,
+            'settings'       => [
+                'api_key'      => 'sk-grp',
+                'display_name' => 'Group Mistral',
+                'base_url'     => 'https://api.mistral.ai/v1',
+                'model'        => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['scope'])->toBe('group');
+        expect($body['data']['config']['principal_id'])->toBe($groupPrincipalId);
+        expect($body['data']['config']['settings']['api_key'])->toBe('***');
+
+        // Row actually landed in tool_user_settings keyed by the group-principal id.
+        $rowCount = \Illuminate\Database\Capsule\Manager::table('tool_user_settings')
+            ->where('principal_id', $groupPrincipalId)
+            ->count();
+        expect($rowCount)->toBe(1);
+    });
+
+    it('403: a member (non-admin) of the group cannot create a group-scoped config', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-grp-memb-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGrpMember');
+
+        // Add the caller as a member (not admin) and switch the session.
+        $memberId = bootAuth($auth, 'spc-grp-memb@example.com', SPC_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
+        clearSession();
+        simulateLoggedInSession($memberId, 'spc-grp-memb@example.com');
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group',
+            'group_id'       => (int) $group->id,
+            'settings'       => [
+                'api_key'      => 'sk-grp',
+                'display_name' => 'X',
+                'base_url'     => 'https://api.openai.com/v1',
+                'model'        => 'whisper-1',
+            ],
+        ]));
+        expect($resp->getStatusCode())->toBe(403);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+    });
+
+    it('200: global admin can create a group-scoped config on any group', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-grp-admin-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGrpAdmin');
+
+        $adminId = bootAuth($auth, 'spc-grp-admin@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group',
+            'group_id'       => (int) $group->id,
+            'settings'       => [
+                'api_key'      => 'sk-admin-grp',
+                'display_name' => 'Admin-set',
+                'base_url'     => 'https://api.openai.com/v1',
+                'model'        => 'whisper-1',
+            ],
+        ]));
+        expect($resp->getStatusCode())->toBe(200);
+        expect(json_decode($resp->getContent(), true)['data']['config']['scope'])->toBe('group');
+    });
+
+    it('422: scope=group without group_id is rejected', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-grp-noid-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService->createGroup($ownerId, 'SpCGrpNoId');
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group',
+            'settings'       => [
+                'api_key'      => 'sk-x',
+                'display_name' => 'X',
+                'base_url'     => 'https://api.openai.com/v1',
+                'model'        => 'whisper-1',
+            ],
+        ]));
+        expect($resp->getStatusCode())->toBe(422);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
+    });
+
+    it('422: scope=user with a stray group_id is rejected', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-stray-gid@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'user',
+            'group_id'       => 7, // stray
+            'settings'       => [
+                'api_key'      => 'sk-x',
+                'display_name' => 'X',
+                'base_url'     => 'https://api.openai.com/v1',
+                'model'        => 'whisper-1',
+            ],
+        ]));
+        expect($resp->getStatusCode())->toBe(422);
+    });
+
+    it('GET ?group_id=N returns only that group\'s configs to a member', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-list-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupA = $groupService->createGroup($ownerId, 'SpCListA');
+        $groupB = $groupService->createGroup($ownerId, 'SpCListB');
+
+        // Owner pre-populates a config on each group.
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group', 'group_id' => (int) $groupA->id,
+            'settings'       => [
+                'api_key' => 'sk-a', 'display_name' => 'A',
+                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group', 'group_id' => (int) $groupB->id,
+            'settings'       => [
+                'api_key' => 'sk-b', 'display_name' => 'B',
+                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+
+        // Add a member and ask for only group A.
+        $memberId = bootAuth($auth, 'spc-list-memb@example.com', SPC_TEST_PASSWORD);
+        $groupService->addMember((int) $groupA->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
+        $groupService->addMember((int) $groupB->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
+        clearSession();
+        simulateLoggedInSession($memberId, 'spc-list-memb@example.com');
+
+        $resp = $controller->index(\Symfony\Component\HttpFoundation\Request::create(
+            '/api/v1/speech/provider-configs?group_id=' . $groupA->id,
+            'GET',
+        ));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['configs'])->toHaveCount(1);
+        expect($body['data']['configs'][0]['scope'])->toBe('group');
+        expect($body['data']['configs'][0]['settings']['display_name'])->toBe('A');
+    });
+
+    it('GET ?group_id=N returns empty list to a non-member (existence-hide)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-list-nonmem-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCListNonMem');
+
+        // Owner writes a config; stranger does NOT join the group.
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group', 'group_id' => (int) $group->id,
+            'settings'       => [
+                'api_key' => 'sk-a', 'display_name' => 'A',
+                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+
+        $strangerId = bootAuth($auth, 'spc-list-stranger@example.com', SPC_TEST_PASSWORD);
+        clearSession();
+        simulateLoggedInSession($strangerId, 'spc-list-stranger@example.com');
+
+        $resp = $controller->index(\Symfony\Component\HttpFoundation\Request::create(
+            '/api/v1/speech/provider-configs?group_id=' . $group->id,
+            'GET',
+        ));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['configs'])->toBe([]);
+    });
+
+    it('GET without ?group_id still returns the legacy scopes (no behaviour change)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-list-legacy@example.com', SPC_TEST_PASSWORD);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'user',
+            'settings'       => [
+                'api_key' => 'sk-pers', 'display_name' => 'Personal',
+                'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
+            ],
+        ]));
+        expect($createResp->getStatusCode())->toBe(200);
+
+        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
+        $body = json_decode($listResp->getContent(), true);
+        // Old behaviour: non-admin sees own user-scoped configs, not groups.
+        expect($body['data']['configs'])->toHaveCount(1);
+        expect($body['data']['configs'][0]['scope'])->toBe('user');
+    });
+
+    it('PUT on a group-scoped id by the group admin updates settings and keeps scope=group', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-grp-put-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGrpPut');
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group', 'group_id' => (int) $group->id,
+            'settings'       => [
+                'api_key' => 'sk-1', 'display_name' => 'v1',
+                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        $putResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
+            'settings' => [
+                'display_name' => 'v2',
+                'base_url'     => 'https://api.mistral.ai/v1',
+                'model'        => 'voxtral-mini-latest',
+                'api_key'      => 'sk-1',
+            ],
+        ]));
+        expect($putResp->getStatusCode())->toBe(200);
+        $body = json_decode($putResp->getContent(), true);
+        expect($body['data']['config']['scope'])->toBe('group');
+        expect($body['data']['config']['settings']['display_name'])->toBe('v2');
+    });
+
+    it('DELETE on a group-scoped id by the group admin removes the row', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-grp-del-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGrpDel');
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope'          => 'group', 'group_id' => (int) $group->id,
+            'settings'       => [
+                'api_key' => 'sk-1', 'display_name' => 'X',
+                'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
+            ],
+        ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        $delResp = $controller->destroy($configId);
+        expect($delResp->getStatusCode())->toBe(200);
+        expect(\Illuminate\Database\Capsule\Manager::table('tool_user_settings')
+            ->where('id', $configId)
+            ->exists())->toBeFalse();
     });
 });
