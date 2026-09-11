@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Http;
 
 use LogicException;
+use Mockery;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\SpeechTranscribeController;
@@ -19,6 +20,7 @@ use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\ToolConfigService;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\SpeechToTextException;
 use Spora\Speech\SpeechToTextProviderInterface;
@@ -127,8 +129,12 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     $service = MediaArchiveTestSupport::buildService($assetStore);
     $reader  = new MediaAssetReader($database, $local);
 
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([]);
+    $config->shouldReceive('getGlobalSettings')->andReturn([]);
+
     $controller = new SpeechTranscribeController(
-        registry: new SpeechToTextRegistry([$provider]),
+        registry: new SpeechToTextRegistry([$provider], $config),
         mediaReader: $reader,
         mediaArchive: $service,
         auth: $auth,

@@ -102,12 +102,17 @@ final class SpeechTranscribeController
         try {
             $userId   = $this->requireUserId();
             $payload  = $this->decodeBody($request);
-            $provider = $this->requireConfiguredProvider();
+            $provider = $this->requireConfiguredProvider($userId);
             $asset    = $this->loadAsset($payload['media_id'], $userId);
             // agent_id is intentionally null — MediaAssetReader::readAsset()
             // returns bytes+mime only. Provider settings cascade from global
             // down (and through the user principal level via $userId).
-            // Per-agent override is out of scope for v1.
+            // Per-agent override is out of scope for v1. The provider
+            // re-resolves its own config inside transcribe() via
+            // ToolConfigService so the registry's per-config label binding
+            // and the transcribe-time settings lookup stay on the same
+            // effective cascade without the controller having to thread the
+            // settings through.
             $result   = $this->transcribeWithProvider(
                 $provider,
                 $asset,
@@ -170,12 +175,12 @@ final class SpeechTranscribeController
     /**
      * @throws SpeechTranscribeException 503 when no provider reports configured.
      */
-    private function requireConfiguredProvider(): SpeechToTextProviderInterface
+    private function requireConfiguredProvider(int $userId): SpeechToTextProviderInterface
     {
-        $provider = $this->registry->configuredProvider();
+        $provider = $this->registry->configuredProvider($userId, null);
         if ($provider === null) {
             throw SpeechTranscribeException::providerUnavailable(
-                'No speech-to-text provider is configured. Install spora-plugin-mistral or spora-plugin-muse and add an API key.',
+                'No speech-to-text provider is configured. Add an API key in Settings → Tools for OpenAI-compatible STT (Mistral, OpenAI Whisper, Groq, etc.) or install spora-plugin-muse.',
             );
         }
 

@@ -585,3 +585,35 @@ Omitted filter (legacy) returns every agent the caller can see across their visi
 ## Updated contract — `POST /api/v1/agents`
 
 Accepts an optional `principal_id` body field. The caller must be admin OR control the target principal (`AgentPrincipalService::callerControlsPrincipal`). When omitted, or when the caller doesn't control the value, the agent lands on the caller's own user-principal (materialised on demand).
+
+## STT provider capability resolution
+
+`GET /api/v1/speech/capability` resolves the list of STT providers the
+SPA can offer the user. The wire shape is one row per provider class,
+keyed by the class-level `name`. Configurable providers (e.g.
+`Spora\Speech\OpenAiCompatibleTranscriber`) report the operator's
+per-config `display_name` instead of the class-level default — the
+registry resolves the effective settings for the calling user via
+`ToolConfigService::getEffectiveSettings()` and calls
+`OpenAiCompatibleTranscriber::bindLabel()` before reading
+`getName()` / `getDisplayName()`. Class-level providers (the Muse
+plugin's bespoke multipart) keep their static `getName()` /
+`getDisplayName()`.
+
+The capability row also exposes two forward-compat fields:
+
+  - `has_global_default` — true when the operator has a global settings
+    row for the provider class (today: the closest approximation
+    `ToolConfigService::getGlobalSettings()` provides; the Speech
+    Provider Configuration plan replaces this with proper per-config
+    semantics).
+  - `config_id` — always `null` for v1. Multi-instance rows only exist
+    once the Speech Provider Configuration plan ships the new
+    `stt_provider_configurations` table. The Capability endpoint stays
+    one-row-per-class for v1; the Configuration UI is where operators
+    see every config they own.
+
+Anonymous callers still get a 200 with the providers' class-level
+labels and `configured: false` whenever no provider has a usable API
+key — the SPA renders the "please log in" hint without a separate
+round-trip.
