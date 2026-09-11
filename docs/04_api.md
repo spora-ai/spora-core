@@ -594,24 +594,28 @@ keyed by the class-level `name`. Configurable providers (e.g.
 `Spora\Speech\OpenAiCompatibleTranscriber`) report the operator's
 per-config `display_name` instead of the class-level default — the
 registry resolves the effective settings for the calling user via
-`ToolConfigService::getEffectiveSettings()` and calls
+`ToolConfigService::getEffectiveSettings()` (which cascades through
+defaults → global → group[0..N] → user → agent_override) and calls
 `OpenAiCompatibleTranscriber::bindLabel()` before reading
 `getName()` / `getDisplayName()`. Class-level providers (the Muse
 plugin's bespoke multipart) keep their static `getName()` /
 `getDisplayName()`.
 
+`configured` is true when ANY cascade level resolves to a usable
+config for the caller — including group-scoped configs the user can
+see because they belong to a group that has a STT config. Anonymous
+callers get `configured: false` (the SPA renders the "please log in"
+hint without a second round-trip).
+
 The capability row also exposes two forward-compat fields:
 
   - `has_global_default` — true when the operator has a global settings
-    row for the provider class (today: the closest approximation
-    `ToolConfigService::getGlobalSettings()` provides; the Speech
-    Provider Configuration plan replaces this with proper per-config
-    semantics).
-  - `config_id` — always `null` for v1. Multi-instance rows only exist
-    once the Speech Provider Configuration plan ships the new
-    `stt_provider_configurations` table. The Capability endpoint stays
-    one-row-per-class for v1; the Configuration UI is where operators
-    see every config they own.
+    row for the provider class.
+  - `config_id` — the row id of the global settings row when one
+    exists for `OpenAiCompatibleTranscriber` (`null` when no row
+    exists, and `null` for class-level providers that don't write to
+    `tool_configurations`). The SPA deep-links the Capability row
+    into the config edit form via this id.
 
 Anonymous callers still get a 200 with the providers' class-level
 labels and `configured: false` whenever no provider has a usable API
@@ -630,6 +634,32 @@ Returns the configs the caller can see.
 
 - admin: every global config (one per registered provider class that has a row in `tool_configurations`).
 - non-admin: only the caller's own user-scoped configs.
+
+When `?group_id=N` is supplied:
+
+- members of the group (any role) and global admins receive the group-scoped configs for that group
+- non-members receive an empty list (existence-hide)
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "configs": [
+      {
+        "id": 7,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "group",
+        "display_name": "Team Voxtral",
+        "settings": { "display_name": "Team Voxtral", "base_url": "https://api.mistral.ai/v1", "model": "voxtral-mini-latest", "language": "", "http_timeout_seconds": "60", "api_key": "***" },
+        "principal_id": 12,
+        "created_at": "2026-09-11T12:34:56+00:00",
+        "updated_at": "2026-09-11T12:34:56+00:00"
+      }
+    ]
+  }
+}
+```
 
 ```jsonc
 // 200 OK
@@ -702,7 +732,8 @@ Body:
 ```jsonc
 {
   "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
-  "scope": "global",          // or "user"
+  "scope": "global",          // or "user" or "group"
+  "group_id": 12,             // required when scope="group"; names the group
   "settings": {
     "api_key": "sk-...",
     "display_name": "Mistral Voxtral (prod)",
@@ -714,12 +745,59 @@ Body:
 }
 ```
 
+Auth rules:
+
+- `scope: 'global'` — global admin only.
+- `scope: 'user'`   — the caller (no extra permission needed).
+- `scope: 'group'`  — caller must be `owner` / `admin` of the named
+  group OR a global admin. The body's `group_id` names the group.
+
 Response:
 
 - `200 OK` — `{data: {config: ConfigResource}}` on success.
-- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — `scope: 'global'` was requested by a non-admin.
-- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — `provider_class` is not a registered speech provider class.
-- `422 SPEECH_PROVIDER_CONFIG_INVALID` — settings key is unknown to the schema, a required field is missing, or a value fails its declared regex validation.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — `scope: 'global'` was
+  requested by a non-admin, or `scope: 'group'` was requested by
+  a non-admin caller who isn't a group admin.
+- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — `provider_class` is not
+  a registered speech provider class.
+- `422 SPEECH_PROVIDER_CONFIG_INVALID` — settings key is unknown to
+  the schema, a required field is missing, a value fails its declared
+  regex validation, or `scope: 'group'` was supplied without a
+  positive `group_id` (or `scope` wasn't `'group'` while `group_id`
+  was set).
+
+```bash
+# Global (admin)
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "global",
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Mistral Voxtral (prod)",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+
+# Group (group admin OR global admin)
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "group",
+    "group_id": 12,
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Team Voxtral",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+```
 
 ```bash
 curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
@@ -750,5 +828,51 @@ Response: same as `POST`.
 Delete a config by id.
 
 - `200 OK` — `{data: {deleted: true}}` on success.
-- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — caller isn't allowed to delete this row.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — caller isn't allowed to delete this row (e.g. non-admin caller trying to delete a global or other-group config).
 - `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — id doesn't exist (or isn't visible to the caller).
+
+### `POST /api/v1/speech/transcribe`
+
+Transcribe a recorded audio asset via the first-configured STT provider.
+Backed by the controller's full `defaults → global → group[0..N] → user
+→ agent_override` cascade resolution: the registry picks the first
+provider whose effective `api_key` (or `isConfigured()` for class-level
+providers) resolves for the caller's principal ids.
+
+Body:
+
+```jsonc
+{
+  "media_id": "00000000-0000-4000-8000-000000000abc",   // UUID, required
+  "language": "en-US",                                  // optional BCP-47 hint
+  "agent_id": 42                                        // optional, must belong to caller
+}
+```
+
+Response:
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "text": "hello world",
+    "language": "en",
+    "duration_ms": 1234
+  }
+}
+```
+
+Errors:
+
+- `401 UNAUTHORIZED` — no active session.
+- `404 MEDIA_NOT_FOUND` — `media_id` does not exist or is not owned by the caller.
+- `422 VALIDATION_ERROR` — body is not valid JSON, `media_id` is missing, or `agent_id` does not belong to the caller.
+- `422 INVALID_AUDIO` — the asset is in external-only storage (provider needs bytes, not a URL), the upstream STT returned an empty transcript, or the asset's MIME is not one the provider accepts (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav`, `audio/mpeg`, `audio/flac`).
+- `502 SPEECH_PROVIDER_FAILED` — upstream STT rejected the request (transport error or HTTP 4xx/5xx).
+- `503 SPEECH_PROVIDER_UNAVAILABLE` — no provider is configured at any cascade level the caller can see.
+
+`agent_id` is threaded through to the cascade as the deepest level, so
+the per-agent override in `agent_tool_overrides` wins over group /
+user / global settings when set. Composers that don't know the active
+agent (e.g. a "New Chat" picker) omit the field; the cascade falls
+through as before.

@@ -78,8 +78,9 @@ If you don't see the Muse card, the plugin isn't installed or its
 Every user can set their own per-principal override. The cascade is:
 
 1. **user-scope setting** (if set) — wins
-2. **global setting** (if set) — fallback
-3. **schema defaults** — final fallback
+2. **group-scope setting** (if set, for any group the caller belongs to) — fallback
+3. **global setting** (if set) — fallback
+4. **schema defaults** — final fallback
 
 To create a personal override:
 
@@ -93,6 +94,101 @@ To create a personal override:
 The Capability endpoint surfaces the resolved effective label, so the
 recording button in the composer shows the user's override name when
 it's set.
+
+## Per-agent STT override (Agent Settings → Speech)
+
+If an operator wants agent X to use Voxtral for production chats and
+agent Y to use Whisper for the support inbox, the per-agent STT section
+in the agent settings page exposes the override.
+
+Behind the scenes the override lands in `agent_tool_overrides` —
+Spora's existing per-agent settings table — keyed on
+`(agent_id, tool_class)`. The transcribe controller threads the
+agent id through to the registry so the per-agent override is the
+last level in the cascade (beats group + user + global).
+
+Enable the override:
+
+1. Sign in and open the agent's settings page.
+2. Add a **Speech** section if not already present.
+3. Pick the provider class and fill in only the fields that should
+   differ from the upstream cascade. The form shows the inherited
+   values as form defaults, but any field you set overrides the
+   cascade at that key only.
+
+When no override is set, the cascade falls through to user → group →
+global as before.
+
+## Per-group STT configuration (Group Settings → Speech)
+
+A team of users that wants to share a Mistral key (and split the bill)
+can attach a group-scoped STT config. Every member of the group gets
+the same effective settings; a user with a personal override still
+wins on conflict.
+
+Auth:
+
+- **Group admin / group owner** can write the group's config.
+- **Global admin** can write any group's config.
+
+Other members of the group can read the group config (e.g. the
+Capability endpoint's "configured: true" still shows because the
+group cascade has at least one valid key), but can't edit it. Users
+who aren't members of the group don't see the config — list access
+is membership-gated for the existence-hide invariant (a non-member
+sees an empty list so they can't tell whether the group has an STT
+config).
+
+Enable the group config:
+
+1. As a group admin, open the group's settings page.
+2. Open the **Speech** section.
+3. Pick the provider class and fill in the settings.
+4. Save. Members of the group immediately see the recording button
+   in composers that consult the group's effective settings.
+
+Storage is the same `tool_user_settings` table; the row's
+`principal_id` is the group's group-principal id (rather than the
+caller's user-principal id).
+
+## The cascade: global → group → user → agent
+
+Every effective settings read walks the cascade in this order:
+
+```
+defaults  →  global  →  group[0..N]  →  user  →  agent_override
+```
+
+Read aloud:
+
+1. **Schema defaults** — every `#[ToolSetting]` declaration has a
+   `default:` attribute. The cascade fills missing keys with the
+   schema default last (so an unset key gets the schema default,
+   not nothing).
+2. **Global settings** — the operator's
+   `tool_configurations` row for the provider class. One row per
+   provider class; admin writes.
+3. **Group settings (per group the user belongs to)** — every
+   `tool_user_settings` row whose `principal_id` points at one of
+   the caller's group-principals. Groups are iterated in **principal
+   id ascending order** so the iteration is stable across calls;
+   the **user-principal wins on conflict** with any group.
+4. **User settings** — the `tool_user_settings` row whose
+   `principal_id` points at the caller's user-principal. One row
+   per user per provider class.
+5. **Agent override** — `agent_tool_overrides` keyed on the active
+   agent id (per chat / composer). Wins over everything above.
+
+The "last write wins" rule produces a single effective key/value map
+that the provider's `transcribe()` call sees. The
+`getEffectiveSettingsWithSource()` companion method returns the same
+map annotated with which level won per key — the SPA uses that
+annotation to render "Inherited from group / Personal override / etc."
+badges next to each field.
+
+When the cascade order matters for debugging, the `describe()`
+endpoint shows the resolved `display_name` for the OpenAI-compatible
+provider — that label is what the recording button's tooltip shows.
 
 ## Display names and collision behaviour
 
