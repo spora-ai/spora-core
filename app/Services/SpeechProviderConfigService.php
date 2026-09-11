@@ -180,37 +180,54 @@ final class SpeechProviderConfigService
         $this->assertRegisteredProviderClass($providerClass);
 
         if ($scope === 'global') {
-            if (!$isAdmin) {
-                throw SpeechProviderConfigException::forbidden(
-                    'Only admins can write global speech provider configurations.',
-                );
-            }
-            $this->assertSettingsAgainstSchema($providerClass, $settings);
-            $this->toolConfigService->putGlobalSettings($providerClass, $settings);
-
-            $rowId = $this->toolConfigService->globalConfigId($providerClass);
-            if ($rowId === null) {
-                throw SpeechProviderConfigException::notFound(
-                    "Global config row for {$providerClass} disappeared after write.",
-                );
-            }
-            return $this->buildConfigResource(
-                rowId: $rowId,
-                providerClass: $providerClass,
-                scope: 'global',
-                settings: $this->toolConfigService->getGlobalSettings($providerClass),
-                principalId: null,
-                createdAt: $this->fetchCreatedAt($providerClass, scope: 'global'),
-                updatedAt: $this->fetchUpdatedAt($providerClass, scope: 'global'),
-            );
+            return $this->upsertGlobalConfig($providerClass, $isAdmin, $settings);
         }
-
         if ($scope !== 'user') {
             throw SpeechProviderConfigException::validation(
                 'scope must be either "global" or "user".',
             );
         }
 
+        return $this->upsertUserConfig($userId, $providerClass, $settings);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @return array<string, mixed>
+     */
+    private function upsertGlobalConfig(string $providerClass, bool $isAdmin, array $settings): array
+    {
+        if (!$isAdmin) {
+            throw SpeechProviderConfigException::forbidden(
+                'Only admins can write global speech provider configurations.',
+            );
+        }
+        $this->assertSettingsAgainstSchema($providerClass, $settings);
+        $this->toolConfigService->putGlobalSettings($providerClass, $settings);
+
+        $rowId = $this->toolConfigService->globalConfigId($providerClass);
+        if ($rowId === null) {
+            throw SpeechProviderConfigException::notFound(
+                "Global config row for {$providerClass} disappeared after write.",
+            );
+        }
+        return $this->buildConfigResource(
+            rowId: $rowId,
+            providerClass: $providerClass,
+            scope: 'global',
+            settings: $this->toolConfigService->getGlobalSettings($providerClass),
+            principalId: null,
+            createdAt: $this->fetchCreatedAt($providerClass, scope: 'global'),
+            updatedAt: $this->fetchUpdatedAt($providerClass, scope: 'global'),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @return array<string, mixed>
+     */
+    private function upsertUserConfig(int $userId, string $providerClass, array $settings): array
+    {
         $this->assertSettingsAgainstSchema($providerClass, $settings);
         $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
         $this->toolConfigService->putPrincipalSettings($providerClass, $principalId, $settings);
@@ -243,35 +260,61 @@ final class SpeechProviderConfigService
     {
         $globalRow = ToolConfiguration::find($id);
         if ($globalRow !== null) {
-            return $this->buildConfigResource(
-                rowId: (int) $globalRow->id,
-                providerClass: (string) $globalRow->tool_class,
-                scope: 'global',
-                settings: $this->toolConfigService->getGlobalSettings((string) $globalRow->tool_class),
-                principalId: null,
-                createdAt: $globalRow->created_at,
-                updatedAt: $globalRow->updated_at,
-            );
+            return $this->buildGlobalResource($globalRow);
         }
 
         $userRow = ToolUserSetting::find($id);
-        if ($userRow !== null) {
-            $callerPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
-            if (!$isAdmin && (int) $userRow->principal_id !== $callerPrincipalId) {
-                return null;
-            }
-            return $this->buildConfigResource(
-                rowId: (int) $userRow->id,
-                providerClass: (string) $userRow->tool_class,
-                scope: 'user',
-                settings: $this->toolConfigService->getPrincipalSettings((string) $userRow->tool_class, (int) $userRow->principal_id),
-                principalId: (int) $userRow->principal_id,
-                createdAt: $userRow->created_at,
-                updatedAt: $userRow->updated_at,
-            );
+        if ($userRow === null) {
+            return null;
         }
+        if (!$this->callerCanReadUserRow($userId, $isAdmin, (int) $userRow->principal_id)) {
+            return null;
+        }
+        return $this->buildUserResource($userRow);
+    }
 
-        return null;
+    private function callerCanReadUserRow(int $userId, bool $isAdmin, int $rowPrincipalId): bool
+    {
+        if ($isAdmin) {
+            return true;
+        }
+        $callerPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        return $rowPrincipalId === $callerPrincipalId;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildGlobalResource(ToolConfiguration $row): array
+    {
+        $providerClass = (string) $row->tool_class;
+        return $this->buildConfigResource(
+            rowId: (int) $row->id,
+            providerClass: $providerClass,
+            scope: 'global',
+            settings: $this->toolConfigService->getGlobalSettings($providerClass),
+            principalId: null,
+            createdAt: $row->created_at,
+            updatedAt: $row->updated_at,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildUserResource(ToolUserSetting $row): array
+    {
+        $providerClass = (string) $row->tool_class;
+        $principalId = (int) $row->principal_id;
+        return $this->buildConfigResource(
+            rowId: (int) $row->id,
+            providerClass: $providerClass,
+            scope: 'user',
+            settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
+            principalId: $principalId,
+            createdAt: $row->created_at,
+            updatedAt: $row->updated_at,
+        );
     }
 
     /**
@@ -388,15 +431,7 @@ final class SpeechProviderConfigService
             );
         }
 
-        $ref = new ReflectionClass($providerClass);
-        $allowed = [];
-        $schema = [];
-        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
-            /** @var ToolSetting $instance */
-            $instance = $attr->newInstance();
-            $allowed[$instance->key] = true;
-            $schema[] = $instance;
-        }
+        [$allowed, $schema] = $this->loadSchema($providerClass);
 
         foreach ($settings as $key => $value) {
             if (!isset($allowed[$key])) {
@@ -410,19 +445,47 @@ final class SpeechProviderConfigService
             if (!$setting->required) {
                 continue;
             }
-            $value = $settings[$setting->key] ?? null;
-            if ($value === null || $value === '') {
-                throw SpeechProviderConfigException::validation(
-                    "Field '{$setting->label}' is required.",
-                );
-            }
-            if ($setting->validation !== '' && is_string($value)) {
-                if (!preg_match($setting->validation, $value)) {
-                    throw SpeechProviderConfigException::validation(
-                        "Field '{$setting->label}' has an invalid value.",
-                    );
-                }
-            }
+            $this->assertRequiredSetting($setting, $settings);
+        }
+    }
+
+    /**
+     * Walk `#[ToolSetting]` attributes on a provider class and return
+     * `(allowed_keys, schema_instances)`.
+     *
+     * @return array{0: array<string, true>, 1: list<ToolSetting>}
+     */
+    private function loadSchema(string $providerClass): array
+    {
+        $ref = new ReflectionClass($providerClass);
+        $allowed = [];
+        $schema = [];
+        foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
+            /** @var ToolSetting $instance */
+            $instance = $attr->newInstance();
+            $allowed[$instance->key] = true;
+            $schema[] = $instance;
+        }
+        return [$allowed, $schema];
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     *
+     * @throws SpeechProviderConfigException
+     */
+    private function assertRequiredSetting(ToolSetting $setting, array $settings): void
+    {
+        $value = $settings[$setting->key] ?? null;
+        if ($value === null || $value === '') {
+            throw SpeechProviderConfigException::validation(
+                "Field '{$setting->label}' is required.",
+            );
+        }
+        if ($setting->validation !== '' && is_string($value) && !preg_match($setting->validation, $value)) {
+            throw SpeechProviderConfigException::validation(
+                "Field '{$setting->label}' has an invalid value.",
+            );
         }
     }
 

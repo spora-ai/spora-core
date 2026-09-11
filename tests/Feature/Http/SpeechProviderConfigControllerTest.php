@@ -115,7 +115,7 @@ describe('SpeechProviderConfigController', function (): void {
         $configId = $createBody['data']['config']['id'];
 
         // LIST — admin sees globals
-        $listResp = $controller->index(Request::create('/api/v1/speech/provider-configs', 'GET'));
+        $listResp = $controller->index();
         expect($listResp->getStatusCode())->toBe(200);
         $listBody = json_decode($listResp->getContent(), true);
         expect($listBody['data']['configs'])->toHaveCount(1);
@@ -162,7 +162,7 @@ describe('SpeechProviderConfigController', function (): void {
         $configId = $createBody['data']['config']['id'];
 
         // LIST — non-admin sees own user-scope config
-        $listResp = $controller->index(Request::create('/api/v1/speech/provider-configs', 'GET'));
+        $listResp = $controller->index();
         expect($listResp->getStatusCode())->toBe(200);
         $listBody = json_decode($listResp->getContent(), true);
         expect($listBody['data']['configs'])->toHaveCount(1);
@@ -305,7 +305,7 @@ describe('SpeechProviderConfigController', function (): void {
     it('returns 403 (forbidden) for anonymous index requests', function (): void {
         [$controller] = makeSpeechProviderConfigController();
         // No session — currentUserId() returns null → requireUserId throws.
-        $resp = $controller->index(Request::create('/api/v1/speech/provider-configs', 'GET'));
+        $resp = $controller->index();
         expect($resp->getStatusCode())->toBe(403);
     });
 });

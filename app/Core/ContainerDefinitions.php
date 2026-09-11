@@ -80,7 +80,6 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
-use Spora\Http\SpeechProviderConfigController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
@@ -148,7 +147,6 @@ use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
-use Spora\Services\SpeechProviderConfigService;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
@@ -204,7 +202,7 @@ final class ContainerDefinitions
             self::toolDefinitions(),
             self::extensionDefinitions(),
             self::orchestratorDefinitions(),
-            self::speechProviderConfigDefinitions(),
+            SpeechProviderConfigContainerBindings::all(),
             self::consoleCommandDefinitions(),
         );
     }
@@ -1540,34 +1538,6 @@ final class ContainerDefinitions
         // class rather than costing ContainerDefinitions method-count budget
         // against the S1448 ceiling.
         return OrchestratorContainerBindings::all();
-    }
-
-    /**
-     * Speech provider configuration surface. Split out so the umbrellas
-     * above stay under the S1448 20-method ceiling. The service is the
-     * orchestrator; the controller is a thin HTTP layer that delegates
-     * every business decision to the service.
-     *
-     * @return array<string, callable>
-     */
-    private static function speechProviderConfigDefinitions(): array
-    {
-        return [
-            SpeechProviderConfigService::class => static function (ContainerInterface $c): SpeechProviderConfigService {
-                return new SpeechProviderConfigService(
-                    $c->get(ToolConfigService::class),
-                    $c->get(SpeechToTextRegistry::class),
-                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
-                );
-            },
-
-            SpeechProviderConfigController::class => static function (ContainerInterface $c): SpeechProviderConfigController {
-                return new SpeechProviderConfigController(
-                    $c->get(AuthService::class),
-                    $c->get(SpeechProviderConfigService::class),
-                );
-            },
-        ];
     }
 
     private static function consoleCommandDefinitions(): array

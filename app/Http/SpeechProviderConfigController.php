@@ -66,7 +66,7 @@ final class SpeechProviderConfigController
             ),
         ],
     )]
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
         try {
             $userId = $this->requireUserId();
