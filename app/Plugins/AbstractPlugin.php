@@ -117,7 +117,21 @@ abstract class AbstractPlugin implements PluginInterface
         return [];
     }
 
-    /** @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>> */
+    /**
+     * Speech-to-text provider classes this plugin contributes.
+     *
+     * Returns `[]` by default — only override when the plugin needs a
+     * bespoke wire shape beyond OpenAI-multipart. Core's
+     * {@see \Spora\Speech\OpenAiCompatibleTranscriber} already covers
+     * every OpenAI-multipart STT vendor (Mistral, OpenAI Whisper, Groq,
+     * Lemonfox, Fireworks, LocalAI, future) through configuration alone,
+     * so a vendor-specific plugin is no longer required. Plugins
+     * returning a non-empty list participate in
+     * {@see \Spora\Speech\SpeechToTextRegistry}; the first configured
+     * provider wins per request.
+     *
+     * @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>>
+     */
     public function speechToTextProviders(): array
     {
         return [];

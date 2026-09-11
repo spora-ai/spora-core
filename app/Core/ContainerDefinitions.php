@@ -159,6 +159,7 @@ use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Skills\SkillScanner;
+use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Tools\AgentTool;
@@ -763,14 +764,17 @@ final class ContainerDefinitions
             // injection without rewriting the core list contract.
             'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique($c->get('llm_driver_classes'))),
 
-            // Speech-to-text providers — core ships no concrete providers.
-            // PluginLoader collects class FQCNs from every loaded plugin's
-            // {@see \Spora\Extensions\SporaExtensionInterface::speechToTextProviders()}
-            // hook. The SpeechToTextRegistry is built from the merged list at
-            // boot so the transcribe controller can pick the first configured
+            // Speech-to-text providers — core ships its own
+            // `OpenAiCompatibleTranscriber` for the OpenAI-multipart
+            // family (Mistral Voxtral, OpenAI Whisper, Groq Whisper,
+            // Lemonfox, Fireworks, LocalAI, future). Plugins contribute
+            // additional bespoke providers alongside — today `Muse` for
+            // Meta's bespoke multipart wire shape and ffmpeg-preprocess.
+            // SpeechToTextRegistry is built from the merged list at boot
+            // so the transcribe controller can pick the first configured
             // provider per request.
             'speech_to_text_provider_classes' => [
-                // Core list intentionally empty — Mistral + Muse plugins own v1.
+                OpenAiCompatibleTranscriber::class,
             ],
             'speech_to_text_provider_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique(array_merge(
                 $c->get('speech_to_text_provider_classes'),
@@ -783,7 +787,7 @@ final class ContainerDefinitions
                     $instance = $c->get($class);
                     $providers[] = $instance;
                 }
-                return new SpeechToTextRegistry($providers);
+                return new SpeechToTextRegistry($providers, $c->get(ToolConfigService::class));
             },
 
             'app_apps' => [

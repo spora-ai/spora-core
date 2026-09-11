@@ -2,14 +2,18 @@
 
 declare(strict_types=1);
 
+use Spora\Services\ToolConfigService;
 use Spora\Speech\InvalidAudioException;
+use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Speech\TranscriptionResult;
+use Symfony\Component\HttpClient\MockHttpClient;
 
 /**
  * Pin the registry selection rules: first-configured-wins, describe()
- * shape, empty-list behaviour.
+ * shape, empty-list behaviour, and the OpenAiCompatibleTranscriber
+ * per-config label binding.
  */
 
 final class StubConfiguredProvider implements SpeechToTextProviderInterface
@@ -62,8 +66,22 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
     }
 }
 
+/**
+ * Build a registry factory: providers + a ToolConfigService mock that
+ * returns the same settings for every (class, agentId, userId) tuple.
+ *
+ * @param list<SpeechToTextProviderInterface> $providers
+ */
+function buildRegistry(array $providers, array $settings = [], array $globalSettings = []): SpeechToTextRegistry
+{
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn($settings);
+    $config->shouldReceive('getGlobalSettings')->andReturn($globalSettings);
+    return new SpeechToTextRegistry($providers, $config);
+}
+
 test('empty registry — all, configured, describe all return empty', function (): void {
-    $registry = new SpeechToTextRegistry([]);
+    $registry = buildRegistry([]);
 
     expect($registry->all())->toBe([])
         ->and($registry->configuredProvider())->toBeNull()
@@ -71,7 +89,7 @@ test('empty registry — all, configured, describe all return empty', function (
 });
 
 test('configuredProvider() returns null when every provider reports unconfigured', function (): void {
-    $registry = new SpeechToTextRegistry([
+    $registry = buildRegistry([
         new StubUnconfiguredProvider(),
         new StubUnconfiguredProvider(),
     ]);
@@ -83,20 +101,20 @@ test('configuredProvider() returns the first configured entry (insertion order w
     $configured = new StubConfiguredProvider();
     $unconfigured = new StubUnconfiguredProvider();
 
-    $registry = new SpeechToTextRegistry([$unconfigured, $configured]);
+    $registry = buildRegistry([$unconfigured, $configured]);
 
     expect($registry->configuredProvider())->toBe($configured);
 });
 
-test('describe() emits name + display_name + configured for every provider, in order', function (): void {
+test('describe() emits name + display_name + configured + has_global_default + config_id for every provider, in order', function (): void {
     $a = new StubConfiguredProvider();
     $b = new StubUnconfiguredProvider();
 
-    $registry = new SpeechToTextRegistry([$a, $b]);
+    $registry = buildRegistry([$a, $b]);
 
     expect($registry->describe())->toBe([
-        ['name' => 'stub-configured',   'display_name' => 'Stub Configured',   'configured' => true],
-        ['name' => 'stub-unconfigured', 'display_name' => 'Stub Unconfigured', 'configured' => false],
+        ['name' => 'stub-configured',   'display_name' => 'Stub Configured',   'configured' => true,  'has_global_default' => false, 'config_id' => null],
+        ['name' => 'stub-unconfigured', 'display_name' => 'Stub Unconfigured', 'configured' => false, 'has_global_default' => false, 'config_id' => null],
     ]);
 });
 
@@ -104,7 +122,127 @@ test('all() returns the providers in their constructor order', function (): void
     $a = new StubConfiguredProvider();
     $b = new StubUnconfiguredProvider();
 
-    $registry = new SpeechToTextRegistry([$a, $b]);
+    $registry = buildRegistry([$a, $b]);
 
     expect($registry->all())->toBe([$a, $b]);
+});
+
+test('OpenAiCompatibleTranscriber describe() binds the resolved display_name and reports configured when api_key is non-empty', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $registry = buildRegistry([$oai], [
+        'display_name' => 'Mistral Voxtral',
+        'api_key'      => 'sk-test',
+    ]);
+
+    $rows = $registry->describe(42, null);
+
+    expect($rows)->toHaveCount(1);
+    expect($rows[0])->toBe([
+        'name'               => 'Mistral Voxtral',
+        'display_name'       => 'Mistral Voxtral',
+        'configured'         => true,
+        'has_global_default' => false,
+        'config_id'          => null,
+    ]);
+    expect($oai->getName())->toBe('Mistral Voxtral');
+    expect($oai->getDisplayName())->toBe('Mistral Voxtral');
+});
+
+test('OpenAiCompatibleTranscriber describe() falls back to class-level defaults when no effective config resolves', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $registry = buildRegistry([$oai], []); // no display_name, no api_key
+
+    $rows = $registry->describe(7, null);
+
+    expect($rows[0])->toBe([
+        'name'               => 'openai_compatible',
+        'display_name'       => 'OpenAI Compatible',
+        'configured'         => false,
+        'has_global_default' => false,
+        'config_id'          => null,
+    ]);
+});
+
+test('OpenAiCompatibleTranscriber configuredProvider() skips providers whose effective api_key is empty', function (): void {
+    $first = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $second = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    // The registry walks providers in order; each call to
+    // getEffectiveSettings returns the SAME map in this stub, but the
+    // real cascade is the caller's responsibility — for the unit test
+    // we just need to verify the registry skips when api_key is empty
+    // and picks the next provider once the api_key resolves.
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')
+        ->andReturn(
+            // First provider — empty key, must be skipped.
+            ['display_name' => 'first', 'api_key' => ''],
+            // Second provider — non-empty key, must be selected.
+            ['display_name' => 'second', 'api_key' => 'sk-test'],
+        );
+    $registry = new SpeechToTextRegistry([$first, $second], $config);
+
+    expect($registry->configuredProvider(99, null))->toBe($second);
+    expect($second->getName())->toBe('second');
+});
+
+test('OpenAiCompatibleTranscriber configuredProvider() returns the first provider whose api_key is non-empty', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $registry = buildRegistry([$oai], ['display_name' => 'only', 'api_key' => 'sk-test']);
+
+    expect($registry->configuredProvider())->toBe($oai);
+    expect($oai->getName())->toBe('only');
+});
+
+test('OpenAiCompatibleTranscriber has_global_default reflects ToolConfigService::getGlobalSettings()', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $configWithGlobal = Mockery::mock(ToolConfigService::class);
+    $configWithGlobal->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'with global',
+        'api_key'      => 'sk-1',
+    ]);
+    $configWithGlobal->shouldReceive('getGlobalSettings')->andReturn([
+        'display_name' => 'with global',
+        'api_key'      => 'sk-1',
+    ]);
+    $withGlobal = new SpeechToTextRegistry([$oai], $configWithGlobal);
+    expect($withGlobal->describe(0, null)[0]['has_global_default'])->toBeTrue();
+
+    $oai2 = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $configWithoutGlobal = Mockery::mock(ToolConfigService::class);
+    $configWithoutGlobal->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'no global',
+        'api_key'      => 'sk-2',
+    ]);
+    $configWithoutGlobal->shouldReceive('getGlobalSettings')->andReturn([]);
+    $withoutGlobal = new SpeechToTextRegistry([$oai2], $configWithoutGlobal);
+    expect($withoutGlobal->describe(0, null)[0]['has_global_default'])->toBeFalse();
+});
+
+test('class-level provider rows report has_global_default=false (only OpenAiCompatibleTranscriber consults the global settings table)', function (): void {
+    $stub = new StubConfiguredProvider();
+    $registry = buildRegistry([$stub]);
+
+    expect($registry->describe()[0]['has_global_default'])->toBeFalse();
+});
+
+test('describe() and configuredProvider() route no-arg calls through with userId=0, agentId=null', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')
+        ->with($oai::class, 0, 0)
+        ->andReturn(['display_name' => 'no-arg', 'api_key' => 'sk-no-arg']);
+    $config->shouldReceive('getGlobalSettings')
+        ->with($oai::class)
+        ->andReturn(['display_name' => 'no-arg']);
+    $registry = new SpeechToTextRegistry([$oai], $config);
+
+    $rows = $registry->describe();
+    expect($rows[0]['name'])->toBe('no-arg')
+        ->and($rows[0]['configured'])->toBeTrue();
+
+    expect($registry->configuredProvider())->toBe($oai);
 });
