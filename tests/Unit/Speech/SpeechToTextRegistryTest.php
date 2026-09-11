@@ -72,11 +72,12 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
  *
  * @param list<SpeechToTextProviderInterface> $providers
  */
-function buildRegistry(array $providers, array $settings = [], array $globalSettings = []): SpeechToTextRegistry
+function buildRegistry(array $providers, array $settings = [], array $globalSettings = [], ?int $globalConfigId = null): SpeechToTextRegistry
 {
     $config = Mockery::mock(ToolConfigService::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn($settings);
     $config->shouldReceive('getGlobalSettings')->andReturn($globalSettings);
+    $config->shouldReceive('globalConfigId')->andReturn($globalConfigId);
     return new SpeechToTextRegistry($providers, $config);
 }
 
@@ -207,6 +208,7 @@ test('OpenAiCompatibleTranscriber has_global_default reflects ToolConfigService:
         'display_name' => 'with global',
         'api_key'      => 'sk-1',
     ]);
+    $configWithGlobal->shouldReceive('globalConfigId')->andReturn(7);
     $withGlobal = new SpeechToTextRegistry([$oai], $configWithGlobal);
     expect($withGlobal->describe(0, null)[0]['has_global_default'])->toBeTrue();
 
@@ -217,6 +219,7 @@ test('OpenAiCompatibleTranscriber has_global_default reflects ToolConfigService:
         'api_key'      => 'sk-2',
     ]);
     $configWithoutGlobal->shouldReceive('getGlobalSettings')->andReturn([]);
+    $configWithoutGlobal->shouldReceive('globalConfigId')->andReturn(null);
     $withoutGlobal = new SpeechToTextRegistry([$oai2], $configWithoutGlobal);
     expect($withoutGlobal->describe(0, null)[0]['has_global_default'])->toBeFalse();
 });
@@ -238,6 +241,9 @@ test('describe() and configuredProvider() route no-arg calls through with userId
     $config->shouldReceive('getGlobalSettings')
         ->with($oai::class)
         ->andReturn(['display_name' => 'no-arg']);
+    $config->shouldReceive('globalConfigId')
+        ->with($oai::class)
+        ->andReturn(null);
     $registry = new SpeechToTextRegistry([$oai], $config);
 
     $rows = $registry->describe();
@@ -245,4 +251,35 @@ test('describe() and configuredProvider() route no-arg calls through with userId
         ->and($rows[0]['configured'])->toBeTrue();
 
     expect($registry->configuredProvider())->toBe($oai);
+});
+
+test('describe() populates config_id with the global row id when one exists for OpenAiCompatibleTranscriber', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $registry = buildRegistry([$oai], [
+        'display_name' => 'Mistral Voxtral',
+        'api_key'      => 'sk-test',
+    ], globalSettings: ['display_name' => 'Mistral Voxtral'], globalConfigId: 42);
+
+    $rows = $registry->describe(0, null);
+
+    expect($rows[0]['config_id'])->toBe(42);
+});
+
+test('describe() leaves config_id as null when no global row exists for OpenAiCompatibleTranscriber', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+    $registry = buildRegistry([$oai], [], [], null);
+
+    $rows = $registry->describe(0, null);
+
+    expect($rows[0]['config_id'])->toBeNull();
+});
+
+test('describe() leaves config_id as null for class-level providers that never write to tool_configurations', function (): void {
+    $stub = new StubConfiguredProvider();
+    $registry = buildRegistry([$stub], [], [], 7);
+
+    $rows = $registry->describe(0, null);
+
+    expect($rows[0]['config_id'])->toBeNull()
+        ->and($rows[0]['name'])->toBe('stub-configured');
 });

@@ -100,19 +100,17 @@ final readonly class SpeechToTextRegistry
      *    `api_key` (OpenAI-compatible) or when `isConfigured()` returns
      *    true (class-level).
      *  - `has_global_default` is true when the operator has a global
-     *    settings row for the provider class. (Today this is the closest
-     *    approximation {@see ToolConfigService} provides — the Speech
-     *    Provider Configuration plan replaces this with proper per-config
-     *    semantics.)
-     *  - `config_id` is always `null` — multi-instance rows only exist
-     *    once the Speech Provider Configuration plan ships the new
-     *    `stt_provider_configurations` table. The Capability endpoint is
-     *    one-row-per-class for v1.
+     *    settings row for the provider class.
+     *  - `config_id` is the row id of the global settings row when one
+     *    exists for {@see OpenAiCompatibleTranscriber} (`null` when no
+     *    row exists, and `null` for class-level providers that don't
+     *    write to `tool_configurations`). The SPA deep-links the
+     *    Capability row into the config edit form via this id.
      *
      * Backward-compatible no-arg overload (anonymous callers) routes to
      * `describe(0, null)`.
      *
-     * @return list<array{name: string, display_name: string, configured: bool, has_global_default: bool, config_id: null}>
+     * @return list<array{name: string, display_name: string, configured: bool, has_global_default: bool, config_id: int|null}>
      */
     public function describe(?int $userId = null, ?int $agentId = null): array
     {
@@ -121,6 +119,7 @@ final readonly class SpeechToTextRegistry
         foreach ($this->providers as $provider) {
             $hasGlobalDefault = false;
             $configured = false;
+            $configId = null;
 
             if ($provider instanceof OpenAiCompatibleTranscriber) {
                 $settings = $this->configService->getEffectiveSettings(
@@ -135,6 +134,7 @@ final readonly class SpeechToTextRegistry
                 $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
                 $configured = $apiKey !== '';
                 $hasGlobalDefault = $this->configService->getGlobalSettings($provider::class) !== [];
+                $configId = $this->configService->globalConfigId($provider::class);
             } else {
                 // Class-level providers keep their static name + display
                 // name; the configured flag is whatever they report.
@@ -146,7 +146,7 @@ final readonly class SpeechToTextRegistry
                 'display_name'       => $provider->getDisplayName(),
                 'configured'         => $configured,
                 'has_global_default' => $hasGlobalDefault,
-                'config_id'          => null,
+                'config_id'          => $configId,
             ];
         }
         return $rows;
