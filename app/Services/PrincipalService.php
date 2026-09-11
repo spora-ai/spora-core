@@ -210,6 +210,53 @@ final class PrincipalService
     }
 
     /**
+     * Resolve the principal ids a user can act as, ordered for cascade
+     * resolution: the user's own user-principal first, followed by every
+     * group-principal the user is a member of (stable order — group id
+     * ascending).
+     *
+     * Used by the speech provider cascade (and any future cascaded
+     * setting) to walk `defaults → global → group[0..N] → user →
+     * agent_override` without re-deriving the membership list. The
+     * returned list intentionally places the user-principal at index 0
+     * so callers that just want "what principals exist" get a stable
+     * order; the cascade reorders into `group[0..N] → user` so the
+     * user-principal wins on conflict (last write wins).
+     *
+     * Does NOT auto-materialise the user-principal row — returns `[]`
+     * when no user-principal exists yet. The cascade callers
+     * (`ToolConfigService::getEffectiveSettings` family) call
+     * {@see self::ensureUserPrincipal()} first so the principal row is
+     * guaranteed to exist by the time this method is consulted.
+     *
+     * @return list<int>
+     */
+    public function principalIdsForUser(int $userId): array
+    {
+        $userPrincipalId = Principal::where('type', Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->value('id');
+
+        if ($userPrincipalId === null) {
+            return [];
+        }
+
+        $groupPrincipalIds = Capsule::table('principals')
+            ->join('group_memberships', 'group_memberships.group_id', '=', 'principals.group_id')
+            ->where('principals.type', Principal::TYPE_GROUP)
+            ->where('group_memberships.user_id', $userId)
+            ->orderBy('principals.id')
+            ->pluck('principals.id')
+            ->all();
+
+        $groupIds = array_map(static fn($v): int => (int) $v, $groupPrincipalIds);
+        $groupIds = array_values(array_unique($groupIds));
+        sort($groupIds);
+
+        return array_merge([(int) $userPrincipalId], $groupIds);
+    }
+
+    /**
      * Resolve the principal for the given group, returning null if no
      * principal exists yet (i.e. a freshly-created group whose
      * `Principal` insert was rolled back or never made).
