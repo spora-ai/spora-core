@@ -9,6 +9,7 @@ use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Services\SpeechProviderConfigValidator;
+use Spora\Services\ToolConfigIdResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\OpenAiCompatibleTranscriber;
@@ -19,17 +20,24 @@ use Spora\Speech\TranscriptionResult;
 /**
  * Wrap {@see SpeechProviderConfigService} so the tests don't have to
  * hand-roll the validator for every fixture.
+ *
+ * Pass a mock idResolver when the test needs to stub id lookups;
+ * null falls through to a real resolver (DB-backed), which is fine
+ * for tests that don't exercise the `globalConfigId` /
+ * `principalSettingsId` code paths.
  */
 function buildService(
     ToolConfigService $toolConfig,
     SpeechToTextRegistry $registry,
     PrincipalService $principalService,
+    ?ToolConfigIdResolver $idResolver = null,
 ): SpeechProviderConfigService {
     return new SpeechProviderConfigService(
         $toolConfig,
         $registry,
         $principalService,
         new SpeechProviderConfigValidator($registry),
+        $idResolver ?? new ToolConfigIdResolver(),
     );
 }
 
@@ -80,16 +88,16 @@ final class StubSpeechProviderWithSettings implements SpeechToTextProviderInterf
 
 test('listConfigs returns every global config to an admin (one row per registered provider class)', function (): void {
     $toolConfig = Mockery::mock(ToolConfigService::class);
-    $toolConfig->shouldReceive('globalConfigId')
-        ->andReturnUsing(static fn(string $class): ?int => $class === OpenAiCompatibleTranscriber::class ? 7 : null);
     $toolConfig->shouldReceive('getGlobalSettings')
         ->andReturnUsing(static fn(string $class): array => $class === OpenAiCompatibleTranscriber::class
             ? ['display_name' => 'Mistral Voxtral', 'api_key' => 'sk-x']
             : []);
     $toolConfig->shouldReceive('maskForApi')
         ->andReturnUsing(static fn(array $settings): array => $settings);
-    $toolConfig->shouldReceive('fetchCreatedAt')->andReturnUsing(static fn(): ?string => null);
-    $toolConfig->shouldReceive('fetchUpdatedAt')->andReturnUsing(static fn(): ?string => null);
+
+    $idResolver = Mockery::mock(ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')
+        ->andReturnUsing(static fn(string $class): ?int => $class === OpenAiCompatibleTranscriber::class ? 7 : null);
 
     $service = buildService(
         $toolConfig,
@@ -98,6 +106,7 @@ test('listConfigs returns every global config to an admin (one row per registere
             $toolConfig,
         ),
         new PrincipalService(new PrincipalResolver()),
+        $idResolver,
     );
 
     $rows = $service->listConfigs(1, true);
@@ -218,12 +227,14 @@ test('upsertConfig writes global settings via putGlobalSettings when scope=globa
             $captured['class'] = $class;
             $captured['settings'] = $settings;
         });
-    $toolConfig->shouldReceive('globalConfigId')
-        ->andReturnUsing(static fn(string $class): ?int => $class === OpenAiCompatibleTranscriber::class ? 42 : null);
     $toolConfig->shouldReceive('getGlobalSettings')
         ->andReturnUsing(static fn(): array => ['display_name' => 'X', 'api_key' => 'sk-y', 'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1']);
     $toolConfig->shouldReceive('maskForApi')
         ->andReturnUsing(static fn(array $settings): array => $settings);
+
+    $idResolver = Mockery::mock(ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')
+        ->andReturnUsing(static fn(string $class): ?int => $class === OpenAiCompatibleTranscriber::class ? 42 : null);
 
     $service = buildService(
         $toolConfig,
@@ -232,6 +243,7 @@ test('upsertConfig writes global settings via putGlobalSettings when scope=globa
             $toolConfig,
         ),
         new PrincipalService(new PrincipalResolver()),
+        $idResolver,
     );
 
     $result = $service->upsertConfig(
@@ -262,12 +274,14 @@ test('upsertConfig resolves the caller principal and writes user settings when s
             $captured['settings'] = $settings;
             return $settings;
         });
-    $toolConfig->shouldReceive('getPrincipalSettingsId')
-        ->andReturnUsing(static fn(): int => 99);
     $toolConfig->shouldReceive('getPrincipalSettings')
         ->andReturnUsing(static fn(): array => ['display_name' => 'Mine', 'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1']);
     $toolConfig->shouldReceive('maskForApi')
         ->andReturnUsing(static fn(array $settings): array => $settings);
+
+    $idResolver = Mockery::mock(ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('principalSettingsId')
+        ->andReturnUsing(static fn(): int => 99);
 
     $service = buildService(
         $toolConfig,
@@ -276,6 +290,7 @@ test('upsertConfig resolves the caller principal and writes user settings when s
             $toolConfig,
         ),
         new PrincipalService(new PrincipalResolver()),
+        $idResolver,
     );
 
     $result = $service->upsertConfig(

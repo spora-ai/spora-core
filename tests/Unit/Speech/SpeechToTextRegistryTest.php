@@ -77,8 +77,9 @@ function buildRegistry(array $providers, array $settings = [], array $globalSett
     $config = Mockery::mock(ToolConfigService::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn($settings);
     $config->shouldReceive('getGlobalSettings')->andReturn($globalSettings);
-    $config->shouldReceive('globalConfigId')->andReturn($globalConfigId);
-    return new SpeechToTextRegistry($providers, $config);
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn($globalConfigId);
+    return new SpeechToTextRegistry($providers, $config, $idResolver);
 }
 
 test('empty registry — all, configured, describe all return empty', function (): void {
@@ -208,8 +209,9 @@ test('OpenAiCompatibleTranscriber has_global_default reflects ToolConfigService:
         'display_name' => 'with global',
         'api_key'      => 'sk-1',
     ]);
-    $configWithGlobal->shouldReceive('globalConfigId')->andReturn(7);
-    $withGlobal = new SpeechToTextRegistry([$oai], $configWithGlobal);
+    $idResolverWith = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolverWith->shouldReceive('globalConfigId')->andReturn(7);
+    $withGlobal = new SpeechToTextRegistry([$oai], $configWithGlobal, $idResolverWith);
     expect($withGlobal->describe(0, null)[0]['has_global_default'])->toBeTrue();
 
     $oai2 = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
@@ -219,8 +221,9 @@ test('OpenAiCompatibleTranscriber has_global_default reflects ToolConfigService:
         'api_key'      => 'sk-2',
     ]);
     $configWithoutGlobal->shouldReceive('getGlobalSettings')->andReturn([]);
-    $configWithoutGlobal->shouldReceive('globalConfigId')->andReturn(null);
-    $withoutGlobal = new SpeechToTextRegistry([$oai2], $configWithoutGlobal);
+    $idResolverWithout = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolverWithout->shouldReceive('globalConfigId')->andReturn(null);
+    $withoutGlobal = new SpeechToTextRegistry([$oai2], $configWithoutGlobal, $idResolverWithout);
     expect($withoutGlobal->describe(0, null)[0]['has_global_default'])->toBeFalse();
 });
 
@@ -241,10 +244,11 @@ test('describe() and configuredProvider() route no-arg calls through with userId
     $config->shouldReceive('getGlobalSettings')
         ->with($oai::class)
         ->andReturn(['display_name' => 'no-arg']);
-    $config->shouldReceive('globalConfigId')
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')
         ->with($oai::class)
         ->andReturn(null);
-    $registry = new SpeechToTextRegistry([$oai], $config);
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver);
 
     $rows = $registry->describe();
     expect($rows[0]['name'])->toBe('no-arg')

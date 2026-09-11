@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Speech;
 
+use Spora\Services\ToolConfigIdResolver;
 use Spora\Services\ToolConfigService;
 
 /**
@@ -41,6 +42,7 @@ final readonly class SpeechToTextRegistry
     public function __construct(
         private array $providers,
         private ToolConfigService $configService,
+        private ToolConfigIdResolver $idResolver = new ToolConfigIdResolver(),
     ) {}
 
     /**
@@ -134,7 +136,7 @@ final readonly class SpeechToTextRegistry
                 $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
                 $configured = $apiKey !== '';
                 $hasGlobalDefault = $this->configService->getGlobalSettings($provider::class) !== [];
-                $configId = $this->configService->globalConfigId($provider::class);
+                $configId = $this->idResolver->globalConfigId($provider::class);
             } else {
                 // Class-level providers keep their static name + display
                 // name; the configured flag is whatever they report.

@@ -46,6 +46,7 @@ final class SpeechProviderConfigService
         private readonly SpeechToTextRegistry $registry,
         private readonly PrincipalService $principalService,
         private readonly SpeechProviderConfigValidator $validator,
+        private readonly ToolConfigIdResolver $idResolver = new ToolConfigIdResolver(),
     ) {}
 
     /**
@@ -70,7 +71,7 @@ final class SpeechProviderConfigService
 
         if ($isAdmin) {
             foreach ($this->registry->all() as $provider) {
-                $globalId = $this->toolConfigService->globalConfigId($provider::class);
+                $globalId = $this->idResolver->globalConfigId($provider::class);
                 if ($globalId === null) {
                     continue;
                 }
@@ -186,7 +187,7 @@ final class SpeechProviderConfigService
         $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
         $this->toolConfigService->putGlobalSettings($providerClass, $settings);
 
-        $rowId = $this->toolConfigService->globalConfigId($providerClass);
+        $rowId = $this->idResolver->globalConfigId($providerClass);
         if ($rowId === null) {
             throw SpeechProviderConfigException::notFound(
                 "Global config row for {$providerClass} disappeared after write.",
@@ -213,7 +214,7 @@ final class SpeechProviderConfigService
         $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
         $this->toolConfigService->putPrincipalSettings($providerClass, $principalId, $settings);
 
-        $rowId = $this->toolConfigService->getPrincipalSettingsId($providerClass, $principalId);
+        $rowId = $this->idResolver->principalSettingsId($providerClass, $principalId);
         if ($rowId === null) {
             throw SpeechProviderConfigException::notFound(
                 "User-scoped config row for {$providerClass} disappeared after write.",
