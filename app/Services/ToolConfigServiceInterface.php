@@ -40,6 +40,10 @@ interface ToolConfigServiceInterface
 
     public function deletePrincipalSettings(string $toolClass, int $principalId): void;
 
+    public function getPrincipalSettingsId(string $toolClass, int $principalId): ?int;
+
+    public function globalConfigId(string $toolClass): ?int;
+
     public function putAgentOverride(string $toolClass, int $agentId, array $settings): void;
 
     public function deleteAgentOverride(string $toolClass, int $agentId): void;

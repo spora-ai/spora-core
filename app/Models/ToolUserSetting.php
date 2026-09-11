@@ -16,11 +16,13 @@ use LogicException;
  * `:tool_user_settings` table). Cascade is a re-name-in-spirit only; the class
  * itself now points at {@see Principal} instead of {@see User}.
  *
- * @property int     $id
- * @property int     $principal_id
- * @property string  $tool_class
- * @property string  $settings  (encrypted JSON; never access directly)
- * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
+ * @property int         $id
+ * @property int         $principal_id
+ * @property string      $tool_class
+ * @property string      $settings  (encrypted JSON; never access directly)
+ * @property string|null $created_at
+ * @property string|null $updated_at
+ * @method   static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
 final class ToolUserSetting extends Model
 {

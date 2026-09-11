@@ -193,6 +193,39 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
+     * Return the row id of the principal-scoped settings for the
+     * (toolClass, principalId) pair, or null when no row exists.
+     *
+     * Added for the Speech Provider Configuration surface — the new
+     * `ConfigResource` wire shape includes the row id so the SPA can
+     * deep-link the Capability row to the config edit form. Mirrors
+     * {@see getGlobalSettingsId()} (well, {@see globalConfigId()}) for
+     * symmetry — the principals-and-groups migration put the
+     * principal-scoped row at `tool_user_settings.principal_id`, so we
+     * keep the existing column name in the lookup.
+     */
+    public function getPrincipalSettingsId(string $toolClass, int $principalId): ?int
+    {
+        $id = ToolUserSetting::where('principal_id', $principalId)
+            ->where('tool_class', $toolClass)
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * Return the row id of the global settings row for a tool class,
+     * or null when no global row exists. Added so the Capability
+     * endpoint can surface a real `config_id` instead of always `null`.
+     */
+    public function globalConfigId(string $toolClass): ?int
+    {
+        $id = ToolConfiguration::where('tool_class', $toolClass)->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
+    /**
      * Return effective settings: global defaults merged with principal
      * settings and agent-specific overrides.
      *

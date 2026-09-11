@@ -8,7 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 use LogicException;
 
 /**
- * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
+ * @property int    $id
+ * @property string $tool_class
+ * @property string $tool_name
+ * @property string $settings  (encrypted JSON; never access directly)
+ * @property string|null $created_at
+ * @property string|null $updated_at
+ * @method   static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
 final class ToolConfiguration extends Model
 {
