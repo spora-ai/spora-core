@@ -617,3 +617,138 @@ Anonymous callers still get a 200 with the providers' class-level
 labels and `configured: false` whenever no provider has a usable API
 key — the SPA renders the "please log in" hint without a separate
 round-trip.
+
+`config_id` is populated by `ToolConfigService::globalConfigId($provider::class)` — a thin lookup against `tool_configurations.id` for `OpenAiCompatibleTranscriber` rows. Class-level providers (e.g. the future Muse plugin) keep `config_id: null` since they have no row in `tool_configurations`. The SPA deep-links the Capability row into the operator's `/admin/settings/speech-providers?config=<id>` form via this id.
+
+## Speech provider configuration
+
+Operator-facing CRUD for STT provider configurations. The storage layer reuses the existing `tool_configurations` (global, admin-only writes) and `tool_user_settings` (per-principal) tables — no new database tables — and the `***` sentinel convention from `ToolController` so an unchanged `api_key` round-trips through edits without being re-prompted. Full operator guide and worked examples: [`docs/14_speech.md`](14_speech.md).
+
+### `GET /api/v1/speech/provider-configs`
+
+Returns the configs the caller can see.
+
+- admin: every global config (one per registered provider class that has a row in `tool_configurations`).
+- non-admin: only the caller's own user-scoped configs.
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "configs": [
+      {
+        "id": 7,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "global",
+        "display_name": "Mistral Voxtral (prod)",
+        "settings": { "display_name": "Mistral Voxtral (prod)", "base_url": "https://api.mistral.ai/v1", "model": "voxtral-mini-latest", "language": "", "http_timeout_seconds": "60", "api_key": "***" },
+        "principal_id": null,
+        "created_at": "2026-09-11T12:34:56+00:00",
+        "updated_at": "2026-09-11T12:34:56+00:00"
+      },
+      {
+        "id": 12,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "user",
+        "display_name": "Personal Mistral",
+        "settings": { "...": "..." },
+        "principal_id": 8,
+        "created_at": "2026-09-11T13:00:00+00:00",
+        "updated_at": "2026-09-11T13:00:00+00:00"
+      }
+    ]
+  }
+}
+```
+
+### Errors
+
+- `401 UNAUTHENTICATED` — `AuthMiddleware` rejects anonymous requests before they reach the controller.
+
+### `GET /api/v1/speech/provider-configs/schema`
+
+Returns the provider-class picker schema: every registered `SpeechToTextProviderInterface` with its declared `#[ToolSetting]` attributes (label, type, default, required, validation regex). Used by the create form's provider picker. Adding a new plugin-provided STT class is a server-side change that auto-appears in the UI.
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "providers": [
+      {
+        "class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "display_name": "OpenAI Compatible",
+        "settings_schema": [
+          { "key": "display_name", "label": "Display name", "type": "text", "required": true, "validation": "/^[A-Za-z0-9 _\\-\\.\\(\\)]{1,80}$/" },
+          { "key": "api_key",      "label": "API Key",       "type": "password", "required": true },
+          { "key": "base_url",     "label": "Base URL",      "type": "text", "required": true, "default": "https://api.openai.com/v1", "validation": "#^https?://[^\\s]+$#" },
+          { "key": "model",        "label": "Model",         "type": "text", "required": true, "default": "whisper-1" },
+          { "key": "language",     "label": "Language hint (BCP-47)", "type": "text", "required": false, "default": "" },
+          { "key": "http_timeout_seconds", "label": "HTTP timeout (seconds)", "type": "text", "required": false, "default": "60", "validation": "/^\\d+$/" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/speech/provider-configs`
+
+Create or update a config (upsert by `(scope, provider_class, principal_id)`).
+
+Body:
+
+```jsonc
+{
+  "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+  "scope": "global",          // or "user"
+  "settings": {
+    "api_key": "sk-...",
+    "display_name": "Mistral Voxtral (prod)",
+    "base_url": "https://api.mistral.ai/v1",
+    "model": "voxtral-mini-latest",
+    "language": "en-US",
+    "http_timeout_seconds": "60"
+  }
+}
+```
+
+Response:
+
+- `200 OK` — `{data: {config: ConfigResource}}` on success.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — `scope: 'global'` was requested by a non-admin.
+- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — `provider_class` is not a registered speech provider class.
+- `422 SPEECH_PROVIDER_CONFIG_INVALID` — settings key is unknown to the schema, a required field is missing, or a value fails its declared regex validation.
+
+```bash
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "global",
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Mistral Voxtral (prod)",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+```
+
+### `PUT /api/v1/speech/provider-configs/{id}`
+
+Update the settings on an existing config. The id is the row id from a prior `GET` / `POST` response — admin-only for global configs, owner-only for user-scope configs.
+
+Body: `{"settings": {...}}`. Sending `api_key: "***"` keeps the existing value (matches `ToolConfigService`'s `***` sentinel convention).
+
+Response: same as `POST`.
+
+### `DELETE /api/v1/speech/provider-configs/{id}`
+
+Delete a config by id.
+
+- `200 OK` — `{data: {deleted: true}}` on success.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — caller isn't allowed to delete this row.
+- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — id doesn't exist (or isn't visible to the caller).
