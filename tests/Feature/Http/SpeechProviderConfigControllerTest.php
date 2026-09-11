@@ -329,9 +329,9 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
 
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCGrpA');
-        $groupPrincipalId = (int) \Illuminate\Database\Capsule\Manager::table('principals')
+        $groupPrincipalId = (int) Capsule::table('principals')
             ->where('type', \Spora\Models\Principal::TYPE_GROUP)
             ->where('group_id', $group->id)
             ->value('id');
@@ -354,7 +354,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
         expect($body['data']['config']['settings']['api_key'])->toBe('***');
 
         // Row actually landed in tool_user_settings keyed by the group-principal id.
-        $rowCount = \Illuminate\Database\Capsule\Manager::table('tool_user_settings')
+        $rowCount = Capsule::table('tool_user_settings')
             ->where('principal_id', $groupPrincipalId)
             ->count();
         expect($rowCount)->toBe(1);
@@ -363,7 +363,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('403: a member (non-admin) of the group cannot create a group-scoped config', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-grp-memb-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCGrpMember');
 
         // Add the caller as a member (not admin) and switch the session.
@@ -391,7 +391,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('200: global admin can create a group-scoped config on any group', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-grp-admin-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCGrpAdmin');
 
         $adminId = bootAuth($auth, 'spc-grp-admin@example.com', SPC_TEST_PASSWORD);
@@ -415,7 +415,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('422: scope=group without group_id is rejected', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-grp-noid-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $groupService->createGroup($ownerId, 'SpCGrpNoId');
 
         $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
@@ -454,7 +454,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('GET ?group_id=N returns only that group\'s configs to a member', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-list-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $groupA = $groupService->createGroup($ownerId, 'SpCListA');
         $groupB = $groupService->createGroup($ownerId, 'SpCListB');
 
@@ -483,7 +483,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
         clearSession();
         simulateLoggedInSession($memberId, 'spc-list-memb@example.com');
 
-        $resp = $controller->index(\Symfony\Component\HttpFoundation\Request::create(
+        $resp = $controller->index(Request::create(
             '/api/v1/speech/provider-configs?group_id=' . $groupA->id,
             'GET',
         ));
@@ -497,7 +497,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('GET ?group_id=N returns empty list to a non-member (existence-hide)', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-list-nonmem-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCListNonMem');
 
         // Owner writes a config; stranger does NOT join the group.
@@ -514,7 +514,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
         clearSession();
         simulateLoggedInSession($strangerId, 'spc-list-stranger@example.com');
 
-        $resp = $controller->index(\Symfony\Component\HttpFoundation\Request::create(
+        $resp = $controller->index(Request::create(
             '/api/v1/speech/provider-configs?group_id=' . $group->id,
             'GET',
         ));
@@ -547,7 +547,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('PUT on a group-scoped id by the group admin updates settings and keeps scope=group', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-grp-put-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCGrpPut');
 
         $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
@@ -577,7 +577,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
     it('DELETE on a group-scoped id by the group admin removes the row', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $ownerId = bootAuth($auth, 'spc-grp-del-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new \Spora\Services\PrincipalService(new PrincipalResolver()));
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
         $group = $groupService->createGroup($ownerId, 'SpCGrpDel');
 
         $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
@@ -592,7 +592,7 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
 
         $delResp = $controller->destroy($configId);
         expect($delResp->getStatusCode())->toBe(200);
-        expect(\Illuminate\Database\Capsule\Manager::table('tool_user_settings')
+        expect(Capsule::table('tool_user_settings')
             ->where('id', $configId)
             ->exists())->toBeFalse();
     });

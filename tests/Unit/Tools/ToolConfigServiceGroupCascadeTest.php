@@ -8,12 +8,8 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Monolog\Logger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
-use Spora\Models\AgentToolOverride;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
-use Spora\Models\ToolConfiguration;
-use Spora\Models\ToolUserSetting;
-use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
 use Tests\Concerns\CreatesPrincipal;
 use Tests\Fixtures\TestTool;
@@ -213,7 +209,7 @@ test('cascade: multiple groups — later (higher-id) group wins over earlier; us
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalIds[0], ['max_results' => 'g1']);
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalIds[1], ['max_results' => 'g2']);
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalIds[2], ['max_results' => 'g3']);
-    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId,    ['max_results' => 'user']);
+    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId, ['max_results' => 'user']);
 
     $effective = $svc->getEffectiveSettings(TestTool::class, $agentId, $userId);
     expect($effective['max_results'])->toBe('user'); // user > group[2] > group[1] > group[0] > global
@@ -226,7 +222,7 @@ test('cascade: agent override wins over everything, including the user-principal
 
     $svc->putGlobalSettings(TestTool::class, ['max_results' => '50']);
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalId, ['max_results' => 'g']);
-    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId,  ['max_results' => 'u']);
+    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId, ['max_results' => 'u']);
     $svc->putAgentOverride(TestTool::class, $agentId, ['max_results' => 'a']);
 
     expect($svc->getEffectiveSettings(TestTool::class, $agentId, $userId)['max_results'])->toBe('a');
@@ -252,7 +248,7 @@ test('cascade source annotation: group keys are tagged "group", user keys "princ
 
     $svc->putGlobalSettings(TestTool::class, ['max_results' => '50']);            // source: global
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalId, ['api_key' => 'g']); // source: group
-    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId,  ['max_results' => 'u']); // source: principal
+    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId, ['max_results' => 'u']); // source: principal
 
     $annotated = $svc->getEffectiveSettingsWithSource(TestTool::class, $agentId, $userId);
 
@@ -270,7 +266,7 @@ test('cascade source annotation: last write wins for source label too', function
     $agentId = makeTestAgentForUser($userId);
 
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalId, ['api_key' => 'g']);
-    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId,  ['api_key' => 'u']);
+    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId, ['api_key' => 'u']);
 
     $annotated = $svc->getEffectiveSettingsWithSource(TestTool::class, $agentId, $userId);
 
@@ -288,7 +284,7 @@ test('PrincipalContext path bypasses group cascade (single explicit principal)',
     $agentId = makeTestAgentForUser($userId);
 
     $svc->putGlobalSettings(TestTool::class, ['max_results' => '50']);
-    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId,  ['api_key' => 'user']);
+    $svc->putPrincipalSettings(TestTool::class, $userPrincipalId, ['api_key' => 'user']);
     $svc->putPrincipalSettings(TestTool::class, $groupPrincipalId, ['api_key' => 'group']);
 
     // Pass a PrincipalContext pinned to the GROUP principal. Only

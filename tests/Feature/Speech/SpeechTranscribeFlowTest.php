@@ -5,17 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Speech;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Mockery;
 use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\SpeechTranscribeController;
-use Spora\Models\AgentToolOverride;
-use Spora\Models\GroupMembership;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
-use Spora\Models\ToolConfiguration;
-use Spora\Models\ToolUserSetting;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPrincipalService;
 use Spora\Services\AgentService;
@@ -205,11 +200,15 @@ test('503 when no provider is configured at any level (cascade finds nothing)', 
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         // Canned but irrelevant — the registry should return null
         // before the provider is asked to transcribe.
         new MockHttpClient([new MockResponse('{}')]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
@@ -230,9 +229,13 @@ test('global-only: cascade resolves to a global default; provider gets global se
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         new MockHttpClient([new MockResponse(json_encode(['text' => 'global-transcript']))]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
@@ -260,9 +263,13 @@ test('user-only: user override wins over global', function (): void {
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         new MockHttpClient([new MockResponse(json_encode(['text' => 'user-transcript']))]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
@@ -298,9 +305,13 @@ test('group-only: group config is honoured for a member with no personal overrid
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         new MockHttpClient([new MockResponse(json_encode(['text' => 'group-transcript']))]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
@@ -344,9 +355,13 @@ test('group + user: user override beats group override; group still beats global
     // Use a 2-mock MockHttpClient so the controller talks to the
     // upstream; the provider transcribe() is invoked exactly once.
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         new MockHttpClient([new MockResponse(json_encode(['text' => 'user-over-group']))]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
@@ -407,9 +422,13 @@ test('agent override beats user + group + global when agent_id is supplied', fun
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
         new MockHttpClient([new MockResponse(json_encode(['text' => 'agent-wins']))]),
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id, 'agent_id' => $agentId]));
@@ -433,8 +452,13 @@ test('non-owned agent_id surfaces as 422 VALIDATION_ERROR and never invokes the 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
     $http = new MockHttpClient();   // no queued responses — failure if invoked
     $controller = buildFlowController(
-        $fx['auth'], $fx['principalService'], $fx['toolConfig'], $http,
-        $fx['agentService'], $fx['mediaArchive'], $fx['reader'],
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
+        $http,
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id, 'agent_id' => 999_999]));

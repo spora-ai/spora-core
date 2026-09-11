@@ -9,7 +9,6 @@ use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Models\Principal;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
-use Spora\Services\GroupService;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
 
@@ -447,7 +446,7 @@ final class SpeechProviderConfigService
         $userRow = ToolUserSetting::find($id);
         if ($userRow !== null) {
             $principalId = (int) $userRow->principal_id;
-            $principal = \Spora\Models\Principal::find($principalId);
+            $principal = Principal::find($principalId);
             $scope = ($principal !== null && $principal->type === Principal::TYPE_GROUP)
                 ? 'group'
                 : 'user';
@@ -512,7 +511,7 @@ final class SpeechProviderConfigService
         $userRow = ToolUserSetting::find($id);
         if ($userRow !== null) {
             $principalId = (int) $userRow->principal_id;
-            $principal = \Spora\Models\Principal::find($principalId);
+            $principal = Principal::find($principalId);
 
             if ($principal !== null && $principal->type === Principal::TYPE_GROUP) {
                 $groupId = (int) $principal->group_id;
