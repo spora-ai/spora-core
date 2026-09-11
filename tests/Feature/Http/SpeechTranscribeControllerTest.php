@@ -11,6 +11,9 @@ use Spora\Core\SecurityManager;
 use Spora\Http\SpeechTranscribeController;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
+use Spora\Services\AgentPictures\AgentPictureService;
+use Spora\Services\AgentPrincipalService;
+use Spora\Services\AgentService;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
@@ -21,6 +24,7 @@ use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
+use Spora\Services\ToolIconResolver;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\SpeechToTextException;
 use Spora\Speech\SpeechToTextProviderInterface;
@@ -42,7 +46,7 @@ use Throwable;
 
 final class TransStubConfigured implements SpeechToTextProviderInterface
 {
-    /** @var list<array{bytes: string, mime: string, lang: ?string}> */
+    /** @var list<array{bytes: string, mime: string, lang: ?string, agent: ?int, user: int}> */
     public array $calls = [];
     public ?TranscriptionResult $result = null;
     public ?Throwable $throws = null;
@@ -67,7 +71,13 @@ final class TransStubConfigured implements SpeechToTextProviderInterface
         ?int $agentId = null,
         ?int $userId = null,
     ): TranscriptionResult {
-        $this->calls[] = ['bytes' => $bytes, 'mime' => $mimeType, 'lang' => $languageHint];
+        $this->calls[] = [
+            'bytes' => $bytes,
+            'mime'  => $mimeType,
+            'lang'  => $languageHint,
+            'agent' => $agentId,
+            'user'  => (int) $userId,
+        ];
         if ($this->throws !== null) {
             throw $this->throws;
         }
@@ -133,11 +143,23 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     $config->shouldReceive('getEffectiveSettings')->andReturn([]);
     $config->shouldReceive('getGlobalSettings')->andReturn([]);
 
+    $pluginLoader = new \Spora\Plugins\PluginLoader([], null);
+    $agentService = new AgentService(
+        new ToolIconResolver(
+            new \Spora\Services\ToolConfigNameResolver(new \Psr\Log\NullLogger(), []),
+            $pluginLoader,
+        ),
+        new AgentPictureService(),
+        new PrincipalResolver(),
+        new AgentPrincipalService(new PrincipalService(new PrincipalResolver())),
+    );
+
     $controller = new SpeechTranscribeController(
         registry: new SpeechToTextRegistry([$provider], $config),
         mediaReader: $reader,
         mediaArchive: $service,
         auth: $auth,
+        agentService: $agentService,
     );
 
     $asset = $service->ingest(new MediaIngestRequest(
@@ -362,4 +384,72 @@ test('writeTranscript is not called when the provider throws', function (): void
     // shouldn't cache a failed call.
     $asset = MediaAsset::query()->find($assetId);
     expect($asset->transcript)->toBeNull();
+});
+
+test('returns 422 when agent_id is not an integer', function (): void {
+    $provider = new TransStubConfigured();
+    [$controller] = buildTransFixtures($provider);
+
+    $resp = $controller->transcribe(jsonTransRequest([
+        'media_id' => '00000000-0000-4000-8000-000000000000',
+        'agent_id' => 'not-an-int',
+    ]));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+test('returns 422 when agent_id does not belong to the caller', function (): void {
+    $provider = new TransStubConfigured();
+    [$controller, , $userId, $assetId] = buildTransFixtures($provider);
+
+    // Try to attribute the transcription to an agent that the caller
+    // does NOT own. The controller surfaces 422 VALIDATION_ERROR so a
+    // probing caller cannot distinguish "doesn't exist" from
+    // "not yours".
+    $resp = $controller->transcribe(jsonTransRequest([
+        'media_id' => $assetId,
+        'agent_id' => 999_999,
+    ]));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
+    // Provider must not be invoked when the agent_id is rejected.
+    expect($provider->calls)->toBe([]);
+});
+
+test('happy path: agent_id is forwarded to the provider when the agent belongs to the caller', function (): void {
+    $provider = new TransStubConfigured();
+    [$controller, , $userId, $assetId] = buildTransFixtures($provider);
+
+    // Insert an agent the caller owns so the ownership check passes.
+    $principalId = createUserPrincipalPublic($userId);
+    $agentId = (int) \Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        'name'         => 'Owned Agent',
+        'principal_id' => $principalId,
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    $resp = $controller->transcribe(jsonTransRequest([
+        'media_id' => $assetId,
+        'agent_id' => $agentId,
+    ]));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    expect($provider->calls)->toHaveCount(1);
+    expect($provider->calls[0]['agent'])->toBe($agentId);
+});
+
+test('agent_id 0 is treated as "no agent" (legacy behaviour preserved)', function (): void {
+    $provider = new TransStubConfigured();
+    [$controller, , , $assetId] = buildTransFixtures($provider);
+
+    $resp = $controller->transcribe(jsonTransRequest([
+        'media_id' => $assetId,
+        'agent_id' => 0,
+    ]));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    expect($provider->calls[0]['agent'])->toBeNull();
 });

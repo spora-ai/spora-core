@@ -9,6 +9,7 @@ use OpenApi\Attributes as OA;
 use Psr\Log\LoggerInterface;
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\SpeechTranscribeException;
+use Spora\Services\AgentService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Speech\InvalidAudioException;
@@ -23,7 +24,7 @@ use Symfony\Component\HttpFoundation\Request;
  * Transcribe a recorded audio asset via the first-configured STT plugin.
  *
  * Flow:
- *   1. Decode the JSON body, validate `{ media_id, language? }`.
+ *   1. Decode the JSON body, validate `{ media_id, language?, agent_id? }`.
  *   2. Resolve the configured provider from {@see SpeechToTextRegistry}.
  *      503 if none is configured.
  *   3. Read the asset via {@see MediaAssetReader::readAsset()} — three
@@ -40,6 +41,15 @@ use Symfony\Component\HttpFoundation\Request;
  *      `media_assets.transcript_language` so chat re-renders re-use the
  *      cached value without re-billing.
  *   6. Return the wire-shape result.
+ *
+ * Optional `agent_id`: when present, the controller validates that the
+ * caller owns the agent (`AgentService::getAgent($agentId, $userId)`)
+ * — a 422 `VALIDATION_ERROR` surfaces a non-owned id without leaking
+ * whether it exists. The id is threaded through to
+ * {@see SpeechToTextRegistry::configuredProvider($userId, $agentId)}
+ * and {@see SpeechToTextProviderInterface::transcribe()} so the
+ * configured provider's `agent_tool_overrides` row wins in the cascade
+ * (per-agent override beats group / user / global).
  *
  * Provider API keys NEVER leave the server. The provider's exception
  * message is logged server-side (operator-visible) and the sanitised
@@ -58,6 +68,7 @@ final class SpeechTranscribeController
         private readonly MediaAssetReader $mediaReader,
         private readonly MediaArchiveService $mediaArchive,
         private readonly AuthService $auth,
+        private readonly AgentService $agentService,
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
@@ -75,6 +86,12 @@ final class SpeechTranscribeController
                         type: 'string',
                         nullable: true,
                         description: 'BCP-47 hint (e.g. "en-US"). null = auto-detect.',
+                    ),
+                    new OA\Property(
+                        property: 'agent_id',
+                        type: 'integer',
+                        nullable: true,
+                        description: 'Optional agent id (must be owned by the caller). When set, the cascade honours any per-agent STT override from agent_tool_overrides.',
                     ),
                 ],
             ),
@@ -102,21 +119,14 @@ final class SpeechTranscribeController
         try {
             $userId   = $this->requireUserId();
             $payload  = $this->decodeBody($request);
-            $provider = $this->requireConfiguredProvider($userId);
+            $agentId  = $this->resolveAgentId($payload, $userId);
+            $provider = $this->requireConfiguredProvider($userId, $agentId);
             $asset    = $this->loadAsset($payload['media_id'], $userId);
-            // agent_id is intentionally null — MediaAssetReader::readAsset()
-            // returns bytes+mime only. Provider settings cascade from global
-            // down (and through the user principal level via $userId).
-            // Per-agent override is out of scope for v1. The provider
-            // re-resolves its own config inside transcribe() via
-            // ToolConfigService so the registry's per-config label binding
-            // and the transcribe-time settings lookup stay on the same
-            // effective cascade without the controller having to thread the
-            // settings through.
             $result   = $this->transcribeWithProvider(
                 $provider,
                 $asset,
                 $payload['language'] ?? null,
+                $agentId,
                 $userId,
             );
         } catch (SpeechTranscribeException $e) {
@@ -135,7 +145,7 @@ final class SpeechTranscribeController
     }
 
     /**
-     * @return array{media_id: string, language?: string}
+     * @return array{media_id: string, language?: string, agent_id?: int}
      *
      * @throws SpeechTranscribeException 422 on malformed body.
      */
@@ -155,8 +165,45 @@ final class SpeechTranscribeController
             throw SpeechTranscribeException::validation('"language" must be a string when present.');
         }
 
-        /** @var array{media_id: string, language?: string} $body */
+        if (isset($body['agent_id'])) {
+            if (!is_int($body['agent_id']) || $body['agent_id'] < 0) {
+                throw SpeechTranscribeException::validation('"agent_id" must be a non-negative integer when present.');
+            }
+        }
+
+        /** @var array{media_id: string, language?: string, agent_id?: int} $body */
         return $body;
+    }
+
+    /**
+     * Resolve the agent id from the request body (optional). When set,
+     * the agent must belong to the requesting user; any failure surfaces
+     * 422 `VALIDATION_ERROR` so a probing caller cannot distinguish
+     * "doesn't exist" from "not yours".
+     *
+     * Composers that don't know the agent (e.g. a global "New Chat"
+     * picker) omit the field and the cascade falls through to user /
+     * group / global as before. Passing `0` is treated as "no agent".
+     *
+     * @param array{media_id: string, agent_id?: int} $payload
+     *
+     * @throws SpeechTranscribeException 422 when the agent is not owned by the caller.
+     */
+    private function resolveAgentId(array $payload, int $userId): ?int
+    {
+        if (!isset($payload['agent_id']) || $payload['agent_id'] <= 0) {
+            return null;
+        }
+
+        $agentId = $payload['agent_id'];
+        $agent = $this->agentService->getAgent($agentId, $userId);
+        if ($agent === null) {
+            throw SpeechTranscribeException::validation(
+                "agent_id {$agentId} does not belong to the requesting user.",
+            );
+        }
+
+        return $agentId;
     }
 
     /**
@@ -175,9 +222,9 @@ final class SpeechTranscribeController
     /**
      * @throws SpeechTranscribeException 503 when no provider reports configured.
      */
-    private function requireConfiguredProvider(int $userId): SpeechToTextProviderInterface
+    private function requireConfiguredProvider(int $userId, ?int $agentId): SpeechToTextProviderInterface
     {
-        $provider = $this->registry->configuredProvider($userId, null);
+        $provider = $this->registry->configuredProvider($userId, $agentId);
         if ($provider === null) {
             throw SpeechTranscribeException::providerUnavailable(
                 'No speech-to-text provider is configured. Add an API key in Settings → Tools for OpenAI-compatible STT (Mistral, OpenAI Whisper, Groq, etc.) or install spora-plugin-muse.',
@@ -226,6 +273,7 @@ final class SpeechTranscribeController
         SpeechToTextProviderInterface $provider,
         array $asset,
         ?string $language,
+        ?int $agentId,
         int $userId,
     ): TranscriptionResult {
         try {
@@ -233,7 +281,7 @@ final class SpeechTranscribeController
                 $asset['bytes'],
                 $asset['mime'],
                 $language,
-                null,
+                $agentId,
                 $userId,
             );
         } catch (InvalidAudioException $e) {
