@@ -182,7 +182,7 @@ test('returns principal ids in ascending order across groups joined in non-monot
     $g1 = $this->makeGroupPrincipal($userId, 'first-inserted');
     $g2 = $this->makeGroupPrincipal($userId, 'second-inserted');
 
-    $sorted = [$g1, $g2, $g3];
+    $sorted = [(int) $g1, (int) $g2, (int) $g3];
     sort($sorted);
 
     expect(makePrincipalService()->principalIdsForUser($userId))->toBe(

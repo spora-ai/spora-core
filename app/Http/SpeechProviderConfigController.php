@@ -174,7 +174,7 @@ final class SpeechProviderConfigController
                     );
                 }
                 $groupId = $body['group_id'];
-            } elseif (isset($body['group_id']) && $body['group_id'] !== null) {
+            } elseif (array_key_exists('group_id', $body)) {
                 throw SpeechProviderConfigException::validation(
                     'group_id may only be set when scope="group".',
                 );
