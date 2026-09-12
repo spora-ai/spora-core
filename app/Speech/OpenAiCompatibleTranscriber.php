@@ -7,7 +7,6 @@ namespace Spora\Speech;
 use Psr\Log\LoggerInterface;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\ToolSetting;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
@@ -174,6 +173,24 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     /**
      * @return array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int}
      */
+    /**
+     * Build the HTTP request descriptor for `/audio/transcriptions`.
+     *
+     * `multipart` (not `body`) is what carries the file. Symfony's
+     * `HttpClient` interprets an array-valued `body` as
+     * `application/x-www-form-urlencoded`, which Mistral and every other
+     * STT vendor reject with `invalid_request_no_input` / "cannot carry
+     * files". Explicit multipart is the only way to send audio bytes
+     * — the temp file written by `wrapAsUpload()` flows through as a
+     * path (`'contents' => '/tmp/...'`) and Symfony streams it.
+     *
+     * @return array{
+     *   url: string,
+     *   headers: array<string, string>,
+     *   multipart: list<array<string, mixed>>,
+     *   timeout: int
+     * }
+     */
     private function buildTranscribeRequest(
         string $bytes,
         string $mimeType,
@@ -190,16 +207,26 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
         $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
 
-        $body = ['file' => $this->wrapAsUpload($bytes, $mimeType), 'model' => $model];
+        [$uploadPath, $uploadName] = $this->writeTempUpload($bytes, $mimeType);
+
+        $multipart = [
+            [
+                'name'        => 'file',
+                'contents'    => $uploadPath,
+                'filename'    => $uploadName,
+                'contentType' => $mimeType,
+            ],
+            ['name' => 'model', 'contents' => $model],
+        ];
         if ($language !== '') {
-            $body['language'] = $language;
+            $multipart[] = ['name' => 'language', 'contents' => $language];
         }
 
         return [
-            'url'     => rtrim($baseUrl, '/') . '/audio/transcriptions',
-            'headers' => ['Authorization' => 'Bearer ' . $apiKey],
-            'body'    => $body,
-            'timeout' => $timeout,
+            'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
+            'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
+            'multipart' => $multipart,
+            'timeout'   => $timeout,
         ];
     }
 
@@ -251,16 +278,16 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     }
 
     /**
-     * @param array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int} $request
+     * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, timeout: int} $request
      * @return array<string, mixed>
      */
     private function sendTranscribeRequest(array $request): array
     {
         try {
             $response = $this->http->request('POST', $request['url'], [
-                'headers' => $request['headers'],
-                'body'    => $request['body'],
-                'timeout' => $request['timeout'],
+                'headers'   => $request['headers'],
+                'multipart' => $request['multipart'],
+                'timeout'   => $request['timeout'],
             ]);
             $payload = $response->toArray(false);
         } catch (Throwable $e) {
@@ -302,29 +329,29 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     }
 
     /**
-     * Stage bytes as a temp file and wrap them in a Symfony
-     * `UploadedFile` in test mode (which copies the file instead of
-     * linking it, so the original can be unlinked immediately). The
-     * test-mode copy lands next to the temp file and is cleaned up by
-     * Symfony when the request finishes.
+     * Write the audio bytes to a temp file for transport. Returns the
+     * file path + a multipart-friendly filename. Symfony's `HttpClient`
+     * multipart entries accept a file path string in `'contents'` and
+     * stream the file off-disk rather than buffering it; an explicit
+     * path also avoids the `UploadedFile` round-trip, which the
+     * multipart API doesn't accept (it expects a file path or a stream,
+     * not a `UploadedFile` wrapper).
+     *
+     * The temp file is left in place — `HttpClient` opens it, reads
+     * it, and the OS reclaims it when nothing references it. The path
+     * is returned to the caller for inclusion in the multipart entry.
+     *
+     * @return array{0: string, 1: string} [path, filename]
      */
-    private function wrapAsUpload(string $bytes, string $mimeType): UploadedFile
+    private function writeTempUpload(string $bytes, string $mimeType): array
     {
         $tmp = tempnam(sys_get_temp_dir(), 'spora_oai_stt_');
         if ($tmp === false) {
             throw new InvalidAudioException('Failed to stage audio for upload.');
         }
         file_put_contents($tmp, $bytes);
-        $ext  = $this->extensionFor($mimeType);
-        $name = 'recording.' . $ext;
-        try {
-            // test mode = true: Symfony copies the file (so it survives
-            // the unlink below) and uses the original MIME. The caller
-            // relies on Symfony's destructor to clean up the copy.
-            return new UploadedFile($tmp, $name, $mimeType, null, true);
-        } finally {
-            @unlink($tmp);
-        }
+        $ext = $this->extensionFor($mimeType);
+        return [$tmp, 'recording.' . $ext];
     }
 
     /**
