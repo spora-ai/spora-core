@@ -362,14 +362,15 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      */
     private function extractDurationMs(array $payload): ?float
     {
-        if (isset($payload['duration']) && is_numeric($payload['duration'])) {
-            return (float) $payload['duration'] * 1000;
-        }
-        if (isset($payload['usage']['seconds']) && is_numeric($payload['usage']['seconds'])) {
-            return (float) $payload['usage']['seconds'] * 1000;
-        }
-        if (isset($payload['usage']['prompt_audio_seconds']) && is_numeric($payload['usage']['prompt_audio_seconds'])) {
-            return (float) $payload['usage']['prompt_audio_seconds'] * 1000;
+        $candidates = [
+            $payload['duration'] ?? null,
+            $payload['usage']['seconds'] ?? null,
+            $payload['usage']['prompt_audio_seconds'] ?? null,
+        ];
+        foreach ($candidates as $candidate) {
+            if (is_numeric($candidate)) {
+                return (float) $candidate * 1000;
+            }
         }
         return null;
     }
