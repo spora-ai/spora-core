@@ -303,6 +303,56 @@ describe('SpeechProviderConfigController', function (): void {
         expect($stored['api_key'])->toBe('sk-real-1');
     });
 
+    // The frontend PUTs only the fields the operator changed (`api_key`
+    // is omitted whenever the operator intended to keep the existing
+    // secret; see `SpeechProviderConfigForm.vue::buildSettingsToSend`).
+    // The schema marks `api_key` as `required`, so a naive validator
+    // rejects the omitted-and-kept case with 422. The service merges
+    // existing storage into the request before validating, so the
+    // schema sees the full set, the password is preserved on disk,
+    // and the changed fields land in their new values.
+    it('PUT with api_key omitted keeps the existing key (server merges storage before validating)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-partial@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+            'settings' => [
+                'api_key' => 'sk-original',
+                'display_name' => 'Mistral Voxtral',
+                'base_url' => 'https://api.mistral.ai/v1',
+                'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($createResp->getStatusCode())->toBe(200);
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        // Operator changed display_name only — omit api_key entirely.
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
+            'settings' => [
+                'display_name' => 'Mistral Voxtral (renamed)',
+                'base_url' => 'https://api.mistral.ai/v1',
+                'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($updateResp->getStatusCode())->toBe(200);
+        $body = json_decode($updateResp->getContent(), true);
+        expect($body['data']['config']['settings']['api_key'])->toBe('***');
+        expect($body['data']['config']['settings']['display_name'])->toBe('Mistral Voxtral (renamed)');
+
+        // The stored key must be unchanged — confirm via direct service read.
+        $global = new \Spora\Services\ToolConfigService(
+            new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            new \Psr\Log\NullLogger(),
+            [],
+        );
+        $stored = $global->getGlobalSettings(\Spora\Speech\OpenAiCompatibleTranscriber::class);
+        expect($stored['api_key'])->toBe('sk-original');
+        expect($stored['display_name'])->toBe('Mistral Voxtral (renamed)');
+    });
+
     it('returns 403 (forbidden) for anonymous index requests', function (): void {
         [$controller] = makeSpeechProviderConfigController();
         // No session — currentUserId() returns null → requireUserId throws.

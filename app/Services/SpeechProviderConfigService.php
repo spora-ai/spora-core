@@ -429,6 +429,15 @@ final class SpeechProviderConfigService
      * against the row's underlying group id (no `group_id` is required
      * on the PUT body — the controller looks it up from the row).
      *
+     * PUTs are partial: the request body only carries the fields the
+     * operator changed. Required-but-omitted fields (most commonly
+     * `api_key`, which the form omits when the operator intended to
+     * keep the existing secret — see `SpeechProviderConfigForm.vue`'s
+     * `buildSettingsToSend`) are filled from the existing storage
+     * before the schema validator runs. The merged map is what
+     * `upsertConfig()` writes — same value back for kept fields,
+     * new value for changed fields, idempotent on disk.
+     *
      * @param array<string, mixed> $settings
      */
     public function updateConfig(int $userId, bool $isAdmin, int $id, array $settings): array
@@ -440,7 +449,11 @@ final class SpeechProviderConfigService
                     'Only admins can update global speech provider configurations.',
                 );
             }
-            return $this->upsertConfig($userId, $isAdmin, (string) $globalRow->tool_class, 'global', $settings);
+            $existing = $this->toolConfigService->getGlobalSettings(
+                (string) $globalRow->tool_class
+            );
+            $merged = array_merge($existing, $settings);
+            return $this->upsertConfig($userId, $isAdmin, (string) $globalRow->tool_class, 'global', $merged);
         }
 
         $userRow = ToolUserSetting::find($id);
@@ -450,6 +463,12 @@ final class SpeechProviderConfigService
             $scope = ($principal !== null && $principal->type === Principal::TYPE_GROUP)
                 ? 'group'
                 : 'user';
+
+            $existing = $this->toolConfigService->getPrincipalSettings(
+                (string) $userRow->tool_class,
+                $principalId
+            );
+            $merged = array_merge($existing, $settings);
 
             if ($scope === 'group') {
                 $groupId = (int) $principal->group_id;
@@ -463,7 +482,7 @@ final class SpeechProviderConfigService
                     isAdmin: $isAdmin,
                     providerClass: (string) $userRow->tool_class,
                     scope: 'group',
-                    settings: $settings,
+                    settings: $merged,
                     groupId: $groupId,
                 );
             }
@@ -479,7 +498,7 @@ final class SpeechProviderConfigService
                 isAdmin: $isAdmin,
                 providerClass: (string) $userRow->tool_class,
                 scope: 'user',
-                settings: $settings,
+                settings: $merged,
             );
         }
 
