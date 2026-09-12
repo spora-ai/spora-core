@@ -53,6 +53,8 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     private readonly ToolConfigSchemaInspector $schema;
 
+    private readonly ToolConfigPrincipalCascade $cascade;
+
     /**
      * @param list<string> $toolClasses
      */
@@ -74,6 +76,7 @@ class ToolConfigService implements ToolConfigServiceInterface
         $this->schema = new ToolConfigSchemaInspector($skillsByName);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
+        $this->cascade = new ToolConfigPrincipalCascade();
     }
 
     /**
@@ -219,7 +222,7 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $cascadePrincipalIds = $this->resolveCascadePrincipalIds($userId, $context);
+        $cascadePrincipalIds = $this->cascade->resolvePrincipalIds($userId, $context);
 
         $merged = $this->getGlobalSettings($toolClass);
 
@@ -426,7 +429,7 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        [$cascadePrincipalIds, $userPrincipalId] = $this->resolveCascadePrincipalIdsWithUserRef($userId, $context);
+        [$cascadePrincipalIds, $userPrincipalId] = $this->cascade->resolvePrincipalIdsWithUserRef($userId, $context);
 
         $global = $this->getGlobalSettings($toolClass);
         $result = [];
@@ -466,62 +469,6 @@ class ToolConfigService implements ToolConfigServiceInterface
         }
 
         return $result;
-    }
-
-    /**
-     * Resolve the principal ids the cascade should consult, in the order
-     * `group[0..N], then user-principal` so the user-principal wins on
-     * conflict (last write wins). Returns an empty list when neither a
-     * `PrincipalContext` nor a `?int $userId` is supplied.
-     *
-     * @return list<int>
-     */
-    private function resolveCascadePrincipalIds(?int $userId, ?PrincipalContext $context): array
-    {
-        if ($context !== null) {
-            return [$context->principalId];
-        }
-        if ($userId === null) {
-            return [];
-        }
-        $principalService = new PrincipalService(new PrincipalResolver());
-        $userPrincipalId = $principalService->ensureUserPrincipal($userId)->id;
-        $allIds = $principalService->principalIdsForUser($userId);
-
-        $groupIds = array_values(array_filter(
-            $allIds,
-            static fn(int $id): bool => $id !== $userPrincipalId,
-        ));
-
-        return array_merge($groupIds, [$userPrincipalId]);
-    }
-
-    /**
-     * Same as {@see self::resolveCascadePrincipalIds()} but also returns
-     * the user-principal id (or `null` if no `?int $userId` was supplied)
-     * so callers can tag each iterated principal as `'group'` or
-     * `'principal'` in the source-annotated cascade output.
-     *
-     * @return array{0: list<int>, 1: int|null}
-     */
-    private function resolveCascadePrincipalIdsWithUserRef(?int $userId, ?PrincipalContext $context): array
-    {
-        if ($context !== null) {
-            return [[$context->principalId], null];
-        }
-        if ($userId === null) {
-            return [[], null];
-        }
-        $principalService = new PrincipalService(new PrincipalResolver());
-        $userPrincipalId = $principalService->ensureUserPrincipal($userId)->id;
-        $allIds = $principalService->principalIdsForUser($userId);
-
-        $groupIds = array_values(array_filter(
-            $allIds,
-            static fn(int $id): bool => $id !== $userPrincipalId,
-        ));
-
-        return [array_merge($groupIds, [$userPrincipalId]), $userPrincipalId];
     }
 
     /**
