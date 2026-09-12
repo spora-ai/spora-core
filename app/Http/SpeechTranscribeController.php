@@ -165,10 +165,8 @@ final class SpeechTranscribeController
             throw SpeechTranscribeException::validation('"language" must be a string when present.');
         }
 
-        if (isset($body['agent_id'])) {
-            if (!is_int($body['agent_id']) || $body['agent_id'] < 0) {
-                throw SpeechTranscribeException::validation('"agent_id" must be a non-negative integer when present.');
-            }
+        if (isset($body['agent_id']) && (!is_int($body['agent_id']) || $body['agent_id'] < 0)) {
+            throw SpeechTranscribeException::validation('"agent_id" must be a non-negative integer when present.');
         }
 
         /** @var array{media_id: string, language?: string, agent_id?: int} $body */
