@@ -66,28 +66,28 @@ final readonly class SpeechToTextRegistry
     {
         $userId ??= 0;
         foreach ($this->providers as $provider) {
-            if ($provider instanceof OpenAiCompatibleTranscriber) {
-                $settings = $this->configService->getEffectiveSettings(
-                    $provider::class,
-                    $agentId ?? 0,
-                    $userId,
-                );
-                $displayName = is_string($settings['display_name'] ?? null) ? trim($settings['display_name']) : '';
-                if ($displayName !== '') {
-                    $provider->bindLabel($displayName);
-                }
-                $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
-                if ($apiKey === '') {
-                    continue;
-                }
-                return $provider;
-            }
-
-            if ($provider->isConfigured()) {
-                return $provider;
+            $candidate = $provider instanceof OpenAiCompatibleTranscriber
+                ? $this->resolveOpenAiCompatibleProvider($provider, $agentId ?? 0, $userId)
+                : ($provider->isConfigured() ? $provider : null);
+            if ($candidate !== null) {
+                return $candidate;
             }
         }
         return null;
+    }
+
+    private function resolveOpenAiCompatibleProvider(
+        OpenAiCompatibleTranscriber $provider,
+        int $agentId,
+        int $userId,
+    ): ?SpeechToTextProviderInterface {
+        $settings = $this->configService->getEffectiveSettings($provider::class, $agentId, $userId);
+        $displayName = is_string($settings['display_name'] ?? null) ? trim($settings['display_name']) : '';
+        if ($displayName !== '') {
+            $provider->bindLabel($displayName);
+        }
+        $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
+        return $apiKey !== '' ? $provider : null;
     }
 
     /**

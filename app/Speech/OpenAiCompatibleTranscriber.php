@@ -184,10 +184,11 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
 
         $apiKey = $this->resolveApiKey($settings);
-        $baseUrl = $this->resolveBaseUrl($settings);
-        $model = $this->resolveModel($settings);
+        $baseUrl = $this->resolveStringSetting($settings, 'base_url', self::DEFAULT_BASE_URL);
+        $model = $this->resolveStringSetting($settings, 'model', self::DEFAULT_MODEL);
         $language = $this->resolveLanguage($settings, $languageHint);
-        $timeout = $this->resolveTimeout($settings);
+        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
+        $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
 
         $body = ['file' => $this->wrapAsUpload($bytes, $mimeType), 'model' => $model];
         if ($language !== '') {
@@ -195,7 +196,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         }
 
         return [
-            'url'     => $baseUrl . '/audio/transcriptions',
+            'url'     => rtrim($baseUrl, '/') . '/audio/transcriptions',
             'headers' => ['Authorization' => 'Bearer ' . $apiKey],
             'body'    => $body,
             'timeout' => $timeout,
@@ -207,7 +208,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      */
     private function resolveApiKey(array $settings): string
     {
-        $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
+        $apiKey = $this->resolveStringSetting($settings, 'api_key', '');
         if ($apiKey === '') {
             throw new SpeechToTextException(sprintf(
                 'No API key configured for %s.',
@@ -218,25 +219,19 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     }
 
     /**
+     * Read a string setting with trim/empty fallback to `$default`.
+     * Shared by every non-key, non-language text setting so the
+     * trim+is_string+empty-default dance lives in one place.
+     *
      * @param array<string, mixed> $settings
      */
-    private function resolveBaseUrl(array $settings): string
+    private function resolveStringSetting(array $settings, string $key, string $default): string
     {
-        if (is_string($settings['base_url'] ?? null) && trim($settings['base_url']) !== '') {
-            return rtrim(trim($settings['base_url']), '/');
+        if (!is_string($settings[$key] ?? null)) {
+            return $default;
         }
-        return self::DEFAULT_BASE_URL;
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     */
-    private function resolveModel(array $settings): string
-    {
-        if (is_string($settings['model'] ?? null) && trim($settings['model']) !== '') {
-            return trim($settings['model']);
-        }
-        return self::DEFAULT_MODEL;
+        $value = trim($settings[$key]);
+        return $value !== '' ? $value : $default;
     }
 
     /**
@@ -249,20 +244,10 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      */
     private function resolveLanguage(array $settings, ?string $languageHint): string
     {
-        $language = $languageHint ?? '';
-        if ($language !== '') {
-            return $language;
+        if ($languageHint !== null && $languageHint !== '') {
+            return $languageHint;
         }
-        return is_string($settings['language'] ?? null) ? trim($settings['language']) : '';
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     */
-    private function resolveTimeout(array $settings): int
-    {
-        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
-        return is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
+        return $this->resolveStringSetting($settings, 'language', '');
     }
 
     /**
