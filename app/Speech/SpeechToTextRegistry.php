@@ -119,38 +119,50 @@ final readonly class SpeechToTextRegistry
         $userId ??= 0;
         $rows = [];
         foreach ($this->providers as $provider) {
-            $hasGlobalDefault = false;
-            $configured = false;
-            $configId = null;
-
-            if ($provider instanceof OpenAiCompatibleTranscriber) {
-                $settings = $this->configService->getEffectiveSettings(
-                    $provider::class,
-                    $agentId ?? 0,
-                    $userId,
-                );
-                $displayName = is_string($settings['display_name'] ?? null) ? trim($settings['display_name']) : '';
-                if ($displayName !== '') {
-                    $provider->bindLabel($displayName);
-                }
-                $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
-                $configured = $apiKey !== '';
-                $hasGlobalDefault = $this->configService->getGlobalSettings($provider::class) !== [];
-                $configId = $this->idResolver->globalConfigId($provider::class);
-            } else {
-                // Class-level providers keep their static name + display
-                // name; the configured flag is whatever they report.
-                $configured = $provider->isConfigured();
-            }
-
-            $rows[] = [
-                'name'               => $provider->getName(),
-                'display_name'       => $provider->getDisplayName(),
-                'configured'         => $configured,
-                'has_global_default' => $hasGlobalDefault,
-                'config_id'          => $configId,
-            ];
+            $rows[] = $provider instanceof OpenAiCompatibleTranscriber
+                ? $this->describeOpenAiCompatible($provider, $agentId ?? 0, $userId)
+                : $this->describeGeneric($provider);
         }
         return $rows;
+    }
+
+    /**
+     * @return array{name: string, display_name: string, configured: bool, has_global_default: bool, config_id: int|null}
+     */
+    private function describeOpenAiCompatible(OpenAiCompatibleTranscriber $provider, int $agentId, int $userId): array
+    {
+        $settings = $this->configService->getEffectiveSettings($provider::class, $agentId, $userId);
+        $displayName = is_string($settings['display_name'] ?? null) ? trim($settings['display_name']) : '';
+        if ($displayName !== '') {
+            $provider->bindLabel($displayName);
+        }
+        $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
+
+        return [
+            'name'               => $provider->getName(),
+            'display_name'       => $provider->getDisplayName(),
+            'configured'         => $apiKey !== '',
+            'has_global_default' => $this->configService->getGlobalSettings($provider::class) !== [],
+            'config_id'          => $this->idResolver->globalConfigId($provider::class),
+        ];
+    }
+
+    /**
+     * Class-level providers keep their static name + display name; the
+     * configured flag is whatever they report. They don't read from
+     * `tool_configurations` so `has_global_default` and `config_id` stay
+     * null/false on the wire shape.
+     *
+     * @return array{name: string, display_name: string, configured: bool, has_global_default: bool, config_id: int|null}
+     */
+    private function describeGeneric(SpeechToTextProviderInterface $provider): array
+    {
+        return [
+            'name'               => $provider->getName(),
+            'display_name'       => $provider->getDisplayName(),
+            'configured'         => $provider->isConfigured(),
+            'has_global_default' => false,
+            'config_id'          => null,
+        ];
     }
 }
