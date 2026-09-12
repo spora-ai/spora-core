@@ -166,8 +166,47 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         ?int $agentId = null,
         ?int $userId = null,
     ): TranscriptionResult {
+        $request = $this->buildTranscribeRequest($bytes, $mimeType, $languageHint, $agentId, $userId);
+        $payload = $this->sendTranscribeRequest($request);
+        return $this->parseTranscribePayload($payload);
+    }
+
+    /**
+     * @return array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int}
+     */
+    private function buildTranscribeRequest(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint,
+        ?int $agentId,
+        ?int $userId,
+    ): array {
         $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
 
+        $apiKey = $this->resolveApiKey($settings);
+        $baseUrl = $this->resolveBaseUrl($settings);
+        $model = $this->resolveModel($settings);
+        $language = $this->resolveLanguage($settings, $languageHint);
+        $timeout = $this->resolveTimeout($settings);
+
+        $body = ['file' => $this->wrapAsUpload($bytes, $mimeType), 'model' => $model];
+        if ($language !== '') {
+            $body['language'] = $language;
+        }
+
+        return [
+            'url'     => $baseUrl . '/audio/transcriptions',
+            'headers' => ['Authorization' => 'Bearer ' . $apiKey],
+            'body'    => $body,
+            'timeout' => $timeout,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function resolveApiKey(array $settings): string
+    {
         $apiKey = is_string($settings['api_key'] ?? null) ? trim($settings['api_key']) : '';
         if ($apiKey === '') {
             throw new SpeechToTextException(sprintf(
@@ -175,40 +214,68 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 $this->getDisplayName(),
             ));
         }
+        return $apiKey;
+    }
 
-        $baseUrl = is_string($settings['base_url'] ?? null) && trim($settings['base_url']) !== ''
-            ? rtrim(trim($settings['base_url']), '/')
-            : self::DEFAULT_BASE_URL;
-        $model = is_string($settings['model'] ?? null) && trim($settings['model']) !== ''
-            ? trim($settings['model'])
-            : self::DEFAULT_MODEL;
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function resolveBaseUrl(array $settings): string
+    {
+        if (is_string($settings['base_url'] ?? null) && trim($settings['base_url']) !== '') {
+            return rtrim(trim($settings['base_url']), '/');
+        }
+        return self::DEFAULT_BASE_URL;
+    }
 
-        // Per-request hint wins — the LLM-recommended language for this
-        // specific call. The setting is the default fallback when no
-        // hint is supplied (operators who set a default language expect
-        // it to apply to every recording without the LLM having to
-        // re-supply it).
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function resolveModel(array $settings): string
+    {
+        if (is_string($settings['model'] ?? null) && trim($settings['model']) !== '') {
+            return trim($settings['model']);
+        }
+        return self::DEFAULT_MODEL;
+    }
+
+    /**
+     * Per-request hint wins — the LLM-recommended language for this
+     * specific call. The setting is the default fallback when no hint
+     * is supplied (operators who set a default language expect it to
+     * apply to every recording without the LLM having to re-supply it).
+     *
+     * @param array<string, mixed> $settings
+     */
+    private function resolveLanguage(array $settings, ?string $languageHint): string
+    {
         $language = $languageHint ?? '';
-        if ($language === '') {
-            $configuredLang = is_string($settings['language'] ?? null) ? trim($settings['language']) : '';
-            $language = $configuredLang;
-        }
-
-        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
-        $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
-
-        $url = $baseUrl . '/audio/transcriptions';
-
-        $body = ['file' => $this->wrapAsUpload($bytes, $mimeType), 'model' => $model];
         if ($language !== '') {
-            $body['language'] = $language;
+            return $language;
         }
+        return is_string($settings['language'] ?? null) ? trim($settings['language']) : '';
+    }
 
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private function resolveTimeout(array $settings): int
+    {
+        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
+        return is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
+    }
+
+    /**
+     * @param array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int} $request
+     * @return array<string, mixed>
+     */
+    private function sendTranscribeRequest(array $request): array
+    {
         try {
-            $response = $this->http->request('POST', $url, [
-                'headers' => ['Authorization' => 'Bearer ' . $apiKey],
-                'body'    => $body,
-                'timeout' => $timeout,
+            $response = $this->http->request('POST', $request['url'], [
+                'headers' => $request['headers'],
+                'body'    => $request['body'],
+                'timeout' => $request['timeout'],
             ]);
             $payload = $response->toArray(false);
         } catch (Throwable $e) {
@@ -219,6 +286,14 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
             throw $this->classifyHttpFailure($response->getStatusCode(), $payload);
         }
 
+        return $payload;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function parseTranscribePayload(array $payload): TranscriptionResult
+    {
         $text = is_string($payload['text'] ?? null) ? $payload['text'] : '';
         if ($text === '') {
             throw new InvalidAudioException(sprintf(
@@ -230,9 +305,8 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         $languageOut = isset($payload['language']) && is_string($payload['language'])
             ? $payload['language']
             : null;
-
         $durationMs = $this->extractDurationMs($payload);
-        $segments   = $this->extractSegments($payload);
+        $segments = $this->extractSegments($payload);
 
         return new TranscriptionResult(
             text: $text,
