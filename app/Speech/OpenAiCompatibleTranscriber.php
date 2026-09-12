@@ -388,9 +388,8 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         if (!isset($payload['segments']) || !is_array($payload['segments'])) {
             return [];
         }
-        /** @var list<mixed> $segments */
-        $segments = array_values($payload['segments']);
-        return $segments;
+        /** @var list<mixed> */
+        return array_values($payload['segments']);
     }
 
     /**
