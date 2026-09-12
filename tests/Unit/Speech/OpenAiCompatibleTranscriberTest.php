@@ -106,6 +106,22 @@ test('transcribe() Mistral wire: usage.prompt_audio_seconds × 1000 → duration
     expect($result->durationMs)->toBe(4200.0);
 });
 
+test('transcribe() accepts video/webm as audio-only WebM (MediaRecorder quirk)', function (): void {
+    // The W3C MediaRecorder spec labels audio-only WebM recordings as
+    // `video/webm` — the container is identical to a video WebM, only
+    // the track list differs. The server's byte sniffer cannot tell
+    // them apart, so we accept the container here and the multipart
+    // filename extension (`webm`) keeps every shipped STT vendor happy.
+    $provider = buildOaiProvider(
+        ['api_key' => 'sk-test', 'model' => 'whisper-1'],
+        json_encode(['text' => 'hello from audio-only webm']),
+    );
+
+    $result = $provider->transcribe('fake-bytes', 'video/webm');
+
+    expect($result->text)->toBe('hello from audio-only webm');
+});
+
 test('transcribe() OpenAI gpt-4o-transcribe wire: usage.seconds × 1000 → durationMs', function (): void {
     $provider = buildOaiProvider(
         ['api_key' => 'sk-test'],

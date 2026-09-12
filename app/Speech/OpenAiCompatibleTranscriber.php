@@ -332,11 +332,19 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * multipart filename. Mirrors the v1 plugins' coverage
      * (webm/ogg/mp4/wav/mpeg/flac) so the only MIME that fails is one
      * no STT vendor would accept anyway.
+     *
+     * The `video/webm` case is a deliberate exception: the W3C MediaRecorder
+     * spec labels audio-only WebM recordings as `video/webm` (the container
+     * is identical to a video WebM; only the track list differs), and the
+     * server's {@see \Spora\Services\MediaArchive\MimeSniffer} cannot tell
+     * the two apart at the byte level. We accept the container here so
+     * the audio-only recording survives the upload; the multipart
+     * filename extension (`webm`) keeps every shipped STT vendor happy.
      */
     private function extensionFor(string $mimeType): string
     {
         return match (strtolower($mimeType)) {
-            'audio/webm'                 => 'webm',
+            'audio/webm', 'video/webm'   => 'webm',
             'audio/ogg'                  => 'ogg',
             'audio/mp4', 'audio/x-m4a'   => 'm4a',
             'audio/wav', 'audio/x-wav'   => 'wav',

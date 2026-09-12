@@ -11,18 +11,32 @@ use Throwable;
 /**
  * Computes the dynamic set of MIME types accepted by the upload UI.
  *
- * Three sources, combined:
+ * Four sources, combined:
  *
  *  1. Static text allowlist — file types an LLM can read directly
  *     (TXT, MD, CSV, JSON, HTML, XML, YAML). Always allowed; the
  *     bytes are passed through via {@see PlainTextPassthroughConverter}.
  *
- *  2. Converter-supplied MIME types — every {@see MediaConverterInterface}
+ *  2. Static audio allowlist — the recording pipeline's input surface
+ *     (see {@see \Spora\Speech\OpenAiCompatibleTranscriber}). Always
+ *     allowed: audio bytes have no XSS or prompt-injection attack
+ *     surface at the byte level and storage size is the only concern
+ *     (same risk class as any other attachment). The list deliberately
+ *     includes `video/webm` because {@see https://w3c.github.io/mediacapture-record/}
+ *     MediaRecorder reports audio-only WebM recordings as `video/webm`
+ *     — there is no byte-level way for the sniffer to distinguish an
+ *     audio-only WebM track from a WebM that also carries a video
+ *     track, so the container is `video/webm` for both. We accept the
+ *     container and let the downstream STT provider handle the
+ *     audio-only-WebM case (see
+ *     {@see \Spora\Speech\OpenAiCompatibleTranscriber::extensionFor()}).
+ *
+ *  3. Converter-supplied MIME types — every {@see MediaConverterInterface}
  *     registered with {@see MediaConverterRegistry}. The PDF converter
  *     ships in core; plugins (e.g. a Word-DOCX plugin) extend this
  *     list automatically.
  *
- *  3. Configurable image MIME types — `image/*` is **additionally** allowed
+ *  4. Configurable image MIME types — `image/*` is **additionally** allowed
  *     when the requesting user's agent's LLM reports
  *     `LLMDriverInterface::supportsImageInput() === true`. The allowed
  *     extensions are resolved by the container from
@@ -66,6 +80,27 @@ final class MediaAllowedTypesService
     ];
 
     /**
+     * Static audio allowlist for the speech-to-text pipeline. Every MIME
+     * here feeds the upstream STT provider as multipart `file`; the byte
+     * is treated as opaque audio data by every shipped provider. The list
+     * deliberately includes `video/webm` for the MediaRecorder quirk
+     * noted on the class docblock — see there for the rationale before
+     * changing this set.
+     */
+    public const AUDIO_MIME_TYPES = [
+        'audio/webm',
+        'audio/ogg',
+        'audio/mp4',
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/wav',
+        'audio/x-wav',
+        'audio/x-m4a',
+        'audio/flac',
+        'video/webm',
+    ];
+
+    /**
      * @param list<string>|null $imageExtensions Resolved image extensions
      *        (e.g. `['png', 'jpeg', 'webp']`). null falls back to the
      *        built-in default. An empty array disables images entirely.
@@ -103,6 +138,9 @@ final class MediaAllowedTypesService
     {
         $set = [];
         foreach (self::TEXT_MIME_TYPES as $mime) {
+            $set[strtolower($mime)] = true;
+        }
+        foreach (self::AUDIO_MIME_TYPES as $mime) {
             $set[strtolower($mime)] = true;
         }
         foreach ($this->converters->allSupportedMimeTypes() as $mime) {
