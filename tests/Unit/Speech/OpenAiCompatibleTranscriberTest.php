@@ -13,22 +13,27 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 use Symfony\Contracts\HttpClient\ResponseStreamInterface;
 
 /**
- * Test-only decorator: captures the raw $options['multipart'] (and the
- * legacy `$options['body']` for any pre-multipart callers) before the
- * inner client runs prepareRequest() (which would convert the multipart
- * array into a streaming Closure and lose the field-level shape).
+ * Test-only decorator: captures the raw $options['body'] before the
+ * inner client runs prepareRequest() (which would convert the body
+ * into a streaming Closure and lose the field-level shape).
+ *
+ * Symfony's HttpClient emits `multipart/form-data` when any value in
+ * `$options['body']` is a PHP stream resource (fopen). Our
+ * `sendTranscribeRequest()` builds that array on the fly from the
+ * internal `multipart` descriptor — so what we capture here is the
+ * exact JSON Symfony will serialise.
  */
 final class OaiCapturingHttpClient implements HttpClientInterface
 {
-    public mixed $capturedMultipart = null;
+    public mixed $capturedBody = null;
     public ?string $capturedUrl = null;
 
     public function __construct(private HttpClientInterface $inner) {}
 
     public function request(string $method, string $url, array $options = []): ResponseInterface
     {
-        $this->capturedMultipart = $options['multipart'] ?? null;
-        $this->capturedUrl       = $url;
+        $this->capturedBody = $options['body'] ?? null;
+        $this->capturedUrl  = $url;
         return $this->inner->request($method, $url, $options);
     }
 
@@ -266,14 +271,17 @@ test('transcribe() lets the per-request hint win when both are set', function ()
 
     $provider->transcribe('fake-bytes', 'audio/webm', 'en-US');
 
-    // The hint wins — the multipart body must carry `language: en-US`,
-    // not the configured `fr-FR`. Now lives in `multipart` (not `body` —
-    // see the comment on `OpenAiCompatibleTranscriber::buildTranscribeRequest`).
-    expect($capturing->capturedMultipart)->toBeArray()
-        ->and($capturing->capturedMultipart)->toContainMultipartField('language', 'en-US');
+    // The hint wins — the body must carry `language: en-US`, not the
+    // configured `fr-FR`. After sendTranscribeRequest translates
+    // `multipart` → `body` with fopen(), the body has:
+    //   language => 'en-US' (scalar)
+    //   model    => 'whisper-1' (scalar)
+    //   file     => <resource> (fopen'd from the temp upload)
+    expect($capturing->capturedBody)->toBeArray()
+        ->and($capturing->capturedBody['language'])->toBe('en-US');
 });
 
-test('transcribe() with empty language setting and empty hint omits the language field from the multipart body', function (): void {
+test('transcribe() with empty language setting and empty hint omits the language field from the body', function (): void {
     $config = Mockery::mock(ToolConfigService::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn([
         'api_key'  => 'sk-test',
@@ -287,10 +295,10 @@ test('transcribe() with empty language setting and empty hint omits the language
     $result = $provider->transcribe('fake-bytes', 'audio/webm', null);
 
     expect($result->text)->toBe('ok');
-    expect($capturing->capturedMultipart)->toBeArray()
-        ->and($capturing->capturedMultipart)->not->toContainMultipartField('language')
-        ->and($capturing->capturedMultipart)->toContainMultipartField('model', 'whisper-1')
-        ->and($capturing->capturedMultipart)->toContainMultipartField('file', null, expect_path: true, expect_mime: 'audio/webm');
+    expect($capturing->capturedBody)->toBeArray()
+        ->and($capturing->capturedBody)->not->toHaveKey('language')
+        ->and($capturing->capturedBody['model'])->toBe('whisper-1')
+        ->and($capturing->capturedBody['file'])->toBeResource();
 });
 
 test('transcribe() POSTs to {base_url}/audio/transcriptions', function (): void {
@@ -310,20 +318,21 @@ test('transcribe() POSTs to {base_url}/audio/transcriptions', function (): void 
 });
 
 // Regression: Symfony's HttpClient interprets an array-valued `body`
-// option as `application/x-www-form-urlencoded`, which every STT vendor
-// rejects with `cannot carry files; use multipart/form-data`. The
-// pre-fix code passed `'body' => $body` with a `Symfony\...\UploadedFile`
-// in the array — Mistral (and OpenAI, Groq, et al.) replied 422. Pin
-// the fix: the HTTP descriptor uses `multipart`, never `body`, for the
-// file-carrying request.
-test('transcribe() uses the multipart option, never body (Symfony array-body is form-encoded)', function (): void {
+// option as `application/x-www-form-urlencoded` when every value is a
+// scalar — which every STT vendor rejects with `cannot carry files;
+// use multipart/form-data`. The trigger to switch to multipart is
+// ANY value being a PHP `resource` (Symfony's
+// `HttpClientTrait::normalizeBody` line 346). We pre-build a
+// `multipart` descriptor then translate to `body` with `fopen()`
+// on each file field at send-time. Pin both halves: the descriptor
+// stage and the body stage.
+test('transcribe() sends multipart via body + fopen() (Symfony switch to multipart/form-data)', function (): void {
     $config = Mockery::mock(ToolConfigService::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn([
         'api_key' => 'sk-test',
         'model'   => 'whisper-1',
     ]);
 
-    /** Captures the full $options array so we can assert against `body` AND `multipart`. */
     /** @var array<string, mixed> $capturedOptions */
     $capturedOptions = [];
     $mock = new MockHttpClient([new MockResponse(json_encode(['text' => 'ok']))]);
@@ -349,9 +358,19 @@ test('transcribe() uses the multipart option, never body (Symfony array-body is 
 
     $provider->transcribe('fake-bytes', 'audio/webm');
 
-    expect($capturedOptions)->toHaveKey('multipart');
-    expect($capturedOptions)->not->toHaveKey('body');
-    expect($capturedOptions['multipart'])->toBeArray();
+    expect($capturedOptions)->toHaveKey('body');
+    expect($capturedOptions['body'])->toBeArray();
+
+    // The file field is a real PHP stream resource — this is what flips
+    // Symfony's body normalizer from form-encoded to multipart.
+    expect($capturedOptions['body']['file'])->toBeResource();
+
+    // Text fields pass through as scalars.
+    expect($capturedOptions['body']['model'])->toBe('whisper-1');
+
+    // Sanity check: the descriptor's `multipart` doesn't leak through
+    // to the actual HTTP options (only `body` does).
+    expect($capturedOptions)->not->toHaveKey('multipart');
 });
 
 test('transcribe() uses the configured model verbatim', function (): void {
@@ -367,7 +386,7 @@ test('transcribe() uses the configured model verbatim', function (): void {
 
     $provider->transcribe('fake-bytes', 'audio/webm');
 
-    expect($capturing->capturedMultipart)->toContainMultipartField('model', 'voxtral-mini-latest');
+    expect($capturing->capturedBody['model'])->toBe('voxtral-mini-latest');
 });
 
 test('transcribe() sends Authorization: Bearer header (via body capture and the MockHttpClient)', function (): void {
@@ -406,76 +425,28 @@ test('transcribe() sends Authorization: Bearer header (via body capture and the 
 });
 
 /**
- * Pest custom expectations for the Symfony multipart shape we send:
+ * Pest custom expectation for the body shape Symfony emits when ANY
+ * value is a PHP stream resource — `HttpClientTrait::normalizeBody`
+ * auto-promotes the request to `multipart/form-data`. The
+ * OaiCapturingHttpClient test decorator captures `$body`, so:
  *
- *   multipart: [
- *     ['name' => 'file',  'contents' => '/tmp/...', 'filename' => 'recording.webm', 'contentType' => 'audio/webm'],
- *     ['name' => 'model', 'contents' => 'whisper-1'],
- *     ...
- *   ]
+ *   expect($capturing->capturedBody['file'])->toBeResource()
  *
- * `expect($multipart)->toContainMultipartField('model', 'voxtral-mini-latest')`:
- *   asserts a text part named `model` exists with `contents === 'voxtral-mini-latest'`.
- *
- * `expect($multipart)->toContainMultipartField('file', null, expect_path: true, expect_mime: 'audio/webm')`:
- *   asserts a file part named `file` exists, its `contents` is a real file path
- *   on disk, and the `contentType` matches `audio/webm`.
- *
- * Each branch always fires at least one Pest assertion (via `expect()`)
- * so the test counts as "made assertions" even when the match is
- * successful — direct `test()->fail()` calls weren't being counted
- * by Pest 2 as assertion traffic.
+ * is the canonical "this thing sends multipart" assertion, paired
+ * with the explicit regression test that asserts the same invariant
+ * (a guard against future regressions if someone removes the
+ * `fopen()` translation).
  */
-expect()->extend('toContainMultipartField', function (
-    string $name,
-    mixed $expectedContents = null,
-    bool $expect_path = false,
-    ?string $expect_mime = null,
-) {
-    /** @var list<array<string, mixed>>|mixed $parts */
-    $parts = $this->value;
-
-    expect($parts)->toBeArray();
-    /** @var list<array<string, mixed>> $parts */
-    $parts = $parts;
-
-    $matching = null;
-    foreach ($parts as $part) {
-        if (($part['name'] ?? null) === $name) {
-            $matching = $part;
-            break;
+expect()->extend('toHaveMultipartBody', function () {
+    /** @var array<string, mixed> $body */
+    $body = $this->value;
+    expect($body)->toBeArray();
+    foreach ($body as $name => $value) {
+        if (is_resource($value)) {
+            expect($name)->toBeString();
+            return $this;
         }
     }
-
-    expect($matching)->not->toBeNull("multipart part '{$name}' not present");
-
-    if ($expect_path === true) {
-        $contents = $matching['contents'] ?? null;
-        expect($contents)->toBeString("multipart part '{$name}' contents");
-        expect(file_exists((string) $contents))->toBeTrue(
-            "multipart part '{$name}' contents must be a real file path, got " . var_export($contents, true),
-        );
-        if ($expect_mime !== null) {
-            expect($matching['contentType'] ?? null)->toBe($expect_mime);
-        }
-        return $this;
-    }
-
-    expect($matching['contents'] ?? null)->toBe($expectedContents);
-    return $this;
-});
-
-expect()->extend('not->toContainMultipartField', function (string $name) {
-    /** @var list<array<string, mixed>>|mixed $parts */
-    $parts = $this->value;
-    expect($parts)->toBeArray();
-    /** @var list<array<string, mixed>> $parts */
-    $parts = $parts;
-
-    foreach ($parts as $part) {
-        if (($part['name'] ?? null) === $name) {
-            test()->fail("multipart part '{$name}' must not be present, found " . json_encode($part));
-        }
-    }
+    test()->fail('toHaveMultipartBody: no value in body was a PHP resource — Symfony will send the body as application/x-www-form-urlencoded, which Mistral rejects with `cannot carry files`.');
     return $this;
 });

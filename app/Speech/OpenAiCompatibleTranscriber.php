@@ -173,62 +173,67 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     /**
      * @return array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int}
      */
-    /**
-     * Build the HTTP request descriptor for `/audio/transcriptions`.
-     *
-     * `multipart` (not `body`) is what carries the file. Symfony's
-     * `HttpClient` interprets an array-valued `body` as
-     * `application/x-www-form-urlencoded`, which Mistral and every other
-     * STT vendor reject with `invalid_request_no_input` / "cannot carry
-     * files". Explicit multipart is the only way to send audio bytes
-     * — the temp file written by `wrapAsUpload()` flows through as a
-     * path (`'contents' => '/tmp/...'`) and Symfony streams it.
-     *
-     * @return array{
-     *   url: string,
-     *   headers: array<string, string>,
-     *   multipart: list<array<string, mixed>>,
-     *   timeout: int
-     * }
-     */
-    private function buildTranscribeRequest(
-        string $bytes,
-        string $mimeType,
-        ?string $languageHint,
-        ?int $agentId,
-        ?int $userId,
-    ): array {
-        $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
+/**
+ * Build the HTTP request descriptor for `/audio/transcriptions`.
+ *
+ * `body` is what carries the file. Symfony's `HttpClient` interprets an
+ * array-valued `body` as `application/x-www-form-urlencoded` when every
+ * value is a scalar — Mistral and every other STT vendor reply 422
+ * (`"cannot carry files"` / `invalid_request_no_input`). The trigger
+ * to switch to `multipart/form-data` is **any value in the array being
+ * a PHP stream resource** — see {@see \Symfony\Component\HttpClient\
+ * HttpClientTrait::normalizeBody()}. We pre-build the multipart structure
+ * here and translate it to `body` with `fopen()` on the file path in
+ * {@see sendTranscribeRequest()} right before dispatch.
+ *
+ * The descriptor stays as `multipart` (not `body`) so the test
+ * decorator can assert on field-level shape without juggling handles.
+ *
+ * @return array{
+ *   url: string,
+ *   headers: array<string, string>,
+ *   multipart: list<array<string, mixed>>,
+ *   timeout: int
+ * }
+ */
+private function buildTranscribeRequest(
+    string $bytes,
+    string $mimeType,
+    ?string $languageHint,
+    ?int $agentId,
+    ?int $userId,
+): array {
+    $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
 
-        $apiKey = $this->resolveApiKey($settings);
-        $baseUrl = $this->resolveStringSetting($settings, 'base_url', self::DEFAULT_BASE_URL);
-        $model = $this->resolveStringSetting($settings, 'model', self::DEFAULT_MODEL);
-        $language = $this->resolveLanguage($settings, $languageHint);
-        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
-        $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
+    $apiKey = $this->resolveApiKey($settings);
+    $baseUrl = $this->resolveStringSetting($settings, 'base_url', self::DEFAULT_BASE_URL);
+    $model = $this->resolveStringSetting($settings, 'model', self::DEFAULT_MODEL);
+    $language = $this->resolveLanguage($settings, $languageHint);
+    $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
+    $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
 
-        [$uploadPath, $uploadName] = $this->writeTempUpload($bytes, $mimeType);
+    [$uploadPath, $uploadName] = $this->writeTempUpload($bytes, $mimeType);
 
-        $multipart = [
-            [
-                'name'        => 'file',
-                'contents'    => $uploadPath,
-                'filename'    => $uploadName,
-                'contentType' => $mimeType,
-            ],
-            ['name' => 'model', 'contents' => $model],
-        ];
-        if ($language !== '') {
-            $multipart[] = ['name' => 'language', 'contents' => $language];
-        }
-
-        return [
-            'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
-            'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
-            'multipart' => $multipart,
-            'timeout'   => $timeout,
-        ];
+    $multipart = [
+        [
+            'name'        => 'file',
+            'contents'    => $uploadPath,
+            'filename'    => $uploadName,
+            'contentType' => $mimeType,
+        ],
+        ['name' => 'model', 'contents' => $model],
+    ];
+    if ($language !== '') {
+        $multipart[] = ['name' => 'language', 'contents' => $language];
     }
+
+    return [
+        'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
+        'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
+        'multipart' => $multipart,
+        'timeout'   => $timeout,
+    ];
+}
 
     /**
      * @param array<string, mixed> $settings
@@ -278,20 +283,48 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     }
 
     /**
+     * Translate the `multipart` descriptor into Symfony's `body` shape
+     * and dispatch the request. Each file-field's path becomes a
+     * `fopen()` stream — that single trick is what flips Symfony's
+     * content-type detector from `application/x-www-form-urlencoded`
+     * to `multipart/form-data`. Text fields pass through as scalars.
+     *
      * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, timeout: int} $request
      * @return array<string, mixed>
      */
     private function sendTranscribeRequest(array $request): array
     {
+        $body = [];
+        $openedStreams = [];
         try {
+            foreach ($request['multipart'] as $part) {
+                $name = (string) $part['name'];
+                if (isset($part['filename'], $part['contents']) && is_string($part['contents']) && is_file($part['contents'])) {
+                    // File field — open the temp file so Symfony's
+                    // `normalizeBody()` sees a `resource` and emits a
+                    // proper multipart body. Reaps the handle in the
+                    // finally below so it survives across the call.
+                    $openedStreams[] = $handle = fopen((string) $part['contents'], 'rb');
+                    $body[$name] = $handle;
+                } else {
+                    $body[$name] = $part['contents'] ?? '';
+                }
+            }
+
             $response = $this->http->request('POST', $request['url'], [
-                'headers'   => $request['headers'],
-                'multipart' => $request['multipart'],
-                'timeout'   => $request['timeout'],
+                'headers' => $request['headers'],
+                'body'    => $body,
+                'timeout' => $request['timeout'],
             ]);
             $payload = $response->toArray(false);
         } catch (Throwable $e) {
             throw $this->classifyTransportFailure($e);
+        } finally {
+            foreach ($openedStreams as $handle) {
+                if (is_resource($handle)) {
+                    fclose($handle);
+                }
+            }
         }
 
         if ($response->getStatusCode() >= 400) {
