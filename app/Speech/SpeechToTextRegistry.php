@@ -68,12 +68,17 @@ final readonly class SpeechToTextRegistry
         foreach ($this->providers as $provider) {
             $candidate = $provider instanceof OpenAiCompatibleTranscriber
                 ? $this->resolveOpenAiCompatibleProvider($provider, $agentId ?? 0, $userId)
-                : ($provider->isConfigured() ? $provider : null);
+                : $this->resolveGenericProvider($provider);
             if ($candidate !== null) {
                 return $candidate;
             }
         }
         return null;
+    }
+
+    private function resolveGenericProvider(SpeechToTextProviderInterface $provider): ?SpeechToTextProviderInterface
+    {
+        return $provider->isConfigured() ? $provider : null;
     }
 
     private function resolveOpenAiCompatibleProvider(
