@@ -18,10 +18,6 @@ parameters:
         - '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
         # Pest dynamic property access on TestCall (e.g. $userId, $agentId set by test)
         - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
-        # `expect()->extend(...)` is dynamic — Pest registers the method at
-        # runtime; PHPStan can't see the registration. Matches both the
-        # `to*` and the negated `not->to*` custom expectations.
-        - '#Call to an undefined method Pest\\(Expectations\\OppositeExpectation|Expectation<[^>]+>)::to[A-Z]#'
         # `test()->fail(...)` lives on Pest\TestCall via __call (see above).
         - '#Call to an undefined method Pest\\.*::fail\(\)#'
         # Capsule Manager __callStatic forwarding (migrations) — select / selectOne /
