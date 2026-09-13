@@ -60,6 +60,10 @@ use Spora\Speech\SpeechToTextRegistry;
  */
 final class SpeechProviderConfigService
 {
+    private const VALIDATION_SCOPE_GROUP_REQUIRES_GROUP_ID = 'scope "group" requires a positive "group_id".';
+    private const VALIDATION_SCOPE_UNKNOWN = 'scope must be either "global", "user", or "group".';
+    private const VALIDATION_SCOPE_PREFERENCE_UNKNOWN = 'scope must be either "user" or "group".';
+
     public function __construct(
         private readonly ToolConfigService $toolConfigService,
         private readonly SpeechToTextRegistry $registry,
@@ -105,8 +109,10 @@ final class SpeechProviderConfigService
                     scope: 'global',
                     settings: $this->toolConfigService->getGlobalSettings($provider::class),
                     principalId: null,
-                    createdAt: $this->fetchCreatedAt($provider::class, scope: 'global'),
-                    updatedAt: $this->fetchUpdatedAt($provider::class, scope: 'global'),
+                    timestamps: [
+                        'created_at' => $this->fetchCreatedAt($provider::class, scope: 'global'),
+                        'updated_at' => $this->fetchUpdatedAt($provider::class, scope: 'global'),
+                    ],
                     isDefault: (bool) ToolConfiguration::where('tool_class', $provider::class)->value('is_default'),
                 );
             }
@@ -129,8 +135,7 @@ final class SpeechProviderConfigService
                 scope: 'user',
                 settings: $decoded,
                 principalId: $principalId,
-                createdAt: $row->created_at,
-                updatedAt: $row->updated_at,
+                timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
                 isDefault: (bool) $row->is_default,
             );
         }
@@ -182,8 +187,7 @@ final class SpeechProviderConfigService
                 scope: 'group',
                 settings: $this->toolConfigService->getPrincipalSettings($toolClass, $principalId),
                 principalId: $principalId,
-                createdAt: $row->created_at,
-                updatedAt: $row->updated_at,
+                timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
                 isDefault: (bool) $row->is_default,
             );
         }
@@ -256,7 +260,7 @@ final class SpeechProviderConfigService
         if ($scope === 'group') {
             if ($groupId === null || $groupId <= 0) {
                 throw SpeechProviderConfigException::validation(
-                    'scope "group" requires a positive "group_id".',
+                    self::VALIDATION_SCOPE_GROUP_REQUIRES_GROUP_ID,
                 );
             }
             if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
@@ -268,7 +272,7 @@ final class SpeechProviderConfigService
         }
 
         throw SpeechProviderConfigException::validation(
-            'scope must be either "global", "user", or "group".',
+            self::VALIDATION_SCOPE_UNKNOWN,
         );
     }
 
@@ -298,8 +302,7 @@ final class SpeechProviderConfigService
             scope: 'global',
             settings: $this->toolConfigService->getGlobalSettings($providerClass),
             principalId: null,
-            createdAt: $this->fetchCreatedAt($providerClass, scope: 'global'),
-            updatedAt: $this->fetchUpdatedAt($providerClass, scope: 'global'),
+            timestamps: ["created_at" => $this->fetchCreatedAt($providerClass, scope: 'global'), "updated_at" => $this->fetchUpdatedAt($providerClass, scope: 'global')],
             isDefault: (bool) ToolConfiguration::where('tool_class', $providerClass)->value('is_default'),
         );
     }
@@ -328,8 +331,7 @@ final class SpeechProviderConfigService
             scope: 'user',
             settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
             principalId: $principalId,
-            createdAt: $row?->created_at,
-            updatedAt: $row?->updated_at,
+            timestamps: ["created_at" => $row?->created_at, "updated_at" => $row?->updated_at],
             isDefault: $row !== null ? (bool) $row->is_default : false,
         );
     }
@@ -358,8 +360,7 @@ final class SpeechProviderConfigService
             scope: 'group',
             settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
             principalId: $principalId,
-            createdAt: $row?->created_at,
-            updatedAt: $row?->updated_at,
+            timestamps: ["created_at" => $row?->created_at, "updated_at" => $row?->updated_at],
             isDefault: $row !== null ? (bool) $row->is_default : false,
         );
     }
@@ -416,8 +417,7 @@ final class SpeechProviderConfigService
             scope: 'global',
             settings: $this->toolConfigService->getGlobalSettings($providerClass),
             principalId: null,
-            createdAt: $row->created_at,
-            updatedAt: $row->updated_at,
+            timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
             isDefault: (bool) $row->is_default,
         );
     }
@@ -435,8 +435,7 @@ final class SpeechProviderConfigService
             scope: 'user',
             settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
             principalId: $principalId,
-            createdAt: $row->created_at,
-            updatedAt: $row->updated_at,
+            timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
             isDefault: (bool) $row->is_default,
         );
     }
@@ -611,111 +610,113 @@ final class SpeechProviderConfigService
     ): array {
         $this->validator->assertRegisteredProviderClass($providerClass);
 
-        $registeredSttClasses = $this->registeredSttClasses();
-
-        if ($scope === 'global') {
-            if (!$isAdmin) {
-                throw SpeechProviderConfigException::forbidden(
-                    'Only admins can mark a global speech provider configuration as default.',
-                );
-            }
-            if ($registeredSttClasses !== []) {
-                ToolConfiguration::whereIn('tool_class', $registeredSttClasses)
-                    ->where('is_default', true)
-                    ->update(['is_default' => false]);
-            }
-            $row = ToolConfiguration::where('tool_class', $providerClass)->first();
-            if ($row === null) {
-                throw SpeechProviderConfigException::notFound(
-                    "No global speech provider configuration exists for {$providerClass}; create one before marking it as default.",
-                );
-            }
-            $row->is_default = true;
-            $row->save();
-            return $this->buildConfigResource(
-                rowId: (int) $row->id,
-                providerClass: $providerClass,
-                scope: 'global',
-                settings: $this->toolConfigService->getGlobalSettings($providerClass),
-                principalId: null,
-                createdAt: $row->created_at,
-                updatedAt: $row->updated_at,
-                isDefault: true,
-            );
-        }
-
-        if ($scope === 'user') {
-            $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
-            if ($registeredSttClasses !== []) {
-                ToolUserSetting::where('principal_id', $principalId)
-                    ->whereIn('tool_class', $registeredSttClasses)
-                    ->where('is_default', true)
-                    ->update(['is_default' => false]);
-            }
-            $row = ToolUserSetting::where('principal_id', $principalId)
-                ->where('tool_class', $providerClass)
-                ->first();
-            if ($row === null) {
-                throw SpeechProviderConfigException::notFound(
-                    "No user-scope speech provider configuration exists for {$providerClass}; create one before marking it as default.",
-                );
-            }
-            $row->is_default = true;
-            $row->save();
-            return $this->buildConfigResource(
-                rowId: (int) $row->id,
-                providerClass: $providerClass,
+        return match ($scope) {
+            'global' => $this->setDefaultGlobalConfig($userId, $isAdmin, $providerClass),
+            'user'   => $this->setDefaultPrincipalConfig(
                 scope: 'user',
-                settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
-                principalId: $principalId,
-                createdAt: $row->created_at,
-                updatedAt: $row->updated_at,
-                isDefault: true,
-            );
-        }
-
-        if ($scope === 'group') {
-            if ($groupId === null || $groupId <= 0) {
-                throw SpeechProviderConfigException::validation(
-                    'scope "group" requires a positive "group_id".',
-                );
-            }
-            if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
-                throw SpeechProviderConfigException::forbidden(
-                    'Only group owners, group admins, or global admins can mark a group speech provider configuration as default.',
-                );
-            }
-            $principalId = $this->principalService->ensureGroupPrincipal($groupId)->id;
-            if ($registeredSttClasses !== []) {
-                ToolUserSetting::where('principal_id', $principalId)
-                    ->whereIn('tool_class', $registeredSttClasses)
-                    ->where('is_default', true)
-                    ->update(['is_default' => false]);
-            }
-            $row = ToolUserSetting::where('principal_id', $principalId)
-                ->where('tool_class', $providerClass)
-                ->first();
-            if ($row === null) {
-                throw SpeechProviderConfigException::notFound(
-                    "No group-scope speech provider configuration exists for {$providerClass}; create one before marking it as default.",
-                );
-            }
-            $row->is_default = true;
-            $row->save();
-            return $this->buildConfigResource(
-                rowId: (int) $row->id,
                 providerClass: $providerClass,
-                scope: 'group',
-                settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
-                principalId: $principalId,
-                createdAt: $row->created_at,
-                updatedAt: $row->updated_at,
-                isDefault: true,
+                principalId: $this->principalService->ensureUserPrincipal($userId)->id,
+            ),
+            'group'  => $this->setDefaultGroupConfig($userId, $isAdmin, $providerClass, $groupId),
+            default  => throw SpeechProviderConfigException::validation(
+                self::VALIDATION_SCOPE_UNKNOWN,
+            ),
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws SpeechProviderConfigException
+     */
+    private function setDefaultGlobalConfig(int $userId, bool $isAdmin, string $providerClass): array
+    {
+        if (!$isAdmin) {
+            throw SpeechProviderConfigException::forbidden(
+                'Only admins can mark a global speech provider configuration as default.',
             );
         }
+        $registeredSttClasses = $this->registeredSttClasses();
+        if ($registeredSttClasses !== []) {
+            ToolConfiguration::whereIn('tool_class', $registeredSttClasses)
+                ->where('is_default', true)
+                ->update(['is_default' => false]);
+        }
+        $row = ToolConfiguration::where('tool_class', $providerClass)->first();
+        if ($row === null) {
+            throw SpeechProviderConfigException::notFound(
+                "No global speech provider configuration exists for {$providerClass}; create one before marking it as default.",
+            );
+        }
+        $row->is_default = true;
+        $row->save();
+        return $this->buildConfigResource(
+            rowId: (int) $row->id,
+            providerClass: $providerClass,
+            scope: 'global',
+            settings: $this->toolConfigService->getGlobalSettings($providerClass),
+            principalId: null,
+            timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
+            isDefault: true,
+        );
+    }
 
-        throw SpeechProviderConfigException::validation(
-            'scope must be either "global", "user", or "group".',
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws SpeechProviderConfigException
+     */
+    private function setDefaultGroupConfig(int $userId, bool $isAdmin, string $providerClass, ?int $groupId): array
+    {
+        if ($groupId === null || $groupId <= 0) {
+            throw SpeechProviderConfigException::validation(
+                self::VALIDATION_SCOPE_GROUP_REQUIRES_GROUP_ID,
+            );
+        }
+        if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
+            throw SpeechProviderConfigException::forbidden(
+                'Only group owners, group admins, or global admins can mark a group speech provider configuration as default.',
+            );
+        }
+        return $this->setDefaultPrincipalConfig(
+            scope: 'group',
+            providerClass: $providerClass,
+            principalId: $this->principalService->ensureGroupPrincipal($groupId)->id,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws SpeechProviderConfigException
+     */
+    private function setDefaultPrincipalConfig(string $scope, string $providerClass, int $principalId): array
+    {
+        $registeredSttClasses = $this->registeredSttClasses();
+        if ($registeredSttClasses !== []) {
+            ToolUserSetting::where('principal_id', $principalId)
+                ->whereIn('tool_class', $registeredSttClasses)
+                ->where('is_default', true)
+                ->update(['is_default' => false]);
+        }
+        $row = ToolUserSetting::where('principal_id', $principalId)
+            ->where('tool_class', $providerClass)
+            ->first();
+        if ($row === null) {
+            throw SpeechProviderConfigException::notFound(
+                "No {$scope}-scope speech provider configuration exists for {$providerClass}; create one before marking it as default.",
+            );
+        }
+        $row->is_default = true;
+        $row->save();
+        return $this->buildConfigResource(
+            rowId: (int) $row->id,
+            providerClass: $providerClass,
+            scope: $scope,
+            settings: $this->toolConfigService->getPrincipalSettings($providerClass, $principalId),
+            principalId: $principalId,
+            timestamps: ["created_at" => $row->created_at, "updated_at" => $row->updated_at],
+            isDefault: true,
         );
     }
 
@@ -755,7 +756,7 @@ final class SpeechProviderConfigService
         } elseif ($scope === 'group') {
             if ($groupId === null || $groupId <= 0) {
                 throw SpeechProviderConfigException::validation(
-                    'scope "group" requires a positive "group_id".',
+                    self::VALIDATION_SCOPE_GROUP_REQUIRES_GROUP_ID,
                 );
             }
             if (!GroupService::callerCanManage($groupId, $userId, $isAdmin)) {
@@ -766,7 +767,7 @@ final class SpeechProviderConfigService
             $principalId = $this->principalService->ensureGroupPrincipal($groupId)->id;
         } else {
             throw SpeechProviderConfigException::validation(
-                'scope must be either "user" or "group".',
+                self::VALIDATION_SCOPE_PREFERENCE_UNKNOWN,
             );
         }
 
@@ -814,8 +815,7 @@ final class SpeechProviderConfigService
         string $scope,
         array $settings,
         ?int $principalId,
-        mixed $createdAt,
-        mixed $updatedAt,
+        array $timestamps,
         bool $isDefault = false,
     ): array {
         $masked = $this->toolConfigService->maskForApi($settings, $providerClass);
@@ -833,8 +833,8 @@ final class SpeechProviderConfigService
             'settings'               => $masked,
             'principal_id'           => $principalId,
             'is_default'             => $isDefault,
-            'created_at'             => $this->formatDateTime($createdAt),
-            'updated_at'             => $this->formatDateTime($updatedAt),
+            'created_at'             => $this->formatDateTime($timestamps['created_at'] ?? null),
+            'updated_at'             => $this->formatDateTime($timestamps['updated_at'] ?? null),
         ];
     }
 

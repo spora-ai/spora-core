@@ -46,6 +46,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SpeechProviderConfigController
 {
+    private const VALIDATION_GROUP_ID_REQUIRED = 'group_id must be a positive integer when scope="group".';
+    private const VALIDATION_GROUP_ID_FORBIDDEN = 'group_id may only be set when scope="group".';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $configService,
@@ -174,13 +177,13 @@ final class SpeechProviderConfigController
             if ($scope === 'group') {
                 if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
                     throw SpeechProviderConfigException::validation(
-                        'group_id must be a positive integer when scope="group".',
+                        self::VALIDATION_GROUP_ID_REQUIRED,
                     );
                 }
                 $groupId = $body['group_id'];
             } elseif (array_key_exists('group_id', $body)) {
                 throw SpeechProviderConfigException::validation(
-                    'group_id may only be set when scope="group".',
+                    self::VALIDATION_GROUP_ID_FORBIDDEN,
                 );
             }
 
@@ -318,13 +321,13 @@ final class SpeechProviderConfigController
             if ($scope === 'group') {
                 if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
                     throw SpeechProviderConfigException::validation(
-                        'group_id must be a positive integer when scope="group".',
+                        self::VALIDATION_GROUP_ID_REQUIRED,
                     );
                 }
                 $groupId = $body['group_id'];
             } elseif (array_key_exists('group_id', $body)) {
                 throw SpeechProviderConfigException::validation(
-                    'group_id may only be set when scope="group".',
+                    self::VALIDATION_GROUP_ID_FORBIDDEN,
                 );
             }
 
@@ -389,13 +392,13 @@ final class SpeechProviderConfigController
             if ($scope === 'group') {
                 if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
                     throw SpeechProviderConfigException::validation(
-                        'group_id must be a positive integer when scope="group".',
+                        self::VALIDATION_GROUP_ID_REQUIRED,
                     );
                 }
                 $groupId = $body['group_id'];
             } elseif (array_key_exists('group_id', $body)) {
                 throw SpeechProviderConfigException::validation(
-                    'group_id may only be set when scope="group".',
+                    self::VALIDATION_GROUP_ID_FORBIDDEN,
                 );
             }
 

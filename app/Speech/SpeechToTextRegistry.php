@@ -93,50 +93,88 @@ final readonly class SpeechToTextRegistry
         $userId ??= 0;
         $agentId ??= 0;
 
-        // Tier 1: agent override for any registered class.
+        $fromAgentOverride = $this->findProviderByAgentOverride($agentId, $userId);
+        if ($fromAgentOverride !== null) {
+            return $fromAgentOverride;
+        }
+
+        $fromPreference = $this->findProviderByPreferredClass($userId, $agentId);
+        if ($fromPreference !== null) {
+            return $fromPreference;
+        }
+
+        $fromGlobalDefault = $this->findProviderByGlobalDefault($agentId, $userId);
+        if ($fromGlobalDefault !== null) {
+            return $fromGlobalDefault;
+        }
+
+        return $this->findFirstConfiguredProvider($agentId, $userId);
+    }
+
+    private function findProviderByAgentOverride(int $agentId, int $userId): ?SpeechToTextProviderInterface
+    {
         foreach ($this->providers as $provider) {
             $class = $provider::class;
-            if (\Spora\Models\AgentToolOverride::where('agent_id', $agentId)
+            if (!\Spora\Models\AgentToolOverride::where('agent_id', $agentId)
                 ->where('tool_class', $class)
                 ->exists()
-                && $this->resolveConfigured($provider, $agentId, $userId) !== null
             ) {
-                return $provider;
+                continue;
             }
-        }
-
-        // Tiers 2 + 3: principal preference (user, then groups by joined_at ASC).
-        $preferredClass = $this->resolvePreferredClass($userId, $agentId);
-        if ($preferredClass !== null) {
-            foreach ($this->providers as $provider) {
-                if ($provider::class === $preferredClass
-                    && $this->resolveConfigured($provider, $agentId, $userId) !== null
-                ) {
-                    return $provider;
-                }
+            if ($this->resolveConfigured($provider, $agentId, $userId) === null) {
+                continue;
             }
+            return $provider;
         }
+        return null;
+    }
 
-        // Tier 4: global default (registered STT classes only).
+    private function findProviderByPreferredClass(int $userId, int $agentId): ?SpeechToTextProviderInterface
+    {
+        $preferredClass = $this->resolvePreferredClass($userId);
+        if ($preferredClass === null) {
+            return null;
+        }
+        foreach ($this->providers as $provider) {
+            if ($provider::class !== $preferredClass) {
+                continue;
+            }
+            if ($this->resolveConfigured($provider, $agentId, $userId) === null) {
+                continue;
+            }
+            return $provider;
+        }
+        return null;
+    }
+
+    private function findProviderByGlobalDefault(int $agentId, int $userId): ?SpeechToTextProviderInterface
+    {
         $registeredSttClasses = $this->registeredSttClasses();
-        if ($registeredSttClasses !== []) {
-            $defaultRow = \Spora\Models\ToolConfiguration::whereIn('tool_class', $registeredSttClasses)
-                ->where('is_default', true)
-                ->orderBy('id')
-                ->first();
-            if ($defaultRow !== null) {
-                $defaultClass = (string) $defaultRow->tool_class;
-                foreach ($this->providers as $provider) {
-                    if ($provider::class === $defaultClass
-                        && $this->resolveConfigured($provider, $agentId, $userId) !== null
-                    ) {
-                        return $provider;
-                    }
-                }
-            }
+        if ($registeredSttClasses === []) {
+            return null;
         }
+        $defaultRow = \Spora\Models\ToolConfiguration::whereIn('tool_class', $registeredSttClasses)
+            ->where('is_default', true)
+            ->orderBy('id')
+            ->first();
+        if ($defaultRow === null) {
+            return null;
+        }
+        $defaultClass = (string) $defaultRow->tool_class;
+        foreach ($this->providers as $provider) {
+            if ($provider::class !== $defaultClass) {
+                continue;
+            }
+            if ($this->resolveConfigured($provider, $agentId, $userId) === null) {
+                continue;
+            }
+            return $provider;
+        }
+        return null;
+    }
 
-        // Tier 5: existing first-configured-wins loop (unchanged).
+    private function findFirstConfiguredProvider(int $agentId, int $userId): ?SpeechToTextProviderInterface
+    {
         foreach ($this->providers as $provider) {
             if ($this->resolveConfigured($provider, $agentId, $userId) !== null) {
                 return $provider;
@@ -159,7 +197,7 @@ final readonly class SpeechToTextRegistry
      * has been deleted, and we mirror that here so a stale pointer
      * doesn't pick a half-configured provider.
      */
-    private function resolvePreferredClass(int $userId, int $agentId): ?string
+    private function resolvePreferredClass(int $userId): ?string
     {
         $registered = $this->registeredSttClasses();
         if ($registered === [] || $userId <= 0) {
@@ -361,15 +399,37 @@ final readonly class SpeechToTextRegistry
             return [null, 'fallback'];
         }
 
-        $userPreferred = \Spora\Models\PrincipalPreference::where('principal_id', $userPrincipalId)
-            ->value('preferred_speech_provider_class');
-        if (is_string($userPreferred)
-            && in_array($userPreferred, $registered, true)
-            && $this->userOrGroupRowExists($userPrincipalId, $userPreferred)
-        ) {
+        $userPreferred = $this->preferredClassForPrincipal($userPrincipalId, $registered);
+        if ($userPreferred !== null) {
             return [$userPreferred, 'user_preference'];
         }
 
+        $groupPreferred = $this->firstGroupPreferredClass($userId, $registered);
+        if ($groupPreferred !== null) {
+            return [$groupPreferred, 'group_preference'];
+        }
+
+        return [null, 'fallback'];
+    }
+
+    /**
+     * @param list<string> $registered
+     */
+    private function preferredClassForPrincipal(int $principalId, array $registered): ?string
+    {
+        $preferred = \Spora\Models\PrincipalPreference::where('principal_id', $principalId)
+            ->value('preferred_speech_provider_class');
+        if (!is_string($preferred) || !in_array($preferred, $registered, true)) {
+            return null;
+        }
+        return $this->userOrGroupRowExists($principalId, $preferred) ? $preferred : null;
+    }
+
+    /**
+     * @param list<string> $registered
+     */
+    private function firstGroupPreferredClass(int $userId, array $registered): ?string
+    {
         $groupRows = Capsule::table('group_memberships')
             ->join('principals', 'principals.group_id', '=', 'group_memberships.group_id')
             ->where('group_memberships.user_id', $userId)
@@ -380,17 +440,12 @@ final readonly class SpeechToTextRegistry
             ->get();
 
         foreach ($groupRows as $groupRow) {
-            $groupPreferred = \Spora\Models\PrincipalPreference::where('principal_id', $groupRow->principal_id)
-                ->value('preferred_speech_provider_class');
-            if (is_string($groupPreferred)
-                && in_array($groupPreferred, $registered, true)
-                && $this->userOrGroupRowExists((int) $groupRow->principal_id, $groupPreferred)
-            ) {
-                return [$groupPreferred, 'group_preference'];
+            $class = $this->preferredClassForPrincipal((int) $groupRow->principal_id, $registered);
+            if ($class !== null) {
+                return $class;
             }
         }
-
-        return [null, 'fallback'];
+        return null;
     }
 
     /**
