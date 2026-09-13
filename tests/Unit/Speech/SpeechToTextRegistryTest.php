@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Services\ToolConfigService;
 use Spora\Speech\InvalidAudioException;
 use Spora\Speech\OpenAiCompatibleTranscriber;
@@ -370,4 +371,198 @@ test('class-level provider without bindLabel() — registry skips the rebind (BC
 
     expect($rows[0]['name'])->toBe('stub-configured')
         ->and($rows[0]['display_name'])->toBe('Stub Configured');
+});
+
+test('configuredProvider() — Tier 1: agent override wins over the configured loop', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    // Effective settings are populated with an api_key so the OpenAiCompatible
+    // provider resolves as configured once the cascade reaches tier 1.
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'Override', 'api_key' => 'sk-agent',
+    ]);
+
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn(null);
+
+    // Insert an agent (FK target for agent_tool_overrides.agent_id) and
+    // an override row for OpenAiCompatibleTranscriber.
+    $ownerUserId = 11;
+    $ownerPrincipalId = createUserPrincipalPublic($ownerUserId);
+    $agentId = (int) Capsule::table('agents')->insertGetId([
+        'name'         => 'SpCAgent',
+        'principal_id' => $ownerPrincipalId,
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    Capsule::table('agent_tool_overrides')->insert([
+        'agent_id'   => $agentId,
+        'tool_class' => OpenAiCompatibleTranscriber::class,
+        'settings'   => '{"display_name":"Agent Override","api_key":"sk-agent"}',
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver, $principalService);
+
+    expect($registry->configuredProvider(null, $agentId))->toBe($oai);
+});
+
+test('configuredProvider() — Tier 2: user preference used when no agent override', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'User pref', 'api_key' => 'sk-user',
+    ]);
+
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn(null);
+
+    $userId = 7;
+    $userPrincipalId = createUserPrincipalPublic($userId);
+
+    // User-scope row for OpenAiCompatibleTranscriber exists.
+    Capsule::table('tool_user_settings')->insert([
+        'principal_id' => $userPrincipalId,
+        'tool_class'   => OpenAiCompatibleTranscriber::class,
+        'settings'     => '{"display_name":"User pref","api_key":"sk-user"}',
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    // User preference points at OpenAiCompatibleTranscriber.
+    Capsule::table('principal_preferences')->insert([
+        'principal_id'                    => $userPrincipalId,
+        'preferred_speech_provider_class' => OpenAiCompatibleTranscriber::class,
+        'created_at'                      => date('Y-m-d H:i:s'),
+        'updated_at'                      => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver, $principalService);
+
+    expect($registry->configuredProvider($userId, null))->toBe($oai);
+});
+
+test('configuredProvider() — Tier 3: group preference used when no user preference', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'Group pref', 'api_key' => 'sk-group',
+    ]);
+
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn(null);
+
+    $userId = 7;
+    createUserPrincipalPublic($userId);
+    $ownerUserId = 8;
+    createUserPrincipalPublic($ownerUserId);
+
+    // Owner creates a group and adds user 7 as a member.
+    $groupService = new Spora\Services\GroupService($principalService);
+    $group = $groupService->createGroup($ownerUserId, 'SpCGrpReg');
+    $groupService->addMember((int) $group->id, $userId, Spora\Models\GroupMembership::ROLE_MEMBER, $ownerUserId);
+
+    $groupPrincipalId = (int) Capsule::table('principals')
+        ->where('type', Spora\Models\Principal::TYPE_GROUP)
+        ->where('group_id', $group->id)
+        ->value('id');
+
+    // Group-scope row for OpenAiCompatibleTranscriber exists.
+    Capsule::table('tool_user_settings')->insert([
+        'principal_id' => $groupPrincipalId,
+        'tool_class'   => OpenAiCompatibleTranscriber::class,
+        'settings'     => '{"display_name":"Group pref","api_key":"sk-group"}',
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    // Group preference points at OpenAiCompatibleTranscriber.
+    Capsule::table('principal_preferences')->insert([
+        'principal_id'                    => $groupPrincipalId,
+        'preferred_speech_provider_class' => OpenAiCompatibleTranscriber::class,
+        'created_at'                      => date('Y-m-d H:i:s'),
+        'updated_at'                      => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver, $principalService);
+
+    expect($registry->configuredProvider($userId, null))->toBe($oai);
+});
+
+test('configuredProvider() — Tier 4: global is_default used when no preferences set', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([
+        'display_name' => 'Global default', 'api_key' => 'sk-global',
+    ]);
+    $config->shouldReceive('getGlobalSettings')->andReturn([
+        'display_name' => 'Global default', 'api_key' => 'sk-global',
+    ]);
+
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn(99);
+
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+
+    // Global row marked as default.
+    Capsule::table('tool_configurations')->insert([
+        'tool_class' => OpenAiCompatibleTranscriber::class,
+        'tool_name'  => 'openai_compatible',
+        'settings'   => '{"display_name":"Global default","api_key":"sk-global"}',
+        'is_default' => true,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver, $principalService);
+
+    expect($registry->configuredProvider(null, null))->toBe($oai);
+});
+
+test('configuredProvider() — Tier 5: first-configured-wins when nothing is set', function (): void {
+    $configured = new StubConfiguredProvider();
+    $unconfigured = new StubUnconfiguredProvider();
+
+    $registry = buildRegistry([$unconfigured, $configured]);
+
+    expect($registry->configuredProvider())->toBe($configured);
+});
+
+test('configuredProvider() — Tier 2/3 fall through when preferred class is unregistered', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn([]);
+    $config->shouldReceive('getGlobalSettings')->andReturn([]);
+
+    $idResolver = Mockery::mock(Spora\Services\ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')->andReturn(null);
+
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+
+    $userId = 9;
+    $userPrincipalId = createUserPrincipalPublic($userId);
+
+    // User preference points at an UNREGISTERED class.
+    Capsule::table('principal_preferences')->insert([
+        'principal_id'                    => $userPrincipalId,
+        'preferred_speech_provider_class' => 'SomeOld\\Class\\NotRegistered',
+        'created_at'                      => date('Y-m-d H:i:s'),
+        'updated_at'                      => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = new SpeechToTextRegistry([$oai], $config, $idResolver, $principalService);
+
+    // Tier 2/3 fall through; tier 4 has no global default; tier 5
+    // returns null because no provider is configured.
+    expect($registry->configuredProvider($userId, null))->toBeNull();
 });

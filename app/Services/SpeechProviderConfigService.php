@@ -640,6 +640,7 @@ final class SpeechProviderConfigService
                 principalId: null,
                 createdAt: $row->created_at,
                 updatedAt: $row->updated_at,
+                isDefault: true,
             );
         }
 
@@ -669,6 +670,7 @@ final class SpeechProviderConfigService
                 principalId: $principalId,
                 createdAt: $row->created_at,
                 updatedAt: $row->updated_at,
+                isDefault: true,
             );
         }
 
@@ -708,6 +710,7 @@ final class SpeechProviderConfigService
                 principalId: $principalId,
                 createdAt: $row->created_at,
                 updatedAt: $row->updated_at,
+                isDefault: true,
             );
         }
 

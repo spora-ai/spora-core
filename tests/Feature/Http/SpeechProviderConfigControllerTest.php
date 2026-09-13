@@ -723,3 +723,158 @@ describe('SpeechProviderConfigController — scope=group', function (): void {
             ->exists())->toBeFalse();
     });
 });
+
+describe('SpeechProviderConfigController — POST /set-default + PUT /preference', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+        Capsule::table('tool_user_settings')->delete();
+        Capsule::table('tool_configurations')->delete();
+        Capsule::table('principal_preferences')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('groups')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+    });
+
+    it('POST /set-default happy path (global admin)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-set-default@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+            'settings' => [
+                'api_key' => 'sk-default',
+                'display_name' => 'Default',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ],
+        ]));
+
+        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+        ]));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['is_default'])->toBeTrue();
+        expect(Capsule::table('tool_configurations')->where('is_default', true)->count())->toBe(1);
+    });
+
+    it('POST /set-default 403 (non-admin)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-set-default-403@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+        ]));
+        expect($resp->getStatusCode())->toBe(403);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+    });
+
+    it('POST /set-default 422 (unregistered class)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-set-default-422@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
+            'provider_class' => 'NotAReal\\Class',
+            'scope' => 'global',
+        ]));
+        expect($resp->getStatusCode())->toBe(404);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
+    });
+
+    it('PUT /preference happy path (self, scope=user)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-pref-user@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+        ]));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['preference']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
+        expect($body['data']['preference']['scope'])->toBe('user');
+    });
+
+    it('PUT /preference happy path (group admin, scope=group)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-pref-grp-owner@example.com', SPC_TEST_PASSWORD);
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCPrefGrp');
+
+        $resp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => (int) $group->id,
+        ]));
+        expect($resp->getStatusCode())->toBe(200);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['preference']['scope'])->toBe('group');
+        expect($body['data']['preference']['group_id'])->toBe((int) $group->id);
+    });
+
+    it('PUT /preference clears with null class', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-pref-clear@example.com', SPC_TEST_PASSWORD);
+
+        // Set first
+        $setResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+        ]));
+        expect($setResp->getStatusCode())->toBe(200);
+
+        // Then clear
+        $clearResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'provider_class' => null,
+            'scope' => 'user',
+        ]));
+        expect($clearResp->getStatusCode())->toBe(200);
+        $body = json_decode($clearResp->getContent(), true);
+        expect($body['data']['preference']['provider_class'])->toBeNull();
+    });
+
+    // Regression: register POST /provider-configs/set-default BEFORE any
+    // /provider-configs/{id} route. FastRoute's GroupCountBased dispatcher
+    // matches PUT /{id} against the literal path /provider-configs/set-default
+    // regardless of registration order (FastRoute returns FOUND with
+    // id="set-default"); the ordering matters so a future POST
+    // /provider-configs/{id} route addition doesn't accidentally match
+    // POST /set-default. This test pins the route table structure.
+    it('Route ordering — POST /provider-configs/set-default is registered before PUT /provider-configs/{id}', function (): void {
+        $collector = new \Spora\Core\MiddlewareRouteCollector(
+            new \FastRoute\RouteParser\Std(),
+            new \FastRoute\DataGenerator\GroupCountBased(),
+        );
+        \Spora\Core\SpeechRouteDefinitions::register($collector);
+        $routes = (new \Spora\OpenApi\RouteSpecCollector());
+        // Re-collect into the spec collector for inspection.
+        $spec = new \Spora\OpenApi\RouteSpecCollector();
+        \Spora\Core\SpeechRouteDefinitions::register($spec);
+
+        $specs = $spec->routes();
+        $setDefaultIndex = null;
+        $updateIndex = null;
+        foreach ($specs as $idx => $row) {
+            if ($row['method'] === 'POST' && $row['route'] === '/api/v1/speech/provider-configs/set-default') {
+                $setDefaultIndex = $idx;
+            }
+            if ($row['method'] === 'PUT' && $row['route'] === '/api/v1/speech/provider-configs/{id}') {
+                $updateIndex = $idx;
+            }
+        }
+        expect($setDefaultIndex)->not->toBeNull();
+        expect($updateIndex)->not->toBeNull();
+        expect($setDefaultIndex)->toBeLessThan($updateIndex);
+    });
+});

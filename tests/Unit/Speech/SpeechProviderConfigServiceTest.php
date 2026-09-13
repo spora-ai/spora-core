@@ -491,3 +491,202 @@ test('getConfig returns null for an unknown id', function (): void {
 
     expect($service->getConfig(1, true, 999_999))->toBeNull();
 });
+
+test('setDefaultConfig — clearing invariant: global admin promotes one row, second call clears the first', function (): void {
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldReceive('getGlobalSettings')->andReturn([
+        'display_name' => 'Mistral', 'api_key' => 'sk-x',
+        'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
+    ]);
+    $toolConfig->shouldReceive('maskForApi')->andReturnUsing(static fn(array $s): array => $s);
+
+    $idResolver = Mockery::mock(ToolConfigIdResolver::class);
+    $idResolver->shouldReceive('globalConfigId')
+        ->andReturnUsing(static fn(string $class): ?int => $class === OpenAiCompatibleTranscriber::class ? 1 : null);
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+        $idResolver,
+    );
+
+    Capsule::table('tool_configurations')->insert([
+        'tool_class'  => OpenAiCompatibleTranscriber::class,
+        'tool_name'   => 'openai_compatible',
+        'settings'    => '{}',
+        'is_default'  => false,
+        'created_at'  => date('Y-m-d H:i:s'),
+        'updated_at'  => date('Y-m-d H:i:s'),
+    ]);
+
+    $result = $service->setDefaultConfig(
+        userId: 1,
+        isAdmin: true,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'global',
+    );
+    expect($result['is_default'])->toBeTrue();
+    expect(Capsule::table('tool_configurations')->where('is_default', true)->count())->toBe(1);
+
+    // Second call should not clear-and-set to multiple is_default=true rows;
+    // it should still leave exactly one.
+    $service->setDefaultConfig(
+        userId: 1,
+        isAdmin: true,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'global',
+    );
+    expect(Capsule::table('tool_configurations')->where('is_default', true)->count())->toBe(1);
+});
+
+test('setDefaultConfig — 403 for non-admin on global', function (): void {
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldIgnoreMissing();
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    $service->setDefaultConfig(
+        userId: 1,
+        isAdmin: false,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'global',
+    );
+})->throws(SpeechProviderConfigException::class, 'admin');
+
+test('setDefaultConfig — 403 for non-member on group', function (): void {
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldIgnoreMissing();
+
+    // createGroup inserts into groups with FK to users; materialise both
+    // principals + users so the FK doesn't trip the test.
+    $ownerUserId = 100;
+    $nonMemberUserId = 101;
+    createUserPrincipalPublic($ownerUserId);
+    createUserPrincipalPublic($nonMemberUserId);
+
+    $groupService = new Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
+    $group = $groupService->createGroup($ownerUserId, 'SpCGrpSetDefault');
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    $service->setDefaultConfig(
+        userId: $nonMemberUserId,
+        isAdmin: false,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'group',
+        groupId: (int) $group->id,
+    );
+})->throws(SpeechProviderConfigException::class, 'group');
+
+test('setPreferredClass — self-only for scope=user', function (): void {
+    $userId = 5;
+    createUserPrincipalPublic($userId);
+
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldIgnoreMissing();
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    $result = $service->setPreferredClass(
+        userId: $userId,
+        isAdmin: false,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'user',
+    );
+
+    expect($result['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
+    expect($result['scope'])->toBe('user');
+    expect($result['group_id'])->toBeNull();
+    expect(Capsule::table('principal_preferences')
+        ->where('preferred_speech_provider_class', OpenAiCompatibleTranscriber::class)
+        ->count())->toBe(1);
+});
+
+test('setPreferredClass — clears preference when provider_class=null', function (): void {
+    $userId = 6;
+    createUserPrincipalPublic($userId);
+
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldIgnoreMissing();
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    // Set first
+    $service->setPreferredClass(
+        userId: $userId,
+        isAdmin: false,
+        providerClass: OpenAiCompatibleTranscriber::class,
+        scope: 'user',
+    );
+    expect(Capsule::table('principal_preferences')
+        ->where('preferred_speech_provider_class', OpenAiCompatibleTranscriber::class)
+        ->count())->toBe(1);
+
+    // Then clear
+    $result = $service->setPreferredClass(
+        userId: $userId,
+        isAdmin: false,
+        providerClass: null,
+        scope: 'user',
+    );
+    expect($result['provider_class'])->toBeNull();
+    expect(Capsule::table('principal_preferences')
+        ->where('preferred_speech_provider_class', OpenAiCompatibleTranscriber::class)
+        ->count())->toBe(0);
+});
+
+test('setPreferredClass — rejects unregistered class', function (): void {
+    $userId = 7;
+    createUserPrincipalPublic($userId);
+
+    $toolConfig = Mockery::mock(ToolConfigService::class);
+    $toolConfig->shouldIgnoreMissing();
+
+    $service = buildService(
+        $toolConfig,
+        new SpeechToTextRegistry(
+            [new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(ToolConfigService::class))],
+            $toolConfig,
+        ),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    $service->setPreferredClass(
+        userId: $userId,
+        isAdmin: false,
+        providerClass: 'NotAReal\\Class',
+        scope: 'user',
+    );
+})->throws(SpeechProviderConfigException::class);
