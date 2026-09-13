@@ -173,67 +173,67 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     /**
      * @return array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int}
      */
-/**
- * Build the HTTP request descriptor for `/audio/transcriptions`.
- *
- * `body` is what carries the file. Symfony's `HttpClient` interprets an
- * array-valued `body` as `application/x-www-form-urlencoded` when every
- * value is a scalar — Mistral and every other STT vendor reply 422
- * (`"cannot carry files"` / `invalid_request_no_input`). The trigger
- * to switch to `multipart/form-data` is **any value in the array being
- * a PHP stream resource** — see {@see \Symfony\Component\HttpClient\
- * HttpClientTrait::normalizeBody()}. We pre-build the multipart structure
- * here and translate it to `body` with `fopen()` on the file path in
- * {@see sendTranscribeRequest()} right before dispatch.
- *
- * The descriptor stays as `multipart` (not `body`) so the test
- * decorator can assert on field-level shape without juggling handles.
- *
- * @return array{
- *   url: string,
- *   headers: array<string, string>,
- *   multipart: list<array<string, mixed>>,
- *   timeout: int
- * }
- */
-private function buildTranscribeRequest(
-    string $bytes,
-    string $mimeType,
-    ?string $languageHint,
-    ?int $agentId,
-    ?int $userId,
-): array {
-    $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
+    /**
+     * Build the HTTP request descriptor for `/audio/transcriptions`.
+     *
+     * `body` is what carries the file. Symfony's `HttpClient` interprets an
+     * array-valued `body` as `application/x-www-form-urlencoded` when every
+     * value is a scalar — Mistral and every other STT vendor reply 422
+     * (`"cannot carry files"` / `invalid_request_no_input`). The trigger
+     * to switch to `multipart/form-data` is **any value in the array being
+     * a PHP stream resource** — see {@see \Symfony\Component\HttpClient\
+     * HttpClientTrait::normalizeBody()}. We pre-build the multipart structure
+     * here and translate it to `body` with `fopen()` on the file path in
+     * {@see sendTranscribeRequest()} right before dispatch.
+     *
+     * The descriptor stays as `multipart` (not `body`) so the test
+     * decorator can assert on field-level shape without juggling handles.
+     *
+     * @return array{
+     *   url: string,
+     *   headers: array<string, string>,
+     *   multipart: list<array<string, mixed>>,
+     *   timeout: int
+     * }
+     */
+    private function buildTranscribeRequest(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint,
+        ?int $agentId,
+        ?int $userId,
+    ): array {
+        $settings = $this->configService->getEffectiveSettings(self::class, $agentId ?? 0, $userId);
 
-    $apiKey = $this->resolveApiKey($settings);
-    $baseUrl = $this->resolveStringSetting($settings, 'base_url', self::DEFAULT_BASE_URL);
-    $model = $this->resolveStringSetting($settings, 'model', self::DEFAULT_MODEL);
-    $language = $this->resolveLanguage($settings, $languageHint);
-    $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
-    $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
+        $apiKey = $this->resolveApiKey($settings);
+        $baseUrl = $this->resolveStringSetting($settings, 'base_url', self::DEFAULT_BASE_URL);
+        $model = $this->resolveStringSetting($settings, 'model', self::DEFAULT_MODEL);
+        $language = $this->resolveLanguage($settings, $languageHint);
+        $timeoutRaw = $settings['http_timeout_seconds'] ?? (string) self::DEFAULT_TIMEOUT;
+        $timeout = is_numeric($timeoutRaw) ? (int) $timeoutRaw : self::DEFAULT_TIMEOUT;
 
-    [$uploadPath, $uploadName] = $this->writeTempUpload($bytes, $mimeType);
+        [$uploadPath, $uploadName] = $this->writeTempUpload($bytes, $mimeType);
 
-    $multipart = [
-        [
-            'name'        => 'file',
-            'contents'    => $uploadPath,
-            'filename'    => $uploadName,
-            'contentType' => $mimeType,
-        ],
-        ['name' => 'model', 'contents' => $model],
-    ];
-    if ($language !== '') {
-        $multipart[] = ['name' => 'language', 'contents' => $language];
+        $multipart = [
+            [
+                'name'        => 'file',
+                'contents'    => $uploadPath,
+                'filename'    => $uploadName,
+                'contentType' => $mimeType,
+            ],
+            ['name' => 'model', 'contents' => $model],
+        ];
+        if ($language !== '') {
+            $multipart[] = ['name' => 'language', 'contents' => $language];
+        }
+
+        return [
+            'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
+            'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
+            'multipart' => $multipart,
+            'timeout'   => $timeout,
+        ];
     }
-
-    return [
-        'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
-        'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
-        'multipart' => $multipart,
-        'timeout'   => $timeout,
-    ];
-}
 
     /**
      * @param array<string, mixed> $settings
