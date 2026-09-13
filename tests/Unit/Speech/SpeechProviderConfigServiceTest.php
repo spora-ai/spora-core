@@ -87,6 +87,14 @@ final class StubSpeechProviderWithSettings implements SpeechToTextProviderInterf
 }
 
 test('listConfigs returns every global config to an admin (one row per registered provider class)', function (): void {
+    // Materialise a user-principal for user 1 — the list endpoint now
+    // also walks the caller's own user-scope rows for admins (see
+    // `listConfigs` docblock: admins may keep a personal override
+    // alongside the global default). The test user has no user-scope
+    // row, so the user-scope loop yields nothing and the assertion of
+    // 1 row still holds.
+    createUserPrincipalPublic(1);
+
     $toolConfig = Mockery::mock(ToolConfigService::class);
     $toolConfig->shouldReceive('getGlobalSettings')
         ->andReturnUsing(static fn(string $class): array => $class === OpenAiCompatibleTranscriber::class

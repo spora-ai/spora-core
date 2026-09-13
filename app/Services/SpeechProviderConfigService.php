@@ -58,15 +58,12 @@ final class SpeechProviderConfigService
      * List the configs the caller can see.
      *
      *  - admin: every global config (one per registered provider class
-     *    that has a row in `tool_configurations`).
-     *  - non-admin: only the caller's own user-scoped configs (rows in
-     *    `tool_user_settings` whose `principal_id` matches the
-     *    caller's user-principal).
-     *
-     * The two scopes are exclusive — admins don't see per-user overrides
-     * via this endpoint, and non-admins don't see globals. The two UI
-     * surfaces (`Admin → Speech` and `User Settings → Speech`) call the
-     * same endpoint and let the auth flag filter.
+     *    that has a row in `tool_configurations`) PLUS the admin's own
+     *    user-scoped configs (rows in `tool_user_settings` keyed by the
+     *    admin's user-principal). Admins may keep a personal override
+     *    alongside the global default.
+     *  - non-admin: only the caller's own user-scoped configs. Non-admins
+     *    never see globals via this endpoint.
      *
      * When `$groupId` is provided, the list is narrowed to that group's
      * configs (admin/non-admin members can read their group's config;
@@ -98,9 +95,10 @@ final class SpeechProviderConfigService
                     updatedAt: $this->fetchUpdatedAt($provider::class, scope: 'global'),
                 );
             }
-            return $rows;
         }
 
+        // Both admins and non-admins see their own user-scope configs.
+        // Admins may want a personal override separate from the global default.
         $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
         $userRows = ToolUserSetting::where('principal_id', $principalId)->get();
         foreach ($userRows as $row) {
@@ -450,7 +448,7 @@ final class SpeechProviderConfigService
                 );
             }
             $existing = $this->toolConfigService->getGlobalSettings(
-                (string) $globalRow->tool_class
+                (string) $globalRow->tool_class,
             );
             $merged = array_merge($existing, $settings);
             return $this->upsertConfig($userId, $isAdmin, (string) $globalRow->tool_class, 'global', $merged);
@@ -466,7 +464,7 @@ final class SpeechProviderConfigService
 
             $existing = $this->toolConfigService->getPrincipalSettings(
                 (string) $userRow->tool_class,
-                $principalId
+                $principalId,
             );
             $merged = array_merge($existing, $settings);
 

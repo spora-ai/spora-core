@@ -343,12 +343,12 @@ describe('SpeechProviderConfigController', function (): void {
         expect($body['data']['config']['settings']['display_name'])->toBe('Mistral Voxtral (renamed)');
 
         // The stored key must be unchanged — confirm via direct service read.
-        $global = new \Spora\Services\ToolConfigService(
+        $global = new ToolConfigService(
             new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             new \Psr\Log\NullLogger(),
             [],
         );
-        $stored = $global->getGlobalSettings(\Spora\Speech\OpenAiCompatibleTranscriber::class);
+        $stored = $global->getGlobalSettings(OpenAiCompatibleTranscriber::class);
         expect($stored['api_key'])->toBe('sk-original');
         expect($stored['display_name'])->toBe('Mistral Voxtral (renamed)');
     });
@@ -358,6 +358,82 @@ describe('SpeechProviderConfigController', function (): void {
         // No session — currentUserId() returns null → requireUserId throws.
         $resp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
         expect($resp->getStatusCode())->toBe(403);
+    });
+
+    // Regression: an admin who creates a user-scope override (no auth
+    // check in upsertUserConfig) used to be unable to see it on the
+    // list endpoint — listConfigs short-circuited on the admin branch
+    // and returned only globals. Admins may want a personal override
+    // separate from the global default, so the endpoint now returns
+    // both for admins. Non-admins still see only their user-scope.
+    it('admin sees both globals and their own user-scope configs in the list', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-admin-mixed@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $globalResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+            'settings' => [
+                'api_key' => 'sk-global',
+                'display_name' => 'Global Mistral',
+                'base_url' => 'https://api.mistral.ai/v1',
+                'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($globalResp->getStatusCode())->toBe(200);
+
+        $userResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+            'settings' => [
+                'api_key' => 'sk-personal',
+                'display_name' => 'Personal Mistral',
+                'base_url' => 'https://api.mistral.ai/v1',
+                'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($userResp->getStatusCode())->toBe(200);
+        $userConfigId = json_decode($userResp->getContent(), true)['data']['config']['id'];
+
+        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
+        expect($listResp->getStatusCode())->toBe(200);
+        $list = json_decode($listResp->getContent(), true)['data']['configs'];
+
+        $scopes = array_column($list, 'scope');
+        expect($scopes)->toContain('global');
+        expect($scopes)->toContain('user');
+        expect(array_filter($list, static fn($c) => $c['id'] === $userConfigId))->not->toBeEmpty();
+    });
+
+    it('non-admin still does NOT see globals in the list', function (): void {
+        // Defensive: this describe block's afterEach clears tool_configurations
+        // and tool_user_settings, but a global could leak from a different
+        // test if execution order ever changed. Wipe both before asserting.
+        Capsule::table('tool_configurations')->delete();
+        Capsule::table('tool_user_settings')->delete();
+
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-nonadmin-still@example.com', SPC_TEST_PASSWORD);
+
+        $userResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+            'settings' => [
+                'api_key' => 'sk-personal',
+                'display_name' => 'Personal Mistral',
+                'base_url' => 'https://api.mistral.ai/v1',
+                'model' => 'voxtral-mini-latest',
+            ],
+        ]));
+        expect($userResp->getStatusCode())->toBe(200);
+
+        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
+        $list = json_decode($listResp->getContent(), true)['data']['configs'];
+
+        $scopes = array_column($list, 'scope');
+        expect($scopes)->not->toContain('global');
+        expect($scopes)->toContain('user');
     });
 });
 
