@@ -100,20 +100,17 @@ final class MediaArchiveGcCommand extends AbstractGcCommand
         $olderThanHours = (int) $input->getOption('older-than-hours');
         if ($temporary && $olderThanHours < 0) {
             $io->error('--older-than-hours must be >= 0');
-            return Command::FAILURE;
         }
 
         $parsed = $this->parseGcOptions($io, $input);
-        if ($parsed === null) {
+        if ($parsed === null || ($temporary && $olderThanHours < 0)) {
             return Command::FAILURE;
         }
         [$maxAgeDays, $dryRun] = $parsed;
 
-        if ($temporary) {
-            return $this->runTempSweep($io, $olderThanHours, $dryRun);
-        }
-
-        return $this->runOrphanSweep($io, $maxAgeDays, $dryRun);
+        return $temporary
+            ? $this->runTempSweep($io, $olderThanHours, $dryRun)
+            : $this->runOrphanSweep($io, $maxAgeDays, $dryRun);
     }
 
     /**
@@ -177,7 +174,6 @@ final class MediaArchiveGcCommand extends AbstractGcCommand
             ->where('created_at', '<=', $cutoff);
 
         $deleted = 0;
-        $kept    = 0;
         $errors  = 0;
 
         foreach ($query->cursor() as $asset) {
@@ -201,7 +197,7 @@ final class MediaArchiveGcCommand extends AbstractGcCommand
         }
 
         $io->success(sprintf(
-            '%s%d deleted, 0 kept, %d errors (temp older-than=%d hours, dry-run=%s)',
+            '%s%d deleted, %d errors (temp older-than=%d hours, dry-run=%s)',
             $dryRun ? '[dry-run] ' : '',
             $deleted,
             $errors,

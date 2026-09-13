@@ -136,6 +136,24 @@ test('up is idempotent — re-running does not raise on a partially migrated DB'
     expect(Capsule::schema()->hasColumn('agents', 'voice_message_retention_count'))->toBeTrue();
 });
 
+test('up backfills pre-existing agents with the default retention count', function (): void {
+    // Seed an agent *before* the migration runs so the row exists
+    // without `voice_message_retention_count`. Without the backfill
+    // the service would read NULL and the `?? 0` fallback would
+    // silently opt every pre-0081 agent out of auto-purge.
+    Capsule::table('agents')->insert([
+        'id'   => 42,
+        'name' => 'legacy-agent',
+    ]);
+
+    $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
+    $migration->up();
+
+    $row = Capsule::table('agents')->where('id', 42)->first();
+    expect($row)->not->toBeNull();
+    expect((int) $row->voice_message_retention_count)->toBe(5);
+});
+
 test('down drops the columns and index', function (): void {
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();

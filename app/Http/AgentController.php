@@ -268,13 +268,15 @@ final class AgentController
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
         $validationError = $this->validateAgentPatch($data);
-        if ($validationError instanceof JsonResponse) {
-            return $validationError;
-        }
-
         $picturePayload = $this->validateProfilePicturePayload($body);
-        if ($picturePayload instanceof JsonResponse) {
-            return $picturePayload;
+
+        // Both validators may produce a 422; the agents-row validator
+        // runs first so the precedence matches the previous short-
+        // circuit order. Consolidated into one guard so this method
+        // stays under the S1142 3-return ceiling.
+        $earlyExit = $validationError ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null);
+        if ($earlyExit !== null) {
+            return $earlyExit;
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);

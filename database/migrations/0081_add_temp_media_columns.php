@@ -35,14 +35,27 @@ use Illuminate\Database\Schema\Blueprint;
  *   column + CHECK as a single raw statement (same SQL grammar, no
  *   table rebuild).
  *
+ * Backfill:
+ *
+ *   The column is added with `DEFAULT 5`, but a default only applies
+ *   to rows inserted after the column lands. Agents that existed
+ *   before this migration ran keep `NULL` until something writes the
+ *   column — and `enforceTempRetention()` would treat that as the
+ *   "manual cleanup only" branch via the `?? 0` fallback, which would
+ *   silently opt every pre-0081 agent out of the auto-purge. The
+ *   explicit `UPDATE … WHERE voice_message_retention_count IS NULL`
+ *   applies the default to the legacy rows so the policy is consistent
+ *   across the whole table the moment the migration completes.
+ *
  * Idempotency:
  *
  *   Both columns and the index gate on `hasColumn` / `indexExists` so
  *   a re-run of this migration over a partially-applied schema is safe.
+ *   The backfill is unconditional but idempotent: a re-run on an
+ *   already-populated column finds no NULL rows and is a no-op.
  */
-return new class extends Migration
-{
-    use \Spora\Core\Database\MigrationHelpers;
+return new class extends Migration {
+    use Spora\Core\Database\MigrationHelpers;
 
     public function up(): void
     {
@@ -88,6 +101,15 @@ return new class extends Migration
                 );
             }
         }
+
+        // Backfill pre-existing agents with the column default. See
+        // the class-level note: without this, the legacy rows would
+        // surface `voice_message_retention_count = NULL` to the
+        // service, which the `?? 0` fallback would interpret as
+        // "operator opted out of auto-purge" — silent data drift.
+        Capsule::table('agents')
+            ->whereNull('voice_message_retention_count')
+            ->update(['voice_message_retention_count' => 5]);
     }
 
     public function down(): void

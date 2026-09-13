@@ -876,3 +876,29 @@ the per-agent override in `agent_tool_overrides` wins over group /
 user / global settings when set. Composers that don't know the active
 agent (e.g. a "New Chat" picker) omit the field; the cascade falls
 through as before.
+
+## Temporary-file media lifecycle
+
+### `POST /api/v1/media/{id}/keep`
+
+Pin a temp row as permanent so the per-(user, agent) retention sweep leaves it alone. Idempotent — calling on a non-temp row returns 200 without re-saving.
+
+- **Auth**: global admin OR asset owner (`asset.user_id == currentUserId`); non-owners receive 403, missing rows 404.
+- **Body**: empty.
+- **Response 200**: `{data: <MediaAsset with is_temporary=false>}`.
+
+### `POST /api/v1/media` — temp opt-in
+
+Accepts `is_temporary` (bool, default false) on the multipart form. When `is_temporary=true` AND `agent_id` is supplied, the upload controller runs `MediaArchiveService::enforceTempRetention()` to keep the (user, agent) temp set under `agents.voice_message_retention_count`.
+
+### `GET /api/v1/media` — include temp rows
+
+Adds `?include_temporary=true` to surface `is_temporary=TRUE` rows (hidden by default — temp voice transcripts crowd out the permanent grid). Operator CLI (`media:list`) sets `includeTemporary: true` by default.
+
+### `agents.voice_message_retention_count`
+
+Per-agent ceiling on temp rows for the (user, agent) pair. Defaults to 5; 0 disables auto-purge (operator must run `media:gc --temporary` or hit `/keep` per row). Range 0–100 (CHECK constraint, validated server-side at PATCH/POST with a 422).
+
+### `media:gc --temporary [--older-than-hours N]`
+
+Reaps `is_temporary=TRUE` rows older than N hours (default 24). Without `--temporary`, the command keeps its orphan-sweep semantics unchanged.
