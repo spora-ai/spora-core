@@ -22,17 +22,17 @@ use Spora\Services\ToolConfigService;
  * exposes {@see describe()} so a future per-agent picker UI can read the
  * available providers without changing this contract.
  *
- * Per-config label binding — only the core-shipped
- * {@see OpenAiCompatibleTranscriber} reads its `display_name` from the
- * operator's effective settings. The registry resolves the effective
- * config for the caller's user id (and optionally an agent id) and calls
- * {@see OpenAiCompatibleTranscriber::bindLabel()} once per
- * {@see describe()} / {@see configuredProvider()} call before reading
- * {@see SpeechToTextProviderInterface::getName()} /
- * {@see getDisplayName()}. Class-level providers (e.g. the Muse plugin's
- * `MuseTranscribeProvider`) keep their static `getName()` /
- * `getDisplayName()` because they have no `bindLabel()` method and the
- * registry's `instanceof` gate skips them.
+ * Per-config label binding — the registry resolves each provider's
+ * effective `display_name` setting (when declared) and calls
+ * {@see SpeechToTextProviderInterface::bindLabel()} once per
+ * {@see describe()} call before reading `getName()` /
+ * `getDisplayName()`. Both core-shipped {@see OpenAiCompatibleTranscriber}
+ * and class-level providers that opt in (via the optional `bindLabel()`
+ * method) participate; providers that don't declare a `display_name`
+ * `#[ToolSetting]` silently fall through to their class-level defaults.
+ * No-`bindLabel()` providers (e.g. {@see MuseTranscribeProvider} before
+ * the meta-Muse plugin update) keep their static `getName()` /
+ * `getDisplayName()` because the `method_exists` gate skips them.
  */
 final readonly class SpeechToTextRegistry
 {
@@ -101,8 +101,9 @@ final readonly class SpeechToTextRegistry
      * Each row is `{name, display_name, configured, has_global_default, config_id}`.
      *
      *  - `name` / `display_name` reflect the resolved per-config label
-     *    for {@see OpenAiCompatibleTranscriber} and the class-level
-     *    `getName()` / `getDisplayName()` for everyone else.
+     *    for providers that opt into `bindLabel()` (via the optional
+     *    method on {@see SpeechToTextProviderInterface}), and the
+     *    class-level `getName()` / `getDisplayName()` for everyone else.
      *  - `configured` is true when the resolved config has a non-empty
      *    `api_key` (OpenAI-compatible) or when `isConfigured()` returns
      *    true (class-level).
@@ -126,7 +127,7 @@ final readonly class SpeechToTextRegistry
         foreach ($this->providers as $provider) {
             $rows[] = $provider instanceof OpenAiCompatibleTranscriber
                 ? $this->describeOpenAiCompatible($provider, $agentId ?? 0, $userId)
-                : $this->describeGeneric($provider);
+                : $this->describeGeneric($provider, $agentId ?? 0, $userId);
         }
         return $rows;
     }
@@ -158,10 +159,29 @@ final readonly class SpeechToTextRegistry
      * `tool_configurations` so `has_global_default` and `config_id` stay
      * null/false on the wire shape.
      *
+     * If the provider implements an OPTIONAL `bindLabel(string $label)`
+     * method (any visibility — the registry uses `method_exists`), the
+     * resolved `display_name` ToolSetting — when declared and non-empty —
+     * is bound before reading `getName()` / `getDisplayName()` so the
+     * operator's per-config rename surfaces. Class-level providers that
+     * don't declare a `display_name` ToolSetting (or whose resolved value
+     * is empty) silently keep their class-level defaults — the bindLabel
+     * call is skipped for empty values so `bindLabel('')` doesn't blank
+     * the existing label.
+     *
      * @return array{name: string, display_name: string, configured: bool, has_global_default: bool, config_id: int|null}
      */
-    private function describeGeneric(SpeechToTextProviderInterface $provider): array
-    {
+    private function describeGeneric(
+        SpeechToTextProviderInterface $provider,
+        int $agentId,
+        int $userId,
+    ): array {
+        $settings = $this->configService->getEffectiveSettings($provider::class, $agentId, $userId);
+        $displayName = is_string($settings['display_name'] ?? null) ? trim($settings['display_name']) : '';
+        if ($displayName !== '' && method_exists($provider, 'bindLabel')) {
+            $provider->bindLabel($displayName);
+        }
+
         return [
             'name'               => $provider->getName(),
             'display_name'       => $provider->getDisplayName(),

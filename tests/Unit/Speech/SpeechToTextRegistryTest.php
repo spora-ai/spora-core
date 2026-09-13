@@ -67,6 +67,42 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
 }
 
 /**
+ * Class-level provider that opts into the optional bindLabel() hook so the
+ * registry can resolve a per-agent `display_name` ToolSetting — mirrors
+ * how {@see Spora\Plugins\Muse\MuseTranscribeProvider} does it.
+ */
+final class StubRelabelledProvider implements SpeechToTextProviderInterface
+{
+    private ?string $boundLabel = null;
+
+    public function getName(): string
+    {
+        return $this->boundLabel ?? 'relabelled';
+    }
+    public function getDisplayName(): string
+    {
+        return $this->boundLabel ?? 'Relabelled Provider';
+    }
+    public function isConfigured(): bool
+    {
+        return true;
+    }
+    public function bindLabel(string $label): void
+    {
+        $this->boundLabel = $label;
+    }
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
+        return new TranscriptionResult('stub');
+    }
+}
+
+/**
  * Build a registry factory: providers + a ToolConfigService mock that
  * returns the same settings for every (class, agentId, userId) tuple.
  *
@@ -286,4 +322,46 @@ test('describe() leaves config_id as null for class-level providers that never w
 
     expect($rows[0]['config_id'])->toBeNull()
         ->and($rows[0]['name'])->toBe('stub-configured');
+});
+
+test('class-level provider with bindLabel() — resolved display_name from settings overrides the class-level default', function (): void {
+    // Mirrors how the Muse plugin's MuseTranscribeProvider declares
+    // a `display_name` ToolSetting and the registry resolves per-agent
+    // effective settings before reading getDisplayName().
+    $provider = new StubRelabelledProvider();
+    $registry = buildRegistry([$provider], ['display_name' => 'Agent Muse Voice']);
+
+    $rows = $registry->describe(42, null);
+
+    expect($rows[0])->toBe([
+        'name'               => 'Agent Muse Voice',
+        'display_name'       => 'Agent Muse Voice',
+        'configured'         => true,
+        'has_global_default' => false,
+        'config_id'          => null,
+    ]);
+});
+
+test('class-level provider with bindLabel() — empty / whitespace display_name falls through to the class-level default', function (): void {
+    $provider = new StubRelabelledProvider();
+    $registry = buildRegistry([$provider], ['display_name' => '   ']);
+
+    $rows = $registry->describe(0, null);
+
+    expect($rows[0]['name'])->toBe('relabelled')
+        ->and($rows[0]['display_name'])->toBe('Relabelled Provider');
+});
+
+test('class-level provider without bindLabel() — registry skips the rebind (BC with existing class-level providers)', function (): void {
+    // StubConfiguredProvider does not implement bindLabel(). The
+    // registry's method_exists gate skips the call so the provider
+    // keeps its static names even when a `display_name` setting
+    // resolves from config.
+    $provider = new StubConfiguredProvider();
+    $registry = buildRegistry([$provider], ['display_name' => 'ignored']);
+
+    $rows = $registry->describe(0, null);
+
+    expect($rows[0]['name'])->toBe('stub-configured')
+        ->and($rows[0]['display_name'])->toBe('Stub Configured');
 });

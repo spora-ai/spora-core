@@ -23,16 +23,14 @@ namespace Spora\Speech;
  *    (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/mp4`,
  *    `audio/wav`, `audio/mpeg`) and reject unsupported MIME types via
  *    {@see InvalidAudioException}.
- *  - Configurable providers (see {@see OpenAiCompatibleTranscriber})
- *    expose a `bindLabel(string $label): void` method that the registry
- *    calls before reading {@see getName()} / {@see getDisplayName()} so
- *    the operator's per-config `display_name` overrides the class-level
- *    defaults. Class-level providers (`MuseTranscribeProvider`) do not
- *    expose this method; the registry gates the call on
- *    `instanceof OpenAiCompatibleTranscriber` and skips it for everything
- *    else. The label is reset on every `describe()` /
- *    `configuredProvider()` call so multi-tenant requests don't bleed
- *    labels across calls.
+ *  - Configurable providers may OPTIONALLY expose a
+ *    `bindLabel(string $label): void` method that the registry calls
+ *    before reading {@see getName()} / {@see getDisplayName()} so the
+ *    operator's per-config `display_name` `#[ToolSetting]` overrides
+ *    the class-level defaults. {@see SpeechToTextRegistry} gates the
+ *    call with `method_exists` so providers without `bindLabel()` keep
+ *    their static names. The label is rebound on every `describe()`
+ *    call so multi-tenant requests don't bleed labels across calls.
  */
 interface SpeechToTextProviderInterface
 {
