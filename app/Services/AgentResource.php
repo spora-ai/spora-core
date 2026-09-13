@@ -48,6 +48,12 @@ final class AgentResource
             'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
+            // Per-agent ceiling on temp rows in the Media Archive
+            // (`POST /api/v1/media` with `is_temporary=true` reaps the
+            // oldest rows once the (user, agent) count exceeds this
+            // value). 0 disables auto-purge — operator can still reap
+            // manually via `media:gc --temporary`. Migration 0081.
+            'voice_message_retention_count' => (int) ($agent->voice_message_retention_count ?? 0),
             'is_pinned'            => (bool) ($agent->is_pinned ?? false),
             'is_archived'          => (bool) ($agent->is_archived ?? false),
             // Per-viewer favourite: read from the context's pre-loaded pivot

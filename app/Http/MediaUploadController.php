@@ -71,6 +71,7 @@ final class MediaUploadController
         }
 
         $prompt = $request->request->get('prompt');
+        $isTemporary = $this->parseBool($request->request->get('is_temporary'));
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
@@ -84,7 +85,17 @@ final class MediaUploadController
             tags: Utf8Sanitizer::scrub($this->parseJsonArray($request->request->get('tags'))),
             metadata: Utf8Sanitizer::scrub($this->parseJsonObject($request->request->get('metadata'))),
             uploadSource: 'upload',
+            isTemporary: $isTemporary,
         ));
+
+        // Real-time retention purge: only when the caller flagged the
+        // row as temp AND attached an agent_id. Direct uploads to the
+        // dashboard never hit this path (no agent context). Errors are
+        // swallowed because the upload itself succeeded — the purge is
+        // an opportunistic sweep, not a precondition for the response.
+        if ($isTemporary && $agentId !== null) {
+            $this->mediaArchive->enforceTempRetention($userId, $agentId, $asset->id);
+        }
 
         return new JsonResponse(
             ['data' => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? ''))],
@@ -191,6 +202,22 @@ final class MediaUploadController
             return null;
         }
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Coerce the multipart `is_temporary` flag to a strict bool. Forms
+     * ship 'true' / 'false' / '1' / '0'; `FILTER_VALIDATE_BOOLEAN`
+     * normalises both to a real bool regardless of transport. Anything
+     * else (missing key, null, typo) falls back to `false` so a
+     * permissive caller doesn't accidentally trip the retention purge.
+     */
+    private function parseBool(mixed $raw): bool
+    {
+        if ($raw === null) {
+            return false;
+        }
+        $normalised = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        return $normalised ?? false;
     }
 
     private function error(int $status, string $code, string $message): JsonResponse

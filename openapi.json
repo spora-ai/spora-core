@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-23-gf94b1825"
+        "version": "0.23.0-42-gf4724b16"
     },
     "servers": [
         {
@@ -2548,6 +2548,37 @@
                         }
                     }
                 },
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/media/{id}/keep": {
+            "post": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Keep KeepMedia",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

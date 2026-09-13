@@ -27,6 +27,7 @@ use Throwable;
  * @property bool $allow_followup
  * @property int $retry_after_minutes
  * @property int $max_retries
+ * @property int $voice_message_retention_count
  * @property bool $is_pinned
  * @property bool $is_archived
  * @property string|null $notes
@@ -57,6 +58,7 @@ final class Agent extends Model
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
+        'voice_message_retention_count',
         'is_pinned',
         'is_archived',
         'notes',
@@ -68,6 +70,9 @@ final class Agent extends Model
         'principal_id' => 'integer',
         'llm_driver_config_id' => 'integer',
         'allow_followup' => 'boolean',
+        'retry_after_minutes' => 'integer',
+        'max_retries' => 'integer',
+        'voice_message_retention_count' => 'integer',
         'is_pinned' => 'boolean',
         'is_archived' => 'boolean',
         'created_at' => 'datetime',

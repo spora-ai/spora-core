@@ -37,6 +37,7 @@ use Spora\Services\MediaArchive\MediaType;
  * @property string|null                            $public_access_token
  * @property string|null                            $payload
  * @property string|null                            $upload_source
+ * @property bool                                   $is_temporary
  * @property \Carbon\Carbon|null                    $created_at
  * @property \Carbon\Carbon|null                    $updated_at
  * @property Agent|null                             $agent
@@ -88,6 +89,7 @@ final class MediaAsset extends Model
         'payload',
         'migrated_from_inline_data_url',
         'upload_source',
+        'is_temporary',
     ];
 
     /**
@@ -108,6 +110,7 @@ final class MediaAsset extends Model
         'tags'                           => 'array',
         'metadata'                       => 'array',
         'migrated_from_inline_data_url'  => 'boolean',
+        'is_temporary'                   => 'boolean',
     ];
 
     /** @var string */

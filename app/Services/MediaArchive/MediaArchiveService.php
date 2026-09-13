@@ -210,6 +210,14 @@ final class MediaArchiveService
         if ($query->to !== null) {
             $builder->where('created_at', '<=', Carbon::instance(DateTime::createFromInterface($query->to)));
         }
+        if (!$query->includeTemporary) {
+            // The composite index on (user_id, agent_id, is_temporary,
+            // created_at) covers the typical caller filter: a single user
+            // drilling into one agent's permanent history. The planner
+            // can use the `is_temporary` column without a full scan even
+            // when the leading user/agent predicates aren't present.
+            $builder->where('is_temporary', false);
+        }
         if ($query->search !== null && trim($query->search) !== '') {
             $term = '%' . trim($query->search) . '%';
             // Escape LIKE wildcards so user-typed terms do not act as SQL
@@ -257,11 +265,6 @@ final class MediaArchiveService
             return;
         }
         $asset->delete();
-    }
-
-    public function countForAgent(int $agentId): int
-    {
-        return MediaAsset::query()->where('agent_id', $agentId)->count();
     }
 
     /**
@@ -334,6 +337,92 @@ final class MediaArchiveService
     public function runConversionPipeline(MediaAsset $asset, string $bytes): void
     {
         $this->ingestPipeline->runConversionPipeline($asset, $bytes);
+    }
+
+    public function countForAgent(int $agentId): int
+    {
+        return MediaAsset::query()->where('agent_id', $agentId)->count();
+    }
+
+    /**
+     * Enforce the per-(user, agent) temp-row retention ceiling in
+     * real-time as part of `POST /api/v1/media`. Called by the upload
+     * controller immediately after a temp ingest succeeds.
+     *
+     * The contract:
+     *   - Read `agents.voice_message_retention_count`. If `0`, return
+     *     immediately: an agent with `0` opted out of auto-purge, so
+     *     temp rows accumulate until the operator runs `media:gc` or
+     *     the user hits the `/keep` endpoint.
+     *   - Otherwise, count existing temp rows for the (user, agent)
+     *     pair excluding the just-uploaded asset, and if the count
+     *     exceeds the ceiling, DELETE the oldest rows so the resulting
+     *     temp count equals `voice_message_retention_count`.
+     *
+     * Returns the number of rows deleted so the caller (and tests) can
+     * assert the purge happened. Errors are swallowed because purge is
+     * opportunistic — a failed DELETE on the cleanup side shouldn't
+     * fail the upload the user just made.
+     *
+     * @param int|null $userId  The uploading user (null = unattributed
+     *                          direct call; matches on `user_id IS NULL`).
+     * @param int|null $agentId The destination agent (null = chat-attached
+     *                          row with no agent; matches on `agent_id IS NULL`).
+     * @param string   $newAssetId  Just-uploaded row to exclude from the
+     *                              cleanup sweep so the new upload survives
+     *                              its own ingest.
+     */
+    public function enforceTempRetention(?int $userId, ?int $agentId, string $newAssetId): int
+    {
+        if ($agentId === null) {
+            // No agent context = no retention policy to enforce. The
+            // (user-only) temp rows fall outside the (user, agent) purge
+            // and are only reaped by `media:gc --temporary`.
+            return 0;
+        }
+
+        $agent = Agent::query()->find($agentId);
+        if ($agent === null) {
+            return 0;
+        }
+        $retention = (int) ($agent->voice_message_retention_count ?? 0);
+        if ($retention <= 0) {
+            // 0 = manual cleanup only. Operator opted out of auto-purge.
+            return 0;
+        }
+
+        $base = Capsule::table('media_assets')
+            ->where('user_id', $userId)
+            ->where('agent_id', $agentId)
+            ->where('is_temporary', true)
+            ->where('id', '!=', $newAssetId);
+
+        $existing = (int) $base->count();
+        // The contract: if `existing >= retention`, the new upload
+        // pushed the (user, agent) temp set past the ceiling (existing
+        // doesn't count the new row, so `existing == retention` still
+        // means the upload of #6 makes the total 6 and one purge is
+        // required to bring it back to `retention`). Stop only when
+        // `existing < retention` — the new upload fits inside the
+        // ceiling without touching the older rows.
+        if ($existing < $retention) {
+            return 0;
+        }
+
+        $excess = $existing - $retention + 1;
+        $oldestIds = (clone $base)
+            ->orderBy('created_at', 'asc')
+            ->limit($excess)
+            ->pluck('id')
+            ->all();
+
+        if ($oldestIds === []) {
+            return 0;
+        }
+
+        return (int) Capsule::table('media_assets')
+            ->whereIn('id', $oldestIds)
+            ->delete();
     }
 
     /**

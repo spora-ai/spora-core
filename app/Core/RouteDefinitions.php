@@ -21,6 +21,7 @@ use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
 use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
+use Spora\Http\KeepMediaController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
@@ -302,6 +303,10 @@ final class RouteDefinitions
         // this to resolve `task_history.attachments[*].media_id` references
         // to wire-shape `MediaAsset` payloads without N+1 round trips.
         $r->addRoute('POST', '/api/v1/media/resolve', [MediaResolveController::class, 'resolve'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // Pin a temp row as permanent so the (user, agent) retention sweep
+        // leaves it alone. Auth gate (admin OR owner) lives in
+        // {@see KeepMediaController::canEdit()}.
+        $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/keep', [KeepMediaController::class, 'keep'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Media derivatives — generic surface for any plugin (Typst, OCR,
         // …) to publish a derivative of a media asset. Generic on purpose:
