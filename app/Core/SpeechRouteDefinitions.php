@@ -32,6 +32,7 @@ use Spora\OpenApi\RouteSpecCollector;
  *   PUT    /api/v1/speech/provider-configs/{id}   — update a config (auth + CSRF)
  *   DELETE /api/v1/speech/provider-configs/{id}   — delete a config (auth + CSRF)
  *   PUT    /api/v1/speech/preference               — set / clear preferred STT class
+ *   GET    /api/v1/speech/preference               — read the current preference (auth only)
  */
 final class SpeechRouteDefinitions
 {
@@ -105,7 +106,14 @@ final class SpeechRouteDefinitions
 
         // "Preferred STT class" — a separate URL tree (no /provider-configs
         // prefix) so the {id} collision isn't a concern and there's no
-        // ordering constraint.
+        // ordering constraint. GET is auth-only (read); PUT carries CSRF
+        // because it writes to principal_preferences.
+        $r->addRoute(
+            'GET',
+            '/api/v1/speech/preference',
+            [SpeechProviderConfigController::class, 'getPreference'],
+            [AuthMiddleware::class],
+        );
         $r->addRoute(
             'PUT',
             '/api/v1/speech/preference',

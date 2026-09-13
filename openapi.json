@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-46-gaa7f2d58"
+        "version": "0.23.0-50-g0de5d663"
     },
     "servers": [
         {
@@ -2859,6 +2859,23 @@
             }
         },
         "/api/v1/speech/preference": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "GetPreference SpeechProviderConfig",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
             "put": {
                 "tags": [
                     "Speech"

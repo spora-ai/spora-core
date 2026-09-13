@@ -785,6 +785,77 @@ final class SpeechProviderConfigService
     }
 
     /**
+     * Read the caller's preferred speech provider class from
+     * `principal_preferences.preferred_speech_provider_class`. Mirrors
+     * {@see setPreferredClass()} but does not write — the SPA hydrates its
+     * `preferredSpeech` ref from this on every page load.
+     *
+     * Returns `provider_class: null` when no row exists yet, so the SPA
+     * can render the "Use global default" placeholder without a 404
+     * dance. Group-scope reads require membership (or global admin) to
+     * avoid leaking cross-tenant preference state.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws SpeechProviderConfigException on invalid scope or auth failure
+     */
+    public function getPreferredClass(
+        int $userId,
+        bool $isAdmin,
+        string $scope,
+        ?int $groupId = null,
+    ): array {
+        if ($scope === 'user') {
+            $principalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+        } elseif ($scope === 'group') {
+            if ($groupId === null || $groupId <= 0) {
+                throw SpeechProviderConfigException::validation(
+                    self::VALIDATION_SCOPE_GROUP_REQUIRES_GROUP_ID,
+                );
+            }
+            // Existence-hide for non-member non-admins, matching the
+            // `listGroupConfigs` invariant at line 144 — non-members must
+            // not be able to tell whether the group has a preference.
+            $isMember = \Illuminate\Database\Capsule\Manager::table('group_memberships')
+                ->where('group_id', $groupId)
+                ->where('user_id', $userId)
+                ->exists();
+            if (!$isMember && !$isAdmin) {
+                throw SpeechProviderConfigException::forbidden(
+                    'Only group members or global admins can read group-level preferred speech providers.',
+                );
+            }
+            $groupPrincipal = $this->principalService->principalForGroup($groupId);
+            if ($groupPrincipal === null) {
+                // Group has never been materialised — return an empty
+                // preference rather than 404 so the SPA renders the
+                // placeholder uniformly.
+                return [
+                    'principal_id'                    => null,
+                    'preferred_speech_provider_class' => null,
+                    'provider_class'                  => null,
+                    'scope'                           => $scope,
+                    'group_id'                        => $groupId,
+                ];
+            }
+            $principalId = (int) $groupPrincipal->id;
+        } else {
+            throw SpeechProviderConfigException::validation(
+                self::VALIDATION_SCOPE_PREFERENCE_UNKNOWN,
+            );
+        }
+
+        $row = PrincipalPreference::where('principal_id', $principalId)->first();
+        return [
+            'principal_id'                    => $principalId,
+            'preferred_speech_provider_class' => $row?->preferred_speech_provider_class,
+            'provider_class'                  => $row?->preferred_speech_provider_class,
+            'scope'                           => $scope,
+            'group_id'                        => $groupId,
+        ];
+    }
+
+    /**
      * Class names of every registered `SpeechToTextProviderInterface`.
      * Used by `setDefaultConfig` to scope the "clear every other
      * is_default=true row" so non-speech tool configs (e.g. LLM

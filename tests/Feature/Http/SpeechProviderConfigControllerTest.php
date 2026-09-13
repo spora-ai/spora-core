@@ -844,6 +844,65 @@ describe('SpeechProviderConfigController — POST /set-default + PUT /preference
         expect($body['data']['preference']['provider_class'])->toBeNull();
     });
 
+    it('GET /preference returns the stored preference (scope=user)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-get-pref-user@example.com', SPC_TEST_PASSWORD);
+
+        // No preference set yet — returns 200 with null provider_class so the SPA
+        // can render the placeholder without a 404 dance.
+        $emptyResp = $controller->getPreference(jsonSpcRequest('GET', '/api/v1/speech/preference?scope=user'));
+        expect($emptyResp->getStatusCode())->toBe(200);
+        $emptyBody = json_decode($emptyResp->getContent(), true);
+        expect($emptyBody['data']['preference']['provider_class'])->toBeNull();
+        expect($emptyBody['data']['preference']['scope'])->toBe('user');
+
+        // Set then read.
+        $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+        ]));
+        $filledResp = $controller->getPreference(jsonSpcRequest('GET', '/api/v1/speech/preference?scope=user'));
+        expect($filledResp->getStatusCode())->toBe(200);
+        $filledBody = json_decode($filledResp->getContent(), true);
+        expect($filledBody['data']['preference']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
+        expect($filledBody['data']['preference']['scope'])->toBe('user');
+    });
+
+    it('GET /preference rejects non-member when scope=group', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-get-pref-grp-owner@example.com', SPC_TEST_PASSWORD);
+        $outsiderId = bootAuth($auth, 'spc-get-pref-outsider@example.com', SPC_TEST_PASSWORD);
+
+        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerId, 'SpCGetPrefGrp');
+
+        // Switch session to the outsider without re-registering (re-registering
+        // would throw EmailTakenException).
+        clearSession();
+        simulateLoggedInSession($outsiderId, 'spc-get-pref-outsider@example.com');
+
+        $resp = $controller->getPreference(jsonSpcRequest(
+            'GET',
+            '/api/v1/speech/preference?scope=group&group_id=' . (int) $group->id,
+        ));
+        expect($resp->getStatusCode())->toBe(403);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+    });
+
+    it('GET /preference rejects stray group_id when scope=user', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-get-pref-stray@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->getPreference(jsonSpcRequest(
+            'GET',
+            '/api/v1/speech/preference?scope=user&group_id=42',
+        ));
+        expect($resp->getStatusCode())->toBe(422);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
+    });
+
     // Regression: register POST /provider-configs/set-default BEFORE any
     // /provider-configs/{id} route. FastRoute's GroupCountBased dispatcher
     // matches PUT /{id} against the literal path /provider-configs/set-default

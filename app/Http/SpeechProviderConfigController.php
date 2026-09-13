@@ -28,6 +28,11 @@ use Symfony\Component\HttpFoundation\Response;
  *   DELETE /api/v1/speech/provider-configs/{id}     — delete a config
  *   PUT    /api/v1/speech/preference               — set / clear the caller's preferred STT
  *                                                  class on principal_preferences
+ *   GET    /api/v1/speech/preference?scope=user|group[&group_id=N]
+ *                                              — read the current preference (auth-only,
+ *                                                returns {provider_class: null} when unset
+ *                                                so the SPA can render the placeholder
+ *                                                without a 404 dance)
  *
  * Storage rules (modeled in {@see SpeechProviderConfigService}):
  *   - `scope = 'global'` writes to `tool_configurations` (admin-only).
@@ -342,6 +347,87 @@ final class SpeechProviderConfigController
             return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
         }
         return new JsonResponse(['data' => ['config' => $config]]);
+    }
+
+    #[OA\Get(
+        path: '/api/v1/speech/preference',
+        summary: "Read the caller's preferred speech-to-text provider class",
+        parameters: [
+            new OA\Parameter(
+                name: 'scope',
+                in: 'query',
+                required: true,
+                schema: new OA\Schema(type: 'string', enum: ['user', 'group']),
+                description: 'Which principal scope to read.',
+            ),
+            new OA\Parameter(
+                name: 'group_id',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'integer'),
+                description: 'Required when scope="group". Names the group whose preference to read.',
+            ),
+        ],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'Current preference row',
+                content: new OA\JsonContent(
+                    properties: [
+                        new OA\Property(
+                            property: 'data',
+                            properties: [
+                                new OA\Property(
+                                    property: 'preference',
+                                    properties: [
+                                        new OA\Property(property: 'principal_id', type: 'integer', nullable: true),
+                                        new OA\Property(property: 'provider_class', type: 'string', nullable: true),
+                                        new OA\Property(property: 'scope', type: 'string'),
+                                        new OA\Property(property: 'group_id', type: 'integer', nullable: true),
+                                    ],
+                                    type: 'object',
+                                ),
+                            ],
+                            type: 'object',
+                        ),
+                    ],
+                ),
+            ),
+            new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
+            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
+        ],
+    )]
+    public function getPreference(Request $request): JsonResponse
+    {
+        try {
+            $userId = $this->requireUserId();
+            $isAdmin = $this->authService->isAdmin();
+
+            $scope = $this->stringField($request->query->all(), 'scope');
+            $groupId = null;
+            if ($scope === 'group') {
+                $groupId = $this->optionalIntQueryParam($request, 'group_id');
+                if ($groupId === null) {
+                    throw SpeechProviderConfigException::validation(
+                        self::VALIDATION_GROUP_ID_REQUIRED,
+                    );
+                }
+            } elseif ($request->query->has('group_id')) {
+                throw SpeechProviderConfigException::validation(
+                    self::VALIDATION_GROUP_ID_FORBIDDEN,
+                );
+            }
+
+            $preference = $this->configService->getPreferredClass(
+                userId: $userId,
+                isAdmin: $isAdmin,
+                scope: $scope,
+                groupId: $groupId,
+            );
+        } catch (SpeechProviderConfigException $e) {
+            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        }
+        return new JsonResponse(['data' => ['preference' => $preference]]);
     }
 
     #[OA\Put(
