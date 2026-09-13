@@ -151,8 +151,8 @@ test('describe() emits name + display_name + configured + has_global_default + c
     $registry = buildRegistry([$a, $b]);
 
     expect($registry->describe())->toBe([
-        ['name' => 'stub-configured',   'display_name' => 'Stub Configured',   'configured' => true,  'has_global_default' => false, 'config_id' => null],
-        ['name' => 'stub-unconfigured', 'display_name' => 'Stub Unconfigured', 'configured' => false, 'has_global_default' => false, 'config_id' => null],
+        ['name' => 'stub-configured',   'display_name' => 'Stub Configured',   'configured' => true,  'has_global_default' => false, 'config_id' => null, 'effective_class' => StubConfiguredProvider::class,   'effective_source' => 'fallback'],
+        ['name' => 'stub-unconfigured', 'display_name' => 'Stub Unconfigured', 'configured' => false, 'has_global_default' => false, 'config_id' => null, 'effective_class' => StubConfiguredProvider::class,   'effective_source' => 'fallback'],
     ]);
 });
 
@@ -181,6 +181,8 @@ test('OpenAiCompatibleTranscriber describe() binds the resolved display_name and
         'configured'         => true,
         'has_global_default' => false,
         'config_id'          => null,
+        'effective_class'    => OpenAiCompatibleTranscriber::class,
+        'effective_source'   => 'fallback',
     ]);
     expect($oai->getName())->toBe('Mistral Voxtral');
     expect($oai->getDisplayName())->toBe('Mistral Voxtral');
@@ -198,6 +200,8 @@ test('OpenAiCompatibleTranscriber describe() falls back to class-level defaults 
         'configured'         => false,
         'has_global_default' => false,
         'config_id'          => null,
+        'effective_class'    => OpenAiCompatibleTranscriber::class,
+        'effective_source'   => 'fallback',
     ]);
 });
 
@@ -339,6 +343,8 @@ test('class-level provider with bindLabel() — resolved display_name from setti
         'configured'         => true,
         'has_global_default' => false,
         'config_id'          => null,
+        'effective_class'    => StubRelabelledProvider::class,
+        'effective_source'   => 'fallback',
     ]);
 });
 

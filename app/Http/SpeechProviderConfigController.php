@@ -22,8 +22,12 @@ use Symfony\Component\HttpFoundation\Response;
  *                                                with group_id: that group's configs)
  *   GET    /api/v1/speech/provider-configs/schema   — provider-class picker schema
  *   POST   /api/v1/speech/provider-configs          — create or update a config (upsert)
+ *   POST   /api/v1/speech/provider-configs/set-default
+ *                                              — mark one config as the default at its scope
  *   PUT    /api/v1/speech/provider-configs/{id}     — update an existing config
  *   DELETE /api/v1/speech/provider-configs/{id}     — delete a config
+ *   PUT    /api/v1/speech/preference               — set / clear the caller's preferred STT
+ *                                                  class on principal_preferences
  *
  * Storage rules (modeled in {@see SpeechProviderConfigService}):
  *   - `scope = 'global'` writes to `tool_configurations` (admin-only).
@@ -272,6 +276,140 @@ final class SpeechProviderConfigController
             );
         }
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    #[OA\Post(
+        path: '/api/v1/speech/provider-configs/set-default',
+        summary: 'Mark a speech provider configuration as default at its scope',
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['provider_class', 'scope'],
+                properties: [
+                    new OA\Property(property: 'provider_class', type: 'string'),
+                    new OA\Property(property: 'scope', type: 'string', enum: ['global', 'user', 'group']),
+                    new OA\Property(
+                        property: 'group_id',
+                        type: 'integer',
+                        nullable: true,
+                        description: 'Required when scope="group".',
+                    ),
+                ],
+            ),
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Updated config (with is_default=true)'),
+            new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
+            new OA\Response(response: 404, description: 'SPEECH_PROVIDER_CONFIG_NOT_FOUND'),
+            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
+        ],
+    )]
+    public function setDefault(Request $request): JsonResponse
+    {
+        try {
+            $body = $this->decodeBody($request);
+            $userId = $this->requireUserId();
+            $isAdmin = $this->authService->isAdmin();
+
+            $providerClass = $this->stringField($body, 'provider_class');
+            $scope = $this->stringField($body, 'scope');
+
+            $groupId = null;
+            if ($scope === 'group') {
+                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+                    throw SpeechProviderConfigException::validation(
+                        'group_id must be a positive integer when scope="group".',
+                    );
+                }
+                $groupId = $body['group_id'];
+            } elseif (array_key_exists('group_id', $body)) {
+                throw SpeechProviderConfigException::validation(
+                    'group_id may only be set when scope="group".',
+                );
+            }
+
+            $config = $this->configService->setDefaultConfig(
+                userId: $userId,
+                isAdmin: $isAdmin,
+                providerClass: $providerClass,
+                scope: $scope,
+                groupId: $groupId,
+            );
+        } catch (SpeechProviderConfigException $e) {
+            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        }
+        return new JsonResponse(['data' => ['config' => $config]]);
+    }
+
+    #[OA\Put(
+        path: '/api/v1/speech/preference',
+        summary: "Set or clear the caller's preferred speech-to-text provider class",
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['scope'],
+                properties: [
+                    new OA\Property(property: 'provider_class', type: 'string', nullable: true),
+                    new OA\Property(property: 'scope', type: 'string', enum: ['user', 'group']),
+                    new OA\Property(
+                        property: 'group_id',
+                        type: 'integer',
+                        nullable: true,
+                        description: 'Required when scope="group".',
+                    ),
+                ],
+            ),
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Updated preference row'),
+            new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
+            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
+        ],
+    )]
+    public function setPreferred(Request $request): JsonResponse
+    {
+        try {
+            $body = $this->decodeBody($request);
+            $userId = $this->requireUserId();
+            $isAdmin = $this->authService->isAdmin();
+
+            $scope = $this->stringField($body, 'scope');
+            $providerClass = null;
+            if (array_key_exists('provider_class', $body) && $body['provider_class'] !== null) {
+                $raw = $body['provider_class'];
+                if (!is_string($raw) || $raw === '') {
+                    throw SpeechProviderConfigException::validation(
+                        'Field \'provider_class\' must be a non-empty string or null.',
+                    );
+                }
+                $providerClass = $raw;
+            }
+
+            $groupId = null;
+            if ($scope === 'group') {
+                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+                    throw SpeechProviderConfigException::validation(
+                        'group_id must be a positive integer when scope="group".',
+                    );
+                }
+                $groupId = $body['group_id'];
+            } elseif (array_key_exists('group_id', $body)) {
+                throw SpeechProviderConfigException::validation(
+                    'group_id may only be set when scope="group".',
+                );
+            }
+
+            $preference = $this->configService->setPreferredClass(
+                userId: $userId,
+                isAdmin: $isAdmin,
+                providerClass: $providerClass,
+                scope: $scope,
+                groupId: $groupId,
+            );
+        } catch (SpeechProviderConfigException $e) {
+            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        }
+        return new JsonResponse(['data' => ['preference' => $preference]]);
     }
 
     /**

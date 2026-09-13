@@ -100,6 +100,8 @@ test('capability reports available=true and configured=true when a configured pr
                 'configured'         => true,
                 'has_global_default' => false,
                 'config_id'          => null,
+                'effective_class'    => 'Tests\Feature\Http\CapConfiguredProvider',
+                'effective_source'   => 'fallback',
             ],
         ]);
 });

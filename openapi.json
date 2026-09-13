@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-42-gf4724b16"
+        "version": "0.23.0-46-gaa7f2d58"
     },
     "servers": [
         {
@@ -2776,6 +2776,28 @@
                 ]
             }
         },
+        "/api/v1/speech/provider-configs/set-default": {
+            "post": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "SetDefault SpeechProviderConfig",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
         "/api/v1/speech/provider-configs/{id}": {
             "put": {
                 "tags": [
@@ -2821,6 +2843,28 @@
                         }
                     }
                 ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/preference": {
+            "put": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "SetPreferred SpeechProviderConfig",
+                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

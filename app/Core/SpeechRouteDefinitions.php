@@ -24,8 +24,14 @@ use Spora\OpenApi\RouteSpecCollector;
  *   GET    /api/v1/speech/provider-configs        — list configs visible to caller
  *   GET    /api/v1/speech/provider-configs/schema — provider picker schema
  *   POST   /api/v1/speech/provider-configs        — upsert a config (auth + CSRF)
+ *   POST   /api/v1/speech/provider-configs/set-default
+ *                                              — mark one config as default at its scope
+ *                                                (MUST be registered BEFORE any
+ *                                                 /provider-configs/{id} route, so
+ *                                                 "set-default" is not parsed as {id})
  *   PUT    /api/v1/speech/provider-configs/{id}   — update a config (auth + CSRF)
  *   DELETE /api/v1/speech/provider-configs/{id}   — delete a config (auth + CSRF)
+ *   PUT    /api/v1/speech/preference               — set / clear preferred STT class
  */
 final class SpeechRouteDefinitions
 {
@@ -69,6 +75,21 @@ final class SpeechRouteDefinitions
             [SpeechProviderConfigController::class, 'store'],
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
+
+        // "Set as Default" lives at /provider-configs/set-default.
+        // CRITICAL ordering: this MUST be registered BEFORE any
+        // /provider-configs/{id} route — otherwise FastRoute parses the
+        // literal "set-default" segment as the {id} placeholder and the
+        // dedicated action never fires. PUT /api/v1/speech/provider-configs/set-default
+        // is unambiguous as long as no PUT route at this exact path
+        // exists; FastRoute falls back to the variable match in that case.
+        $r->addRoute(
+            'POST',
+            '/api/v1/speech/provider-configs/set-default',
+            [SpeechProviderConfigController::class, 'setDefault'],
+            [AuthMiddleware::class, CsrfMiddleware::class],
+        );
+
         $r->addRoute(
             'PUT',
             '/api/v1/speech/provider-configs/{id}',
@@ -79,6 +100,16 @@ final class SpeechRouteDefinitions
             'DELETE',
             '/api/v1/speech/provider-configs/{id}',
             [SpeechProviderConfigController::class, 'destroy'],
+            [AuthMiddleware::class, CsrfMiddleware::class],
+        );
+
+        // "Preferred STT class" — a separate URL tree (no /provider-configs
+        // prefix) so the {id} collision isn't a concern and there's no
+        // ordering constraint.
+        $r->addRoute(
+            'PUT',
+            '/api/v1/speech/preference',
+            [SpeechProviderConfigController::class, 'setPreferred'],
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
     }
