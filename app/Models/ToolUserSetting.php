@@ -19,6 +19,10 @@ use LogicException;
  * @property int         $id
  * @property int         $principal_id
  * @property string      $tool_class
+ * @property bool        $is_default  Service-enforced invariant: at most
+ *                                      one row per (`principal_id`,
+ *                                      `tool_class`) has `is_default = true`.
+ *                                      Mirrors the LLM `is_default` pattern.
  * @property string      $settings  (encrypted JSON; never access directly)
  * @property string|null $created_at
  * @property string|null $updated_at
@@ -33,6 +37,7 @@ final class ToolUserSetting extends Model
     protected $fillable = [
         'principal_id',
         'tool_class',
+        'is_default',
         'settings',
     ];
 
