@@ -23,10 +23,10 @@ use Spora\Speech\SpeechToTextRegistry;
  *   - {@see SpeechToTextRegistry} (read-only) for class discovery +
  *     effective-class resolution metadata
  *
- * Migration 0085 introduced `speech_provider_configurations` (the
- * speech mirror of `llm_driver_configurations`) and migration 0088
+ * Migration 0082 introduced `speech_provider_configurations` (the
+ * speech mirror of `llm_driver_configurations`) and migration 0084
  * swapped `preferred_speech_provider_class` for an FK — both are
- * unified into this surface.
+ * folded into the 0081-0084 unified migration block.
  *
  * Singleton scope is request-lifetime (the DI container builds a
  * fresh instance per resolve); the underlying SecurityManager /

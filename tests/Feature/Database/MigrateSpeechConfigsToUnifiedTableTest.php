@@ -8,15 +8,18 @@ use Spora\Core\Database;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 
 /**
- * Migration 0087 backfill — speech_provider_configurations seeded
+ * Migration 0083 backfill — speech_provider_configurations seeded
  * from tool_configurations (global) + tool_user_settings
- * (per-user / per-group).
+ * (per-user / per-group). The data migration runs in PHP so it can
+ * enumerate registered SpeechToTextProviderInterface classes; only
+ * the core-shipped OpenAiCompatibleTranscriber is visible to the
+ * CLI boot, so the test exercises that single class. Plugin-
+ * contributed STT rows are explicitly out of scope (see the
+ * migration's docblock).
  *
- * The data migration runs in PHP so it can enumerate registered
- * SpeechToTextProviderInterface classes; only the core-shipped
- * OpenAiCompatibleTranscriber is visible to the CLI boot, so the
- * test exercises that single class. Plugin-contributed STT rows
- * are explicitly out of scope (see the migration's docblock).
+ * The data migration lived in 0087 in the previous branch layout;
+ * folding it into 0083 keeps the unified migration set contiguous
+ * (0081 → 0084).
  */
 beforeEach(function (): void {
     Database::resetBootState();
@@ -48,7 +51,7 @@ beforeEach(function (): void {
         $t->timestamps();
     });
 
-    // Migration 0085 — the table the migration copies INTO.
+    // Migration 0082 — the table the migration copies INTO.
     Capsule::schema()->create('speech_provider_configurations', static function (Blueprint $t): void {
         $t->bigIncrements('id');
         $t->unsignedBigInteger('principal_id')->nullable();

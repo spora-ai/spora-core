@@ -46,8 +46,8 @@ use Throwable;
  * behaviour.
  *
  * The previous PR's per-agent override via `agent_tool_overrides`
- * was removed in migration 0089 — the new tier 1 reads from
- * `agents.speech_driver_config_id` directly. Migration 0089 also
+ * was removed in migration 0084 — the new tier 1 reads from
+ * `agents.speech_driver_config_id` directly. Migration 0084 also
  * cleans up the legacy override rows for core STT classes; plugin
  * operators either re-create via the new endpoint or leave the
  * legacy rows in place (the cascade ignores them anyway).

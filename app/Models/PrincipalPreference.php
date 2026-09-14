@@ -19,11 +19,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * write the field for which principal.
  *
  * The `preferred_speech_config_id` is the FK to
- * `speech_provider_configurations(id)` introduced in migration 0088
- * (replacing the `preferred_speech_provider_class` string column from
- * migration 0084). Migration 0084 stored a class FQCN because speech
- * configs spanned two tables; migration 0085 unified them so the FK is
- * the natural shape.
+ * `speech_provider_configurations(id)` introduced in migration 0084
+ * (replacing the legacy `preferred_speech_provider_class` string
+ * column). Migration 0082 unified the speech-config storage into one
+ * table so the FK is the natural shape; migration 0084 dropped the
+ * legacy string column and added the FK alongside the new column.
  *
  * @property int $id
  * @property int $principal_id
