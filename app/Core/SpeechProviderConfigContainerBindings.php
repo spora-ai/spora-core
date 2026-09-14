@@ -40,6 +40,7 @@ final class SpeechProviderConfigContainerBindings
                 return new SpeechProviderConfigPersistence(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(SpeechProviderConfigValidator::class),
+                    $c->get(SpeechToTextRegistry::class),
                 );
             },
 

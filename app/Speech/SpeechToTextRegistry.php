@@ -71,6 +71,21 @@ final readonly class SpeechToTextRegistry
     }
 
     /**
+     * Alias of {@see self::all()} used by collaborators that need every
+     * registered provider instance (e.g.
+     * {@see \Spora\Services\SpeechProviderConfigPersistence::configResource()}
+     * walking the registry to look up a class's display label). Kept as
+     * a separate method so the call sites read naturally without
+     * obscuring the internal provider list.
+     *
+     * @return list<SpeechToTextProviderInterface>
+     */
+    public function allProviders(): array
+    {
+        return $this->providers;
+    }
+
+    /**
      * Resolve the effective provider per the five-tier cascade.
      *
      * The transcribe controller translates `null` into HTTP 503

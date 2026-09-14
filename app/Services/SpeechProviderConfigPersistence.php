@@ -8,9 +8,11 @@ use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
 use Spora\Models\Agent;
+use Spora\Models\Principal;
 use Spora\Models\PrincipalPreference;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\Exceptions\PrincipalNotAccessibleException;
+use Spora\Speech\SpeechToTextRegistry;
 
 /**
  * Persistence layer for {@see SpeechProviderConfiguration}.
@@ -37,15 +39,18 @@ final class SpeechProviderConfigPersistence
 {
     private readonly SecurityManagerInterface $security;
     private readonly SpeechProviderConfigValidator $validator;
+    private readonly SpeechToTextRegistry $speechRegistry;
     private readonly PrincipalResolver $principalResolver;
 
     public function __construct(
         SecurityManagerInterface $security,
         SpeechProviderConfigValidator $validator,
+        ?SpeechToTextRegistry $speechRegistry = null,
         ?PrincipalResolver $principalResolver = null,
     ) {
         $this->security = $security;
         $this->validator = $validator;
+        $this->speechRegistry = $speechRegistry ?? new SpeechToTextRegistry([]);
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
@@ -222,6 +227,18 @@ final class SpeechProviderConfigPersistence
      * a single config row. Used by the controller to render the
      * CRUD responses.
      *
+     * The SPA filters list entries by `scope` (see
+     * {@see \Spora\Speech\SpeechToTextRegistry::allProviders()} for the
+     * matching provider-name lookup), so this serializer emits three
+     * derived fields on top of the raw `is_global` + `principal_id`
+     * pair:
+     *   - `provider_name`         — class-level stable key
+     *   - `provider_display_name` — operator-facing label
+     *   - `scope`                 — 'global' | 'user' | 'group'
+     *
+     * The raw fields stay so the SPA doesn't need a second endpoint for
+     * the admin-only branch.
+     *
      * @return array<string, mixed>
      */
     public function configResource(SpeechProviderConfiguration $config): array
@@ -229,13 +246,32 @@ final class SpeechProviderConfigPersistence
         $settings = $this->decodeSettings($config->provider_class, $config->getRawOriginal('settings'));
         $masked = $this->maskForApi($config->provider_class, $settings);
 
+        $providerName = null;
+        $providerDisplayName = null;
+        foreach ($this->speechRegistry->allProviders() as $provider) {
+            if ($provider::class === $config->provider_class) {
+                $providerName = $provider->getName();
+                $providerDisplayName = $provider->getDisplayName();
+                break;
+            }
+        }
+
+        $scope = 'global';
+        if (!$config->is_global && $config->principal_id !== null) {
+            $principal = Principal::find((int) $config->principal_id);
+            $scope = ($principal !== null && $principal->type === Principal::TYPE_GROUP) ? 'group' : 'user';
+        }
+
         return [
             'id' => (int) $config->id,
             'provider_class' => $config->provider_class,
+            'provider_name' => $providerName,
+            'provider_display_name' => $providerDisplayName,
             'display_name' => $config->display_name,
             'is_default' => (bool) $config->is_default,
             'is_global' => (bool) $config->is_global,
             'principal_id' => $config->principal_id !== null ? (int) $config->principal_id : null,
+            'scope' => $scope,
             'settings' => $masked,
             'created_at' => $config->created_at->toIso8601String(),
             'updated_at' => $config->updated_at->toIso8601String(),

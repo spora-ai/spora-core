@@ -45,7 +45,7 @@ function makeSpeechProviderConfigController(): array
     ]);
 
     $validator = new SpeechProviderConfigValidator($registry);
-    $persistence = new SpeechProviderConfigPersistence($security, $validator);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 
@@ -421,5 +421,137 @@ describe('SpeechProviderConfigController', function (): void {
         ))[0];
         $keys = array_column($oai['settings_schema'], 'key');
         expect($keys)->toContain('api_key');
+    });
+
+    // ---------------------------------------------------------------
+    // SPA wire-shape response: scope + provider_name + provider_display_name
+    //
+    // Regression for the second wire-shape mismatch: the SPA's
+    // `stores/speechProviderConfigs.ts` filters the list by
+    // `c.scope === 'user'|'global'|'group'` and the SPA's
+    // `SpeechProviderConfig` type requires `provider_display_name`. The
+    // previous request-side fix (PR #144) only updated POST/PUT bodies,
+    // so the GET response was still missing both fields and every list
+    // entry fell into the empty-store bucket.
+    // ---------------------------------------------------------------
+
+    it('list response includes scope and provider_display_name for every config', function (): void {
+        // Seed one of each scope (global, user, group) and confirm the
+        // GET response now exposes `scope`, `provider_name`, and
+        // `provider_display_name` on every entry.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $adminId = bootAuth($auth, 'spc-shape-admin@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($adminId);
+        $group = (new GroupService($principalService))->createGroup($adminId, 'SpcShapeGroup');
+        $groupPrincipalId = (int) $principalService->principalForGroup($group->id)->id;
+
+        // Global row.
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'display_name' => 'Shape Global',
+            'settings' => fullSettings('sk-shape-global'),
+        ]));
+
+        // User row.
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'display_name' => 'Shape Personal',
+            'settings' => fullSettings('sk-shape-personal'),
+        ]));
+
+        // Group row.
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => $group->id,
+            'display_name' => 'Shape Team',
+            'settings' => fullSettings('sk-shape-team'),
+        ]));
+
+        $resp = $controller->index();
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+        $configs = json_decode($resp->getContent(), true)['data']['configs'];
+        expect($configs)->toHaveCount(3);
+
+        foreach ($configs as $config) {
+            expect($config)->toHaveKey('scope');
+            expect($config['scope'])->toBeIn(['global', 'user', 'group']);
+            expect($config)->toHaveKey('provider_name');
+            expect($config['provider_name'])->toBeString()->not()->toBeEmpty();
+            expect($config)->toHaveKey('provider_display_name');
+            expect($config['provider_display_name'])->toBeString()->not()->toBeEmpty();
+            // provider_name/display_name pair from the registry must
+            // align with the row's provider_class.
+            expect($config['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
+        }
+    });
+
+    it('list response: global configs report scope=global', function (): void {
+        // Pins the derived `scope` value so the SPA's global-list filter
+        // populates from the API response.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $adminId = bootAuth($auth, 'spc-shape-global@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-sg'),
+        ]));
+
+        $resp = $controller->index();
+        $configs = json_decode($resp->getContent(), true)['data']['configs'];
+        expect($configs[0]['scope'])->toBe('global');
+        expect($configs[0]['is_global'])->toBeTrue();
+        expect($configs[0]['principal_id'])->toBeNull();
+    });
+
+    it('list response: user-scoped configs report scope=user', function (): void {
+        // The non-admin branch writes under the caller's user-principal,
+        // so the derived scope must be 'user' (not 'group', not 'global').
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-shape-user@example.com', SPC_TEST_PASSWORD);
+
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'settings' => fullSettings('sk-su'),
+        ]));
+
+        $resp = $controller->index();
+        $configs = json_decode($resp->getContent(), true)['data']['configs'];
+        expect($configs[0]['scope'])->toBe('user');
+        expect($configs[0]['is_global'])->toBeFalse();
+        expect($configs[0]['principal_id'])->toBeGreaterThan(0);
+    });
+
+    it('list response: group-scoped configs report scope=group', function (): void {
+        // Seed a group + group-principal + a group-scope config; the
+        // serializer must derive scope=group from the principal's type,
+        // not from the raw `is_global` + `principal_id` pair.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $adminId = bootAuth($auth, 'spc-shape-group@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($adminId);
+        $group = (new GroupService($principalService))->createGroup($adminId, 'SpcShapeTeam');
+        $groupPrincipalId = (int) $principalService->principalForGroup($group->id)->id;
+
+        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => $group->id,
+            'settings' => fullSettings('sk-st'),
+        ]));
+
+        $resp = $controller->index();
+        $configs = json_decode($resp->getContent(), true)['data']['configs'];
+        expect($configs[0]['scope'])->toBe('group');
+        expect($configs[0]['is_global'])->toBeFalse();
+        expect((int) $configs[0]['principal_id'])->toBe($groupPrincipalId);
     });
 });
