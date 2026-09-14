@@ -369,27 +369,55 @@ final class SpeechProviderConfigController
 
     private function validateGetPreferenceInput(Request $request): PreferredPreferenceInput|JsonResponse
     {
-        $params = $request->query->all();
-        $scope = $this->stringField($params, 'scope');
+        $scope = $this->requireScopeFromQuery($request);
         if ($scope instanceof JsonResponse) {
             return $scope;
         }
-        if ($scope !== 'user' && $scope !== 'group') {
-            return $this->validationError('scope must be "user" or "group".');
+        $groupId = $this->optionalGroupIdForScope($request, $scope);
+        if ($groupId instanceof JsonResponse) {
+            return $groupId;
         }
+        return new PreferredPreferenceInput($scope, $groupId, null);
+    }
 
+    private function requireScopeFromQuery(Request $request): string|JsonResponse
+    {
+        $scope = $this->stringField($request->query->all(), 'scope');
+        if ($scope instanceof JsonResponse) {
+            return $scope;
+        }
+        return $this->requireValidScope($scope);
+    }
+
+    /**
+     * @return int|JsonResponse|null int|null on success, JsonResponse on validation error
+     */
+    private function optionalGroupIdForScope(Request $request, string $scope): int|JsonResponse|null
+    {
         $groupId = $this->optionalIntQueryParam($request, 'group_id');
         if ($groupId instanceof JsonResponse) {
             return $groupId;
         }
+        return $this->groupIdViolationForScope($request, $scope, $groupId) ?? $groupId;
+    }
+
+    private function groupIdViolationForScope(Request $request, string $scope, ?int $groupId): ?JsonResponse
+    {
         if ($scope === 'group' && $groupId === null) {
             return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
         }
         if ($scope !== 'group' && $request->query->has('group_id')) {
             return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
         }
+        return null;
+    }
 
-        return new PreferredPreferenceInput($scope, $groupId, null);
+    private function requireValidScope(string $scope): string|JsonResponse
+    {
+        if ($scope === 'user' || $scope === 'group') {
+            return $scope;
+        }
+        return $this->validationError('scope must be "user" or "group".');
     }
 
     /**
@@ -450,26 +478,55 @@ final class SpeechProviderConfigController
         if ($body instanceof JsonResponse) {
             return $body;
         }
+        $scope = $this->requireScopeFromBody($body);
+        if ($scope instanceof JsonResponse) {
+            return $scope;
+        }
+        return $this->preferredInputFromBody($body, $scope);
+    }
 
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function requireScopeFromBody(array $body): string|JsonResponse
+    {
         $scope = $this->stringField($body, 'scope');
         if ($scope instanceof JsonResponse) {
             return $scope;
         }
-        if ($scope !== 'user' && $scope !== 'group') {
-            return $this->validationError('scope must be "user" or "group".');
-        }
+        return $this->requireValidScope($scope);
+    }
 
-        $configId = array_key_exists('config_id', $body) ? $body['config_id'] : null;
-        if ($configId !== null && (!is_int($configId) || $configId <= 0)) {
-            return $this->validationError('Field "config_id" must be a positive integer or null.');
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function preferredInputFromBody(array $body, string $scope): PreferredPreferenceInput|JsonResponse
+    {
+        $configId = $this->extractConfigId($body);
+        if ($configId instanceof JsonResponse) {
+            return $configId;
         }
-
         $groupId = $this->cleanGroupIdForScope($body, $scope);
         if ($groupId instanceof JsonResponse) {
             return $groupId;
         }
-
         return new PreferredPreferenceInput($scope, $groupId, $configId);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return int|null|JsonResponse int|null on success, JsonResponse on validation error
+     */
+    private function extractConfigId(array $body): int|null|JsonResponse
+    {
+        $raw = array_key_exists('config_id', $body) ? $body['config_id'] : null;
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_int($raw) || $raw <= 0) {
+            return $this->validationError('Field "config_id" must be a positive integer or null.');
+        }
+        return $raw;
     }
 
     /**
@@ -479,15 +536,24 @@ final class SpeechProviderConfigController
     private function cleanGroupIdForScope(array $body, string $scope): int|JsonResponse|null
     {
         if ($scope === 'group') {
-            if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-                return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
-            }
-            return $body['group_id'];
+            return $this->extractRequiredGroupId($body);
         }
         if (array_key_exists('group_id', $body)) {
             return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
         }
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return int|JsonResponse
+     */
+    private function extractRequiredGroupId(array $body): int|JsonResponse
+    {
+        if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+            return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
+        }
+        return $body['group_id'];
     }
 
     private function resolvePrincipalIdForScope(int $userId, string $scope, ?int $groupId): int
@@ -548,16 +614,21 @@ final class SpeechProviderConfigController
         if ($content === '') {
             return [];
         }
-        try {
-            $decoded = json_decode($content, true, 16, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return $this->validationError('Request body must be valid JSON.');
-        }
+        $decoded = $this->decodeJsonBody($content);
         if (!is_array($decoded)) {
             return $this->validationError('Request body must be valid JSON.');
         }
         /** @var array<string, mixed> $decoded */
         return $decoded;
+    }
+
+    private function decodeJsonBody(string $content): mixed
+    {
+        try {
+            return json_decode($content, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
     }
 
     /**
