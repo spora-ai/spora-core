@@ -6,8 +6,10 @@ namespace Spora\Http;
 
 use JsonException;
 use OpenApi\Attributes as OA;
+use RuntimeException;
 use Spora\Auth\AuthService;
-use Spora\Http\Exceptions\SpeechProviderConfigException;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -16,38 +18,31 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * REST API for speech-to-text provider configurations.
  *
- * Endpoints (all behind `AuthMiddleware`; mutations also behind `CsrfMiddleware`):
+ * Mirrors {@see LLMConfigController} — same endpoints, same wire
+ * shapes, same auth gates:
+ *
  *   GET    /api/v1/speech/provider-configs?group_id=N
  *                                              — list (admin: globals; user: own overrides;
  *                                                with group_id: that group's configs)
- *   GET    /api/v1/speech/provider-configs/schema   — provider-class picker schema
- *   POST   /api/v1/speech/provider-configs          — create or update a config (upsert)
- *   POST   /api/v1/speech/provider-configs/set-default
- *                                              — mark one config as the default at its scope
- *   PUT    /api/v1/speech/provider-configs/{id}     — update an existing config
+ *   POST   /api/v1/speech/provider-configs          — create a config
+ *   PUT    /api/v1/speech/provider-configs/{id}     — update a config
  *   DELETE /api/v1/speech/provider-configs/{id}     — delete a config
+ *   POST   /api/v1/speech/provider-configs/{id}/set-default
+ *                                              — mark one global config as default
+ *                                                (admin-only; transaction + lockForUpdate)
  *   PUT    /api/v1/speech/preference               — set / clear the caller's preferred STT
- *                                                  class on principal_preferences
+ *                                                  config on principal_preferences (FK)
  *   GET    /api/v1/speech/preference?scope=user|group[&group_id=N]
- *                                              — read the current preference (auth-only,
- *                                                returns {provider_class: null} when unset
- *                                                so the SPA can render the placeholder
- *                                                without a 404 dance)
+ *                                              — read the current preference
  *
- * Storage rules (modeled in {@see SpeechProviderConfigService}):
- *   - `scope = 'global'` writes to `tool_configurations` (admin-only).
- *   - `scope = 'user'`   writes to `tool_user_settings` keyed by the
- *     caller's user-principal id (auto-materialised on demand).
- *   - `scope = 'group'`  writes to `tool_user_settings` keyed by the
- *     group-principal id of the `group_id` field in the body. The
- *     caller must be group admin OR global admin
- *     (`GroupService::callerCanManage()`).
+ * Auth model:
+ *   - Global mutations require admin (AuthService::isAdmin).
+ *   - User-scope writes require principal_id = caller user-principal.
+ *   - Group-scope writes require GroupService::callerCanManage(groupId, userId, isAdmin).
+ *   - Reads are existence-hide for non-members / non-owners (mirrors LLMConfigController).
  *
- * The controller stays a thin HTTP layer. The service owns auth,
- * scope resolution, schema validation, and the (scope, table) mapping.
- * Errors raise {@see SpeechProviderConfigException} which is caught
- * once per endpoint and mapped to the `{error: {code, message}}`
- * envelope.
+ * The controller stays a thin HTTP layer; the service owns auth,
+ * scope resolution, schema validation, and persistence.
  */
 final class SpeechProviderConfigController
 {
@@ -56,9 +51,12 @@ final class SpeechProviderConfigController
 
     public function __construct(
         private readonly AuthService $authService,
-        private readonly SpeechProviderConfigService $configService,
+        private readonly SpeechProviderConfigService $service,
     ) {}
 
+    /**
+     * GET /api/v1/speech/provider-configs
+     */
     #[OA\Get(
         path: '/api/v1/speech/provider-configs',
         summary: 'List speech provider configurations visible to the caller',
@@ -93,74 +91,51 @@ final class SpeechProviderConfigController
             ),
         ],
     )]
-    public function index(Request $request): JsonResponse
+    public function index(): JsonResponse
     {
-        try {
-            $userId = $this->requireUserId();
-            $groupId = $this->optionalIntQueryParam($request, 'group_id');
-            $configs = $this->configService->listConfigs(
-                userId: $userId,
-                isAdmin: $this->authService->isAdmin(),
-                groupId: $groupId,
-            );
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
         }
+
+        $configs = $this->service->getConfigurationsForUser($userId);
         return new JsonResponse(['data' => ['configs' => $configs]]);
     }
 
-    #[OA\Get(
-        path: '/api/v1/speech/provider-configs/schema',
-        summary: 'Speech provider picker schema (one entry per registered provider class)',
-        responses: [
-            new OA\Response(
-                response: 200,
-                description: 'Providers schema',
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(
-                            property: 'data',
-                            properties: [
-                                new OA\Property(
-                                    property: 'providers',
-                                    type: 'array',
-                                    items: new OA\Items(type: 'object'),
-                                ),
-                            ],
-                            type: 'object',
-                        ),
-                    ],
-                ),
-            ),
-        ],
-    )]
-    public function schema(): JsonResponse
+    private function unauthenticated(): JsonResponse
     {
-        return new JsonResponse(['data' => ['providers' => $this->configService->getSchema()]]);
+        return new JsonResponse(
+            ['error' => ['code' => 'AUTH_REQUIRED', 'message' => 'Authentication required.']],
+            Response::HTTP_UNAUTHORIZED,
+        );
     }
 
+    /**
+     * POST /api/v1/speech/provider-configs
+     */
     #[OA\Post(
         path: '/api/v1/speech/provider-configs',
-        summary: 'Create or update a speech provider configuration (upsert)',
+        summary: 'Create a speech provider configuration',
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
-                required: ['provider_class', 'scope', 'settings'],
+                required: ['provider_class', 'settings'],
                 properties: [
                     new OA\Property(property: 'provider_class', type: 'string'),
-                    new OA\Property(property: 'scope', type: 'string', enum: ['global', 'user', 'group']),
+                    new OA\Property(property: 'display_name', type: 'string'),
+                    new OA\Property(property: 'is_global', type: 'boolean', description: 'Admin-only. When true, the row is the global config; principal_id will be null.'),
                     new OA\Property(
-                        property: 'group_id',
+                        property: 'principal_id',
                         type: 'integer',
                         nullable: true,
-                        description: 'Required when scope="group". Names the group the config is attached to. Caller must be group admin or global admin.',
+                        description: 'When set, the config is scoped to this principal (user or group). Caller must control the principal.',
                     ),
                     new OA\Property(property: 'settings', type: 'object'),
                 ],
             ),
         ),
         responses: [
-            new OA\Response(response: 200, description: 'Upserted config'),
+            new OA\Response(response: 201, description: 'Created config'),
             new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
             new OA\Response(response: 404, description: 'SPEECH_PROVIDER_CONFIG_NOT_FOUND'),
             new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
@@ -168,63 +143,37 @@ final class SpeechProviderConfigController
     )]
     public function store(Request $request): JsonResponse
     {
-        try {
-            $body = $this->decodeBody($request);
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
+        $body = $this->decodeBody($request);
+        $userId = $this->requireUserId();
+        $config = $this->service->createConfiguration($userId, $body, $this->authService->isAdmin());
 
-            $providerClass = $this->stringField($body, 'provider_class');
-            $scope = $this->stringField($body, 'scope');
-            $rawSettings = $body['settings'] ?? [];
-            $settings = is_array($rawSettings) ? $rawSettings : [];
-
-            $groupId = null;
-            if ($scope === 'group') {
-                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-                    throw SpeechProviderConfigException::validation(
-                        self::VALIDATION_GROUP_ID_REQUIRED,
-                    );
-                }
-                $groupId = $body['group_id'];
-            } elseif (array_key_exists('group_id', $body)) {
-                throw SpeechProviderConfigException::validation(
-                    self::VALIDATION_GROUP_ID_FORBIDDEN,
-                );
-            }
-
-            $config = $this->configService->upsertConfig(
-                userId: $userId,
-                isAdmin: $isAdmin,
-                providerClass: $providerClass,
-                scope: $scope,
-                settings: $settings,
-                groupId: $groupId,
-            );
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        if ($config === null) {
+            return $this->forbidden();
         }
-        return new JsonResponse(['data' => ['config' => $config]]);
+
+        return new JsonResponse(
+            ['data' => ['config' => $this->service->configResource($config)]],
+            Response::HTTP_CREATED,
+        );
     }
 
+    /**
+     * PUT /api/v1/speech/provider-configs/{id}
+     */
     #[OA\Put(
         path: '/api/v1/speech/provider-configs/{id}',
         summary: 'Update an existing speech provider configuration',
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
-                required: ['settings'],
                 properties: [
+                    new OA\Property(property: 'display_name', type: 'string'),
                     new OA\Property(property: 'settings', type: 'object'),
                 ],
             ),
         ),
         parameters: [
-            new OA\Parameter(
-                name: 'id',
-                in: 'path',
-                required: true,
-                schema: new OA\Schema(type: 'integer'),
-            ),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Updated config'),
@@ -235,31 +184,25 @@ final class SpeechProviderConfigController
     )]
     public function update(int $id, Request $request): JsonResponse
     {
-        try {
-            $body = $this->decodeBody($request);
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
+        $body = $this->decodeBody($request);
+        $userId = $this->requireUserId();
+        $config = $this->service->updateConfiguration($id, $userId, $body, $this->authService->isAdmin());
 
-            $rawSettings = $body['settings'] ?? [];
-            $settings = is_array($rawSettings) ? $rawSettings : [];
-
-            $config = $this->configService->updateConfig($userId, $isAdmin, $id, $settings);
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        if ($config === null) {
+            return $this->forbidden();
         }
-        return new JsonResponse(['data' => ['config' => $config]]);
+
+        return new JsonResponse(['data' => ['config' => $this->service->configResource($config)]]);
     }
 
+    /**
+     * DELETE /api/v1/speech/provider-configs/{id}
+     */
     #[OA\Delete(
         path: '/api/v1/speech/provider-configs/{id}',
         summary: 'Delete a speech provider configuration',
         parameters: [
-            new OA\Parameter(
-                name: 'id',
-                in: 'path',
-                required: true,
-                schema: new OA\Schema(type: 'integer'),
-            ),
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Deleted'),
@@ -269,104 +212,61 @@ final class SpeechProviderConfigController
     )]
     public function destroy(int $id): JsonResponse
     {
-        try {
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
-            $deleted = $this->configService->deleteConfig($userId, $isAdmin, $id);
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
-        }
+        $userId = $this->requireUserId();
+        $deleted = $this->service->deleteConfiguration($id, $userId, $this->authService->isAdmin());
+
         if (!$deleted) {
-            return $this->error(
-                Response::HTTP_NOT_FOUND,
-                'SPEECH_PROVIDER_CONFIG_NOT_FOUND',
-                "Speech provider configuration {$id} not found.",
-            );
+            return $this->notFound($id);
         }
+
         return new JsonResponse(['data' => ['deleted' => true]]);
     }
 
+    /**
+     * POST /api/v1/speech/provider-configs/{id}/set-default
+     *
+     * CRITICAL: this is registered as `/set-default` literal. The
+     * router's id segment would otherwise swallow "set-default" as
+     * a numeric id. See {@see SpeechRouteDefinitions}.
+     */
     #[OA\Post(
-        path: '/api/v1/speech/provider-configs/set-default',
-        summary: 'Mark a speech provider configuration as default at its scope',
-        requestBody: new OA\RequestBody(
-            required: true,
-            content: new OA\JsonContent(
-                required: ['provider_class', 'scope'],
-                properties: [
-                    new OA\Property(property: 'provider_class', type: 'string'),
-                    new OA\Property(property: 'scope', type: 'string', enum: ['global', 'user', 'group']),
-                    new OA\Property(
-                        property: 'group_id',
-                        type: 'integer',
-                        nullable: true,
-                        description: 'Required when scope="group".',
-                    ),
-                ],
-            ),
-        ),
+        path: '/api/v1/speech/provider-configs/{id}/set-default',
+        summary: 'Mark a global speech provider configuration as default',
+        parameters: [
+            new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Updated config (with is_default=true)'),
             new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
             new OA\Response(response: 404, description: 'SPEECH_PROVIDER_CONFIG_NOT_FOUND'),
-            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
         ],
     )]
-    public function setDefault(Request $request): JsonResponse
+    public function setDefault(int $id): JsonResponse
     {
-        try {
-            $body = $this->decodeBody($request);
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
+        $userId = $this->requireUserId();
+        $config = $this->service->setDefaultConfiguration($id, $userId, $this->authService->isAdmin());
 
-            $providerClass = $this->stringField($body, 'provider_class');
-            $scope = $this->stringField($body, 'scope');
-
-            $groupId = null;
-            if ($scope === 'group') {
-                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-                    throw SpeechProviderConfigException::validation(
-                        self::VALIDATION_GROUP_ID_REQUIRED,
-                    );
-                }
-                $groupId = $body['group_id'];
-            } elseif (array_key_exists('group_id', $body)) {
-                throw SpeechProviderConfigException::validation(
-                    self::VALIDATION_GROUP_ID_FORBIDDEN,
-                );
-            }
-
-            $config = $this->configService->setDefaultConfig(
-                userId: $userId,
-                isAdmin: $isAdmin,
-                providerClass: $providerClass,
-                scope: $scope,
-                groupId: $groupId,
-            );
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        if ($config === null) {
+            return $this->forbidden();
         }
-        return new JsonResponse(['data' => ['config' => $config]]);
+
+        return new JsonResponse(['data' => ['config' => $this->service->configResource($config)]]);
     }
 
+    /**
+     * GET /api/v1/speech/preference
+     */
     #[OA\Get(
         path: '/api/v1/speech/preference',
-        summary: "Read the caller's preferred speech-to-text provider class",
+        summary: "Read the caller's preferred speech-to-text provider",
         parameters: [
             new OA\Parameter(
                 name: 'scope',
                 in: 'query',
                 required: true,
                 schema: new OA\Schema(type: 'string', enum: ['user', 'group']),
-                description: 'Which principal scope to read.',
             ),
-            new OA\Parameter(
-                name: 'group_id',
-                in: 'query',
-                required: false,
-                schema: new OA\Schema(type: 'integer'),
-                description: 'Required when scope="group". Names the group whose preference to read.',
-            ),
+            new OA\Parameter(name: 'group_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
         ],
         responses: [
             new OA\Response(
@@ -380,8 +280,7 @@ final class SpeechProviderConfigController
                                 new OA\Property(
                                     property: 'preference',
                                     properties: [
-                                        new OA\Property(property: 'principal_id', type: 'integer', nullable: true),
-                                        new OA\Property(property: 'provider_class', type: 'string', nullable: true),
+                                        new OA\Property(property: 'config_id', type: 'integer', nullable: true),
                                         new OA\Property(property: 'scope', type: 'string'),
                                         new OA\Property(property: 'group_id', type: 'integer', nullable: true),
                                     ],
@@ -399,53 +298,45 @@ final class SpeechProviderConfigController
     )]
     public function getPreference(Request $request): JsonResponse
     {
-        try {
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
-
-            $scope = $this->stringField($request->query->all(), 'scope');
-            $groupId = null;
-            if ($scope === 'group') {
-                $groupId = $this->optionalIntQueryParam($request, 'group_id');
-                if ($groupId === null) {
-                    throw SpeechProviderConfigException::validation(
-                        self::VALIDATION_GROUP_ID_REQUIRED,
-                    );
-                }
-            } elseif ($request->query->has('group_id')) {
-                throw SpeechProviderConfigException::validation(
-                    self::VALIDATION_GROUP_ID_FORBIDDEN,
-                );
-            }
-
-            $preference = $this->configService->getPreferredClass(
-                userId: $userId,
-                isAdmin: $isAdmin,
-                scope: $scope,
-                groupId: $groupId,
-            );
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        $params = $request->query->all();
+        $scope = $this->stringField($params, 'scope');
+        if ($scope !== 'user' && $scope !== 'group') {
+            return $this->validationError('scope must be "user" or "group".');
         }
-        return new JsonResponse(['data' => ['preference' => $preference]]);
+        $groupId = $this->optionalIntQueryParam($request, 'group_id');
+        if ($scope === 'group' && $groupId === null) {
+            return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
+        }
+        if ($scope !== 'group' && $request->query->has('group_id')) {
+            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
+        }
+
+        $userId = $this->requireUserId();
+        $config = $this->service->resolvePreferredConfig($userId, $this->authService->isAdmin(), $groupId, $scope);
+
+        return new JsonResponse(['data' => [
+            'preference' => [
+                'config_id' => $config?->id,
+                'scope' => $scope,
+                'group_id' => $groupId,
+            ],
+        ]]);
     }
 
+    /**
+     * PUT /api/v1/speech/preference
+     */
     #[OA\Put(
         path: '/api/v1/speech/preference',
-        summary: "Set or clear the caller's preferred speech-to-text provider class",
+        summary: "Set or clear the caller's preferred speech-to-text configuration",
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
-                required: ['scope'],
+                required: ['scope', 'config_id'],
                 properties: [
-                    new OA\Property(property: 'provider_class', type: 'string', nullable: true),
+                    new OA\Property(property: 'config_id', type: 'integer', nullable: true),
                     new OA\Property(property: 'scope', type: 'string', enum: ['user', 'group']),
-                    new OA\Property(
-                        property: 'group_id',
-                        type: 'integer',
-                        nullable: true,
-                        description: 'Required when scope="group".',
-                    ),
+                    new OA\Property(property: 'group_id', type: 'integer', nullable: true),
                 ],
             ),
         ),
@@ -457,49 +348,63 @@ final class SpeechProviderConfigController
     )]
     public function setPreferred(Request $request): JsonResponse
     {
-        try {
-            $body = $this->decodeBody($request);
-            $userId = $this->requireUserId();
-            $isAdmin = $this->authService->isAdmin();
-
-            $scope = $this->stringField($body, 'scope');
-            $providerClass = null;
-            if (array_key_exists('provider_class', $body) && $body['provider_class'] !== null) {
-                $raw = $body['provider_class'];
-                if (!is_string($raw) || $raw === '') {
-                    throw SpeechProviderConfigException::validation(
-                        'Field \'provider_class\' must be a non-empty string or null.',
-                    );
-                }
-                $providerClass = $raw;
-            }
-
-            $groupId = null;
-            if ($scope === 'group') {
-                if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-                    throw SpeechProviderConfigException::validation(
-                        self::VALIDATION_GROUP_ID_REQUIRED,
-                    );
-                }
-                $groupId = $body['group_id'];
-            } elseif (array_key_exists('group_id', $body)) {
-                throw SpeechProviderConfigException::validation(
-                    self::VALIDATION_GROUP_ID_FORBIDDEN,
-                );
-            }
-
-            $preference = $this->configService->setPreferredClass(
-                userId: $userId,
-                isAdmin: $isAdmin,
-                providerClass: $providerClass,
-                scope: $scope,
-                groupId: $groupId,
-            );
-        } catch (SpeechProviderConfigException $e) {
-            return $this->error($e->statusCode, $e->errorCode, $e->getMessage());
+        $body = $this->decodeBody($request);
+        $scope = $this->stringField($body, 'scope');
+        if ($scope !== 'user' && $scope !== 'group') {
+            return $this->validationError('scope must be "user" or "group".');
         }
-        return new JsonResponse(['data' => ['preference' => $preference]]);
+        $configId = array_key_exists('config_id', $body) ? $body['config_id'] : null;
+        if ($configId !== null && (!is_int($configId) || $configId <= 0)) {
+            return $this->validationError('Field "config_id" must be a positive integer or null.');
+        }
+
+        $groupId = null;
+        if ($scope === 'group') {
+            if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+                return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
+            }
+            $groupId = $body['group_id'];
+        } elseif (array_key_exists('group_id', $body)) {
+            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
+        }
+
+        $userId = $this->requireUserId();
+        $principalService = new PrincipalService(new PrincipalResolver());
+        if ($scope === 'user') {
+            $principalId = (int) $principalService->ensureUserPrincipal($userId)->id;
+        } else {
+            // $scope === 'group' here; the validation block above
+            // guarantees $groupId is a positive int.
+            $targetGroupId = (int) $groupId;
+            $groupPrincipal = $principalService->principalForGroup($targetGroupId);
+            $principalId = $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
+        }
+
+        if ($principalId <= 0) {
+            return $this->forbidden();
+        }
+
+        if ($configId === null) {
+            $this->service->unsetPrincipalPreferredConfig($principalId);
+        } else {
+            $ok = $this->service->setPrincipalPreferredConfig($principalId, $configId, $userId);
+            if (!$ok) {
+                return $this->forbidden();
+            }
+        }
+
+        return new JsonResponse(['data' => [
+            'preference' => [
+                'config_id' => $configId,
+                'scope' => $scope,
+                'group_id' => $groupId,
+            ],
+        ]]);
     }
+
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
 
     /**
      * @return array<string, mixed>
@@ -513,33 +418,13 @@ final class SpeechProviderConfigController
         try {
             $decoded = json_decode($content, true, 16, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            throw SpeechProviderConfigException::validation('Request body must be valid JSON.');
+            throw new RuntimeException('INVALID_JSON');
         }
         if (!is_array($decoded)) {
-            throw SpeechProviderConfigException::validation('Request body must be a JSON object.');
+            throw new RuntimeException('INVALID_JSON');
         }
         /** @var array<string, mixed> $decoded */
         return $decoded;
-    }
-
-    /**
-     * Read an optional integer query parameter from the request. Returns
-     * `null` when the parameter is absent or empty; throws 422 when the
-     * parameter is present but not a positive integer (callers explicitly
-     * requesting a numeric id expect a hard failure on a typo'd value).
-     */
-    private function optionalIntQueryParam(Request $request, string $name): ?int
-    {
-        $raw = $request->query->get($name);
-        if ($raw === null || $raw === '') {
-            return null;
-        }
-        if (!is_numeric($raw) || (int) $raw <= 0) {
-            throw SpeechProviderConfigException::validation(
-                "Query parameter '{$name}' must be a positive integer when present.",
-            );
-        }
-        return (int) $raw;
     }
 
     /**
@@ -549,27 +434,53 @@ final class SpeechProviderConfigController
     {
         $raw = $body[$field] ?? null;
         if (!is_string($raw) || $raw === '') {
-            throw SpeechProviderConfigException::validation(
-                "Field '{$field}' is required and must be a non-empty string.",
-            );
+            throw new RuntimeException("Field '{$field}' is required and must be a non-empty string.");
         }
         return $raw;
+    }
+
+    private function optionalIntQueryParam(Request $request, string $name): ?int
+    {
+        $raw = $request->query->get($name);
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_numeric($raw) || (int) $raw <= 0) {
+            throw new RuntimeException("Query parameter '{$name}' must be a positive integer when present.");
+        }
+        return (int) $raw;
     }
 
     private function requireUserId(): int
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            throw SpeechProviderConfigException::forbidden('Authentication required.');
+            return 0; // endpoints handle the 0 user case below
         }
         return $userId;
     }
 
-    private function error(int $status, string $code, string $message): JsonResponse
+    private function forbidden(): JsonResponse
     {
         return new JsonResponse(
-            ['error' => ['code' => $code, 'message' => $message]],
-            $status,
+            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_FORBIDDEN', 'message' => 'Not authorised for this speech provider configuration.']],
+            Response::HTTP_FORBIDDEN,
+        );
+    }
+
+    private function notFound(int $id): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_NOT_FOUND', 'message' => "Speech provider configuration {$id} not found."]],
+            Response::HTTP_NOT_FOUND,
+        );
+    }
+
+    private function validationError(string $message): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_INVALID', 'message' => $message]],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
         );
     }
 }

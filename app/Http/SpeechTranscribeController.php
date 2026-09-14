@@ -34,8 +34,11 @@ use Symfony\Component\HttpFoundation\Request;
  *        - `external` (asset is just a `source_url` pointer) → 422
  *          INVALID_AUDIO; the provider needs bytes, not a URL
  *        - `data_url` / `local` → continue with `bytes` + `mime`
- *   4. Call the provider's `transcribe(bytes, mime, language?, agentId?, userId?)`.
- *      422 on InvalidAudioException (client-side fix);
+ *   4. Call the provider's `transcribe(bytes, mime, language?, userId?)`.
+ *      The speech cascade deliberately ignores per-agent overrides — we
+ *      pass `0` for `$agentId` so the provider reads user / group /
+ *      global settings, never `agent_tool_overrides`. 422 on
+ *      InvalidAudioException (client-side fix);
  *      502 on SpeechToTextException (provider-side failure).
  *   5. Write the transcript back to `media_assets.transcript` /
  *      `media_assets.transcript_language` so chat re-renders re-use the
@@ -45,11 +48,9 @@ use Symfony\Component\HttpFoundation\Request;
  * Optional `agent_id`: when present, the controller validates that the
  * caller owns the agent (`AgentService::getAgent($agentId, $userId)`)
  * — a 422 `VALIDATION_ERROR` surfaces a non-owned id without leaking
- * whether it exists. The id is threaded through to
- * {@see SpeechToTextRegistry::configuredProvider($userId, $agentId)}
- * and {@see SpeechToTextProviderInterface::transcribe()} so the
- * configured provider's `agent_tool_overrides` row wins in the cascade
- * (per-agent override beats group / user / global).
+ * whether it exists. The id is resolved only for ownership checking;
+ * the speech cascade no longer reads `agent_tool_overrides`, so the
+ * resolved `$agentId` is never threaded into the registry or provider.
  *
  * Provider API keys NEVER leave the server. The provider's exception
  * message is logged server-side (operator-visible) and the sanitised
@@ -91,7 +92,7 @@ final class SpeechTranscribeController
                         property: 'agent_id',
                         type: 'integer',
                         nullable: true,
-                        description: 'Optional agent id (must be owned by the caller). When set, the cascade honours any per-agent STT override from agent_tool_overrides.',
+                        description: 'Optional agent id (must be owned by the caller). Accepted for backwards compatibility — the controller validates ownership but the speech cascade no longer threads agent_id into settings lookup, so per-agent STT overrides are out of scope.',
                     ),
                 ],
             ),
@@ -274,6 +275,14 @@ final class SpeechTranscribeController
         ?int $agentId,
         int $userId,
     ): TranscriptionResult {
+        // Speech cascade is FK-driven: the registry already resolved
+        // the provider from agents.speech_driver_config_id (tier 1)
+        // and the user/group/global preference tiers. The provider
+        // call itself doesn't take an agentId — it reads user / group
+        // / global settings from SpeechProviderConfiguration
+        // directly. The signature keeps $agentId for symmetry with the
+        // controller's ownership-validation flow; it's unused here.
+        $agentId = 0;
         try {
             return $provider->transcribe(
                 $asset['bytes'],

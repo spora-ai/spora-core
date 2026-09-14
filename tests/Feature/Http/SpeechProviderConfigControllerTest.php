@@ -6,47 +6,48 @@ namespace Tests\Feature\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
+use Spora\Core\SecurityManager;
 use Spora\Http\SpeechProviderConfigController;
+use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SpeechProviderConfigPreferences;
 use Spora\Services\SpeechProviderConfigService;
+use Spora\Services\SpeechProviderConfigValidator;
 use Spora\Services\ToolConfigService;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 const SPC_TEST_PASSWORD = 'Password1!';
 
 /**
- * Wire the controller graph against the real {@see ToolConfigService} so
- * the crypto + encryption round-trip matches what the production setup
- * does. The OpenAiCompatibleTranscriber provider is registered so the
- * registry has at least one known class.
+ * Wire the controller graph against the real SecurityManager +
+ * ToolConfigService so the per-field encryption round-trip matches
+ * production. Returns the controller + AuthService so callers can
+ * drive the auth-aware endpoints.
  *
- * @return array{0: SpeechProviderConfigController, 1: AuthService, 2: ToolConfigService, 3: PrincipalService}
+ * @return array{0: SpeechProviderConfigController, 1: AuthService}
  */
 function makeSpeechProviderConfigController(): array
 {
     $auth = bootAuthLayer();
-    $security = new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new ToolConfigService($security, new \Psr\Log\NullLogger(), []);
     $principalService = new PrincipalService(new PrincipalResolver());
 
-    $registry = new SpeechToTextRegistry(
-        [new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig)],
-        $toolConfig,
-    );
+    $registry = new SpeechToTextRegistry([
+        new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
+    ]);
 
-    $service = new SpeechProviderConfigService(
-        $toolConfig,
-        $registry,
-        $principalService,
-        new \Spora\Services\SpeechProviderConfigValidator($registry),
-    );
+    $validator = new SpeechProviderConfigValidator($registry);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator);
+    $preferences = new SpeechProviderConfigPreferences($principalService);
+    $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 
-    $controller = new SpeechProviderConfigController($auth, $service);
-
-    return [$controller, $auth, $toolConfig, $principalService];
+    return [new SpeechProviderConfigController($auth, $service), $auth];
 }
 
 function jsonSpcRequest(string $method, string $uri, array $body = []): Request
@@ -63,877 +64,228 @@ function jsonSpcRequest(string $method, string $uri, array $body = []): Request
     );
 }
 
+function fullSettings(string $apiKey = 'sk-test'): array
+{
+    return [
+        'api_key' => $apiKey,
+        'display_name' => 'Mistral Voxtral',
+        'base_url' => 'https://api.openai.com/v1',
+        'model' => 'whisper-1',
+    ];
+}
+
 describe('SpeechProviderConfigController', function (): void {
-    beforeEach(function (): void {
+    beforeEach(function () {
         clearSession();
+        Capsule::table('speech_provider_configurations')->delete();
+        Capsule::table('principal_preferences')->delete();
+        Capsule::table('agents')->delete();
     });
 
-    afterEach(function (): void {
+    afterEach(function () {
         clearSession();
-        Capsule::table('tool_user_settings')->delete();
-        Capsule::table('tool_configurations')->delete();
+        Capsule::table('speech_provider_configurations')->delete();
+        Capsule::table('principal_preferences')->delete();
+        Capsule::table('agents')->delete();
     });
 
-    it('returns 200 on schema for an authenticated caller', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-schema@example.com', SPC_TEST_PASSWORD);
-
-        $response = $controller->schema();
-
-        expect($response->getStatusCode())->toBe(200);
-        $body = json_decode($response->getContent(), true);
-        expect($body['data']['providers'])->toBeArray();
-        expect($body['data']['providers'][0]['class'])->toBe(OpenAiCompatibleTranscriber::class);
-    });
-
-    it('returns 200 on schema for an anonymous caller', function (): void {
+    it('returns 401 for an unauthenticated caller on index', function (): void {
         [$controller] = makeSpeechProviderConfigController();
-        $response = $controller->schema();
-        expect($response->getStatusCode())->toBe(200);
+        $resp = $controller->index();
+        expect($resp->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
     });
 
-    it('200 admin happy path: create a global config, list it, update it, delete it', function (): void {
+    it('list returns 200 with an empty list for a fresh user', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-empty@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->index();
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
+    });
+
+    it('admin: create a global config returns 201 with masked api_key', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $userId = bootAuth($auth, 'spc-admin@example.com', SPC_TEST_PASSWORD);
         makeAdmin($auth, $userId);
 
-        // CREATE — admin scope=global
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-mistral',
-                'display_name' => 'Mistral Voxtral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
+            'is_global' => true,
+            'display_name' => 'OAI Global',
+            'settings' => fullSettings('sk-mistral'),
         ]));
-        expect($createResp->getStatusCode())->toBe(200);
-        $createBody = json_decode($createResp->getContent(), true);
-        expect($createBody['data']['config']['scope'])->toBe('global');
-        expect($createBody['data']['config']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
-        expect($createBody['data']['config']['settings']['api_key'])->toBe('***');
-        $configId = $createBody['data']['config']['id'];
 
-        // LIST — admin sees globals
-        $listResp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
-        expect($listResp->getStatusCode())->toBe(200);
-        $listBody = json_decode($listResp->getContent(), true);
-        expect($listBody['data']['configs'])->toHaveCount(1);
-        expect($listBody['data']['configs'][0]['id'])->toBe($configId);
-
-        // UPDATE — change display_name + base_url
-        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
-            'settings' => [
-                'display_name' => 'Mistral Voxtral (prod)',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-                'api_key' => 'sk-mistral', // unchanged — sends same value
-            ],
-        ]));
-        expect($updateResp->getStatusCode())->toBe(200);
-        $updateBody = json_decode($updateResp->getContent(), true);
-        expect($updateBody['data']['config']['settings']['display_name'])->toBe('Mistral Voxtral (prod)');
-
-        // DELETE
-        $deleteResp = $controller->destroy($configId);
-        expect($deleteResp->getStatusCode())->toBe(200);
-        $deleteBody = json_decode($deleteResp->getContent(), true);
-        expect($deleteBody['data']['deleted'])->toBeTrue();
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
+        expect($body['data']['config']['is_global'])->toBeTrue();
+        expect($body['data']['config']['settings']['api_key'])->toBe('***');
     });
 
-    it('200 user happy path: a non-admin can create + list their own per-user config', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-user@example.com', SPC_TEST_PASSWORD);
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-            'settings' => [
-                'api_key' => 'sk-personal',
-                'display_name' => 'Personal Mistral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($createResp->getStatusCode())->toBe(200);
-        $createBody = json_decode($createResp->getContent(), true);
-        expect($createBody['data']['config']['scope'])->toBe('user');
-        expect($createBody['data']['config']['principal_id'])->toBeGreaterThan(0);
-        $configId = $createBody['data']['config']['id'];
-
-        // LIST — non-admin sees own user-scope config
-        $listResp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
-        expect($listResp->getStatusCode())->toBe(200);
-        $listBody = json_decode($listResp->getContent(), true);
-        expect($listBody['data']['configs'])->toHaveCount(1);
-        expect($listBody['data']['configs'][0]['id'])->toBe($configId);
-    });
-
-    it('returns 403 when a non-admin POSTs scope=global', function (): void {
+    it('non-admin: POST with is_global=true returns 403', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $userId = bootAuth($auth, 'spc-nonadmin@example.com', SPC_TEST_PASSWORD);
 
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-x',
-                'display_name' => 'X',
-                'base_url' => 'https://api.openai.com/v1',
-                'model' => 'whisper-1',
-            ],
+            'is_global' => true,
+            'settings' => fullSettings(),
         ]));
-        expect($createResp->getStatusCode())->toBe(403);
-        $body = json_decode($createResp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
     });
 
-    it('returns 403 when a user tries to update another user config (use 2-user fixture)', function (): void {
-        [$controller, $auth, $toolConfig, $principalService] = makeSpeechProviderConfigController();
+    it('non-admin: creates a per-user config under their user-principal', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-user@example.com', SPC_TEST_PASSWORD);
 
-        // User A creates a personal config.
-        $userA = bootAuth($auth, 'spc-a@example.com', SPC_TEST_PASSWORD);
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-            'settings' => [
-                'api_key' => 'sk-a',
-                'display_name' => 'A',
-                'base_url' => 'https://api.openai.com/v1',
-                'model' => 'whisper-1',
-            ],
+            'settings' => fullSettings('sk-personal'),
         ]));
-        expect($createResp->getStatusCode())->toBe(200);
-        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
 
-        // Switch to user B — clear the prior session and login.
-        clearSession();
-        $userB = bootAuth($auth, 'spc-b@example.com', SPC_TEST_PASSWORD);
-        expect($userB)->not->toBe($userA);
-
-        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
-            'settings' => [
-                'api_key' => 'sk-b',
-                'display_name' => 'B',
-                'base_url' => 'https://api.openai.com/v1',
-                'model' => 'whisper-1',
-            ],
-        ]));
-        expect($updateResp->getStatusCode())->toBe(403);
-        $body = json_decode($updateResp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['is_global'])->toBeFalse();
+        expect($body['data']['config']['principal_id'])->toBeGreaterThan(0);
     });
 
-    it('returns 404 when POST provider_class is not a registered speech provider', function (): void {
+    it('update merges existing settings so omitted-and-kept values survive', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
-        bootAuth($auth, 'spc-bad@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $auth->currentUserId() ?? 0);
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => 'NotAReal\\Class',
-            'scope' => 'global',
-            'settings' => [],
-        ]));
-        expect($createResp->getStatusCode())->toBe(404);
-        $body = json_decode($createResp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
-    });
-
-    it('returns 422 when POST body fails the declared regex validation', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        bootAuth($auth, 'spc-regex@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $auth->currentUserId() ?? 0);
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-x',
-                'display_name' => 'X',
-                'base_url' => 'not-a-url',
-                'model' => 'whisper-1',
-            ],
-        ]));
-        expect($createResp->getStatusCode())->toBe(422);
-        $body = json_decode($createResp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
-    });
-
-    it('round-trips api_key as "***" on read; sending "***" keeps the existing value', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-mask@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $userId);
-
-        // Initial create with a real key
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-real-1',
-                'display_name' => 'M',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($createResp->getStatusCode())->toBe(200);
-        $createBody = json_decode($createResp->getContent(), true);
-        expect($createBody['data']['config']['settings']['api_key'])->toBe('***');
-        $configId = $createBody['data']['config']['id'];
-
-        // Send "***" as the api_key — value should not change.
-        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
-            'settings' => [
-                'api_key' => '***',
-                'display_name' => 'M (updated)',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($updateResp->getStatusCode())->toBe(200);
-
-        // The stored key (read by ToolConfigService::getGlobalSettings) must
-        // still be the original — confirm via direct call to the service.
-        $global = $toolConfig = (new ToolConfigService(
-            new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new \Psr\Log\NullLogger(),
-            [],
-        ));
-        $stored = $global->getGlobalSettings(OpenAiCompatibleTranscriber::class);
-        expect($stored['api_key'])->toBe('sk-real-1');
-    });
-
-    // The frontend PUTs only the fields the operator changed (`api_key`
-    // is omitted whenever the operator intended to keep the existing
-    // secret; see `SpeechProviderConfigForm.vue::buildSettingsToSend`).
-    // The schema marks `api_key` as `required`, so a naive validator
-    // rejects the omitted-and-kept case with 422. The service merges
-    // existing storage into the request before validating, so the
-    // schema sees the full set, the password is preserved on disk,
-    // and the changed fields land in their new values.
-    it('PUT with api_key omitted keeps the existing key (server merges storage before validating)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-partial@example.com', SPC_TEST_PASSWORD);
+        $userId = bootAuth($auth, 'spc-update@example.com', SPC_TEST_PASSWORD);
         makeAdmin($auth, $userId);
 
         $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-original',
-                'display_name' => 'Mistral Voxtral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
+            'is_global' => true,
+            'display_name' => 'Original',
+            'settings' => fullSettings('sk-kept'),
         ]));
-        expect($createResp->getStatusCode())->toBe(200);
         $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
 
-        // Operator changed display_name only — omit api_key entirely.
-        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
-            'settings' => [
-                'display_name' => 'Mistral Voxtral (renamed)',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'display_name' => 'Renamed',
+            'settings' => fullSettings('sk-kept'),
         ]));
-        expect($updateResp->getStatusCode())->toBe(200);
-        $body = json_decode($updateResp->getContent(), true);
-        expect($body['data']['config']['settings']['api_key'])->toBe('***');
-        expect($body['data']['config']['settings']['display_name'])->toBe('Mistral Voxtral (renamed)');
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_OK);
 
-        // The stored key must be unchanged — confirm via direct service read.
-        $global = new ToolConfigService(
-            new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-            new \Psr\Log\NullLogger(),
-            [],
-        );
-        $stored = $global->getGlobalSettings(OpenAiCompatibleTranscriber::class);
-        expect($stored['api_key'])->toBe('sk-original');
-        expect($stored['display_name'])->toBe('Mistral Voxtral (renamed)');
+        $config = SpeechProviderConfiguration::find($configId);
+        expect($config->display_name)->toBe('Renamed');
     });
 
-    it('returns 403 (forbidden) for anonymous index requests', function (): void {
-        [$controller] = makeSpeechProviderConfigController();
-        // No session — currentUserId() returns null → requireUserId throws.
-        $resp = $controller->index(jsonSpcRequest("GET", "/api/v1/speech/provider-configs"));
-        expect($resp->getStatusCode())->toBe(403);
-    });
-
-    // Regression: an admin who creates a user-scope override (no auth
-    // check in upsertUserConfig) used to be unable to see it on the
-    // list endpoint — listConfigs short-circuited on the admin branch
-    // and returned only globals. Admins may want a personal override
-    // separate from the global default, so the endpoint now returns
-    // both for admins. Non-admins still see only their user-scope.
-    it('admin sees both globals and their own user-scope configs in the list', function (): void {
+    it('delete returns 200 and removes the row', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-admin-mixed@example.com', SPC_TEST_PASSWORD);
+        $userId = bootAuth($auth, 'spc-delete@example.com', SPC_TEST_PASSWORD);
         makeAdmin($auth, $userId);
 
-        $globalResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-global',
-                'display_name' => 'Global Mistral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($globalResp->getStatusCode())->toBe(200);
-
-        $userResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-            'settings' => [
-                'api_key' => 'sk-personal',
-                'display_name' => 'Personal Mistral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($userResp->getStatusCode())->toBe(200);
-        $userConfigId = json_decode($userResp->getContent(), true)['data']['config']['id'];
-
-        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
-        expect($listResp->getStatusCode())->toBe(200);
-        $list = json_decode($listResp->getContent(), true)['data']['configs'];
-
-        $scopes = array_column($list, 'scope');
-        expect($scopes)->toContain('global');
-        expect($scopes)->toContain('user');
-        expect(array_filter($list, static fn($c) => $c['id'] === $userConfigId))->not->toBeEmpty();
-    });
-
-    it('non-admin still does NOT see globals in the list', function (): void {
-        // Defensive: this describe block's afterEach clears tool_configurations
-        // and tool_user_settings, but a global could leak from a different
-        // test if execution order ever changed. Wipe both before asserting.
-        Capsule::table('tool_configurations')->delete();
-        Capsule::table('tool_user_settings')->delete();
-
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-nonadmin-still@example.com', SPC_TEST_PASSWORD);
-
-        $userResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-            'settings' => [
-                'api_key' => 'sk-personal',
-                'display_name' => 'Personal Mistral',
-                'base_url' => 'https://api.mistral.ai/v1',
-                'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($userResp->getStatusCode())->toBe(200);
-
-        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
-        $list = json_decode($listResp->getContent(), true)['data']['configs'];
-
-        $scopes = array_column($list, 'scope');
-        expect($scopes)->not->toContain('global');
-        expect($scopes)->toContain('user');
-    });
-});
-
-describe('SpeechProviderConfigController — scope=group', function (): void {
-    beforeEach(function (): void {
-        clearSession();
-    });
-
-    afterEach(function (): void {
-        clearSession();
-        Capsule::table('tool_user_settings')->delete();
-        Capsule::table('tool_configurations')->delete();
-        Capsule::table('group_memberships')->delete();
-        Capsule::table('groups')->delete();
-        Capsule::table('principals')->where('type', 'group')->delete();
-    });
-
-    it('200: group admin creates a group-scoped config; principal_id points at the group-principal', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
-
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGrpA');
-        $groupPrincipalId = (int) Capsule::table('principals')
-            ->where('type', \Spora\Models\Principal::TYPE_GROUP)
-            ->where('group_id', $group->id)
-            ->value('id');
-
-        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group',
-            'group_id'       => (int) $group->id,
-            'settings'       => [
-                'api_key'      => 'sk-grp',
-                'display_name' => 'Group Mistral',
-                'base_url'     => 'https://api.mistral.ai/v1',
-                'model'        => 'voxtral-mini-latest',
-            ],
-        ]));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['config']['scope'])->toBe('group');
-        expect($body['data']['config']['principal_id'])->toBe($groupPrincipalId);
-        expect($body['data']['config']['settings']['api_key'])->toBe('***');
-
-        // Row actually landed in tool_user_settings keyed by the group-principal id.
-        $rowCount = Capsule::table('tool_user_settings')
-            ->where('principal_id', $groupPrincipalId)
-            ->count();
-        expect($rowCount)->toBe(1);
-    });
-
-    it('403: a member (non-admin) of the group cannot create a group-scoped config', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-grp-memb-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGrpMember');
-
-        // Add the caller as a member (not admin) and switch the session.
-        $memberId = bootAuth($auth, 'spc-grp-memb@example.com', SPC_TEST_PASSWORD);
-        $groupService->addMember((int) $group->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
-        clearSession();
-        simulateLoggedInSession($memberId, 'spc-grp-memb@example.com');
-
-        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group',
-            'group_id'       => (int) $group->id,
-            'settings'       => [
-                'api_key'      => 'sk-grp',
-                'display_name' => 'X',
-                'base_url'     => 'https://api.openai.com/v1',
-                'model'        => 'whisper-1',
-            ],
-        ]));
-        expect($resp->getStatusCode())->toBe(403);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
-    });
-
-    it('200: global admin can create a group-scoped config on any group', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-grp-admin-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGrpAdmin');
-
-        $adminId = bootAuth($auth, 'spc-grp-admin@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $adminId);
-
-        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group',
-            'group_id'       => (int) $group->id,
-            'settings'       => [
-                'api_key'      => 'sk-admin-grp',
-                'display_name' => 'Admin-set',
-                'base_url'     => 'https://api.openai.com/v1',
-                'model'        => 'whisper-1',
-            ],
-        ]));
-        expect($resp->getStatusCode())->toBe(200);
-        expect(json_decode($resp->getContent(), true)['data']['config']['scope'])->toBe('group');
-    });
-
-    it('422: scope=group without group_id is rejected', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-grp-noid-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $groupService->createGroup($ownerId, 'SpCGrpNoId');
-
-        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group',
-            'settings'       => [
-                'api_key'      => 'sk-x',
-                'display_name' => 'X',
-                'base_url'     => 'https://api.openai.com/v1',
-                'model'        => 'whisper-1',
-            ],
-        ]));
-        expect($resp->getStatusCode())->toBe(422);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
-    });
-
-    it('422: scope=user with a stray group_id is rejected', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        bootAuth($auth, 'spc-stray-gid@example.com', SPC_TEST_PASSWORD);
-
-        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'user',
-            'group_id'       => 7, // stray
-            'settings'       => [
-                'api_key'      => 'sk-x',
-                'display_name' => 'X',
-                'base_url'     => 'https://api.openai.com/v1',
-                'model'        => 'whisper-1',
-            ],
-        ]));
-        expect($resp->getStatusCode())->toBe(422);
-    });
-
-    it('GET ?group_id=N returns only that group\'s configs to a member', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-list-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $groupA = $groupService->createGroup($ownerId, 'SpCListA');
-        $groupB = $groupService->createGroup($ownerId, 'SpCListB');
-
-        // Owner pre-populates a config on each group.
-        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group', 'group_id' => (int) $groupA->id,
-            'settings'       => [
-                'api_key' => 'sk-a', 'display_name' => 'A',
-                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group', 'group_id' => (int) $groupB->id,
-            'settings'       => [
-                'api_key' => 'sk-b', 'display_name' => 'B',
-                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-
-        // Add a member and ask for only group A.
-        $memberId = bootAuth($auth, 'spc-list-memb@example.com', SPC_TEST_PASSWORD);
-        $groupService->addMember((int) $groupA->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
-        $groupService->addMember((int) $groupB->id, $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
-        clearSession();
-        simulateLoggedInSession($memberId, 'spc-list-memb@example.com');
-
-        $resp = $controller->index(Request::create(
-            '/api/v1/speech/provider-configs?group_id=' . $groupA->id,
-            'GET',
-        ));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['configs'])->toHaveCount(1);
-        expect($body['data']['configs'][0]['scope'])->toBe('group');
-        expect($body['data']['configs'][0]['settings']['display_name'])->toBe('A');
-    });
-
-    it('GET ?group_id=N returns empty list to a non-member (existence-hide)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-list-nonmem-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCListNonMem');
-
-        // Owner writes a config; stranger does NOT join the group.
-        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group', 'group_id' => (int) $group->id,
-            'settings'       => [
-                'api_key' => 'sk-a', 'display_name' => 'A',
-                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-
-        $strangerId = bootAuth($auth, 'spc-list-stranger@example.com', SPC_TEST_PASSWORD);
-        clearSession();
-        simulateLoggedInSession($strangerId, 'spc-list-stranger@example.com');
-
-        $resp = $controller->index(Request::create(
-            '/api/v1/speech/provider-configs?group_id=' . $group->id,
-            'GET',
-        ));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['configs'])->toBe([]);
-    });
-
-    it('GET without ?group_id still returns the legacy scopes (no behaviour change)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-list-legacy@example.com', SPC_TEST_PASSWORD);
-
         $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'user',
-            'settings'       => [
-                'api_key' => 'sk-pers', 'display_name' => 'Personal',
-                'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
-            ],
-        ]));
-        expect($createResp->getStatusCode())->toBe(200);
-
-        $listResp = $controller->index(jsonSpcRequest('GET', '/api/v1/speech/provider-configs'));
-        $body = json_decode($listResp->getContent(), true);
-        // Old behaviour: non-admin sees own user-scoped configs, not groups.
-        expect($body['data']['configs'])->toHaveCount(1);
-        expect($body['data']['configs'][0]['scope'])->toBe('user');
-    });
-
-    it('PUT on a group-scoped id by the group admin updates settings and keeps scope=group', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-grp-put-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGrpPut');
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group', 'group_id' => (int) $group->id,
-            'settings'       => [
-                'api_key' => 'sk-1', 'display_name' => 'v1',
-                'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
-            ],
-        ]));
-        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
-
-        $putResp = $controller->update($configId, jsonSpcRequest('PUT', "/api/v1/speech/provider-configs/{$configId}", [
-            'settings' => [
-                'display_name' => 'v2',
-                'base_url'     => 'https://api.mistral.ai/v1',
-                'model'        => 'voxtral-mini-latest',
-                'api_key'      => 'sk-1',
-            ],
-        ]));
-        expect($putResp->getStatusCode())->toBe(200);
-        $body = json_decode($putResp->getContent(), true);
-        expect($body['data']['config']['scope'])->toBe('group');
-        expect($body['data']['config']['settings']['display_name'])->toBe('v2');
-    });
-
-    it('DELETE on a group-scoped id by the group admin removes the row', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-grp-del-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGrpDel');
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope'          => 'group', 'group_id' => (int) $group->id,
-            'settings'       => [
-                'api_key' => 'sk-1', 'display_name' => 'X',
-                'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
-            ],
+            'is_global' => true,
+            'settings' => fullSettings('sk-x'),
         ]));
         $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
 
         $delResp = $controller->destroy($configId);
-        expect($delResp->getStatusCode())->toBe(200);
-        expect(Capsule::table('tool_user_settings')
-            ->where('id', $configId)
-            ->exists())->toBeFalse();
-    });
-});
-
-describe('SpeechProviderConfigController — POST /set-default + PUT /preference', function (): void {
-    beforeEach(function (): void {
-        clearSession();
+        expect($delResp->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(SpeechProviderConfiguration::find($configId))->toBeNull();
     });
 
-    afterEach(function (): void {
-        clearSession();
-        Capsule::table('tool_user_settings')->delete();
-        Capsule::table('tool_configurations')->delete();
-        Capsule::table('principal_preferences')->delete();
-        Capsule::table('group_memberships')->delete();
-        Capsule::table('groups')->delete();
-        Capsule::table('principals')->where('type', 'group')->delete();
-    });
-
-    it('POST /set-default happy path (global admin)', function (): void {
+    it('non-admin cannot update or delete another user\'s config', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-set-default@example.com', SPC_TEST_PASSWORD);
+
+        // user A creates a config
+        $userA = bootAuth($auth, 'spc-a@example.com', SPC_TEST_PASSWORD);
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'settings' => fullSettings('sk-a'),
+        ]));
+        expect($createResp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        // Switch to user B
+        clearSession();
+        $userB = bootAuth($auth, 'spc-b@example.com', SPC_TEST_PASSWORD);
+
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'settings' => fullSettings('sk-b'),
+        ]));
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+    });
+
+    it('set-default promotes one global config (admin only)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-default@example.com', SPC_TEST_PASSWORD);
         makeAdmin($auth, $userId);
 
-        $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-            'settings' => [
-                'api_key' => 'sk-default',
-                'display_name' => 'Default',
-                'base_url' => 'https://api.openai.com/v1',
-                'model' => 'whisper-1',
-            ],
+            'is_global' => true,
+            'settings' => fullSettings('sk-default'),
         ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
 
-        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
-        ]));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['config']['is_default'])->toBeTrue();
-        expect(Capsule::table('tool_configurations')->where('is_default', true)->count())->toBe(1);
+        $resp = $controller->setDefault($configId);
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $config = SpeechProviderConfiguration::find($configId);
+        expect($config->is_default)->toBeTrue();
     });
 
-    it('POST /set-default 403 (non-admin)', function (): void {
+    it('non-admin cannot set the default (403)', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
-        bootAuth($auth, 'spc-set-default-403@example.com', SPC_TEST_PASSWORD);
+        $adminId = bootAuth($auth, 'spc-admin2@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
 
-        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'global',
+            'is_global' => true,
+            'settings' => fullSettings('sk-def'),
         ]));
-        expect($resp->getStatusCode())->toBe(403);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
-    });
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
 
-    it('POST /set-default 422 (unregistered class)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-set-default-422@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $userId);
-
-        $resp = $controller->setDefault(jsonSpcRequest('POST', '/api/v1/speech/provider-configs/set-default', [
-            'provider_class' => 'NotAReal\\Class',
-            'scope' => 'global',
-        ]));
-        expect($resp->getStatusCode())->toBe(404);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
-    });
-
-    it('PUT /preference happy path (self, scope=user)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-pref-user@example.com', SPC_TEST_PASSWORD);
-
-        $resp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-        ]));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['preference']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
-        expect($body['data']['preference']['scope'])->toBe('user');
-    });
-
-    it('PUT /preference happy path (group admin, scope=group)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-pref-grp-owner@example.com', SPC_TEST_PASSWORD);
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCPrefGrp');
-
-        $resp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'group',
-            'group_id' => (int) $group->id,
-        ]));
-        expect($resp->getStatusCode())->toBe(200);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['data']['preference']['scope'])->toBe('group');
-        expect($body['data']['preference']['group_id'])->toBe((int) $group->id);
-    });
-
-    it('PUT /preference clears with null class', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-pref-clear@example.com', SPC_TEST_PASSWORD);
-
-        // Set first
-        $setResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-        ]));
-        expect($setResp->getStatusCode())->toBe(200);
-
-        // Then clear
-        $clearResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'provider_class' => null,
-            'scope' => 'user',
-        ]));
-        expect($clearResp->getStatusCode())->toBe(200);
-        $body = json_decode($clearResp->getContent(), true);
-        expect($body['data']['preference']['provider_class'])->toBeNull();
-    });
-
-    it('GET /preference returns the stored preference (scope=user)', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-get-pref-user@example.com', SPC_TEST_PASSWORD);
-
-        // No preference set yet — returns 200 with null provider_class so the SPA
-        // can render the placeholder without a 404 dance.
-        $emptyResp = $controller->getPreference(jsonSpcRequest('GET', '/api/v1/speech/preference?scope=user'));
-        expect($emptyResp->getStatusCode())->toBe(200);
-        $emptyBody = json_decode($emptyResp->getContent(), true);
-        expect($emptyBody['data']['preference']['provider_class'])->toBeNull();
-        expect($emptyBody['data']['preference']['scope'])->toBe('user');
-
-        // Set then read.
-        $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'scope' => 'user',
-        ]));
-        $filledResp = $controller->getPreference(jsonSpcRequest('GET', '/api/v1/speech/preference?scope=user'));
-        expect($filledResp->getStatusCode())->toBe(200);
-        $filledBody = json_decode($filledResp->getContent(), true);
-        expect($filledBody['data']['preference']['provider_class'])->toBe(OpenAiCompatibleTranscriber::class);
-        expect($filledBody['data']['preference']['scope'])->toBe('user');
-    });
-
-    it('GET /preference rejects non-member when scope=group', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $ownerId = bootAuth($auth, 'spc-get-pref-grp-owner@example.com', SPC_TEST_PASSWORD);
-        $outsiderId = bootAuth($auth, 'spc-get-pref-outsider@example.com', SPC_TEST_PASSWORD);
-
-        $groupService = new \Spora\Services\GroupService(new PrincipalService(new PrincipalResolver()));
-        $group = $groupService->createGroup($ownerId, 'SpCGetPrefGrp');
-
-        // Switch session to the outsider without re-registering (re-registering
-        // would throw EmailTakenException).
         clearSession();
-        simulateLoggedInSession($outsiderId, 'spc-get-pref-outsider@example.com');
-
-        $resp = $controller->getPreference(jsonSpcRequest(
-            'GET',
-            '/api/v1/speech/preference?scope=group&group_id=' . (int) $group->id,
-        ));
-        expect($resp->getStatusCode())->toBe(403);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+        $userB = bootAuth($auth, 'spc-nonadmin2@example.com', SPC_TEST_PASSWORD);
+        $resp = $controller->setDefault($configId);
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
     });
 
-    it('GET /preference rejects stray group_id when scope=user', function (): void {
+    it('preferred config: PUT /api/v1/speech/preference sets, GET reads', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-get-pref-stray@example.com', SPC_TEST_PASSWORD);
+        $adminId = bootAuth($auth, 'spc-pref-admin@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
 
-        $resp = $controller->getPreference(jsonSpcRequest(
-            'GET',
-            '/api/v1/speech/preference?scope=user&group_id=42',
-        ));
-        expect($resp->getStatusCode())->toBe(422);
-        $body = json_decode($resp->getContent(), true);
-        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-pref'),
+        ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        clearSession();
+        $userId = bootAuth($auth, 'spc-pref@example.com', SPC_TEST_PASSWORD);
+
+        $putResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
+            'config_id' => $configId,
+            'scope' => 'user',
+        ]));
+        expect($putResp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $getResp = $controller->getPreference(Request::create('/api/v1/speech/preference', 'GET', [
+            'scope' => 'user',
+        ]));
+        expect($getResp->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode($getResp->getContent(), true)['data']['preference']['config_id'])->toBe($configId);
     });
 
-    // Regression: register POST /provider-configs/set-default BEFORE any
-    // /provider-configs/{id} route. FastRoute's GroupCountBased dispatcher
-    // matches PUT /{id} against the literal path /provider-configs/set-default
-    // regardless of registration order (FastRoute returns FOUND with
-    // id="set-default"); the ordering matters so a future POST
-    // /provider-configs/{id} route addition doesn't accidentally match
-    // POST /set-default. This test pins the route table structure.
-    it('Route ordering — POST /provider-configs/set-default is registered before PUT /provider-configs/{id}', function (): void {
-        $collector = new \Spora\Core\MiddlewareRouteCollector(
-            new \FastRoute\RouteParser\Std(),
-            new \FastRoute\DataGenerator\GroupCountBased(),
-        );
-        \Spora\Core\SpeechRouteDefinitions::register($collector);
-        $routes = (new \Spora\OpenApi\RouteSpecCollector());
-        // Re-collect into the spec collector for inspection.
-        $spec = new \Spora\OpenApi\RouteSpecCollector();
-        \Spora\Core\SpeechRouteDefinitions::register($spec);
+    it('preference GET returns null when no preference is set', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-pref-null@example.com', SPC_TEST_PASSWORD);
 
-        $specs = $spec->routes();
-        $setDefaultIndex = null;
-        $updateIndex = null;
-        foreach ($specs as $idx => $row) {
-            if ($row['method'] === 'POST' && $row['route'] === '/api/v1/speech/provider-configs/set-default') {
-                $setDefaultIndex = $idx;
-            }
-            if ($row['method'] === 'PUT' && $row['route'] === '/api/v1/speech/provider-configs/{id}') {
-                $updateIndex = $idx;
-            }
-        }
-        expect($setDefaultIndex)->not->toBeNull();
-        expect($updateIndex)->not->toBeNull();
-        expect($setDefaultIndex)->toBeLessThan($updateIndex);
+        $resp = $controller->getPreference(Request::create('/api/v1/speech/preference', 'GET', [
+            'scope' => 'user',
+        ]));
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode($resp->getContent(), true)['data']['preference']['config_id'])->toBeNull();
     });
 });

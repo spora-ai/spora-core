@@ -18,17 +18,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * pointers and the {@see \Spora\Services\LlmConfigValidator} gates who can
  * write the field for which principal.
  *
- * The `preferred_speech_provider_class` column (added by migration 0084)
- * stores a class FQCN rather than a numeric FK because speech configs
- * span `tool_configurations` (global) and `tool_user_settings`
- * (per-principal) — a single FK can't reach both. The registry
- * ({@see \Spora\Speech\SpeechToTextRegistry::resolvePreferredClass()})
- * validates the class is a registered STT class at read time.
+ * The `preferred_speech_config_id` is the FK to
+ * `speech_provider_configurations(id)` introduced in migration 0088
+ * (replacing the `preferred_speech_provider_class` string column from
+ * migration 0084). Migration 0084 stored a class FQCN because speech
+ * configs spanned two tables; migration 0085 unified them so the FK is
+ * the natural shape.
  *
  * @property int $id
  * @property int $principal_id
  * @property int|null $preferred_llm_config_id
- * @property string|null $preferred_speech_provider_class
+ * @property int|null $preferred_speech_config_id
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  */
@@ -37,7 +37,7 @@ final class PrincipalPreference extends Model
     protected $table = 'principal_preferences';
 
     /** @var list<string> */
-    protected $fillable = ['principal_id', 'preferred_llm_config_id', 'preferred_speech_provider_class'];
+    protected $fillable = ['principal_id', 'preferred_llm_config_id', 'preferred_speech_config_id'];
 
     public $timestamps = true;
 
@@ -49,5 +49,10 @@ final class PrincipalPreference extends Model
     public function preferredLlmConfig(): BelongsTo
     {
         return $this->belongsTo(LLMDriverConfiguration::class, 'preferred_llm_config_id');
+    }
+
+    public function preferredSpeechConfig(): BelongsTo
+    {
+        return $this->belongsTo(SpeechProviderConfiguration::class, 'preferred_speech_config_id');
     }
 }

@@ -16,17 +16,11 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  * Returns the list of every loaded STT provider (one row per provider,
  * regardless of how many plugins ship them), plus a derived
  * `available` / `configured` summary the frontend uses to decide whether
- * to render the recording button at all.
- *
- * Per-agent scope is intentionally `null` for v1 — the controller
- * resolves the per-user effective settings but doesn't accept an agent
- * id, mirroring the rationale in
- * {@see SpeechTranscribeController::transcribeWithProvider()} (per-agent
- * settings are out of scope until the Speech Provider Configuration
- * plan's `stt_provider_configurations` schema is in place). Anonymous
- * visitors (no session) still get a 200 with `configured: false` and
- * providers built via `describe(0, null)` so the SPA can render the
- * "please log in" empty state without a separate code path.
+ * to render the recording button at all. Every row also carries the
+ * effective-class + tier label resolved by
+ * {@see SpeechToTextRegistry::resolveEffectiveClassWithSource()} so
+ * the SPA can render "Currently using: X" against a single source of
+ * truth.
  *
  * Mirrors the shape of {@see MediaAllowedTypesController}:
  * read-only, auth-only (no CSRF).
@@ -57,8 +51,9 @@ final class SpeechCapabilityController
                                     new OA\Property(property: 'name', type: 'string'),
                                     new OA\Property(property: 'display_name', type: 'string'),
                                     new OA\Property(property: 'configured', type: 'boolean'),
-                                    new OA\Property(property: 'has_global_default', type: 'boolean'),
-                                    new OA\Property(property: 'config_id', type: 'integer', nullable: true),
+                                    new OA\Property(property: 'effective_class', type: 'string', nullable: true),
+                                    new OA\Property(property: 'effective_source', type: 'string', nullable: true),
+                                    new OA\Property(property: 'effective_config_id', type: 'integer', nullable: true),
                                 ],
                                 type: 'object',
                             ),
@@ -71,13 +66,35 @@ final class SpeechCapabilityController
     public function index(): JsonResponse
     {
         $userId = $this->auth->currentUserId();
-        $providers = $this->registry->describe($userId, null);
+        $providers = $this->registry->all();
+
+        [$effectiveClass, $effectiveSource] = $this->registry->describe($userId, null);
+
+        // "configured" summary: a provider was resolved AND it self-
+        // reports configured. The fallback tier picks the first
+        // registered class (which may not have an api_key yet) — the
+        // summary reflects whether transcribing would actually work,
+        // not whether a class exists.
+        $resolvedProvider = $this->registry->configuredProvider($userId, null);
+        $isReady = $resolvedProvider !== null && $resolvedProvider->isConfigured();
+
+        $rows = [];
+        foreach ($providers as $provider) {
+            $rows[] = [
+                'name' => $provider->getName(),
+                'display_name' => $provider->getDisplayName(),
+                'configured' => $provider->isConfigured(),
+                'effective_class' => $effectiveClass,
+                'effective_source' => $effectiveSource,
+                'effective_config_id' => null,
+            ];
+        }
 
         return new JsonResponse([
             'data' => [
-                'available'  => $providers !== [],
-                'configured' => $this->registry->configuredProvider($userId, null) !== null,
-                'providers'  => $providers,
+                'available' => $providers !== [],
+                'configured' => $isReady,
+                'providers' => $rows,
             ],
         ]);
     }

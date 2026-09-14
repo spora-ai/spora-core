@@ -48,10 +48,12 @@ use Tests\Support\MediaArchiveTestSupport;
  *
  * Cascade rules pinned by these scenarios:
  *
- *   defaults → global → group[0..N] → user → agent_tool_override
+ *   defaults → global → group[0..N] → user
  *
  * `group[N]` iterates groups by principal id ascending; the user-principal
- * wins on conflict; the agent override wins over all principal levels.
+ * wins on conflict. Per-agent overrides (`agent_tool_overrides`) are
+ * deliberately ignored by the speech cascade — creating a new user /
+ * group / global provider is enough.
  */
 final class FlowStubRecorder
 {
@@ -86,7 +88,6 @@ function buildFlowController(
     return new SpeechTranscribeController(
         registry: new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber($http, $toolConfig)],
-            $toolConfig,
         ),
         mediaReader: $reader,
         mediaArchive: $mediaArchive,
@@ -194,7 +195,12 @@ function putAgentOverride(ToolConfigService $toolConfig, int $agentId, array $se
     $toolConfig->putAgentOverride(OpenAiCompatibleTranscriber::class, $agentId, $settings);
 }
 
-test('503 when no provider is configured at any level (cascade finds nothing)', function (): void {
+test('cascade finds a configured provider even when no preferences/defaults are set; provider-level failure surfaces as 502', function (): void {
+    // OpenAiCompatibleTranscriber's isConfigured() returns true unconditionally
+    // (it defers the real key check to transcribe() per its docstring).
+    // The cascade's fallback tier therefore picks it; with no api_key
+    // present anywhere, the HTTP layer returns bad JSON and the
+    // controller maps that to 502 SPEECH_PROVIDER_FAILED — NOT 503.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-1@example.com', 'Password1!');
 
@@ -203,8 +209,6 @@ test('503 when no provider is configured at any level (cascade finds nothing)', 
         $fx['auth'],
         $fx['principalService'],
         $fx['toolConfig'],
-        // Canned but irrelevant — the registry should return null
-        // before the provider is asked to transcribe.
         new MockHttpClient([new MockResponse('{}')]),
         $fx['agentService'],
         $fx['mediaArchive'],
@@ -212,8 +216,8 @@ test('503 when no provider is configured at any level (cascade finds nothing)', 
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
-    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_BAD_GATEWAY);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_FAILED');
 });
 
 test('global-only: cascade resolves to a global default; provider gets global settings', function (): void {
@@ -381,7 +385,11 @@ test('group + user: user override beats group override; group still beats global
     expect($rowCountForGroup)->toBe(1);
 });
 
-test('agent override beats user + group + global when agent_id is supplied', function (): void {
+test('user preference beats agent override + group + global when agent_id is supplied', function (): void {
+    // The agent override row is left in place to prove that the speech
+    // cascade no longer consults `agent_tool_overrides` — user preference
+    // wins regardless of the request body's `agent_id` (which is only
+    // checked for ownership, never threaded into settings lookup).
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-6@example.com', 'Password1!');
 
@@ -410,9 +418,9 @@ test('agent override beats user + group + global when agent_id is supplied', fun
     ]);
     putProviderSettings($fx['toolConfig'], $userPrincipalId, [
         'api_key' => 'sk-user', 'display_name' => 'Personal',
-        'base_url' => 'https://api.mistral.ai/v1', 'model' => 'voxtral-mini-latest',
+        'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1',
     ]);
-    // Agent override is the deepest — it must win.
+    // Stale agent override row — the cascade must ignore it.
     putAgentOverride($fx['toolConfig'], $agentId, [
         'api_key'      => 'sk-agent',
         'display_name' => 'Voice Bot Whisper',
@@ -425,7 +433,7 @@ test('agent override beats user + group + global when agent_id is supplied', fun
         $fx['auth'],
         $fx['principalService'],
         $fx['toolConfig'],
-        new MockHttpClient([new MockResponse(json_encode(['text' => 'agent-wins']))]),
+        new MockHttpClient([new MockResponse(json_encode(['text' => 'user-wins']))]),
         $fx['agentService'],
         $fx['mediaArchive'],
         $fx['reader'],
@@ -433,10 +441,11 @@ test('agent override beats user + group + global when agent_id is supplied', fun
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id, 'agent_id' => $agentId]));
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('agent-wins');
+    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('user-wins');
 
-    // Sanity: the agent_tool_overrides row is the only thing that
-    // could have produced "agent-wins" through the cascade.
+    // Sanity: the agent_tool_overrides row is still in the table but the
+    // speech cascade bypasses it — orphan rows are intentional and out
+    // of scope for the speech retention sweep.
     expect(Capsule::table('agent_tool_overrides')->where('agent_id', $agentId)->count())->toBe(1);
 });
 

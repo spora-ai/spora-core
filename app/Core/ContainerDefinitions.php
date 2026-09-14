@@ -153,7 +153,6 @@ use Spora\Services\SystemMailer;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
-use Spora\Services\ToolConfigIdResolver;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
@@ -791,9 +790,7 @@ final class ContainerDefinitions
                 }
                 return new SpeechToTextRegistry(
                     $providers,
-                    $c->get(ToolConfigService::class),
-                    new ToolConfigIdResolver(),
-                    $c->get(PrincipalService::class),
+                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
                 );
             },
 

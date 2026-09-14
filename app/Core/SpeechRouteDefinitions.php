@@ -18,20 +18,21 @@ use Spora\OpenApi\RouteSpecCollector;
  * 20-method Sonar brain-overload threshold (the speech surface arrived
  * as a 21st method).
  *
- * Endpoints:
+ * Endpoints (the LLM mirror):
+ *
  *   GET    /api/v1/speech/capability              — provider list (auth only)
  *   POST   /api/v1/speech/transcribe              — transcribe a recording (auth + CSRF)
  *   GET    /api/v1/speech/provider-configs        — list configs visible to caller
- *   GET    /api/v1/speech/provider-configs/schema — provider picker schema
- *   POST   /api/v1/speech/provider-configs        — upsert a config (auth + CSRF)
- *   POST   /api/v1/speech/provider-configs/set-default
- *                                              — mark one config as default at its scope
- *                                                (MUST be registered BEFORE any
- *                                                 /provider-configs/{id} route, so
- *                                                 "set-default" is not parsed as {id})
+ *   POST   /api/v1/speech/provider-configs        — create a config (auth + CSRF)
+ *   POST   /api/v1/speech/provider-configs/{id}/set-default
+ *                                              — mark one global config as default
+ *                                                (CRITICAL ordering: registered BEFORE any
+ *                                                 /provider-configs/{id} POST so the literal
+ *                                                 "set-default" suffix isn't parsed as the
+ *                                                 {id} placeholder)
  *   PUT    /api/v1/speech/provider-configs/{id}   — update a config (auth + CSRF)
  *   DELETE /api/v1/speech/provider-configs/{id}   — delete a config (auth + CSRF)
- *   PUT    /api/v1/speech/preference               — set / clear preferred STT class
+ *   PUT    /api/v1/speech/preference               — set / clear preferred STT config (FK)
  *   GET    /api/v1/speech/preference               — read the current preference (auth only)
  */
 final class SpeechRouteDefinitions
@@ -55,19 +56,11 @@ final class SpeechRouteDefinitions
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
 
-        // Provider-config surface: list + schema are auth-only reads; the
-        // three mutations carry CSRF because they write to
-        // tool_configurations / tool_user_settings.
+        // Provider-config surface (LLMConfigController parity).
         $r->addRoute(
             'GET',
             '/api/v1/speech/provider-configs',
             [SpeechProviderConfigController::class, 'index'],
-            [AuthMiddleware::class],
-        );
-        $r->addRoute(
-            'GET',
-            '/api/v1/speech/provider-configs/schema',
-            [SpeechProviderConfigController::class, 'schema'],
             [AuthMiddleware::class],
         );
         $r->addRoute(
@@ -77,16 +70,12 @@ final class SpeechRouteDefinitions
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
 
-        // "Set as Default" lives at /provider-configs/set-default.
-        // CRITICAL ordering: this MUST be registered BEFORE any
-        // /provider-configs/{id} route — otherwise FastRoute parses the
-        // literal "set-default" segment as the {id} placeholder and the
-        // dedicated action never fires. PUT /api/v1/speech/provider-configs/set-default
-        // is unambiguous as long as no PUT route at this exact path
-        // exists; FastRoute falls back to the variable match in that case.
+        // "Set as Default" is on /{id}/set-default so the {id} variable
+        // can come through normally. (LLMConfigController uses the same
+        // pattern.)
         $r->addRoute(
             'POST',
-            '/api/v1/speech/provider-configs/set-default',
+            '/api/v1/speech/provider-configs/{id}/set-default',
             [SpeechProviderConfigController::class, 'setDefault'],
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
@@ -104,7 +93,7 @@ final class SpeechRouteDefinitions
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
 
-        // "Preferred STT class" — a separate URL tree (no /provider-configs
+        // "Preferred STT config" — a separate URL tree (no /provider-configs
         // prefix) so the {id} collision isn't a concern and there's no
         // ordering constraint. GET is auth-only (read); PUT carries CSRF
         // because it writes to principal_preferences.

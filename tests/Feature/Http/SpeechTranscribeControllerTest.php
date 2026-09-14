@@ -140,8 +140,10 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     $reader  = new MediaAssetReader($database, $local);
 
     $config = Mockery::mock(ToolConfigService::class);
-    $config->shouldReceive('getEffectiveSettings')->andReturn([]);
-    $config->shouldReceive('getGlobalSettings')->andReturn([]);
+    // Mock is unused since the registry's new FK-driven cascade no
+    // longer calls ToolConfigService; keep the variable around in
+    // case future SpeechTranscribe tests need to stub settings.
+    $config->shouldIgnoreMissing();
 
     $pluginLoader = new \Spora\Plugins\PluginLoader([], null);
     $agentService = new AgentService(
@@ -155,7 +157,7 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     );
 
     $controller = new SpeechTranscribeController(
-        registry: new SpeechToTextRegistry([$provider], $config),
+        registry: new SpeechToTextRegistry([$provider]),
         mediaReader: $reader,
         mediaArchive: $service,
         auth: $auth,
@@ -418,7 +420,7 @@ test('returns 422 when agent_id does not belong to the caller', function (): voi
     expect($provider->calls)->toBe([]);
 });
 
-test('happy path: agent_id is forwarded to the provider when the agent belongs to the caller', function (): void {
+test('agent_id in request body is validated for ownership but never threaded into the provider (cascade ignores agent overrides)', function (): void {
     $provider = new TransStubConfigured();
     [$controller, , $userId, $assetId] = buildTransFixtures($provider);
 
@@ -438,10 +440,13 @@ test('happy path: agent_id is forwarded to the provider when the agent belongs t
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
     expect($provider->calls)->toHaveCount(1);
-    expect($provider->calls[0]['agent'])->toBe($agentId);
+    // The speech cascade never reads agent_tool_overrides, so the
+    // controller always passes 0 for $agentId — the provider's settings
+    // lookup walks user / group / global only.
+    expect($provider->calls[0]['agent'])->toBe(0);
 });
 
-test('agent_id 0 is treated as "no agent" (legacy behaviour preserved)', function (): void {
+test('agent_id 0 / absent: same outcome as a valid agent_id (cascade is unchanged)', function (): void {
     $provider = new TransStubConfigured();
     [$controller, , , $assetId] = buildTransFixtures($provider);
 
@@ -451,5 +456,5 @@ test('agent_id 0 is treated as "no agent" (legacy behaviour preserved)', functio
     ]));
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect($provider->calls[0]['agent'])->toBeNull();
+    expect($provider->calls[0]['agent'])->toBe(0);
 });

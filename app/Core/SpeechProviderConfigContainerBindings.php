@@ -8,9 +8,10 @@ use Psr\Container\ContainerInterface;
 use Spora\Http\SpeechProviderConfigController;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SpeechProviderConfigPreferences;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Services\SpeechProviderConfigValidator;
-use Spora\Services\ToolConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 
 /**
@@ -30,12 +31,33 @@ final class SpeechProviderConfigContainerBindings
     public static function all(): array
     {
         return [
+            SpeechProviderConfigValidator::class => static function (ContainerInterface $c): SpeechProviderConfigValidator {
+                return new SpeechProviderConfigValidator($c->get(SpeechToTextRegistry::class));
+            },
+
+            SpeechProviderConfigPersistence::class => static function (ContainerInterface $c): SpeechProviderConfigPersistence {
+                return new SpeechProviderConfigPersistence(
+                    $c->get(SecurityManagerInterface::class),
+                    $c->get(SpeechProviderConfigValidator::class),
+                );
+            },
+
+            SpeechProviderConfigPreferences::class => static function (ContainerInterface $c): SpeechProviderConfigPreferences {
+                $principalService = $c->has(PrincipalService::class)
+                    ? $c->get(PrincipalService::class)
+                    : new PrincipalService(new PrincipalResolver());
+                return new SpeechProviderConfigPreferences($principalService);
+            },
+
             SpeechProviderConfigService::class => static function (ContainerInterface $c): SpeechProviderConfigService {
+                $principalService = $c->has(PrincipalService::class)
+                    ? $c->get(PrincipalService::class)
+                    : new PrincipalService(new PrincipalResolver());
                 return new SpeechProviderConfigService(
-                    $c->get(ToolConfigService::class),
-                    $c->get(SpeechToTextRegistry::class),
-                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
-                    new SpeechProviderConfigValidator($c->get(SpeechToTextRegistry::class)),
+                    $c->get(SpeechProviderConfigValidator::class),
+                    $c->get(SpeechProviderConfigPersistence::class),
+                    $c->get(SpeechProviderConfigPreferences::class),
+                    $principalService,
                 );
             },
 

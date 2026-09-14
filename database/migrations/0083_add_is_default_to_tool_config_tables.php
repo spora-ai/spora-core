@@ -199,10 +199,14 @@ return new class extends Migration {
         // Build a "registry" with only the core-shipped STT class —
         // plugin contributions aren't visible to the migration's CLI
         // boot. Hard-coding here is intentional (see class docblock).
-        // The second arg satisfies the registry constructor signature
-        // at this point in the migration timeline; the registry is
-        // reshaped by the LLM-parity commit that follows this one,
-        // and the constructor argument is dropped there in lockstep.
+        // The migration only needs the registry's `all()` accessor,
+        // which returns the providers regardless of what other
+        // collaborators the constructor receives. The LLM-parity
+        // reshape reshaped the constructor signature (ToolConfigService
+        // dropped, PrincipalService kept) — see the registry's
+        // `__construct` for the current shape; we pass a fresh
+        // PrincipalService to satisfy the type system without
+        // bootstrapping the DI container.
         $registry = new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber(
                 new \Symfony\Component\HttpClient\MockHttpClient(),
@@ -212,11 +216,7 @@ return new class extends Migration {
                     [],
                 ),
             )],
-            new \Spora\Services\ToolConfigService(
-                new \Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-                new \Psr\Log\NullLogger(),
-                [],
-            ),
+            new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
         );
 
         $registered = $registry->all();

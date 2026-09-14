@@ -44,6 +44,20 @@ final class SpeechProviderConfigValidator
     }
 
     /**
+     * @return list<string>
+     */
+    public function passwordKeysFor(string $providerClass): array
+    {
+        $keys = [];
+        foreach ($this->collectSettingsSchema($providerClass) as $setting) {
+            if (($setting['type'] ?? '') === 'password') {
+                $keys[] = (string) $setting['key'];
+            }
+        }
+        return $keys;
+    }
+
+    /**
      * Walk `#[ToolSetting]` attributes on a provider class and return
      * each entry as a flat dict (the shape the SPA needs to render
      * the dynamic form).
