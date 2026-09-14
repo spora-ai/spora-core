@@ -134,17 +134,22 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     {
         $query = SpeechProviderConfiguration::where('id', $configId);
         if (!$isAdmin) {
-            $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
-            $query->where(static function ($q) use ($principalIds): void {
-                if ($principalIds === []) {
-                    $q->whereRaw('1 = 0');
-                } else {
-                    $q->whereIn('principal_id', $principalIds);
-                }
-                $q->orWhere('is_global', true);
-            });
+            $this->applyVisibleScope($query, $userId);
         }
         return $query->first();
+    }
+
+    private function applyVisibleScope(\Illuminate\Database\Eloquent\Builder $query, int $userId): void
+    {
+        $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        $query->where(static function ($q) use ($principalIds): void {
+            if ($principalIds === []) {
+                $q->whereRaw('1 = 0');
+            } else {
+                $q->whereIn('principal_id', $principalIds);
+            }
+            $q->orWhere('is_global', true);
+        });
     }
 
     public function findConfiguration(int $configId): ?SpeechProviderConfiguration

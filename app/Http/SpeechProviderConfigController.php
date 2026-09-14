@@ -303,6 +303,30 @@ final class SpeechProviderConfigController
     )]
     public function getPreference(Request $request): JsonResponse
     {
+        $validated = $this->validateGetPreferenceInput($request);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
+        }
+
+        $userId = $this->requireUserId();
+        $config = $this->service->resolvePreferredConfig(
+            $userId,
+            $this->authService->isAdmin(),
+            $validated->groupId,
+            $validated->scope,
+        );
+
+        return new JsonResponse(['data' => [
+            'preference' => [
+                'config_id' => $config?->id,
+                'scope' => $validated->scope,
+                'group_id' => $validated->groupId,
+            ],
+        ]]);
+    }
+
+    private function validateGetPreferenceInput(Request $request): PreferredPreferenceInput|JsonResponse
+    {
         $params = $request->query->all();
         $scope = $this->stringField($params, 'scope');
         if ($scope instanceof JsonResponse) {
@@ -311,6 +335,7 @@ final class SpeechProviderConfigController
         if ($scope !== 'user' && $scope !== 'group') {
             return $this->validationError('scope must be "user" or "group".');
         }
+
         $groupId = $this->optionalIntQueryParam($request, 'group_id');
         if ($groupId instanceof JsonResponse) {
             return $groupId;
@@ -322,16 +347,7 @@ final class SpeechProviderConfigController
             return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
         }
 
-        $userId = $this->requireUserId();
-        $config = $this->service->resolvePreferredConfig($userId, $this->authService->isAdmin(), $groupId, $scope);
-
-        return new JsonResponse(['data' => [
-            'preference' => [
-                'config_id' => $config?->id,
-                'scope' => $scope,
-                'group_id' => $groupId,
-            ],
-        ]]);
+        return new PreferredPreferenceInput($scope, $groupId, null);
     }
 
     /**
@@ -359,10 +375,40 @@ final class SpeechProviderConfigController
     )]
     public function setPreferred(Request $request): JsonResponse
     {
+        $validated = $this->validatePreferredInput($request);
+        if ($validated instanceof JsonResponse) {
+            return $validated;
+        }
+
+        $userId = $this->requireUserId();
+        $principalId = $this->resolvePrincipalIdForScope($userId, $validated->scope, $validated->groupId);
+        if ($principalId <= 0) {
+            return $this->forbidden();
+        }
+
+        return $this->applyPreferredConfigWrite(
+            $principalId,
+            $validated->configId,
+            $userId,
+            $validated->scope,
+            $validated->groupId,
+        );
+    }
+
+    /**
+     * Validate the entire PUT body for /api/v1/speech/preference in one
+     * pass. Returns the cleaned (scope, groupId, configId) triple on
+     * success, or a 422 JsonResponse on the first failure.
+     *
+     * @return PreferredPreferenceInput|JsonResponse
+     */
+    private function validatePreferredInput(Request $request): PreferredPreferenceInput|JsonResponse
+    {
         $body = $this->decodeBody($request);
         if ($body instanceof JsonResponse) {
             return $body;
         }
+
         $scope = $this->stringField($body, 'scope');
         if ($scope instanceof JsonResponse) {
             return $scope;
@@ -376,41 +422,19 @@ final class SpeechProviderConfigController
             return $this->validationError('Field "config_id" must be a positive integer or null.');
         }
 
-        $groupIdResult = $this->validateGroupIdForScope($body, $scope);
-        if ($groupIdResult instanceof JsonResponse) {
-            return $groupIdResult;
-        }
-        $groupId = $groupIdResult;
-
-        $userId = $this->requireUserId();
-        $principalId = $this->resolvePrincipalIdForScope($userId, $scope, $groupId);
-
-        if ($principalId <= 0) {
-            return $this->forbidden();
+        $groupId = $this->cleanGroupIdForScope($body, $scope);
+        if ($groupId instanceof JsonResponse) {
+            return $groupId;
         }
 
-        $writeResult = $this->applyPreferredConfigWrite($principalId, $configId, $userId);
-        if ($writeResult instanceof JsonResponse) {
-            return $writeResult;
-        }
-
-        return new JsonResponse(['data' => [
-            'preference' => [
-                'config_id' => $configId,
-                'scope' => $scope,
-                'group_id' => $groupId,
-            ],
-        ]]);
+        return new PreferredPreferenceInput($scope, $groupId, $configId);
     }
 
     /**
-     * Validate the group_id body field for the given scope and return
-     * either the cleaned int or a 422 JsonResponse.
-     *
      * @param array<string, mixed> $body
      * @return int|JsonResponse|null
      */
-    private function validateGroupIdForScope(array $body, string $scope): int|JsonResponse|null
+    private function cleanGroupIdForScope(array $body, string $scope): int|JsonResponse|null
     {
         if ($scope === 'group') {
             if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
@@ -430,13 +454,33 @@ final class SpeechProviderConfigController
         if ($scope === 'user') {
             return (int) $principalService->ensureUserPrincipal($userId)->id;
         }
-        // $scope === 'group' here; validateGroupIdForScope guarantees
+        // $scope === 'group' here; cleanGroupIdForScope guarantees
         // $groupId is a positive int.
         $groupPrincipal = $principalService->principalForGroup((int) $groupId);
         return $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
     }
 
-    private function applyPreferredConfigWrite(int $principalId, ?int $configId, int $userId): ?JsonResponse
+    private function applyPreferredConfigWrite(
+        int $principalId,
+        ?int $configId,
+        int $userId,
+        string $scope,
+        ?int $groupId,
+    ): JsonResponse {
+        $writeResult = $this->writePreferredConfig($principalId, $configId, $userId);
+        if ($writeResult !== null) {
+            return $writeResult;
+        }
+        return new JsonResponse(['data' => [
+            'preference' => [
+                'config_id' => $configId,
+                'scope' => $scope,
+                'group_id' => $groupId,
+            ],
+        ]]);
+    }
+
+    private function writePreferredConfig(int $principalId, ?int $configId, int $userId): ?JsonResponse
     {
         if ($configId === null) {
             $this->service->unsetPrincipalPreferredConfig($principalId);
