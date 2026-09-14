@@ -630,6 +630,8 @@ final class ContainerDefinitions
                 );
             },
 
+            \Spora\Services\MediaArchive\MediaArchiveRetention::class => static fn(): \Spora\Services\MediaArchive\MediaArchiveRetention => new \Spora\Services\MediaArchive\MediaArchiveRetention(),
+
             MediaAssetResolver::class => static function (ContainerInterface $c): MediaAssetResolver {
                 return new MediaAssetResolver(
                     $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : new PrincipalResolver(),
@@ -1164,6 +1166,7 @@ final class ContainerDefinitions
             MediaUploadController::class => static function (ContainerInterface $c): MediaUploadController {
                 return new MediaUploadController(
                     $c->get(MediaArchiveService::class),
+                    $c->get(\Spora\Services\MediaArchive\MediaArchiveRetention::class),
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(AuthService::class),
                     $c->get(PrincipalResolver::class),

@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
+use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -36,6 +37,7 @@ final class MediaUploadController
 {
     public function __construct(
         private readonly MediaArchiveService $mediaArchive,
+        private readonly MediaArchiveRetention $retention,
         private readonly MediaAllowedTypesService $allowedTypes,
         private readonly AuthService $auth,
         private readonly PrincipalResolver $principalResolver,
@@ -94,7 +96,7 @@ final class MediaUploadController
         // swallowed because the upload itself succeeded — the purge is
         // an opportunistic sweep, not a precondition for the response.
         if ($isTemporary && $agentId !== null) {
-            $this->mediaArchive->enforceTempRetention($userId, $agentId, $asset->id);
+            $this->retention->enforceTempRetention($userId, $agentId, $asset->id);
         }
 
         return new JsonResponse(

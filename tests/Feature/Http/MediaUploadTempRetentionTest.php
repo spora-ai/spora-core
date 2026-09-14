@@ -106,7 +106,14 @@ function buildUploadController(int $userId = 1): MediaUploadController
         300,
     ));
     $sniffer = new MimeSniffer();
-    return new MediaUploadController($service, $allowed, $auth, new PrincipalResolver(), $sniffer);
+    return new MediaUploadController(
+        $service,
+        new \Spora\Services\MediaArchive\MediaArchiveRetention(),
+        $allowed,
+        $auth,
+        new PrincipalResolver(),
+        $sniffer,
+    );
 }
 
 function makeUploadRequest(bool $isTemporary, ?int $agentId): Request

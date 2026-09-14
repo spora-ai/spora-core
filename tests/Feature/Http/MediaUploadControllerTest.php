@@ -281,7 +281,14 @@ function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null, in
         300,
     ));
     $sniffer = new MimeSniffer();
-    $controller = new MediaUploadController($service, $allowed, $auth, new \Spora\Services\PrincipalResolver(), $sniffer);
+    $controller = new MediaUploadController(
+        $service,
+        new \Spora\Services\MediaArchive\MediaArchiveRetention(),
+        $allowed,
+        $auth,
+        new \Spora\Services\PrincipalResolver(),
+        $sniffer,
+    );
     return [$assetStore, $service, $auth, $allowed, $sniffer, $controller];
 }
 
