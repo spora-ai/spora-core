@@ -281,14 +281,15 @@ final class SpeechTranscribeController
         // call itself doesn't take an agentId — it reads user / group
         // / global settings from SpeechProviderConfiguration
         // directly. The signature keeps $agentId for symmetry with the
-        // controller's ownership-validation flow; it's unused here.
-        $agentId = 0;
+        // controller's ownership-validation flow; bind it to a fresh
+        // local so the parameter itself is not reassigned.
+        unset($agentId);
         try {
             return $provider->transcribe(
                 $asset['bytes'],
                 $asset['mime'],
                 $language,
-                $agentId,
+                0,
                 $userId,
             );
         } catch (InvalidAudioException $e) {
