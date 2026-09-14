@@ -140,23 +140,13 @@ final readonly class SpeechToTextRegistry
         }
 
         // Tier 4: global default.
-        $defaultConfig = SpeechProviderConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->orderBy('id')
-            ->first();
-        if ($defaultConfig !== null) {
-            $defaultClass = $defaultConfig->provider_class;
-            if (in_array($defaultClass, $this->registeredSttClasses(), true)) {
-                return [$defaultClass, 'global_default'];
-            }
+        $fromGlobal = $this->resolveGlobalDefaultClass();
+        if ($fromGlobal !== null) {
+            return [$fromGlobal, 'global_default'];
         }
 
         // Tier 5: fallback — first registered STT class.
-        if ($this->providers !== []) {
-            return [$this->providers[0]::class, 'fallback'];
-        }
-
-        return [null, null];
+        return $this->resolveFallbackClass();
     }
 
     /**
@@ -175,11 +165,7 @@ final readonly class SpeechToTextRegistry
         if ($config === null) {
             return [null, 'fallback'];
         }
-        $class = $config->provider_class;
-        if (!in_array($class, $this->registeredSttClasses(), true)) {
-            return [null, 'fallback'];
-        }
-        return [$class, 'agent'];
+        return $this->resolveRegisteredClass($config->provider_class, 'agent');
     }
 
     /**
@@ -236,11 +222,50 @@ final readonly class SpeechToTextRegistry
             return null;
         }
 
-        $class = $config->provider_class;
-        if (!in_array($class, $this->registeredSttClasses(), true)) {
+        $registered = $this->registeredSttClasses();
+        if (!in_array($config->provider_class, $registered, true)) {
             return null;
         }
-        return $class;
+        return $config->provider_class;
+    }
+
+    private function resolveGlobalDefaultClass(): ?string
+    {
+        $defaultConfig = SpeechProviderConfiguration::where('is_global', true)
+            ->where('is_default', true)
+            ->orderBy('id')
+            ->first();
+        if ($defaultConfig === null) {
+            return null;
+        }
+        $registered = $this->registeredSttClasses();
+        if (!in_array($defaultConfig->provider_class, $registered, true)) {
+            return null;
+        }
+        return $defaultConfig->provider_class;
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null}
+     */
+    private function resolveFallbackClass(): array
+    {
+        if ($this->providers === []) {
+            return [null, null];
+        }
+        $first = $this->providers[0];
+        return [$first::class, 'fallback'];
+    }
+
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function resolveRegisteredClass(string $class, string $source): array
+    {
+        if (in_array($class, $this->registeredSttClasses(), true)) {
+            return [$class, $source];
+        }
+        return [null, 'fallback'];
     }
 
     /**

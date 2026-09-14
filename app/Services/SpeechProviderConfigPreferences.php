@@ -108,30 +108,37 @@ final class SpeechProviderConfigPreferences
     public function resolvePreferredConfig(int $userId, bool $isAdmin, ?int $groupId = null, string $scope = 'user'): ?SpeechProviderConfiguration
     {
         if ($scope === 'group') {
-            if ($groupId === null) {
-                return null;
-            }
-            $groupPrincipal = $this->principalService->principalForGroup($groupId);
-            if ($groupPrincipal === null) {
-                return null;
-            }
-            // Existence-hide: non-member non-admins fall through to
-            // `null` so the SPA renders the "no preference set"
-            // placeholder rather than leaking cross-tenant state.
-            if (!$isAdmin) {
-                $isMember = Capsule::table('group_memberships')
-                    ->where('group_id', $groupId)
-                    ->where('user_id', $userId)
-                    ->exists();
-                if (!$isMember) {
-                    return null;
-                }
-            }
-            return $this->getPrincipalPreferredConfig((int) $groupPrincipal->id);
+            return $this->resolveGroupPreferredConfig($userId, $isAdmin, $groupId);
         }
 
         $principalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
         return $this->getPrincipalPreferredConfig($principalId);
+    }
+
+    private function resolveGroupPreferredConfig(int $userId, bool $isAdmin, ?int $groupId): ?SpeechProviderConfiguration
+    {
+        if ($groupId === null) {
+            return null;
+        }
+        $groupPrincipal = $this->principalService->principalForGroup($groupId);
+        if ($groupPrincipal === null) {
+            return null;
+        }
+        // Existence-hide: non-member non-admins fall through to
+        // `null` so the SPA renders the "no preference set"
+        // placeholder rather than leaking cross-tenant state.
+        if (!$isAdmin && !$this->isGroupMember($userId, $groupId)) {
+            return null;
+        }
+        return $this->getPrincipalPreferredConfig((int) $groupPrincipal->id);
+    }
+
+    private function isGroupMember(int $userId, int $groupId): bool
+    {
+        return Capsule::table('group_memberships')
+            ->where('group_id', $groupId)
+            ->where('user_id', $userId)
+            ->exists();
     }
 
     private function isConfigEligibleForPrincipal(int $configId, int $principalId, int $callerUserId): bool

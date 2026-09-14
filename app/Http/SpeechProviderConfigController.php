@@ -6,7 +6,6 @@ namespace Spora\Http;
 
 use JsonException;
 use OpenApi\Attributes as OA;
-use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -144,6 +143,9 @@ final class SpeechProviderConfigController
     public function store(Request $request): JsonResponse
     {
         $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
         $userId = $this->requireUserId();
         $config = $this->service->createConfiguration($userId, $body, $this->authService->isAdmin());
 
@@ -185,6 +187,9 @@ final class SpeechProviderConfigController
     public function update(int $id, Request $request): JsonResponse
     {
         $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
         $userId = $this->requireUserId();
         $config = $this->service->updateConfiguration($id, $userId, $body, $this->authService->isAdmin());
 
@@ -300,10 +305,16 @@ final class SpeechProviderConfigController
     {
         $params = $request->query->all();
         $scope = $this->stringField($params, 'scope');
+        if ($scope instanceof JsonResponse) {
+            return $scope;
+        }
         if ($scope !== 'user' && $scope !== 'group') {
             return $this->validationError('scope must be "user" or "group".');
         }
         $groupId = $this->optionalIntQueryParam($request, 'group_id');
+        if ($groupId instanceof JsonResponse) {
+            return $groupId;
+        }
         if ($scope === 'group' && $groupId === null) {
             return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
         }
@@ -349,48 +360,38 @@ final class SpeechProviderConfigController
     public function setPreferred(Request $request): JsonResponse
     {
         $body = $this->decodeBody($request);
+        if ($body instanceof JsonResponse) {
+            return $body;
+        }
         $scope = $this->stringField($body, 'scope');
+        if ($scope instanceof JsonResponse) {
+            return $scope;
+        }
         if ($scope !== 'user' && $scope !== 'group') {
             return $this->validationError('scope must be "user" or "group".');
         }
+
         $configId = array_key_exists('config_id', $body) ? $body['config_id'] : null;
         if ($configId !== null && (!is_int($configId) || $configId <= 0)) {
             return $this->validationError('Field "config_id" must be a positive integer or null.');
         }
 
-        $groupId = null;
-        if ($scope === 'group') {
-            if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-                return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
-            }
-            $groupId = $body['group_id'];
-        } elseif (array_key_exists('group_id', $body)) {
-            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
+        $groupIdResult = $this->validateGroupIdForScope($body, $scope);
+        if ($groupIdResult instanceof JsonResponse) {
+            return $groupIdResult;
         }
+        $groupId = $groupIdResult;
 
         $userId = $this->requireUserId();
-        $principalService = new PrincipalService(new PrincipalResolver());
-        if ($scope === 'user') {
-            $principalId = (int) $principalService->ensureUserPrincipal($userId)->id;
-        } else {
-            // $scope === 'group' here; the validation block above
-            // guarantees $groupId is a positive int.
-            $targetGroupId = (int) $groupId;
-            $groupPrincipal = $principalService->principalForGroup($targetGroupId);
-            $principalId = $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
-        }
+        $principalId = $this->resolvePrincipalIdForScope($userId, $scope, $groupId);
 
         if ($principalId <= 0) {
             return $this->forbidden();
         }
 
-        if ($configId === null) {
-            $this->service->unsetPrincipalPreferredConfig($principalId);
-        } else {
-            $ok = $this->service->setPrincipalPreferredConfig($principalId, $configId, $userId);
-            if (!$ok) {
-                return $this->forbidden();
-            }
+        $writeResult = $this->applyPreferredConfigWrite($principalId, $configId, $userId);
+        if ($writeResult instanceof JsonResponse) {
+            return $writeResult;
         }
 
         return new JsonResponse(['data' => [
@@ -402,14 +403,60 @@ final class SpeechProviderConfigController
         ]]);
     }
 
+    /**
+     * Validate the group_id body field for the given scope and return
+     * either the cleaned int or a 422 JsonResponse.
+     *
+     * @param array<string, mixed> $body
+     * @return int|JsonResponse|null
+     */
+    private function validateGroupIdForScope(array $body, string $scope): int|JsonResponse|null
+    {
+        if ($scope === 'group') {
+            if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
+                return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
+            }
+            return $body['group_id'];
+        }
+        if (array_key_exists('group_id', $body)) {
+            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
+        }
+        return null;
+    }
+
+    private function resolvePrincipalIdForScope(int $userId, string $scope, ?int $groupId): int
+    {
+        $principalService = new PrincipalService(new PrincipalResolver());
+        if ($scope === 'user') {
+            return (int) $principalService->ensureUserPrincipal($userId)->id;
+        }
+        // $scope === 'group' here; validateGroupIdForScope guarantees
+        // $groupId is a positive int.
+        $groupPrincipal = $principalService->principalForGroup((int) $groupId);
+        return $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
+    }
+
+    private function applyPreferredConfigWrite(int $principalId, ?int $configId, int $userId): ?JsonResponse
+    {
+        if ($configId === null) {
+            $this->service->unsetPrincipalPreferredConfig($principalId);
+            return null;
+        }
+        $ok = $this->service->setPrincipalPreferredConfig($principalId, $configId, $userId);
+        return $ok ? null : $this->forbidden();
+    }
+
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 
     /**
-     * @return array<string, mixed>
+     * Decode the JSON body or return a 422 envelope — callers check the
+     * type and return early on the error response.
+     *
+     * @return array<string, mixed>|JsonResponse
      */
-    private function decodeBody(Request $request): array
+    private function decodeBody(Request $request): array|JsonResponse
     {
         $content = $request->getContent();
         if ($content === '') {
@@ -418,10 +465,10 @@ final class SpeechProviderConfigController
         try {
             $decoded = json_decode($content, true, 16, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            throw new RuntimeException('INVALID_JSON');
+            return $this->validationError('Request body must be valid JSON.');
         }
         if (!is_array($decoded)) {
-            throw new RuntimeException('INVALID_JSON');
+            return $this->validationError('Request body must be valid JSON.');
         }
         /** @var array<string, mixed> $decoded */
         return $decoded;
@@ -429,24 +476,28 @@ final class SpeechProviderConfigController
 
     /**
      * @param array<string, mixed> $body
+     * @return string|JsonResponse
      */
-    private function stringField(array $body, string $field): string
+    private function stringField(array $body, string $field): string|JsonResponse
     {
         $raw = $body[$field] ?? null;
         if (!is_string($raw) || $raw === '') {
-            throw new RuntimeException("Field '{$field}' is required and must be a non-empty string.");
+            return $this->validationError("Field '{$field}' is required and must be a non-empty string.");
         }
         return $raw;
     }
 
-    private function optionalIntQueryParam(Request $request, string $name): ?int
+    /**
+     * @return int|JsonResponse
+     */
+    private function optionalIntQueryParam(Request $request, string $name): int|JsonResponse|null
     {
         $raw = $request->query->get($name);
         if ($raw === null || $raw === '') {
             return null;
         }
         if (!is_numeric($raw) || (int) $raw <= 0) {
-            throw new RuntimeException("Query parameter '{$name}' must be a positive integer when present.");
+            return $this->validationError("Query parameter '{$name}' must be a positive integer when present.");
         }
         return (int) $raw;
     }

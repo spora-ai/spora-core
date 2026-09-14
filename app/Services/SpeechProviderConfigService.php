@@ -102,9 +102,20 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             $q->orWhere('is_global', true);
         });
 
-        return $query->get()
-            ->map(fn(SpeechProviderConfiguration $config): array => $this->persistence->configResource($config))
-            ->all();
+        return $this->mapToResources($query->get());
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Collection<int, SpeechProviderConfiguration> $configs
+     * @return list<array<string, mixed>>
+     */
+    private function mapToResources(iterable $configs): array
+    {
+        $rows = [];
+        foreach ($configs as $config) {
+            $rows[] = $this->persistence->configResource($config);
+        }
+        return $rows;
     }
 
     /**
@@ -112,11 +123,11 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
      */
     public function getGlobalConfigurations(): array
     {
-        return SpeechProviderConfiguration::where('is_global', true)
-            ->orderBy('display_name')
-            ->get()
-            ->map(fn(SpeechProviderConfiguration $config): array => $this->persistence->configResource($config))
-            ->all();
+        return $this->mapToResources(
+            SpeechProviderConfiguration::where('is_global', true)
+                ->orderBy('display_name')
+                ->get(),
+        );
     }
 
     public function getConfiguration(int $configId, int $userId, bool $isAdmin = false): ?SpeechProviderConfiguration
