@@ -423,6 +423,29 @@ describe('SpeechProviderConfigController', function (): void {
         expect($keys)->toContain('api_key');
     });
 
+    it('schema marks base_url and model as optional when they have defaults (regression)', function (): void {
+        // base_url and model carry `default:` values, so they should
+        // not be marked required — the SPA pre-fills the default and
+        // an operator who only sets the API key shouldn't be blocked
+        // by a missing-field error.
+        [$controller] = makeSpeechProviderConfigController();
+        $providers = json_decode($controller->schema()->getContent(), true)['data']['providers'];
+        $oai = array_values(array_filter(
+            $providers,
+            static fn(array $p): bool => $p['class'] === OpenAiCompatibleTranscriber::class,
+        ))[0];
+        $byKey = [];
+        foreach ($oai['settings_schema'] as $field) {
+            $byKey[$field['key']] = $field;
+        }
+        expect($byKey['base_url']['required'])->toBeFalse();
+        expect($byKey['base_url']['default'])->toBe('https://api.openai.com/v1');
+        expect($byKey['model']['required'])->toBeFalse();
+        expect($byKey['model']['default'])->toBe('whisper-1');
+        // display_name is still required — operators must label their config.
+        expect($byKey['display_name']['required'])->toBeTrue();
+    });
+
     // ---------------------------------------------------------------
     // SPA wire-shape response: scope + provider_name + provider_display_name
     //

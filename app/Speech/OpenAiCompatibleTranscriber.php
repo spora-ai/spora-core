@@ -72,18 +72,18 @@ use Throwable;
     key: 'base_url',
     label: 'Base URL',
     type: 'text',
-    required: true,
+    required: false,
     default: 'https://api.openai.com/v1',
-    description: 'Vendor base URL. The provider POSTs to {base_url}/audio/transcriptions.',
+    description: 'Vendor base URL. The provider POSTs to {base_url}/audio/transcriptions. Leave blank to use the OpenAI default.',
     validation: '#^https?://[^\s]+$#',
 )]
 #[ToolSetting(
     key: 'model',
     label: 'Model',
     type: 'text',
-    required: true,
+    required: false,
     default: 'whisper-1',
-    description: 'Vendor model identifier. OpenAI: whisper-1. Mistral: voxtral-mini-latest. Groq: whisper-large-v3-turbo.',
+    description: 'Vendor model identifier. OpenAI: whisper-1. Mistral: voxtral-mini-latest. Groq: whisper-large-v3-turbo. Leave blank to use the OpenAI default.',
 )]
 #[ToolSetting(
     key: 'language',
