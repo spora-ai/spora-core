@@ -168,6 +168,8 @@ final class SpeechProviderConfigController
                         nullable: true,
                         description: 'When set, the config is scoped to this principal (user or group). Caller must control the principal.',
                     ),
+                    new OA\Property(property: 'scope', type: 'string', enum: ['user', 'group', 'global', 'agent']),
+                    new OA\Property(property: 'group_id', type: 'integer'),
                     new OA\Property(property: 'settings', type: 'object'),
                 ],
             ),
@@ -186,7 +188,15 @@ final class SpeechProviderConfigController
             return $body;
         }
         $userId = $this->requireUserId();
-        $config = $this->service->createConfiguration($userId, $body, $this->authService->isAdmin());
+        $isAdmin = $this->authService->isAdmin();
+
+        $resolved = $this->resolveScopeAndPrincipal($body, $userId, $isAdmin);
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        $body = $resolved;
+
+        $config = $this->service->createConfiguration($userId, $body, $isAdmin);
 
         if ($config === null) {
             return $this->forbidden();
@@ -328,6 +338,69 @@ final class SpeechProviderConfigController
         } catch (JsonException) {
             return null;
         }
+    }
+
+    /**
+     * Translate the SPA's wire shape (`scope: 'group' + group_id`,
+     * `scope: 'global'`, or neither) into the row-level fields the
+     * service + persistence layers expect. Returns the rewritten body
+     * on success, or a 403 JsonResponse when the caller cannot manage
+     * the target group.
+     *
+     * - `scope: 'group'` → resolves `group_id` (groups.id) to a
+     *   `principal_id` (principals.id) via the service's
+     *   {@see SpeechProviderConfigService::resolveGroupPrincipal()}.
+     *   `is_global` stays false. Missing/invalid `group_id` → 403.
+     * - `scope: 'global'` → clears `principal_id` and forces
+     *   `is_global: true` so the persistence layer writes the row as
+     *   global regardless of what `principal_id` was supplied.
+     * - `scope: 'user'` (or omitted) → leaves the body untouched.
+     *   `createConfiguration()` defaults `principal_id` to the
+     *   caller's user-principal when none was supplied.
+     *
+     * The `scope` and `group_id` keys are stripped before persistence so
+     * they never reach the validator's required-key check or the
+     * settings encoder.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function resolveScopeAndPrincipal(array $body, int $userId, bool $isAdmin): array|JsonResponse
+    {
+        $scope = $body['scope'] ?? null;
+        if ($scope === 'global') {
+            unset($body['scope'], $body['group_id']);
+            $body['is_global'] = true;
+            $body['principal_id'] = null;
+            return $body;
+        }
+        if ($scope !== 'group') {
+            unset($body['scope'], $body['group_id']);
+            return $body;
+        }
+        // Pull `group_id` off the body BEFORE stripping so the resolver
+        // helper doesn't have to re-parse it from a now-empty field.
+        $groupIdRaw = $body['group_id'] ?? null;
+        unset($body['scope'], $body['group_id']);
+        return $this->resolveGroupScopeBody($body, $userId, $isAdmin, is_int($groupIdRaw) ? $groupIdRaw : 0);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function resolveGroupScopeBody(array $body, int $userId, bool $isAdmin, int $groupId): array|JsonResponse
+    {
+        if ($groupId <= 0) {
+            return $this->forbidden();
+        }
+        $principalId = $this->service->resolveGroupPrincipal($groupId, $userId, $isAdmin);
+        if ($principalId === null) {
+            return $this->forbidden();
+        }
+        $body['principal_id'] = $principalId;
+        $body['is_global'] = false;
+        return $body;
     }
 
     private function requireUserId(): int

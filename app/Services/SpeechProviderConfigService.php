@@ -172,6 +172,25 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         return $this->persistence->createConfiguration($principalId, $userId, $data, $isAdmin);
     }
 
+    /**
+     * Resolve a `groups.id` to the matching `principals.id` so a group-scope
+     * write can land on the row's `principal_id` column. Returns `null`
+     * when the caller cannot manage the group — the controller surfaces a
+     * 403 in that case so the SPA can show a meaningful error.
+     *
+     * Authorization mirrors {@see LLMConfigController}'s group-scope path:
+     * global admins can target any group; everyone else must be a group
+     * `owner` or `admin` per {@see GroupService::callerCanManage}.
+     */
+    public function resolveGroupPrincipal(int $groupId, int $callerUserId, bool $isAdmin): ?int
+    {
+        if (!GroupService::callerCanManage($groupId, $callerUserId, $isAdmin)) {
+            return null;
+        }
+
+        return (int) $this->principalService->ensureGroupPrincipal($groupId)->id;
+    }
+
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?SpeechProviderConfiguration
     {
         return $this->persistence->updateConfiguration($configId, $userId, $data, $isAdmin);

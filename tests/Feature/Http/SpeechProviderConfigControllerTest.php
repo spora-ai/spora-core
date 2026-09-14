@@ -8,7 +8,9 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
 use Spora\Core\SecurityManager;
 use Spora\Http\SpeechProviderConfigController;
+use Spora\Models\GroupMembership;
 use Spora\Models\SpeechProviderConfiguration;
+use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigPersistence;
@@ -80,6 +82,9 @@ describe('SpeechProviderConfigController', function (): void {
         Capsule::table('speech_provider_configurations')->delete();
         Capsule::table('principal_preferences')->delete();
         Capsule::table('agents')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+        Capsule::table('groups')->delete();
     });
 
     afterEach(function () {
@@ -87,6 +92,9 @@ describe('SpeechProviderConfigController', function (): void {
         Capsule::table('speech_provider_configurations')->delete();
         Capsule::table('principal_preferences')->delete();
         Capsule::table('agents')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+        Capsule::table('groups')->delete();
     });
 
     it('returns 401 for an unauthenticated caller on index', function (): void {
@@ -248,6 +256,153 @@ describe('SpeechProviderConfigController', function (): void {
         $userB = bootAuth($auth, 'spc-nonadmin2@example.com', SPC_TEST_PASSWORD);
         $resp = $controller->setDefault($configId);
         expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+    });
+
+    // ---------------------------------------------------------------
+    // SPA wire-shape: scope / group_id / display_name (LLM-parity)
+    // ---------------------------------------------------------------
+
+    it('admin: scope=global in the body translates to is_global=true with null principal_id', function (): void {
+        // Regression for the wire-shape mismatch: SPA used to send
+        // `{ scope: 'global' }` but the new backend ignored `scope`
+        // and defaulted principal_id to the caller's user-principal —
+        // the row landed as user-scope, not global.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $adminId = bootAuth($auth, 'spc-wire-global@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+            'display_name' => 'OAI Global (wired)',
+            'settings' => fullSettings('sk-global'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['is_global'])->toBeTrue();
+        expect($body['data']['config']['principal_id'])->toBeNull();
+        expect($body['data']['config']['display_name'])->toBe('OAI Global (wired)');
+
+        $row = SpeechProviderConfiguration::find($body['data']['config']['id']);
+        expect($row->is_global)->toBeTrue();
+        expect($row->principal_id)->toBeNull();
+        expect($row->display_name)->toBe('OAI Global (wired)');
+    });
+
+    it('non-admin: scope=global returns 403 (admin-only gate)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-wire-global-nonadmin@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'global',
+            'settings' => fullSettings(),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+    });
+
+    it('group owner: scope=group + group_id lands on the group-principal', function (): void {
+        // The SPA passes `groups.id` in `group_id`; the controller must
+        // resolve it to the matching `principals.id` before persistence
+        // and reject when the caller cannot manage the group.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
+        $principalService = new PrincipalService(new PrincipalResolver());
+        // Materialise the user-principal so `PrincipalResolver::visiblePrincipalIds`
+        // returns the caller's group-principals. (Without this the resolver
+        // short-circuits to [] — the user-principal row is lazy and only
+        // gets created by `ensureUserPrincipal` on a user-scope write.)
+        $principalService->ensureUserPrincipal($ownerId);
+        $group = (new GroupService($principalService))->createGroup($ownerId, 'SpcGroup');
+        $expectedPrincipalId = (int) $principalService->principalForGroup($group->id)->id;
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => $group->id,
+            'settings' => fullSettings('sk-team'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['is_global'])->toBeFalse();
+        expect((int) $body['data']['config']['principal_id'])->toBe($expectedPrincipalId);
+
+        // The scope / group_id keys must NOT leak into the persisted
+        // settings blob — only the schema-allowed keys should round-trip.
+        $row = SpeechProviderConfiguration::find($body['data']['config']['id']);
+        expect($row->principal_id)->toBe($expectedPrincipalId);
+        $decoded = json_decode($row->getRawOriginal('settings'), true);
+        expect($decoded)->not->toHaveKey('scope');
+        expect($decoded)->not->toHaveKey('group_id');
+    });
+
+    it('group non-member: scope=group + group_id returns 403', function (): void {
+        // Owner creates the group; an unrelated caller tries to write
+        // a config scoped to it. The controller must refuse.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-group-owner-2@example.com', SPC_TEST_PASSWORD);
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $group = (new GroupService($principalService))->createGroup($ownerId, 'SpcGroupPrivate');
+
+        clearSession();
+        $outsiderId = bootAuth($auth, 'spc-group-outsider@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => $group->id,
+            'settings' => fullSettings('sk-x'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+        expect(SpeechProviderConfiguration::count())->toBe(0);
+    });
+
+    it('group admin: scope=group + group_id is accepted', function (): void {
+        // Mirrors the LLM flow: `owner` AND `admin` roles can manage
+        // a group's settings; `member` cannot. This covers the admin
+        // branch of `GroupService::callerCanManage`.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $ownerId = bootAuth($auth, 'spc-group-owner-3@example.com', SPC_TEST_PASSWORD);
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $groupService = new GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'SpcGroupAdmin');
+
+        clearSession();
+        $adminId = bootAuth($auth, 'spc-group-admin@example.com', SPC_TEST_PASSWORD);
+        $principalService->ensureUserPrincipal($adminId);
+        $groupService->addMember((int) $group->id, $adminId, GroupMembership::ROLE_ADMIN, $ownerId);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => $group->id,
+            'settings' => fullSettings('sk-admin'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['data']['config']['is_global'])->toBeFalse();
+        expect((int) $body['data']['config']['principal_id'])->toBeGreaterThan(0);
+    });
+
+    it('scope=group without group_id returns 403 (no implicit principal to resolve)', function (): void {
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-group-noid@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'settings' => fullSettings('sk-x'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+        expect(SpeechProviderConfiguration::count())->toBe(0);
     });
 
     it('schema() lists every registered STT class with its settings_schema', function (): void {

@@ -36,6 +36,13 @@ interface SpeechProviderConfigServiceInterface
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?SpeechProviderConfiguration;
 
+    /**
+     * Resolve a `groups.id` (from the SPA's wire shape) to the matching
+     * `principals.id` so the controller can target a group-scope write.
+     * Returns `null` when the caller is not authorised to manage the group.
+     */
+    public function resolveGroupPrincipal(int $groupId, int $callerUserId, bool $isAdmin): ?int;
+
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?SpeechProviderConfiguration;
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool;
