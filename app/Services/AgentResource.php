@@ -43,6 +43,14 @@ final class AgentResource
             'system_prompt'        => $agent->system_prompt,
             'notes'                => $agent->notes,
             'llm_driver_config_id' => $agent->llm_driver_config_id,
+            // Per-agent STT override (tier 1 of the cascade). FK to
+            // speech_provider_configurations.id; SET NULL on delete so
+            // a deleted config silently falls back to the cascade. The
+            // SPA reads this on agent load and writes it via PATCH
+            // /agents/{id} — same path the LLM FK uses.
+            'speech_driver_config_id' => $agent->speech_driver_config_id !== null
+                ? (int) $agent->speech_driver_config_id
+                : null,
             'max_steps'            => (int) $agent->max_steps,
             'is_active'            => (bool) $agent->is_active,
             'allow_followup'       => (bool) $agent->allow_followup,

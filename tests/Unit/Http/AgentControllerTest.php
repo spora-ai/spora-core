@@ -158,6 +158,42 @@ describe('AgentController::update', function (): void {
         expect($body['data']['agent']['is_pinned'])->toBeTrue();
         expect($body['data']['agent']['is_archived'])->toBeTrue();
     });
+
+    test('accepts speech_driver_config_id in the body and surfaces it in the response (per-agent STT cascade tier 1)', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        // The new FK replaces the legacy per-agent tool override endpoint
+        // (`PUT /agents/{id}/tools/{tool}/override`) which the SPA used
+        // to call but which 404s for the speech tool class. The cascade
+        // tier 1 (`SpeechToTextRegistry::loadAgentSpeechConfig`) already
+        // reads this column; the controller's allowlist just needs to
+        // include it.
+        $request = jsonRequest('PATCH', '/api/v1/agents/1', [
+            'speech_driver_config_id' => 42,
+        ]);
+        $request->attributes->set('id', 1);
+        $response = $controller->update($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agent']['speech_driver_config_id'])->toBe(42);
+    });
+
+    test('clears speech_driver_config_id to null when the operator picks "Use cascade default"', function (): void {
+        [$controller, , , $authService] = makeAgentControllers();
+        bootAuth($authService);
+
+        $request = jsonRequest('PATCH', '/api/v1/agents/1', [
+            'speech_driver_config_id' => null,
+        ]);
+        $request->attributes->set('id', 1);
+        $response = $controller->update($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agent']['speech_driver_config_id'])->toBeNull();
+    });
 });
 
 describe('AgentController::destroy', function (): void {

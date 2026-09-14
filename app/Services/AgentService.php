@@ -54,6 +54,7 @@ final class AgentService implements AgentServiceInterface
         'description',
         'system_prompt',
         'llm_driver_config_id',
+        'speech_driver_config_id',
         'max_steps',
         'allow_followup',
         'retry_after_minutes',

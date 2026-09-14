@@ -159,6 +159,12 @@ final class AgentController
                 ? $body['notes']
                 : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
+            // Per-agent STT override (tier 1 of the cascade). FK to
+            // speech_provider_configurations.id; SET NULL on delete so
+            // a deleted config silently falls back to the cascade. The
+            // operator's intent on POST is the same as on PATCH — accept
+            // an explicit id or omit for "use cascade default".
+            'speech_driver_config_id' => isset($body['speech_driver_config_id']) ? (int) $body['speech_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
             // Mirror the schema default when the body omits the field
@@ -264,7 +270,7 @@ final class AgentController
         // Plan A: `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
         $validationError = $this->validateAgentPatch($data);
