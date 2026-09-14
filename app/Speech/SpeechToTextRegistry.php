@@ -161,18 +161,23 @@ final readonly class SpeechToTextRegistry
      */
     private function resolveAgentClass(int $agentId): array
     {
-        if ($agentId <= 0) {
-            return [null, 'fallback'];
-        }
-        $agent = Agent::find($agentId);
-        if ($agent === null || $agent->speech_driver_config_id === null) {
-            return [null, 'fallback'];
-        }
-        $config = SpeechProviderConfiguration::find($agent->speech_driver_config_id);
+        $config = $this->loadAgentSpeechConfig($agentId);
         if ($config === null) {
             return [null, 'fallback'];
         }
         return $this->resolveRegisteredClass($config->provider_class, 'agent');
+    }
+
+    private function loadAgentSpeechConfig(int $agentId): ?SpeechProviderConfiguration
+    {
+        if ($agentId <= 0) {
+            return null;
+        }
+        $agent = Agent::find($agentId);
+        if ($agent === null || $agent->speech_driver_config_id === null) {
+            return null;
+        }
+        return SpeechProviderConfiguration::find($agent->speech_driver_config_id);
     }
 
     /**
@@ -180,22 +185,36 @@ final readonly class SpeechToTextRegistry
      */
     private function resolvePreferredClassWithSource(int $userId): array
     {
-        $registered = $this->registeredSttClasses();
-        if ($registered === [] || $userId <= 0) {
+        if ($this->registeredSttClasses() === [] || $userId <= 0) {
             return [null, 'fallback'];
         }
 
+        $userTier = $this->resolveUserPreferenceTier($userId);
+        if ($userTier[0] !== null) {
+            return $userTier;
+        }
+        return $this->resolveGroupPreferenceTier($userId);
+    }
+
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function resolveUserPreferenceTier(int $userId): array
+    {
         try {
             $userPrincipalId = $this->principalService->ensureUserPrincipal($userId)->id;
         } catch (Throwable) {
             return [null, 'fallback'];
         }
+        $class = $this->classForPrincipalPreferred((int) $userPrincipalId);
+        return $class === null ? [null, 'fallback'] : [$class, 'user_preference'];
+    }
 
-        $userClass = $this->classForPrincipalPreferred((int) $userPrincipalId);
-        if ($userClass !== null) {
-            return [$userClass, 'user_preference'];
-        }
-
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function resolveGroupPreferenceTier(int $userId): array
+    {
         // Tier 3: group preferences, joined_at ASC.
         $groupRows = Capsule::table('group_memberships')
             ->join('principals', 'principals.group_id', '=', 'group_memberships.group_id')
@@ -212,7 +231,6 @@ final readonly class SpeechToTextRegistry
                 return [$class, 'group_preference'];
             }
         }
-
         return [null, 'fallback'];
     }
 
@@ -223,12 +241,15 @@ final readonly class SpeechToTextRegistry
         if (!is_int($configId) || $configId <= 0) {
             return null;
         }
-
         $config = SpeechProviderConfiguration::find($configId);
+        return $this->extractRegisteredProviderClass($config);
+    }
+
+    private function extractRegisteredProviderClass(?SpeechProviderConfiguration $config): ?string
+    {
         if ($config === null) {
             return null;
         }
-
         $registered = $this->registeredSttClasses();
         if (!in_array($config->provider_class, $registered, true)) {
             return null;
