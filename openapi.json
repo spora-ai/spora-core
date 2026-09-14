@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-54-g7763ade8"
+        "version": "0.23.0-68-g98be6681"
     },
     "servers": [
         {
@@ -2718,6 +2718,25 @@
                 ]
             }
         },
+        "/api/v1/speech/provider-configs/schema": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Schema SpeechProviderConfig",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/speech/provider-configs": {
             "get": {
                 "tags": [
@@ -2853,7 +2872,7 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "GetPreference SpeechProviderConfig",
+                "summary": "GetPreference SpeechPreference",
                 "parameters": [],
                 "responses": {
                     "default": {
@@ -2870,7 +2889,7 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "SetPreferred SpeechProviderConfig",
+                "summary": "SetPreferred SpeechPreference",
                 "parameters": [],
                 "responses": {
                     "default": {

@@ -108,7 +108,7 @@ function buildUploadController(int $userId = 1): MediaUploadController
     $sniffer = new MimeSniffer();
     return new MediaUploadController(
         $service,
-        new \Spora\Services\MediaArchive\MediaArchiveRetention(),
+        new Spora\Services\MediaArchive\MediaArchiveRetention(),
         $allowed,
         $auth,
         new PrincipalResolver(),
