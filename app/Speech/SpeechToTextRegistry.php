@@ -128,23 +128,30 @@ final readonly class SpeechToTextRegistry
     private function resolveEffectiveClassWithSource(int $userId, int $agentId = 0): array
     {
         // Tier 1: agent-specific config.
-        $fromAgent = $this->resolveAgentClass($agentId);
-        if ($fromAgent[0] !== null) {
-            return $fromAgent;
+        $agentTier = $this->resolveAgentClass($agentId);
+        if ($agentTier[0] !== null) {
+            return $agentTier;
         }
 
         // Tiers 2 + 3: user / group preference (FK).
-        $fromPreference = $this->resolvePreferredClassWithSource($userId);
-        if ($fromPreference[0] !== null) {
-            return $fromPreference;
+        $prefTier = $this->resolvePreferredClassWithSource($userId);
+        if ($prefTier[0] !== null) {
+            return $prefTier;
         }
 
+        return $this->resolveTailClass();
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null}
+     */
+    private function resolveTailClass(): array
+    {
         // Tier 4: global default.
-        $fromGlobal = $this->resolveGlobalDefaultClass();
-        if ($fromGlobal !== null) {
-            return [$fromGlobal, 'global_default'];
+        $globalClass = $this->resolveGlobalDefaultClass();
+        if ($globalClass !== null) {
+            return [$globalClass, 'global_default'];
         }
-
         // Tier 5: fallback — first registered STT class.
         return $this->resolveFallbackClass();
     }
