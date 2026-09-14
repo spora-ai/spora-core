@@ -61,7 +61,7 @@ final class SpeechProviderConfigPreferences
         );
     }
 
-    public function getDefaultConfiguration(int $userId): ?SpeechProviderConfiguration
+    public function getDefaultConfiguration(): ?SpeechProviderConfiguration
     {
         return SpeechProviderConfiguration::where('is_global', true)
             ->where('is_default', true)
@@ -120,17 +120,28 @@ final class SpeechProviderConfigPreferences
         if ($groupId === null) {
             return null;
         }
+        $principalId = $this->resolveGroupPrincipalId($userId, $isAdmin, $groupId);
+        if ($principalId === null) {
+            return null;
+        }
+        return $this->getPrincipalPreferredConfig($principalId);
+    }
+
+    /**
+     * Resolve the group-principal id, enforcing the existence-hide rule
+     * (non-admin non-members fall through to `null`). Extracted from
+     * {@see resolveGroupPreferredConfig()} to drop the S1142 return count.
+     */
+    private function resolveGroupPrincipalId(int $userId, bool $isAdmin, int $groupId): ?int
+    {
         $groupPrincipal = $this->principalService->principalForGroup($groupId);
         if ($groupPrincipal === null) {
             return null;
         }
-        // Existence-hide: non-member non-admins fall through to
-        // `null` so the SPA renders the "no preference set"
-        // placeholder rather than leaking cross-tenant state.
         if (!$isAdmin && !$this->isGroupMember($userId, $groupId)) {
             return null;
         }
-        return $this->getPrincipalPreferredConfig((int) $groupPrincipal->id);
+        return (int) $groupPrincipal->id;
     }
 
     private function isGroupMember(int $userId, int $groupId): bool

@@ -42,7 +42,7 @@ interface SpeechProviderConfigServiceInterface
 
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?SpeechProviderConfiguration;
 
-    public function getDefaultConfiguration(int $userId): ?SpeechProviderConfiguration;
+    public function getDefaultConfiguration(): ?SpeechProviderConfiguration;
 
     public function getPrincipalPreferredConfig(int $principalId): ?SpeechProviderConfiguration;
 

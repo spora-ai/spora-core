@@ -192,9 +192,9 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         return $this->preferences->setDefaultConfiguration($configId, $isAdmin);
     }
 
-    public function getDefaultConfiguration(int $userId): ?SpeechProviderConfiguration
+    public function getDefaultConfiguration(): ?SpeechProviderConfiguration
     {
-        return $this->preferences->getDefaultConfiguration($userId);
+        return $this->preferences->getDefaultConfiguration();
     }
 
     public function getPrincipalPreferredConfig(int $principalId): ?SpeechProviderConfiguration
