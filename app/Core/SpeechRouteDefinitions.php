@@ -22,6 +22,13 @@ use Spora\OpenApi\RouteSpecCollector;
  *
  *   GET    /api/v1/speech/capability              — provider list (auth only)
  *   POST   /api/v1/speech/transcribe              — transcribe a recording (auth + CSRF)
+ *   GET    /api/v1/speech/provider-configs/schema
+ *                                              — registered STT classes + per-class settings
+ *                                                schema (auth only). CRITICAL ordering:
+ *                                                registered BEFORE any /provider-configs/{id}
+ *                                                route so FastRoute matches the literal
+ *                                                "schema" segment instead of swallowing it
+ *                                                as an {id} placeholder.
  *   GET    /api/v1/speech/provider-configs        — list configs visible to caller
  *   POST   /api/v1/speech/provider-configs        — create a config (auth + CSRF)
  *   POST   /api/v1/speech/provider-configs/{id}/set-default
@@ -57,6 +64,16 @@ final class SpeechRouteDefinitions
         );
 
         // Provider-config surface (LLMConfigController parity).
+        // /schema is a literal segment that must be registered BEFORE
+        // any /{id} route — FastRoute matches the first registered
+        // route in declaration order, and otherwise /schema would be
+        // parsed as id="schema" with an unsupported GET → 405.
+        $r->addRoute(
+            'GET',
+            '/api/v1/speech/provider-configs/schema',
+            [SpeechProviderConfigController::class, 'schema'],
+            [AuthMiddleware::class],
+        );
         $r->addRoute(
             'GET',
             '/api/v1/speech/provider-configs',

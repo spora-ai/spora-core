@@ -47,7 +47,7 @@ function makeSpeechProviderConfigController(): array
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 
-    return [new SpeechProviderConfigController($auth, $service), $auth];
+    return [new SpeechProviderConfigController($auth, $service, $registry), $auth];
 }
 
 function jsonSpcRequest(string $method, string $uri, array $body = []): Request
@@ -287,5 +287,23 @@ describe('SpeechProviderConfigController', function (): void {
         ]));
         expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
         expect(json_decode($resp->getContent(), true)['data']['preference']['config_id'])->toBeNull();
+    });
+
+    it('schema() lists every registered STT class with its settings_schema', function (): void {
+        [$controller] = makeSpeechProviderConfigController();
+
+        $resp = $controller->schema();
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $providers = json_decode($resp->getContent(), true)['data']['providers'];
+        $classes = array_column($providers, 'class');
+        expect($classes)->toContain(OpenAiCompatibleTranscriber::class);
+
+        $oai = array_values(array_filter(
+            $providers,
+            static fn(array $p): bool => $p['class'] === OpenAiCompatibleTranscriber::class,
+        ))[0];
+        $keys = array_column($oai['settings_schema'], 'key');
+        expect($keys)->toContain('api_key');
     });
 });

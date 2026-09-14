@@ -10,6 +10,7 @@ use Spora\Auth\AuthService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
+use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -20,6 +21,9 @@ use Symfony\Component\HttpFoundation\Response;
  * Mirrors {@see LLMConfigController} — same endpoints, same wire
  * shapes, same auth gates:
  *
+ *   GET    /api/v1/speech/provider-configs/schema
+ *                                              — registered STT classes + settings_schema
+ *                                                (drives the dynamic create-config form)
  *   GET    /api/v1/speech/provider-configs?group_id=N
  *                                              — list (admin: globals; user: own overrides;
  *                                                with group_id: that group's configs)
@@ -51,7 +55,45 @@ final class SpeechProviderConfigController
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
+        private readonly SpeechToTextRegistry $registry,
     ) {}
+
+    /**
+     * GET /api/v1/speech/provider-configs/schema
+     *
+     * Registered STT classes + per-class `#[ToolSetting]` schemas.
+     * Drives the dynamic create-config form in Settings → Speech.
+     * Mirrors {@see LLMConfigController::drivers()}.
+     */
+    #[OA\Get(
+        path: '/api/v1/speech/provider-configs/schema',
+        summary: 'Registered speech-to-text provider classes with their settings schemas',
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'Provider schemas',
+                content: new OA\JsonContent(
+                    properties: [
+                        new OA\Property(
+                            property: 'data',
+                            properties: [
+                                new OA\Property(
+                                    property: 'providers',
+                                    type: 'array',
+                                    items: new OA\Items(type: 'object'),
+                                ),
+                            ],
+                            type: 'object',
+                        ),
+                    ],
+                ),
+            ),
+        ],
+    )]
+    public function schema(): JsonResponse
+    {
+        return new JsonResponse(['data' => ['providers' => $this->service->getSchema($this->registry)]]);
+    }
 
     /**
      * GET /api/v1/speech/provider-configs

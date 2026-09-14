@@ -65,6 +65,7 @@ final class SpeechProviderConfigContainerBindings
                 return new SpeechProviderConfigController(
                     $c->get(\Spora\Auth\AuthService::class),
                     $c->get(SpeechProviderConfigService::class),
+                    $c->get(SpeechToTextRegistry::class),
                 );
             },
         ];
