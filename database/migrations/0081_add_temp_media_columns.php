@@ -7,7 +7,10 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 
 /**
- * Introduce the temp-file media lifecycle.
+ * Introduce the temp-file media lifecycle **and** the agents-side
+ * column for the new speech-to-text cascade.
+ *
+ * Temp-file lifecycle:
  *
  *   1. `media_assets.is_temporary` — flag for rows that should be eligible
  *      for automatic cleanup (default false so every pre-existing row is
@@ -24,6 +27,26 @@ use Illuminate\Database\Schema\Blueprint;
  *      it without dropping the column. The 0–100 range keeps the purge
  *      loop bounded — a tenant who flips this to 100 won't accidentally
  *      trigger a row-by-row DELETE that pins the DB.
+ *
+ * Speech-cascade tier-1:
+ *
+ *   3. `agents.speech_driver_config_id` — tier-1 of the new five-tier
+ *      speech cascade. Mirrors `agents.llm_driver_config_id` (same
+ *      column shape: nullable unsigned bigint). The
+ *      {@see \Spora\Speech\SpeechToTextRegistry::resolveEffectiveClassWithSource()}
+ *      reads this column directly and uses it as the highest-priority
+ *      source for the agent's effective STT class.
+ *
+ *      The FK to `speech_provider_configurations(id) ON DELETE SET NULL`
+ *      is added in migration 0082 — the referenced table doesn't exist
+ *      yet at this point. We add the column here (nullable, indexed)
+ *      so 0082 can layer the FK on top in a single
+ *      `Schema::table('agents', …)` call. Splitting the column add from
+ *      the FK add is the only way to land both before any code starts
+ *      reading the column: 0081 → 0082 is a single transactional step
+ *      from the agent-table's perspective, but two migration files so
+ *      the table creation and its first consumer land in their natural
+ *      order.
  *
  * Why a CHECK constraint:
  *
@@ -110,6 +133,18 @@ return new class extends Migration {
         Capsule::table('agents')
             ->whereNull('voice_message_retention_count')
             ->update(['voice_message_retention_count' => 5]);
+
+        if (!$schema->hasColumn('agents', 'speech_driver_config_id')) {
+            // See class docblock: the FK to speech_provider_configurations
+            // is added in migration 0082 (the table doesn't exist yet
+            // here). We add the column + index now so 0082 can layer the
+            // FK on top of an existing column without an ALTER-then-FK
+            // dance that SQLite doesn't always honour.
+            $schema->table('agents', static function (Blueprint $t): void {
+                $t->unsignedBigInteger('speech_driver_config_id')->nullable()->after('llm_driver_config_id');
+                $t->index('speech_driver_config_id', 'idx_agents_speech_driver_config_id');
+            });
+        }
     }
 
     public function down(): void
@@ -140,6 +175,23 @@ return new class extends Migration {
         if ($schema->hasColumn('agents', 'voice_message_retention_count')) {
             $schema->table('agents', static function (Blueprint $t): void {
                 $t->dropColumn('voice_message_retention_count');
+            });
+        }
+
+        if ($schema->hasColumn('agents', 'speech_driver_config_id')) {
+            // Drop the index first — SQLite won't drop an index
+            // implicitly tied to a column remove on every engine
+            // version. The FK on this column was added in migration
+            // 0082 and is dropped by 0082's `down()` before this
+            // runs, so by the time we reach this branch the column is
+            // unconstrained.
+            if ($this->indexExists('agents', 'idx_agents_speech_driver_config_id')) {
+                $schema->table('agents', static function (Blueprint $t): void {
+                    $t->dropIndex('idx_agents_speech_driver_config_id');
+                });
+            }
+            $schema->table('agents', static function (Blueprint $t): void {
+                $t->dropColumn('speech_driver_config_id');
             });
         }
     }
