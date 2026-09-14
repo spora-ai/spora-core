@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\PrincipalPreference;
@@ -37,17 +38,29 @@ final class LLMConfigPreferences
 
     public function setDefaultConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = $this->loadDefaultableConfiguration($configId, $isAdmin);
-        if ($config === null) {
-            return null;
-        }
+        return Capsule::connection()->transaction(
+            function () use ($configId, $isAdmin): ?LLMDriverConfiguration {
+                $config = $this->loadDefaultableConfigurationForUpdate($configId, $isAdmin);
+                if ($config === null) {
+                    return null;
+                }
 
-        LLMDriverConfiguration::where('is_global', true)->where('is_default', true)->update(['is_default' => false]);
+                $priorDefault = LLMDriverConfiguration::where('is_global', true)
+                    ->where('is_default', true)
+                    ->where('id', '!=', $config->id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($priorDefault !== null) {
+                    $priorDefault->is_default = false;
+                    $priorDefault->save();
+                }
 
-        $config->is_default = true;
-        $config->save();
+                $config->is_default = true;
+                $config->save();
 
-        return $config;
+                return $config;
+            },
+        );
     }
 
     /**
@@ -166,9 +179,24 @@ final class LLMConfigPreferences
         $this->unsetPrincipalPreferredConfig($principalId);
     }
 
-    private function loadDefaultableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
+    /**
+     * Same auth gate as the original `loadDefaultableConfiguration`
+     * helper but takes a `lockForUpdate` row lock first so two parallel
+     * `setDefaultConfiguration` calls cannot each observe their target
+     * row and the prior default row, then both flip `is_default = false`
+     * before the transaction commits — which would leave the table with
+     * either two defaults (data corruption) or no default (silent
+     * outage) depending on the interleave. The lock guarantees the
+     * {clear-others → set-new} pair runs serially against the prior
+     * default row, matching the scoped pattern at
+     * {@see \Spora\Http\GroupLlmConfigsController::setDefaultScopedConfigOrFail()}
+     * (the per-group transaction that introduced this guard).
+     */
+    private function loadDefaultableConfigurationForUpdate(int $configId, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = LLMDriverConfiguration::find($configId);
+        $config = LLMDriverConfiguration::where('id', $configId)
+            ->lockForUpdate()
+            ->first();
         $eligible = $config !== null && $config->is_global && $isAdmin;
 
         if (!$eligible) {

@@ -8,6 +8,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\LLMConfigPersistence;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalService;
@@ -241,6 +242,7 @@ final class GroupLlmConfigsController
             return $this->notFound('NOT_FOUND', self::MSG_CONFIG_NOT_FOUND);
         }
 
+        LLMConfigPersistence::detachConfigurationReferencesStatic($cid);
         Capsule::table('llm_driver_configurations')
             ->where('id', $cid)
             ->delete();
