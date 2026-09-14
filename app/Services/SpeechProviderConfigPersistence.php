@@ -324,24 +324,24 @@ final class SpeechProviderConfigPersistence
         if ($config === null) {
             return null;
         }
+        return $this->callerMayEdit($config, $isAdmin, $callerUserId) ? $config : null;
+    }
 
-        // Admins can edit anything.
+    /**
+     * Admins can edit any row. Non-admins are restricted to configs
+     * they own (their own user-principal configs, or configs they
+     * admin via a group); globals are off-limits. Extracted so the
+     * loader stays under the S1142 3-return ceiling.
+     */
+    private function callerMayEdit(SpeechProviderConfiguration $config, bool $isAdmin, int $callerUserId): bool
+    {
         if ($isAdmin) {
-            return $config;
+            return true;
         }
-
-        // Non-admins cannot edit global configs.
         if ($config->is_global) {
-            return null;
+            return false;
         }
-
-        // Non-admins can only edit configs they own (their own
-        // user-principal configs, or configs they admin via a group).
-        if (!$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
-            return null;
-        }
-
-        return $config;
+        return $this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id);
     }
 
     /**
