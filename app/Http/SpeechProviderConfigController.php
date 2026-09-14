@@ -7,8 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
-use Spora\Services\PrincipalResolver;
-use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -33,10 +31,12 @@ use Symfony\Component\HttpFoundation\Response;
  *   POST   /api/v1/speech/provider-configs/{id}/set-default
  *                                              — mark one global config as default
  *                                                (admin-only; transaction + lockForUpdate)
- *   PUT    /api/v1/speech/preference               — set / clear the caller's preferred STT
- *                                                  config on principal_preferences (FK)
- *   GET    /api/v1/speech/preference?scope=user|group[&group_id=N]
- *                                              — read the current preference
+ *
+ * The /api/v1/speech/preference endpoints live on
+ * {@see SpeechPreferenceController} so the provider-config controller
+ * stays under the SonarCloud S1448 20-method ceiling and the
+ * preference surface mirrors the LLM split
+ * (LLMConfigController + UserPreferenceController + GroupPreferencesController).
  *
  * Auth model:
  *   - Global mutations require admin (AuthService::isAdmin).
@@ -49,9 +49,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SpeechProviderConfigController
 {
-    private const VALIDATION_GROUP_ID_REQUIRED = 'group_id must be a positive integer when scope="group".';
-    private const VALIDATION_GROUP_ID_FORBIDDEN = 'group_id may only be set when scope="group".';
-
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
@@ -300,304 +297,6 @@ final class SpeechProviderConfigController
         return new JsonResponse(['data' => ['config' => $this->service->configResource($config)]]);
     }
 
-    /**
-     * GET /api/v1/speech/preference
-     */
-    #[OA\Get(
-        path: '/api/v1/speech/preference',
-        summary: "Read the caller's preferred speech-to-text provider",
-        parameters: [
-            new OA\Parameter(
-                name: 'scope',
-                in: 'query',
-                required: true,
-                schema: new OA\Schema(type: 'string', enum: ['user', 'group']),
-            ),
-            new OA\Parameter(name: 'group_id', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
-        ],
-        responses: [
-            new OA\Response(
-                response: 200,
-                description: 'Current preference row',
-                content: new OA\JsonContent(
-                    properties: [
-                        new OA\Property(
-                            property: 'data',
-                            properties: [
-                                new OA\Property(
-                                    property: 'preference',
-                                    properties: [
-                                        new OA\Property(property: 'config_id', type: 'integer', nullable: true),
-                                        new OA\Property(property: 'scope', type: 'string'),
-                                        new OA\Property(property: 'group_id', type: 'integer', nullable: true),
-                                    ],
-                                    type: 'object',
-                                ),
-                            ],
-                            type: 'object',
-                        ),
-                    ],
-                ),
-            ),
-            new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
-            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
-        ],
-    )]
-    public function getPreference(Request $request): JsonResponse
-    {
-        $validated = $this->validateGetPreferenceInput($request);
-        if ($validated instanceof JsonResponse) {
-            return $validated;
-        }
-
-        $userId = $this->requireUserId();
-        $config = $this->service->resolvePreferredConfig(
-            $userId,
-            $this->authService->isAdmin(),
-            $validated->groupId,
-            $validated->scope,
-        );
-
-        return new JsonResponse(['data' => [
-            'preference' => [
-                'config_id' => $config?->id,
-                'scope' => $validated->scope,
-                'group_id' => $validated->groupId,
-            ],
-        ]]);
-    }
-
-    private function validateGetPreferenceInput(Request $request): PreferredPreferenceInput|JsonResponse
-    {
-        $scope = $this->requireScopeFromQuery($request);
-        if ($scope instanceof JsonResponse) {
-            return $scope;
-        }
-        $groupId = $this->optionalGroupIdForScope($request, $scope);
-        if ($groupId instanceof JsonResponse) {
-            return $groupId;
-        }
-        return new PreferredPreferenceInput($scope, $groupId, null);
-    }
-
-    private function requireScopeFromQuery(Request $request): string|JsonResponse
-    {
-        $scope = $this->stringField($request->query->all(), 'scope');
-        if ($scope instanceof JsonResponse) {
-            return $scope;
-        }
-        return $this->requireValidScope($scope);
-    }
-
-    /**
-     * @return int|JsonResponse|null int|null on success, JsonResponse on validation error
-     */
-    private function optionalGroupIdForScope(Request $request, string $scope): int|JsonResponse|null
-    {
-        $groupId = $this->optionalIntQueryParam($request, 'group_id');
-        if ($groupId instanceof JsonResponse) {
-            return $groupId;
-        }
-        return $this->groupIdViolationForScope($request, $scope, $groupId) ?? $groupId;
-    }
-
-    private function groupIdViolationForScope(Request $request, string $scope, ?int $groupId): ?JsonResponse
-    {
-        if ($scope === 'group' && $groupId === null) {
-            return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
-        }
-        if ($scope !== 'group' && $request->query->has('group_id')) {
-            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
-        }
-        return null;
-    }
-
-    private function requireValidScope(string $scope): string|JsonResponse
-    {
-        if ($scope === 'user' || $scope === 'group') {
-            return $scope;
-        }
-        return $this->validationError('scope must be "user" or "group".');
-    }
-
-    /**
-     * PUT /api/v1/speech/preference
-     */
-    #[OA\Put(
-        path: '/api/v1/speech/preference',
-        summary: "Set or clear the caller's preferred speech-to-text configuration",
-        requestBody: new OA\RequestBody(
-            required: true,
-            content: new OA\JsonContent(
-                required: ['scope', 'config_id'],
-                properties: [
-                    new OA\Property(property: 'config_id', type: 'integer', nullable: true),
-                    new OA\Property(property: 'scope', type: 'string', enum: ['user', 'group']),
-                    new OA\Property(property: 'group_id', type: 'integer', nullable: true),
-                ],
-            ),
-        ),
-        responses: [
-            new OA\Response(response: 200, description: 'Updated preference row'),
-            new OA\Response(response: 403, description: 'SPEECH_PROVIDER_CONFIG_FORBIDDEN'),
-            new OA\Response(response: 422, description: 'SPEECH_PROVIDER_CONFIG_INVALID'),
-        ],
-    )]
-    public function setPreferred(Request $request): JsonResponse
-    {
-        $validated = $this->validatePreferredInput($request);
-        if ($validated instanceof JsonResponse) {
-            return $validated;
-        }
-
-        $userId = $this->requireUserId();
-        $principalId = $this->resolvePrincipalIdForScope($userId, $validated->scope, $validated->groupId);
-        if ($principalId <= 0) {
-            return $this->forbidden();
-        }
-
-        return $this->applyPreferredConfigWrite(
-            $principalId,
-            $validated->configId,
-            $userId,
-            $validated->scope,
-            $validated->groupId,
-        );
-    }
-
-    /**
-     * Validate the entire PUT body for /api/v1/speech/preference in one
-     * pass. Returns the cleaned (scope, groupId, configId) triple on
-     * success, or a 422 JsonResponse on the first failure.
-     *
-     * @return PreferredPreferenceInput|JsonResponse
-     */
-    private function validatePreferredInput(Request $request): PreferredPreferenceInput|JsonResponse
-    {
-        $body = $this->decodeBody($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $scope = $this->requireScopeFromBody($body);
-        if ($scope instanceof JsonResponse) {
-            return $scope;
-        }
-        return $this->preferredInputFromBody($body, $scope);
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function requireScopeFromBody(array $body): string|JsonResponse
-    {
-        $scope = $this->stringField($body, 'scope');
-        if ($scope instanceof JsonResponse) {
-            return $scope;
-        }
-        return $this->requireValidScope($scope);
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function preferredInputFromBody(array $body, string $scope): PreferredPreferenceInput|JsonResponse
-    {
-        $configId = $this->extractConfigId($body);
-        if ($configId instanceof JsonResponse) {
-            return $configId;
-        }
-        $groupId = $this->cleanGroupIdForScope($body, $scope);
-        if ($groupId instanceof JsonResponse) {
-            return $groupId;
-        }
-        return new PreferredPreferenceInput($scope, $groupId, $configId);
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     * @return int|null|JsonResponse int|null on success, JsonResponse on validation error
-     */
-    private function extractConfigId(array $body): int|null|JsonResponse
-    {
-        $raw = array_key_exists('config_id', $body) ? $body['config_id'] : null;
-        if ($raw === null) {
-            return null;
-        }
-        if (!is_int($raw) || $raw <= 0) {
-            return $this->validationError('Field "config_id" must be a positive integer or null.');
-        }
-        return $raw;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     * @return int|JsonResponse|null
-     */
-    private function cleanGroupIdForScope(array $body, string $scope): int|JsonResponse|null
-    {
-        if ($scope === 'group') {
-            return $this->extractRequiredGroupId($body);
-        }
-        if (array_key_exists('group_id', $body)) {
-            return $this->validationError(self::VALIDATION_GROUP_ID_FORBIDDEN);
-        }
-        return null;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     * @return int|JsonResponse
-     */
-    private function extractRequiredGroupId(array $body): int|JsonResponse
-    {
-        if (!isset($body['group_id']) || !is_int($body['group_id']) || $body['group_id'] <= 0) {
-            return $this->validationError(self::VALIDATION_GROUP_ID_REQUIRED);
-        }
-        return $body['group_id'];
-    }
-
-    private function resolvePrincipalIdForScope(int $userId, string $scope, ?int $groupId): int
-    {
-        $principalService = new PrincipalService(new PrincipalResolver());
-        if ($scope === 'user') {
-            return (int) $principalService->ensureUserPrincipal($userId)->id;
-        }
-        // $scope === 'group' here; cleanGroupIdForScope guarantees
-        // $groupId is a positive int.
-        $groupPrincipal = $principalService->principalForGroup((int) $groupId);
-        return $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
-    }
-
-    private function applyPreferredConfigWrite(
-        int $principalId,
-        ?int $configId,
-        int $userId,
-        string $scope,
-        ?int $groupId,
-    ): JsonResponse {
-        $writeResult = $this->writePreferredConfig($principalId, $configId, $userId);
-        if ($writeResult !== null) {
-            return $writeResult;
-        }
-        return new JsonResponse(['data' => [
-            'preference' => [
-                'config_id' => $configId,
-                'scope' => $scope,
-                'group_id' => $groupId,
-            ],
-        ]]);
-    }
-
-    private function writePreferredConfig(int $principalId, ?int $configId, int $userId): ?JsonResponse
-    {
-        if ($configId === null) {
-            $this->service->unsetPrincipalPreferredConfig($principalId);
-            return null;
-        }
-        $ok = $this->service->setPrincipalPreferredConfig($principalId, $configId, $userId);
-        return $ok ? null : $this->forbidden();
-    }
-
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
@@ -629,34 +328,6 @@ final class SpeechProviderConfigController
         } catch (JsonException) {
             return null;
         }
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     * @return string|JsonResponse
-     */
-    private function stringField(array $body, string $field): string|JsonResponse
-    {
-        $raw = $body[$field] ?? null;
-        if (!is_string($raw) || $raw === '') {
-            return $this->validationError("Field '{$field}' is required and must be a non-empty string.");
-        }
-        return $raw;
-    }
-
-    /**
-     * @return int|JsonResponse
-     */
-    private function optionalIntQueryParam(Request $request, string $name): int|JsonResponse|null
-    {
-        $raw = $request->query->get($name);
-        if ($raw === null || $raw === '') {
-            return null;
-        }
-        if (!is_numeric($raw) || (int) $raw <= 0) {
-            return $this->validationError("Query parameter '{$name}' must be a positive integer when present.");
-        }
-        return (int) $raw;
     }
 
     private function requireUserId(): int

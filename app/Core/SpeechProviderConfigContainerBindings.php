@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Psr\Container\ContainerInterface;
+use Spora\Http\SpeechPreferenceController;
 use Spora\Http\SpeechProviderConfigController;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -66,6 +67,13 @@ final class SpeechProviderConfigContainerBindings
                     $c->get(\Spora\Auth\AuthService::class),
                     $c->get(SpeechProviderConfigService::class),
                     $c->get(SpeechToTextRegistry::class),
+                );
+            },
+
+            SpeechPreferenceController::class => static function (ContainerInterface $c): SpeechPreferenceController {
+                return new SpeechPreferenceController(
+                    $c->get(\Spora\Auth\AuthService::class),
+                    $c->get(SpeechProviderConfigService::class),
                 );
             },
         ];

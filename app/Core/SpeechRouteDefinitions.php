@@ -7,6 +7,7 @@ namespace Spora\Core;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\SpeechCapabilityController;
+use Spora\Http\SpeechPreferenceController;
 use Spora\Http\SpeechProviderConfigController;
 use Spora\Http\SpeechTranscribeController;
 use Spora\OpenApi\RouteSpecCollector;
@@ -112,18 +113,21 @@ final class SpeechRouteDefinitions
 
         // "Preferred STT config" — a separate URL tree (no /provider-configs
         // prefix) so the {id} collision isn't a concern and there's no
-        // ordering constraint. GET is auth-only (read); PUT carries CSRF
-        // because it writes to principal_preferences.
+        // ordering constraint. Lives on its own controller
+        // ({@see SpeechPreferenceController}) so the provider-config
+        // controller stays under the Sonar 20-method threshold.
+        // GET is auth-only (read); PUT carries CSRF because it writes
+        // to principal_preferences.
         $r->addRoute(
             'GET',
             '/api/v1/speech/preference',
-            [SpeechProviderConfigController::class, 'getPreference'],
+            [SpeechPreferenceController::class, 'getPreference'],
             [AuthMiddleware::class],
         );
         $r->addRoute(
             'PUT',
             '/api/v1/speech/preference',
-            [SpeechProviderConfigController::class, 'setPreferred'],
+            [SpeechPreferenceController::class, 'setPreferred'],
             [AuthMiddleware::class, CsrfMiddleware::class],
         );
     }

@@ -250,45 +250,6 @@ describe('SpeechProviderConfigController', function (): void {
         expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
     });
 
-    it('preferred config: PUT /api/v1/speech/preference sets, GET reads', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $adminId = bootAuth($auth, 'spc-pref-admin@example.com', SPC_TEST_PASSWORD);
-        makeAdmin($auth, $adminId);
-
-        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'is_global' => true,
-            'settings' => fullSettings('sk-pref'),
-        ]));
-        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
-
-        clearSession();
-        $userId = bootAuth($auth, 'spc-pref@example.com', SPC_TEST_PASSWORD);
-
-        $putResp = $controller->setPreferred(jsonSpcRequest('PUT', '/api/v1/speech/preference', [
-            'config_id' => $configId,
-            'scope' => 'user',
-        ]));
-        expect($putResp->getStatusCode())->toBe(Response::HTTP_OK);
-
-        $getResp = $controller->getPreference(Request::create('/api/v1/speech/preference', 'GET', [
-            'scope' => 'user',
-        ]));
-        expect($getResp->getStatusCode())->toBe(Response::HTTP_OK);
-        expect(json_decode($getResp->getContent(), true)['data']['preference']['config_id'])->toBe($configId);
-    });
-
-    it('preference GET returns null when no preference is set', function (): void {
-        [$controller, $auth] = makeSpeechProviderConfigController();
-        $userId = bootAuth($auth, 'spc-pref-null@example.com', SPC_TEST_PASSWORD);
-
-        $resp = $controller->getPreference(Request::create('/api/v1/speech/preference', 'GET', [
-            'scope' => 'user',
-        ]));
-        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-        expect(json_decode($resp->getContent(), true)['data']['preference']['config_id'])->toBeNull();
-    });
-
     it('schema() lists every registered STT class with its settings_schema', function (): void {
         [$controller] = makeSpeechProviderConfigController();
 
