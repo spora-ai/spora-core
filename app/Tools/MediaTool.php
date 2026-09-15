@@ -396,7 +396,7 @@ final class MediaTool extends AbstractTool
                 $asset->width !== null ? (int) $asset->width : null,
                 $asset->height !== null ? (int) $asset->height : null,
             ),
-            default => self::markdownLink($assetUrl, $altText),
+            default => MediaEmbed::link($assetUrl, $altText),
         };
     }
 
@@ -514,10 +514,14 @@ final class MediaTool extends AbstractTool
         }
 
         $mime = (string) ($asset->mime_type ?? 'application/octet-stream');
-        if (!MediaSourceReader::isTextShapedMime($mime)) {
-            return $this->binarySourceFallback($asset, $mime);
-        }
 
+        return MediaSourceReader::isTextShapedMime($mime)
+            ? $this->buildTextSource($asset, $mime)
+            : $this->binarySourceFallback($asset, $mime);
+    }
+
+    private function buildTextSource(MediaAsset $asset, string $mime): ToolResult
+    {
         $bytes = $this->sourceReader->read($asset);
         if ($bytes === null) {
             return ToolResult::fail(sprintf(
@@ -528,11 +532,6 @@ final class MediaTool extends AbstractTool
             ));
         }
 
-        return $this->buildTextSourceResponse($asset, $bytes, $mime);
-    }
-
-    private function buildTextSourceResponse(MediaAsset $asset, string $bytes, string $mime): ToolResult
-    {
         $filename = (string) ($asset->filename ?? $asset->id);
         $size     = strlen($bytes);
 
@@ -645,19 +644,6 @@ final class MediaTool extends AbstractTool
         }
 
         return $this->derivativeHandler->createDerivative($parent, $arguments, $userId, $context);
-    }
-
-    /**
-     * Markdown link with the link text escaped against `\`/`[`/`]` injection,
-     * mirroring {@see MediaEmbed::image()}'s alt escaping. URLs are HTML-escaped.
-     */
-    private static function markdownLink(string $url, string $text): string
-    {
-        $safeText = htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $mdEsc    = strtr($safeText, ['\\' => '\\\\', ']' => '\\]', '[' => '\\[']);
-        $safeUrl  = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
-
-        return "[{$mdEsc}]({$safeUrl})";
     }
 
     private function resolveScope(int $agentId, ?int $userId): string

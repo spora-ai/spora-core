@@ -47,6 +47,22 @@ final class MediaEmbed
     }
 
     /**
+     * Markdown link syntax (`[text](url)`) with the same escape pattern
+     * as {@see image()}: `$text` is HTML-escaped AND Markdown-metacharacter
+     * escaped so an untrusted label can't break out of the brackets; `$url`
+     * is HTML-escaped so HTML entities in URLs are neutralised before the
+     * chat sanitizer sees them.
+     */
+    public static function link(string $url, string $text): string
+    {
+        $safeText = htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $mdEsc    = strtr($safeText, ['\\' => '\\\\', ']' => '\\]', '[' => '\\[']);
+        $safeUrl  = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+
+        return "[{$mdEsc}]({$safeUrl})";
+    }
+
+    /**
      * `<audio>` element for a pre-resolved URL. The caller is responsible
      * for routing the URL through {@see AssetStore::store()} first if the
      * payload is bytes, not a URL.
