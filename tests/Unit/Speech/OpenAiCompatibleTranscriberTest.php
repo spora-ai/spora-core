@@ -233,6 +233,71 @@ test('transcribe() 5xx raises SpeechToTextException with server-error message', 
         ->toThrow(SpeechToTextException::class, 'server error');
 });
 
+test('transcribe() transport failure throws SpeechToTextException with URL sanitised to <host>', function (): void {
+    // Symfony's HttpClient raises TransportException for DNS, TLS,
+    // connect-reset failures. The wire-facing message must NOT leak
+    // the operator's chosen base URL: `scheme://host[:port]` collapses
+    // to `scheme://<host>` so the SPA can still tell HTTP from HTTPS
+    // failures apart.
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-test']);
+
+    $provider = new OpenAiCompatibleTranscriber(
+        new class implements HttpClientInterface {
+            public function request(string $method, string $url, array $options = []): ResponseInterface
+            {
+                throw new Symfony\Component\HttpClient\Exception\TransportException(
+                    'Could not connect to https://api.mistral.ai/v1/audio/transcriptions: c-err 35 (TLS handshake)',
+                );
+            }
+            public function stream(ResponseInterface|iterable $responses, ?float $timeout = null): ResponseStreamInterface
+            {
+                throw new LogicException('transport failure path must not reach stream()');
+            }
+            public function withOptions(array $options): static
+            {
+                return $this;
+            }
+        },
+        $config,
+    );
+
+    $exception = null;
+    try {
+        $provider->transcribe('fake-bytes', 'audio/webm');
+    } catch (SpeechToTextException $e) {
+        $exception = $e;
+    }
+
+    expect($exception)->toBeInstanceOf(SpeechToTextException::class)
+        ->and($exception->getMessage())->toContain('request failed')
+        ->and($exception->getMessage())->not->toContain('api.mistral.ai')
+        ->and($exception->getMessage())->toContain('<host>')
+        ->and($exception->getPrevious())->toBeInstanceOf(Symfony\Component\HttpClient\Exception\TransportException::class);
+});
+
+test('classifyHttpFailure() falls back to json_encode when the error body has no message field', function (): void {
+    // Some vendors return a structured error envelope with no
+    // `message` field at any depth (Mistral 401 envelope can be
+    // `{error: {code, type}}`). The json_encode fallback covers that
+    // case so the exception still surfaces a usable body to the SPA.
+    $provider = buildOaiProvider(
+        ['api_key' => 'sk-test'],
+        json_encode(['error' => ['code' => 42, 'type' => 'auth_error']]),
+        401,
+    );
+
+    $exception = null;
+    try {
+        $provider->transcribe('fake-bytes', 'audio/webm');
+    } catch (SpeechToTextException $e) {
+        $exception = $e;
+    }
+
+    expect($exception)->toBeInstanceOf(SpeechToTextException::class)
+        ->and($exception->getMessage())->toContain('HTTP 401');
+});
+
 test('transcribe() unknown MIME raises InvalidAudioException — never reaches the API', function (): void {
     $provider = buildOaiProvider(['api_key' => 'sk-test']);
 
