@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use JsonException;
-use Psr\Container\ContainerInterface;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
 use Spora\Models\Principal;
+use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
-use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
-use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\PrincipalContext;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -46,7 +44,6 @@ final class MediaDerivativeController
     public function __construct(
         private readonly MediaDerivativeService $derivatives,
         private readonly AuthService $auth,
-        private readonly ContainerInterface $container,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
 
@@ -71,34 +68,40 @@ final class MediaDerivativeController
      * response. Pulled out of `create()` so the controller entry point
      * has a single trailing `return new JsonResponse(...)`.
      *
+     * Producer resolution + `produce()` lives on the service
+     * ({@see MediaDerivativeService::produceDerivative()}) so the
+     * controller and `MediaTool::create_derivative` share the same
+     * code path; this method only owns the HTTP shape.
+     *
      * @param array<string, mixed> $options
      * @return array{0: int, 1: array<string, mixed>}
      */
     private function produceDerivativeResponse(MediaAsset $parent, string $format, array $options): array
     {
-        $producer = $format === '' ? null : $this->findProducer($parent, $format);
-        if ($format === '' || $producer === null) {
+        if ($format === '') {
             return $this->rejection(
-                $format === '' ? Response::HTTP_BAD_REQUEST : Response::HTTP_CONFLICT,
-                $format === '' ? 'BAD_REQUEST' : 'NO_PRODUCER',
-                $format === '' ? '`format` is required.' : 'No producer supports this format for this asset.',
+                Response::HTTP_BAD_REQUEST,
+                'BAD_REQUEST',
+                '`format` is required.',
             );
         }
 
         try {
-            $output = $producer->produce($parent, $format, $options);
-            $derivative = $this->derivatives->create(
+            // Service does the full pipeline: producer resolution +
+            // `produce()` + `create()` with attribution. Controller
+            // owns the HTTP shape only.
+            $derivative = $this->derivatives->createFromRequest(
                 parent: $parent,
-                output: $output,
                 format: $format,
-                producerPlugin: $producer->pluginSlug(),
-                producerOperation: $producer->operationName(),
+                options: $options,
                 userId: $this->auth->currentUserId(),
                 context: $this->resolveContext(),
             );
             return [Response::HTTP_CREATED, [
                 'data' => ['derivative' => $this->serializer->serialize($derivative)],
             ]];
+        } catch (NoDerivativeProducerException $e) {
+            return $this->rejection(Response::HTTP_CONFLICT, 'NO_PRODUCER', $e->getMessage());
         } catch (Throwable $e) {
             return $this->rejection(Response::HTTP_UNPROCESSABLE_ENTITY, 'PRODUCER_FAILED', $e->getMessage());
         }
@@ -127,29 +130,6 @@ final class MediaDerivativeController
             return [];
         }
         return is_array($decoded) ? $decoded : [];
-    }
-
-    private function findProducer(MediaAsset $parent, string $format): ?MediaDerivativeProducerInterface
-    {
-        $format = strtolower($format);
-        $mime   = strtolower((string) $parent->mime_type);
-        $ext    = strtolower(pathinfo((string) $parent->filename, PATHINFO_EXTENSION));
-        foreach (MediaDerivativeProducerDiscovery::all() as $class) {
-            /** @var MediaDerivativeProducerInterface $producer */
-            $producer = $this->container->get($class);
-            $sources = array_map('strtolower', $producer->supportedSourceFormats());
-            $outputs = array_map('strtolower', $producer->supportedDerivativeFormats());
-            if (
-                in_array($format, $outputs, true)
-                && (
-                    ($mime !== '' && in_array($mime, $sources, true))
-                    || ($ext !== '' && in_array($ext, $sources, true))
-                )
-            ) {
-                return $producer;
-            }
-        }
-        return null;
     }
 
     private function canSee(MediaAsset $asset): bool

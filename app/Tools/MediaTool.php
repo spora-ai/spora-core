@@ -6,10 +6,14 @@ namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Services\AssetStorageException;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetSerializer;
+use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
@@ -19,40 +23,63 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpFoundation\Request;
+use Throwable;
 
 /**
- * Built-in tool for reading the media library.
+ * Built-in tool for reading and producing media library content.
  *
- * Five operations:
+ * Seven operations:
  *
- *   - `search`         — paginated list of `media_assets` rows (auto-approved read)
- *   - `get_media`      — fetch one asset + a markdown embed snippet the LLM
- *                        can echo verbatim so the chat UI renders the
- *                        asset inline. Auto-approved read.
- *   - `get_public_url` — mint or fetch the public shareable URL of a single
- *                        asset. Hidden by default (`enabledByDefault: false`)
- *                        and always requires approval. Operators opt the
- *                        operation in via a per-agent override.
- *   - `get_embed_code` — return a markdown snippet (image / audio / video /
- *                        link) the assistant can drop into its reply,
- *                        pointing at the local archive URL. Auto-approved
- *                        read-only operation.
- *   - `get_source`     — return the raw bytes of a single asset so the LLM
- *                        can iterate on it (e.g. read a `.typ` source,
- *                        re-ingest an extracted document). Text-shaped
- *                        mimes inline up to {@see self::GET_SOURCE_TEXT_MAX};
- *                        binary mimes inline base64 up to
- *                        {@see self::GET_SOURCE_BINARY_MAX}. Hidden by
- *                        default (`enabledByDefault: false`) and always
- *                        requires approval — every call surfaces the asset's
- *                        bytes to the LLM, which is a stronger promise than
- *                        `get_media`'s embed-only contract.
+ *   - `search`            — paginated list of `media_assets` rows (auto-approved read).
+ *                           Derivatives are filtered out — the LLM fetches a
+ *                           derivative via `get_media` on its parent id.
+ *   - `get_media`         — fetch one asset + a markdown embed snippet the LLM
+ *                           can echo verbatim so the chat UI renders the
+ *                           asset inline. The response now includes a
+ *                           `derivatives[]` array (every render of this
+ *                           asset, e.g. PNG/PDF/SVG siblings) and a
+ *                           `parent_id` (set when this asset is itself a
+ *                           derivative of another), so the LLM can walk
+ *                           both directions without a second round-trip.
+ *                           Auto-approved read.
+ *   - `get_public_url`    — mint or fetch the public shareable URL of a single
+ *                           asset. Hidden by default (`enabledByDefault: false`)
+ *                           and always requires approval. Operators opt the
+ *                           operation in via a per-agent override.
+ *   - `get_embed_code`    — return a markdown snippet (image / audio / video /
+ *                           link) the assistant can drop into its reply,
+ *                           pointing at the local archive URL. Auto-approved
+ *                           read-only operation.
+ *   - `get_source`        — return the raw bytes of a single asset so the LLM
+ *                           can iterate on it (e.g. read a `.typ` source,
+ *                           re-ingest an extracted document). Text-shaped
+ *                           mimes inline up to {@see self::GET_SOURCE_TEXT_MAX};
+ *                           binary mimes inline base64 up to
+ *                           {@see self::GET_SOURCE_BINARY_MAX}. Hidden by
+ *                           default (`enabledByDefault: false`) and always
+ *                           requires approval — every call surfaces the asset's
+ *                           bytes to the LLM, which is a stronger promise than
+ *                           `get_media`'s embed-only contract.
+ *   - `list_derivatives`  — return the derivative rows of a parent asset
+ *                           (e.g. the PNG/PDF renders of a `.typ` source).
+ *                           Takes an optional `format` filter to narrow
+ *                           to a specific derivative kind (e.g. only the
+ *                           PNG). Auto-approved read — the same
+ *                           operator-visible shape the dashboard renders,
+ *                           so the LLM and the operator see the same row.
+ *   - `create_derivative` — generate a fresh derivative by calling the
+ *                           registered {@see \Spora\Services\MediaArchive\MediaDerivativeProducerInterface}
+ *                           that matches the parent's MIME and the
+ *                           requested `format`. Idempotent on the
+ *                           natural key `(parent_id, format, producer_plugin,
+ *                           producer_operation)` — re-rendering returns
+ *                           the same derivative id. Off by default; each
+ *                           call requires operator approval.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
- *   - `agent` (default): `search` filters by `agent_id`, `get_media`,
- *     `get_public_url`, `get_embed_code` and `get_source` require
- *     `asset->agent_id === $agentId`.
+ *   - `agent` (default): `search` filters by `agent_id`, the per-asset
+ *     ops require `asset->agent_id === $agentId`.
  *   - `principal`: the per-asset ops accept any asset whose
  *     `asset->user_id === $context->ownerUserId` (direct upload by the
  *     principal's owner user) or whose attached agent belongs to the
@@ -65,7 +92,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, and share media from the media library. `get_media` echoes a markdown embed; `get_embed_code` returns the embed alone; `get_public_url` mints a shareable link.',
+    description: 'Search, retrieve, share, and produce media library content. `get_media` echoes a markdown embed and lists the asset\'s derivatives; `get_embed_code` returns the embed alone; `get_public_url` mints a shareable link; `get_source` reads bytes; `list_derivatives` enumerates an asset\'s derivatives; `create_derivative` generates a fresh derivative via a registered producer.',
     category: 'data',
     icon: 'image',
 )]
@@ -122,12 +149,52 @@ use Symfony\Component\HttpFoundation\Request;
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
+#[ToolOperation(
+    name: 'list_derivatives',
+    description: 'List the derivative rows of a parent asset (e.g. every PDF/PNG/SVG render '
+               . 'of a .typ source, every thumbnail/format conversion of an uploaded image). '
+               . 'Pass an optional `format` filter (e.g. "png") to narrow to one derivative '
+               . 'kind. Each row carries `media_id`, `format`, `asset_url`, `label`, '
+               . '`producer_plugin`, `producer_operation`, and `created_at` — the same shape '
+               . 'the operator dashboard renders on the VersionsStrip, so the LLM and the '
+               . 'operator see identical rows. Empty list when the parent has no derivatives. '
+               . 'Auto-approved read.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'create_derivative',
+    description: 'Generate a fresh derivative of a parent asset via the registered '
+               . 'derivative producer that matches the parent\'s MIME/extension and the '
+               . 'requested `format` (e.g. render a .typ source to PNG, convert an uploaded '
+               . 'image to a WebP thumbnail). The natural key `(parent_id, format, '
+               . 'producer_plugin, producer_operation)` makes the operation idempotent — '
+               . 're-rendering returns the same derivative id. Optional `options` carries '
+               . 'producer-specific knobs (e.g. {"page": 0, "ppi": 144} for typst). Returns '
+               . 'the new derivative\'s id + asset_url + producer attribution. Off by '
+               . 'default; each call requires operator approval because the producer may '
+               . 'take seconds and always writes a fresh `media_assets` row.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(name: 'mime_type', type: 'string', description: 'Filter by media_assets.mime_type (case-insensitive LIKE).', required: false)]
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, and get_source (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source'])]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, and create_derivative (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative'])]
+#[ToolParameter(
+    name: 'format',
+    type: 'string',
+    description: 'Derivative format identifier. Required for `create_derivative` (e.g. "png", "pdf", "thumbnail-256", "format-webp"). Optional filter for `list_derivatives` (e.g. "png" returns only PNG derivatives). Ignored by every other op.',
+    required: ['create_derivative'],
+)]
+#[ToolParameter(
+    name: 'options',
+    type: 'object',
+    description: 'Producer-specific options for `create_derivative` (e.g. {"page": 0, "ppi": 144} for typst; {"longEdge": 1024} for image derivatives). Omit for defaults. Ignored by every other op.',
+    required: false,
+)]
 final class MediaTool extends AbstractTool
 {
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
@@ -155,6 +222,8 @@ final class MediaTool extends AbstractTool
         private readonly AuthService $auth,
         private readonly DatabaseAssetStore $database,
         private readonly LocalAssetStore $local,
+        private readonly MediaAssetSerializer $serializer,
+        private readonly MediaDerivativeService $derivatives,
         private readonly ?ToolConfigService $toolConfigService = null,
         Request|array $request = [],
     ) {
@@ -171,12 +240,14 @@ final class MediaTool extends AbstractTool
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'search'         => $this->search($arguments, $agentId, $userId),
-            'get_media'      => $this->getMedia($arguments, $agentId, $userId, $context),
-            'get_public_url' => $this->getPublicUrl($arguments, $agentId, $userId, $context),
-            'get_embed_code' => $this->getEmbedCode($arguments, $agentId, $userId, $context),
-            'get_source'     => $this->getSource($arguments, $agentId, $userId, $context),
-            default          => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, or get_source.'),
+            'search'            => $this->search($arguments, $agentId, $userId),
+            'get_media'         => $this->getMedia($arguments, $agentId, $userId, $context),
+            'get_public_url'    => $this->getPublicUrl($arguments, $agentId, $userId, $context),
+            'get_embed_code'    => $this->getEmbedCode($arguments, $agentId, $userId, $context),
+            'get_source'        => $this->getSource($arguments, $agentId, $userId, $context),
+            'list_derivatives'  => $this->listDerivatives($arguments, $agentId, $userId, $context),
+            'create_derivative' => $this->createDerivative($arguments, $agentId, $userId, $context),
+            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, or create_derivative.'),
         };
     }
 
@@ -184,14 +255,17 @@ final class MediaTool extends AbstractTool
     {
         $op = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
         $assetId = (string) ($arguments['asset_id'] ?? '');
+        $format  = (string) ($arguments['format'] ?? '');
 
         return match ($op) {
-            'search'         => 'Media library search',
-            'get_media'      => "Media get_media({$assetId})",
-            'get_public_url' => "Media get_public_url({$assetId})",
-            'get_embed_code' => "Media get_embed_code({$assetId})",
-            'get_source'     => "Media get_source({$assetId})",
-            default          => "Media {$op}",
+            'search'            => 'Media library search',
+            'get_media'         => "Media get_media({$assetId})",
+            'get_public_url'    => "Media get_public_url({$assetId})",
+            'get_embed_code'    => "Media get_embed_code({$assetId})",
+            'get_source'        => "Media get_source({$assetId})",
+            'list_derivatives'  => "Media list_derivatives({$assetId}" . ($format !== '' ? ", format={$format}" : '') . ')',
+            'create_derivative' => "Media create_derivative({$assetId}, format={$format})",
+            default             => "Media {$op}",
         };
     }
 
@@ -490,24 +564,161 @@ final class MediaTool extends AbstractTool
     }
 
     /**
+     * List the derivative rows attached to a parent asset. Reuses
+     * {@see MediaAssetSerializer::derivativeRowsFor()} so the
+     * LLM-visible row shape stays in lockstep with the operator
+     * dashboard's VersionsStrip — no parallel formatter, no drift.
+     *
+     * The optional `format` filter narrows to a single derivative
+     * kind (e.g. only PNG renders of a `.typ` source). The match
+     * is exact and case-insensitive — the format column on
+     * `media_derivatives` is written lowercase by
+     * {@see MediaDerivativeService::createFromRequest()}, so a
+     * lowercase compare is sufficient.
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function listDerivatives(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
+    {
+        $parent = $this->resolveAssetOrFail('list_derivatives', $arguments, $agentId, $userId, $context);
+        if ($parent instanceof ToolResult) {
+            return $parent;
+        }
+
+        $rows = $this->serializer->derivativeRowsFor($parent);
+        $formatFilter = strtolower(trim((string) ($arguments['format'] ?? '')));
+        if ($formatFilter !== '') {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn(array $row): bool => strtolower((string) ($row['format'] ?? '')) === $formatFilter,
+            ));
+        }
+
+        $count = count($rows);
+        $suffix = $formatFilter !== '' ? " matching format \"{$formatFilter}\"" : '';
+        return ToolResult::ok(
+            "Found {$count} derivative(s) of {$parent->id}{$suffix}.",
+            [
+                'parent_id'  => $parent->id,
+                'format'     => $formatFilter !== '' ? $formatFilter : null,
+                'count'      => $count,
+                'derivatives' => $rows,
+            ],
+        );
+    }
+
+    /**
+     * Produce a fresh derivative of the parent asset via the registered
+     * {@see \Spora\Services\MediaArchive\MediaDerivativeProducerInterface}
+     * that matches the parent's MIME/extension and the requested
+     * `format`. Delegates the full producer-resolution + `produce()` +
+     * `create()` pipeline to {@see MediaDerivativeService::createFromRequest()}
+     * so the tool and the HTTP controller share one code path.
+     *
+     * Idempotent on the natural key `(parent_id, format, producer_plugin,
+     * producer_operation)` — re-rendering the same source with the
+     * same producer returns the same derivative id rather than creating
+     * a sibling row.
+     *
+     * Throws {@see NoDerivativeProducerException} → mapped to a
+     * human-readable `ToolResult::fail()` with a hint to call
+     * `list_derivatives` to discover the available formats. Producer
+     * runtime errors propagate as a generic 422-style failure.
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function createDerivative(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
+    {
+        $parent = $this->resolveAssetOrFail('create_derivative', $arguments, $agentId, $userId, $context);
+        if ($parent instanceof ToolResult) {
+            return $parent;
+        }
+
+        $format = strtolower(trim((string) ($arguments['format'] ?? '')));
+        if ($format === '') {
+            return ToolResult::fail('`format` is required for `create_derivative`. '
+                . 'Call `list_derivatives(asset_id: <parent>)` to discover the formats the registered producers support.');
+        }
+
+        $options = $arguments['options'] ?? [];
+        if (!is_array($options)) {
+            return ToolResult::fail('`options` must be an object mapping producer-specific knobs (e.g. {"page": 0, "ppi": 144}).');
+        }
+
+        try {
+            $derivative = $this->derivatives->createFromRequest(
+                parent: $parent,
+                format: $format,
+                options: $options,
+                userId: $userId,
+                context: $context,
+            );
+        } catch (NoDerivativeProducerException $e) {
+            return ToolResult::fail($e->getMessage()
+                . ' Call `list_derivatives(asset_id: ' . $parent->id . ')` to discover the formats the registered producers support.');
+        } catch (Throwable $e) {
+            return ToolResult::fail(sprintf(
+                '`create_derivative` failed: %s',
+                $e->getMessage(),
+            ));
+        }
+
+        return ToolResult::ok(
+            sprintf(
+                "Created derivative %s of %s (format=%s, mime=%s).",
+                $derivative->id,
+                $parent->id,
+                $format,
+                (string) ($derivative->mime_type ?? 'application/octet-stream'),
+            ),
+            [
+                'derivative_id' => $derivative->id,
+                'parent_id'     => $parent->id,
+                'format'        => $format,
+                'mime_type'     => $derivative->mime_type,
+                'byte_size'     => $derivative->byte_size,
+                'width'         => $derivative->width,
+                'height'        => $derivative->height,
+                'asset_url'     => $derivative->publicUrl(),
+                'plugin_slug'   => $derivative->plugin_slug,
+                'tool_name'     => $derivative->tool_name,
+            ],
+        );
+    }
+
+    /**
      * Read the asset's bytes from whichever storage backend the row
      * points at. Mirrors {@see \Spora\Http\AssetController::streamAsset()}
      * but stays private to MediaTool so the tool can layer the
      * scope check + size cap on top without exposing the read seam.
+     *
+     * `AssetStorageException` is caught and converted to `null` so the
+     * caller can route through its existing "could not be read" branch —
+     * a missing local file or a legacy `data_url` row whose `payload`
+     * was never backfilled should not surface as an uncaught exception
+     * out of a tool the LLM is driving.
      */
     private function readAssetBytes(MediaAsset $asset): ?string
     {
-        return match ($asset->storage_mode) {
-            'data_url' => (string) $this->database->read($asset)['bytes'],
-            'local'    => $this->readLocalFile($asset),
-            default    => null,
-        };
+        try {
+            return match ($asset->storage_mode) {
+                'data_url' => (string) $this->database->read($asset)['bytes'],
+                'local'    => $this->readLocalFile($asset),
+                default    => null,
+            };
+        } catch (AssetStorageException) {
+            return null;
+        }
     }
 
     private function readLocalFile(MediaAsset $asset): ?string
     {
-        $payload = $this->local->readFromAsset($asset);
-        $path    = (string) $payload['path'];
+        try {
+            $payload = $this->local->readFromAsset($asset);
+        } catch (AssetStorageException) {
+            return null;
+        }
+        $path = (string) $payload['path'];
         if ($path === '') {
             return null;
         }
@@ -625,8 +836,22 @@ final class MediaTool extends AbstractTool
     /**
      * Richer per-asset payload for `get_media` — superset of {@see summarizeAsset()}
      * with the metadata the operator UI needs (width / height, prompt,
-     * extracted text, public URL when minted). `search` stays on the
-     * leaner {@see summarizeAsset()} to avoid N KB of converter output per row.
+     * extracted text, public URL when minted) plus the derivative
+     * graph an LLM needs to walk the parent → child relationship in
+     * one round-trip. `search` stays on the leaner {@see summarizeAsset()}
+     * to avoid N KB of converter output per row.
+     *
+     * Derivative enrichment:
+     *  - `derivatives[]` is empty for non-parents; for parents it
+     *    reuses {@see MediaAssetSerializer::derivativeRowsFor()} so the
+     *    LLM-visible row shape is byte-for-byte identical to the
+     *    operator dashboard's VersionsStrip (label, asset_url,
+     *    producer_plugin, producer_operation, created_at).
+     *  - `parent_id` is null for non-derivatives; for derivatives it
+     *    is the parent asset's id (one-shot reverse lookup on
+     *    `media_derivatives.derivative_id`), so the LLM can fetch the
+     *    parent via `get_media(asset_id: parent_id)` if it wants the
+     *    wider context.
      *
      * @return array<string, mixed>
      */
@@ -647,6 +872,8 @@ final class MediaTool extends AbstractTool
             'metadata'         => $asset->metadata,
             'asset_url'        => $assetUrl,
             'public_url'       => $this->ensurePublicUrl($asset),
+            'parent_id'        => $this->derivatives->parentOf($asset->id),
+            'derivatives'      => $this->serializer->derivativeRowsFor($asset),
             'created_at'       => $asset->created_at?->toIso8601String(),
         ];
     }

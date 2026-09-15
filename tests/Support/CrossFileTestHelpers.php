@@ -322,16 +322,29 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             50 * 1024 * 1024,
         );
+        [$derivatives, $derivativesRestore] = makeMediaDerivativeServiceForTest($ctx['tmp']);
+        $serializer = new Spora\Services\MediaArchive\MediaAssetSerializer(
+            includeDerivatives: true,
+            derivatives: $derivatives,
+        );
         $tool = new Spora\Tools\MediaTool(
             $ctx['service'],
             $auth ?? makeMediaToolNonAdminAuth(),
             $database,
             $local,
+            $serializer,
+            $derivatives,
             $config,
             $globalConfig,
         );
 
-        return ['tool' => $tool, 'restore' => $ctx['restore']];
+        return [
+            'tool' => $tool,
+            'restore' => static function () use ($ctx, $derivativesRestore): void {
+                $derivativesRestore();
+                $ctx['restore']();
+            },
+        ];
     }
 }
 
@@ -357,8 +370,47 @@ if (!function_exists('buildMediaToolForSchema')) {
             new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
             50 * 1024 * 1024,
         );
+        [$derivatives] = makeMediaDerivativeServiceForTest($ctx['tmp']);
+        $serializer = new Spora\Services\MediaArchive\MediaAssetSerializer(
+            includeDerivatives: true,
+            derivatives: $derivatives,
+        );
 
-        return new Spora\Tools\MediaTool($ctx['service'], $auth, $database, $local);
+        return new Spora\Tools\MediaTool($ctx['service'], $auth, $database, $local, $serializer, $derivatives);
+    }
+}
+
+if (!function_exists('makeMediaDerivativeServiceForTest')) {
+    /**
+     * Build a {@see Spora\Services\MediaArchive\MediaDerivativeService}
+     * wired against the same `SPORA_STORAGE_DIR` the test fixture is
+     * using, plus the lightweight producer container
+     * {@see Tests\Support\MediaArchiveTestSupport::buildProducerContainer()}
+     * (which is what {@see MediaArchiveTestSupport::buildProducerContainer()}
+     * exposes for the other media-archive tests).
+     *
+     * Returns `[service, restore]` so per-test derivatives state is
+     * cleared between cases (the producer discovery registry is a
+     * static, so each test must reset it before registering new
+     * producers).
+     */
+    function makeMediaDerivativeServiceForTest(string $tmp): array
+    {
+        $paths    = new Spora\Core\Paths(BASE_PATH);
+        $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $database = new Spora\Services\DatabaseAssetStore(50 * 1024 * 1024);
+        $local    = new Spora\Services\LocalAssetStore($paths, $security, 50 * 1024 * 1024);
+        $assetStore = new Spora\Services\AutoAssetStore($database, $local, 1_048_576);
+
+        $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+        $container = Tests\Support\MediaArchiveTestSupport::buildProducerContainer();
+        $service = new Spora\Services\MediaArchive\MediaDerivativeService($assetStore, $principalService, $container);
+
+        $restore = static function (): void {
+            Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery::reset();
+        };
+
+        return [$service, $restore];
     }
 }
 

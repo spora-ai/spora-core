@@ -19,15 +19,18 @@ use Spora\Tools\MediaTool;
  *
  * Locks in the contract the orchestrator relies on:
  *
- *   - `search`         : enabled_by_default = true,  requires_approval_by_default = false
- *   - `get_media`      : enabled_by_default = true,  requires_approval_by_default = false
- *   - `get_public_url` : enabled_by_default = false, requires_approval_by_default = true
- *   - `get_embed_code` : enabled_by_default = true,  requires_approval_by_default = false
- *   - The discriminator `enum` in the generated JSON schema lists all four
+ *   - `search`            : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `get_media`         : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `get_public_url`    : enabled_by_default = false, requires_approval_by_default = true
+ *   - `get_embed_code`    : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `get_source`        : enabled_by_default = false, requires_approval_by_default = true
+ *   - `list_derivatives`  : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `create_derivative` : enabled_by_default = false, requires_approval_by_default = true
+ *   - The discriminator `enum` in the generated JSON schema lists all seven
  *     operations (the orchestrator narrows the enum per-agent).
- *   - When no per-agent override exists, `get_public_url` is filtered out of
- *     the tool list — this matches `enabledByDefault: false` behavior in
- *     {@see ToolDefinitionBuilder::buildToolDefinitions()}.
+ *   - When no per-agent override exists, `get_public_url`, `get_source`,
+ *     and `create_derivative` are filtered out of the tool list — matches
+ *     `enabledByDefault: false` in {@see ToolDefinitionBuilder::buildToolDefinitions()}.
  *
  * Uses a real `MediaArchiveService` rather than a Mockery mock because
  * MediaArchiveService is `final` and the ToolDefinitionBuilder + tool
@@ -97,9 +100,9 @@ describe('MediaTool attributes', function (): void {
         expect($tool->description)->toContain('media library');
     });
 
-    it('declares exactly the five expected operations', function (): void {
+    it('declares exactly the seven expected operations', function (): void {
         $names = array_map(static fn(ToolOperation $op) => $op->name, mediaToolOperations());
-        expect($names)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source']);
+        expect($names)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative']);
     });
 
     it('marks search as enabled by default and auto-approved', function (): void {
@@ -132,6 +135,18 @@ describe('MediaTool attributes', function (): void {
             ->and($op->requiresApprovalByDefault)->toBeTrue();
     });
 
+    it('marks list_derivatives as enabled by default and auto-approved', function (): void {
+        $op = mediaToolOpByName('list_derivatives');
+        expect($op->enabledByDefault)->toBeTrue()
+            ->and($op->requiresApprovalByDefault)->toBeFalse();
+    });
+
+    it('marks create_derivative as hidden by default and requiring approval', function (): void {
+        $op = mediaToolOpByName('create_derivative');
+        expect($op->enabledByDefault)->toBeFalse()
+            ->and($op->requiresApprovalByDefault)->toBeTrue();
+    });
+
     it('exposes the scope setting as a select with two options', function (): void {
         $ref = new ReflectionClass(MediaTool::class);
         $attrs = $ref->getAttributes(ToolSetting::class);
@@ -158,23 +173,24 @@ describe('MediaTool attributes', function (): void {
 });
 
 describe('MediaTool parameter schema', function (): void {
-    it('synthesizes an "action" discriminator with the five operations in its enum', function (): void {
+    it('synthesizes an "action" discriminator with the seven operations in its enum', function (): void {
         $tool = buildMediaToolForSchema();
 
         $schema = $tool->getParametersSchema();
         expect($schema['type'])->toBe('object');
         expect($schema['properties'])->toHaveKey('action');
         expect($schema['properties']['action']['type'])->toBe('string');
-        expect($schema['properties']['action']['enum'])->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source']);
+        expect($schema['properties']['action']['enum'])->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative']);
     });
 });
 
 describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
-    it('omits get_public_url and get_source from the tool list when no per-agent override exists', function (): void {
+    it('omits get_public_url, get_source and create_derivative from the tool list when no per-agent override exists', function (): void {
         // No AgentToolOperationOverride rows for this agent — the orchestrator's
-        // ToolDefinitionBuilder should hide both `get_public_url` and `get_source`
-        // (both enabledByDefault=false) and emit only the default-enabled
-        // operations: `search`, `get_media`, and `get_embed_code`.
+        // ToolDefinitionBuilder should hide the three ops with
+        // `enabledByDefault: false` (`get_public_url`, `get_source`,
+        // `create_derivative`) and emit only the default-enabled ops:
+        // `search`, `get_media`, `get_embed_code`, `list_derivatives`.
         $toolInstance = buildMediaToolForSchema();
 
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
@@ -184,8 +200,8 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
         expect($defs[0]['function']['name'])->toBe('media');
 
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
-        expect($enum)->toBe(['search', 'get_media', 'get_embed_code']);
-        expect($enum)->not->toContain('get_public_url', 'get_source');
+        expect($enum)->toBe(['search', 'get_media', 'get_embed_code', 'list_derivatives']);
+        expect($enum)->not->toContain('get_public_url', 'get_source', 'create_derivative');
     });
 
     it('includes get_public_url when a per-agent override opts the operation in', function (): void {
@@ -205,7 +221,7 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
 
         expect($defs)->toHaveCount(1);
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
-        expect($enum)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code']);
+        expect($enum)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'list_derivatives']);
     });
 
     it('excludes the tool entirely when the agent does not have it enabled', function (): void {
