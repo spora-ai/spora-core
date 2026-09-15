@@ -202,6 +202,166 @@ if (!function_exists('createUserPrincipalPublic')) {
     }
 }
 
+if (!function_exists('seedMediaToolAgent')) {
+    /**
+     * Create an Agent row so the FK on media_assets.agent_id resolves.
+     * Tests use unique emails + namespaced agent names so a single Pest
+     * run never collides between cases (each test runs in its own
+     * transaction).
+     */
+    function seedMediaToolAgent(string $name = 'Test Agent'): int
+    {
+        // Create the user row first to satisfy the agents.user_id FK.
+        // The exact id doesn't matter — only the row needs to exist.
+        $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
+        $stmt = $pdo->prepare(
+            'INSERT INTO users (email, password, username, verified, resettable, roles_mask, registered, created_at, updated_at) '
+            . 'VALUES (?, ?, ?, 1, 1, 0, ?, ?, ?)',
+        );
+        $email = sprintf('mediatool-%s-%s@example.com', bin2hex(random_bytes(4)), microtime(true));
+        $now   = time();
+        $stmt->execute([
+            $email,
+            password_hash('Password1!', PASSWORD_BCRYPT),
+            $email,
+            $now,
+            date('Y-m-d H:i:s', $now),
+            date('Y-m-d H:i:s', $now),
+        ]);
+        $userId = (int) $pdo->lastInsertId();
+
+        return Spora\Models\Agent::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'name'      => $name,
+            'is_active' => true,
+        ])->id;
+    }
+}
+
+if (!function_exists('seedMediaAsset')) {
+    /**
+     * Insert a media_assets row directly. The default shape matches what
+     * the MediaTool tests need (data_url storage, image mime, no
+     * upload_source) but every field is overridable. The AgentPicture
+     * tests also rely on this helper — they pass just `$userId` and let
+     * the defaults do the rest.
+     *
+     * `$userId` is the first positional parameter so the call
+     * `seedMediaAsset($userId)` from AgentPictureServiceTest stays
+     * semantically correct. The MediaTool tests use named args.
+     */
+    function seedMediaAsset(
+        ?int $userId = null,
+        ?int $agentId = null,
+        ?string $publicToken = null,
+        ?string $pluginSlug = null,
+        ?string $mime = 'image/png',
+        ?string $idOverride = null,
+    ): Spora\Models\MediaAsset {
+        $id = $idOverride ?? sprintf(
+            '%08x-aaaa-bbbb-cccc-%012x',
+            random_int(0, 0xffffffff),
+            random_int(0, 0xffffffffffff),
+        );
+
+        return Spora\Models\MediaAsset::create([
+            'id'                            => $id,
+            'asset_url'                     => Spora\Services\MediaArchive\MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $id . '.png',
+            'storage_mode'                  => 'data_url',
+            'mime_type'                     => $mime,
+            'media_type'                    => 'image',
+            'byte_size'                     => 1024,
+            'agent_id'                      => $agentId,
+            'user_id'                       => (int) $userId,
+            'plugin_slug'                   => $pluginSlug,
+            'asset_token'                   => bin2hex(random_bytes(16)),
+            'public_access_token'           => $publicToken,
+            'filename'                      => 'sample.png',
+            'migrated_from_inline_data_url' => false,
+        ]);
+    }
+}
+
+if (!function_exists('makeMediaToolNonAdminAuth')) {
+    function makeMediaToolNonAdminAuth(): Spora\Auth\AuthService
+    {
+        $auth = Mockery::mock(Spora\Auth\AuthService::class);
+        $auth->allows('isAdmin')->andReturn(false);
+        $auth->allows('currentUserId')->andReturn(null);
+        return $auth;
+    }
+}
+
+if (!function_exists('makeMediaToolAdminAuth')) {
+    function makeMediaToolAdminAuth(): Spora\Auth\AuthService
+    {
+        $auth = Mockery::mock(Spora\Auth\AuthService::class);
+        $auth->allows('isAdmin')->andReturn(true);
+        $auth->allows('currentUserId')->andReturn(1);
+        return $auth;
+    }
+}
+
+if (!function_exists('makeMediaToolWithRealArchive')) {
+    /**
+     * Build a MediaTool wired to a real MediaArchiveService so the test
+     * exercises the same query path the LLM hits in production. Returns
+     * the tool + a cleanup closure that wipes the tmp asset dir.
+     */
+    function makeMediaToolWithRealArchive(
+        ?Spora\Auth\AuthService $auth = null,
+        ?Spora\Services\ToolConfigService $config = null,
+        array $globalConfig = [],
+    ): array {
+        // Reuse the same builder that MediaArchiveServiceTest uses so we get a
+        // fully-wired service (asset store, resolver, converters, decoder).
+        $ctx = makeMediaArchiveService();
+        $database = new Spora\Services\DatabaseAssetStore();
+        $local    = new Spora\Services\LocalAssetStore(
+            new Spora\Core\Paths(BASE_PATH),
+            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            50 * 1024 * 1024,
+        );
+        $tool = new Spora\Tools\MediaTool(
+            $ctx['service'],
+            $auth ?? makeMediaToolNonAdminAuth(),
+            $database,
+            $local,
+            $config,
+            $globalConfig,
+        );
+
+        return ['tool' => $tool, 'restore' => $ctx['restore']];
+    }
+}
+
+if (!function_exists('buildMediaToolForSchema')) {
+    /**
+     * Build a MediaTool instance for the schema-surface tests
+     * (MediaToolApprovalTest). None of those tests call execute(), so
+     * the wire-shape builder is enough — no need for a restore closure
+     * or full archive service lifecycle.
+     */
+    function buildMediaToolForSchema(): Spora\Tools\MediaTool
+    {
+        // Build a real archive service so the constructor's type hint is
+        // satisfied. None of these tests invoke execute().
+        $ctx = makeMediaArchiveService();
+        $auth = Mockery::mock(Spora\Auth\AuthService::class);
+        $auth->allows('isAdmin')->andReturn(false);
+        $auth->allows('currentUserId')->andReturn(null);
+
+        $database = new Spora\Services\DatabaseAssetStore();
+        $local    = new Spora\Services\LocalAssetStore(
+            new Spora\Core\Paths(BASE_PATH),
+            new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            50 * 1024 * 1024,
+        );
+
+        return new Spora\Tools\MediaTool($ctx['service'], $auth, $database, $local);
+    }
+}
+
 if (!function_exists('makeMediaArchiveService')) {
     /**
      * Build a MediaArchiveService with optional injected dependencies.

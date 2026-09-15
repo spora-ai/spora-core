@@ -7,7 +7,11 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
+<<<<<<< HEAD
         "version": "0.23.0-75-gd6286fa5"
+=======
+        "version": "0.23.0-1-g268dbde5"
+>>>>>>> 14ca747a (feat(core): add MediaTool::get_source op for raw byte reads)
     },
     "servers": [
         {

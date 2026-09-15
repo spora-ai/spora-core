@@ -9,25 +9,25 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 /**
  * Per-op `required[]` narrowing for MediaTool's `asset_id` parameter.
  *
- * `asset_id` is bound to `get_media`, `get_public_url`, and `get_embed_code`
- * — the `search` op ignores it. The filter must drop `asset_id` from
- * `required[]` when only `search` is allowed (e.g. the agent enabled the
- * read-only search but not the per-asset lookups).
+ * `asset_id` is bound to `get_media`, `get_public_url`, `get_embed_code`,
+ * and `get_source` — the `search` op ignores it. The filter must drop
+ * `asset_id` from `required[]` when only `search` is allowed (e.g. the
+ * agent enabled the read-only search but not the per-asset lookups).
  *
  * The schema is built reflectively from a class-string — no MediaTool
  * instantiation, so no MediaArchiveService / AuthService wiring needed.
  */
-it('declares `asset_id` as required for the three per-asset ops only', function (): void {
+it('declares `asset_id` as required for the four per-asset ops only', function (): void {
     $schema = ToolParameterSchemaBuilder::build(MediaTool::class);
 
     expect($schema['__required_when']['asset_id'] ?? null)
-        ->toBe(['get_media', 'get_public_url', 'get_embed_code']);
+        ->toBe(['get_media', 'get_public_url', 'get_embed_code', 'get_source']);
 });
 
 it('keeps `asset_id` required when any per-asset op is allowed', function (): void {
     $schema = ToolParameterSchemaBuilder::build(MediaTool::class);
 
-    foreach (['get_media', 'get_public_url', 'get_embed_code'] as $op) {
+    foreach (['get_media', 'get_public_url', 'get_embed_code', 'get_source'] as $op) {
         $filtered = OperationSchemaFilter::filter($schema, [$op], 'action');
         expect($filtered['required'])->toContain('asset_id');
     }
@@ -54,7 +54,7 @@ it('keeps `asset_id` required when search is allowed alongside any per-asset op'
 
     $mixed = OperationSchemaFilter::filter(
         $schema,
-        ['search', 'get_media', 'get_public_url', 'get_embed_code'],
+        ['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source'],
         'action',
     );
     expect($mixed['required'])->toContain('asset_id', 'action');

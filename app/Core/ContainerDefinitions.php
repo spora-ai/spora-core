@@ -1473,6 +1473,8 @@ final class ContainerDefinitions
                 return new MediaTool(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
+                    $c->get(DatabaseAssetStore::class),
+                    $c->get(LocalAssetStore::class),
                     $c->get(ToolConfigService::class),
                     $c->get('config'),
                 );

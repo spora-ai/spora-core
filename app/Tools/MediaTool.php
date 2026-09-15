@@ -6,6 +6,8 @@ namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Services\DatabaseAssetStore;
+use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaType;
@@ -21,7 +23,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Built-in tool for reading the media library.
  *
- * Four operations:
+ * Five operations:
  *
  *   - `search`         — paginated list of `media_assets` rows (auto-approved read)
  *   - `get_media`      — fetch one asset + a markdown embed snippet the LLM
@@ -35,15 +37,25 @@ use Symfony\Component\HttpFoundation\Request;
  *                        link) the assistant can drop into its reply,
  *                        pointing at the local archive URL. Auto-approved
  *                        read-only operation.
+ *   - `get_source`     — return the raw bytes of a single asset so the LLM
+ *                        can iterate on it (e.g. read a `.typ` source,
+ *                        re-ingest an extracted document). Text-shaped
+ *                        mimes inline up to {@see self::GET_SOURCE_TEXT_MAX};
+ *                        binary mimes inline base64 up to
+ *                        {@see self::GET_SOURCE_BINARY_MAX}. Hidden by
+ *                        default (`enabledByDefault: false`) and always
+ *                        requires approval — every call surfaces the asset's
+ *                        bytes to the LLM, which is a stronger promise than
+ *                        `get_media`'s embed-only contract.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
  *   - `agent` (default): `search` filters by `agent_id`, `get_media`,
- *     `get_public_url` and `get_embed_code` require
+ *     `get_public_url`, `get_embed_code` and `get_source` require
  *     `asset->agent_id === $agentId`.
- *   - `principal`: `get_media`/`get_public_url`/`get_embed_code` accept any
- *     asset whose `asset->user_id === $context->ownerUserId` (direct upload
- *     by the principal's owner user) or whose attached agent belongs to the
+ *   - `principal`: the per-asset ops accept any asset whose
+ *     `asset->user_id === $context->ownerUserId` (direct upload by the
+ *     principal's owner user) or whose attached agent belongs to the
  *     calling agent's principal. `search` falls through to the listing
  *     controller's principal-aware path.
  *   - `user` (legacy): kept as a silent alias for `principal` so existing
@@ -95,22 +107,54 @@ use Symfony\Component\HttpFoundation\Request;
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
+#[ToolOperation(
+    name: 'get_source',
+    description: 'Return the raw bytes of a single asset so the LLM can iterate on it '
+               . '(e.g. read a .typ file, re-ingest an extracted document). Text-shaped '
+               . 'mimes (text/*, application/json, application/xml) return the bytes '
+               . 'inline; binary mimes return a base64-encoded payload under '
+               . 'data.content_base64. Hard size cap (see {@see self::GET_SOURCE_TEXT_MAX} '
+               . 'and {@see self::GET_SOURCE_BINARY_MAX}); oversized assets fail with a '
+               . 'message pointing the LLM at `get_media` for the public URL. External '
+               . 'assets (storage_mode=external) have no Spora-side payload — fail with '
+               . 'a hint to use `get_media` for the source URL. Off by default; each '
+               . 'call requires operator approval.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(name: 'mime_type', type: 'string', description: 'Filter by media_assets.mime_type (case-insensitive LIKE).', required: false)]
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, and get_embed_code (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code'])]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, and get_source (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source'])]
 final class MediaTool extends AbstractTool
 {
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
     private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
+
+    /**
+     * Text-shaped inline cap for `get_source`. 5 MiB is enough for a
+     * medium-sized Typst source, a small JSON config, or a long-form
+     * document excerpt — anything bigger should be streamed through
+     * `get_media`'s public URL, not inlined into the LLM context.
+     */
+    private const GET_SOURCE_TEXT_MAX = 5 * 1024 * 1024;
+
+    /**
+     * Binary inline cap for `get_source`. Base64 inflation + the LLM
+     * context window makes binary inlining much more expensive than
+     * text, so the cap sits well below the text cap.
+     */
+    private const GET_SOURCE_BINARY_MAX = 2 * 1024 * 1024;
 
     private readonly array $config;
 
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
+        private readonly DatabaseAssetStore $database,
+        private readonly LocalAssetStore $local,
         private readonly ?ToolConfigService $toolConfigService = null,
         Request|array $request = [],
     ) {
@@ -131,7 +175,8 @@ final class MediaTool extends AbstractTool
             'get_media'      => $this->getMedia($arguments, $agentId, $userId, $context),
             'get_public_url' => $this->getPublicUrl($arguments, $agentId, $userId, $context),
             'get_embed_code' => $this->getEmbedCode($arguments, $agentId, $userId, $context),
-            default          => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, or get_embed_code.'),
+            'get_source'     => $this->getSource($arguments, $agentId, $userId, $context),
+            default          => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, or get_source.'),
         };
     }
 
@@ -145,6 +190,7 @@ final class MediaTool extends AbstractTool
             'get_media'      => "Media get_media({$assetId})",
             'get_public_url' => "Media get_public_url({$assetId})",
             'get_embed_code' => "Media get_embed_code({$assetId})",
+            'get_source'     => "Media get_source({$assetId})",
             default          => "Media {$op}",
         };
     }
@@ -340,6 +386,158 @@ final class MediaTool extends AbstractTool
                 'embed'      => $embed,
             ],
         );
+    }
+
+    /**
+     * Read the asset's bytes back to the caller so the LLM can iterate
+     * (e.g. re-typeset a previously uploaded source). Scope, ownership,
+     * and approval are inherited from {@see resolveAssetOrFail()} and
+     * the per-op `requiresApprovalByDefault: true`.
+     *
+     * Storage handling:
+     *  - `data_url` / `local`: read bytes via the asset stores.
+     *  - `external`: no Spora-side payload — point the LLM at
+     *    `get_media` for the source URL instead of pretending the
+     *    payload is local.
+     *
+     * Size handling:
+     *  - Text-shaped mimes (text/*, application/json, application/xml,
+     *    application/yaml, application/x-yaml) inline up to
+     *    {@see self::GET_SOURCE_TEXT_MAX} bytes.
+     *  - Binary mimes inline up to {@see self::GET_SOURCE_BINARY_MAX}
+     *    bytes, base64-encoded under `data.content_base64`.
+     *  - Anything larger fails with an actionable message that points
+     *    the LLM at the public URL (`get_media`).
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function getSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context = null): ToolResult
+    {
+        $asset = $this->resolveAssetOrFail('get_source', $arguments, $agentId, $userId, $context);
+        if ($asset instanceof ToolResult) {
+            return $asset;
+        }
+
+        $bytes = $this->readAssetBytes($asset);
+        if ($bytes === null) {
+            if ($asset->storage_mode === 'external') {
+                return ToolResult::fail(sprintf(
+                    'Asset %s is stored externally (storage_mode=external) and has no '
+                    . 'Spora-side payload. Use `get_media` to retrieve its source URL.',
+                    $asset->id,
+                ));
+            }
+            return ToolResult::fail(sprintf(
+                'Asset %s payload could not be read (storage_mode=%s). '
+                    . 'The underlying blob may be missing; try `get_media` for the public URL.',
+                $asset->id,
+                $asset->storage_mode,
+            ));
+        }
+
+        $mime     = (string) ($asset->mime_type ?? 'application/octet-stream');
+        $isText   = self::isTextShapedMime($mime);
+        $sizeCap  = $isText ? self::GET_SOURCE_TEXT_MAX : self::GET_SOURCE_BINARY_MAX;
+        $size     = strlen($bytes);
+        $filename = (string) ($asset->filename ?? $asset->id);
+
+        if ($size > $sizeCap) {
+            return ToolResult::fail(sprintf(
+                'Asset %s (%s, %.1f MiB) exceeds the inline `get_source` cap of %d MiB for %s '
+                    . 'mimes. Use `get_media` to fetch the public URL and stream the bytes '
+                    . 'out-of-band.',
+                $asset->id,
+                $filename,
+                $size / (1024 * 1024),
+                (int) ($sizeCap / (1024 * 1024)),
+                $isText ? 'text-shaped' : 'binary',
+            ));
+        }
+
+        if ($isText) {
+            $header = sprintf('Source of %s (%s, %d bytes, mime=%s):', $asset->id, $filename, $size, $mime);
+            $content = $header . "\n\n" . $bytes;
+            return ToolResult::ok(
+                $content,
+                [
+                    'asset_id'  => $asset->id,
+                    'filename'  => $filename,
+                    'mime_type' => $mime,
+                    'byte_size' => $size,
+                    'encoding'  => 'utf-8',
+                ],
+            );
+        }
+
+        $header = sprintf(
+            'Binary source of %s (%s, %d bytes, mime=%s); base64 payload in data.content_base64.',
+            $asset->id,
+            $filename,
+            $size,
+            $mime,
+        );
+        return ToolResult::ok(
+            $header,
+            [
+                'asset_id'         => $asset->id,
+                'filename'         => $filename,
+                'mime_type'        => $mime,
+                'byte_size'        => $size,
+                'encoding'         => 'base64',
+                'content_base64'   => base64_encode($bytes),
+            ],
+        );
+    }
+
+    /**
+     * Read the asset's bytes from whichever storage backend the row
+     * points at. Mirrors {@see \Spora\Http\AssetController::streamAsset()}
+     * but stays private to MediaTool so the tool can layer the
+     * scope check + size cap on top without exposing the read seam.
+     */
+    private function readAssetBytes(MediaAsset $asset): ?string
+    {
+        return match ($asset->storage_mode) {
+            'data_url' => (string) $this->database->read($asset)['bytes'],
+            'local'    => $this->readLocalFile($asset),
+            default    => null,
+        };
+    }
+
+    private function readLocalFile(MediaAsset $asset): ?string
+    {
+        $payload = $this->local->readFromAsset($asset);
+        $path    = (string) $payload['path'];
+        if ($path === '') {
+            return null;
+        }
+        $bytes = @file_get_contents($path);
+        return $bytes === false ? null : $bytes;
+    }
+
+    /**
+     * Text-shaped mimes inline into the LLM context. The list mirrors
+     * what the operator-facing converters emit (text, JSON, YAML, XML)
+     * plus the wildcards LLM agents routinely ingest (SVG, CSV).
+     */
+    private static function isTextShapedMime(string $mime): bool
+    {
+        $mime = strtolower(trim($mime));
+        if ($mime === '') {
+            return false;
+        }
+        if (str_starts_with($mime, 'text/')) {
+            return true;
+        }
+        return in_array($mime, [
+            'application/json',
+            'application/xml',
+            'application/yaml',
+            'application/x-yaml',
+            'application/svg+xml',
+            'application/csv',
+            'application/x-typst',
+        ], true);
     }
 
     /**

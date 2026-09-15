@@ -85,18 +85,6 @@ function mediaToolOpByName(string $name): ToolOperation
     throw new RuntimeException("MediaTool has no #[ToolOperation] named {$name}");
 }
 
-function buildMediaToolForSchema(): MediaTool
-{
-    // Build a real archive service so the constructor's type hint is
-    // satisfied. None of these tests invoke execute().
-    $ctx = makeMediaArchiveService();
-    $auth = Mockery::mock(Spora\Auth\AuthService::class);
-    $auth->allows('isAdmin')->andReturn(false);
-    $auth->allows('currentUserId')->andReturn(null);
-
-    return new MediaTool($ctx['service'], $auth);
-}
-
 describe('MediaTool attributes', function (): void {
     it('declares the "media" tool name and a description', function (): void {
         $ref = new ReflectionClass(MediaTool::class);
@@ -109,9 +97,9 @@ describe('MediaTool attributes', function (): void {
         expect($tool->description)->toContain('media library');
     });
 
-    it('declares exactly the four expected operations', function (): void {
+    it('declares exactly the five expected operations', function (): void {
         $names = array_map(static fn(ToolOperation $op) => $op->name, mediaToolOperations());
-        expect($names)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code']);
+        expect($names)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source']);
     });
 
     it('marks search as enabled by default and auto-approved', function (): void {
@@ -136,6 +124,12 @@ describe('MediaTool attributes', function (): void {
         $op = mediaToolOpByName('get_embed_code');
         expect($op->enabledByDefault)->toBeTrue()
             ->and($op->requiresApprovalByDefault)->toBeFalse();
+    });
+
+    it('marks get_source as hidden by default and requiring approval', function (): void {
+        $op = mediaToolOpByName('get_source');
+        expect($op->enabledByDefault)->toBeFalse()
+            ->and($op->requiresApprovalByDefault)->toBeTrue();
     });
 
     it('exposes the scope setting as a select with two options', function (): void {
@@ -164,23 +158,23 @@ describe('MediaTool attributes', function (): void {
 });
 
 describe('MediaTool parameter schema', function (): void {
-    it('synthesizes an "action" discriminator with the four operations in its enum', function (): void {
+    it('synthesizes an "action" discriminator with the five operations in its enum', function (): void {
         $tool = buildMediaToolForSchema();
 
         $schema = $tool->getParametersSchema();
         expect($schema['type'])->toBe('object');
         expect($schema['properties'])->toHaveKey('action');
         expect($schema['properties']['action']['type'])->toBe('string');
-        expect($schema['properties']['action']['enum'])->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code']);
+        expect($schema['properties']['action']['enum'])->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source']);
     });
 });
 
 describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
-    it('omits get_public_url from the tool list when no per-agent override exists', function (): void {
+    it('omits get_public_url and get_source from the tool list when no per-agent override exists', function (): void {
         // No AgentToolOperationOverride rows for this agent — the orchestrator's
-        // ToolDefinitionBuilder should hide `get_public_url` (enabledByDefault=false)
-        // and emit only the default-enabled operations: `search`, `get_media`,
-        // and `get_embed_code`.
+        // ToolDefinitionBuilder should hide both `get_public_url` and `get_source`
+        // (both enabledByDefault=false) and emit only the default-enabled
+        // operations: `search`, `get_media`, and `get_embed_code`.
         $toolInstance = buildMediaToolForSchema();
 
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
@@ -191,7 +185,7 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
 
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
         expect($enum)->toBe(['search', 'get_media', 'get_embed_code']);
-        expect($enum)->not->toContain('get_public_url');
+        expect($enum)->not->toContain('get_public_url', 'get_source');
     });
 
     it('includes get_public_url when a per-agent override opts the operation in', function (): void {
