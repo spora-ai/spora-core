@@ -97,14 +97,30 @@ final class MediaDerivativeController
                 userId: $this->auth->currentUserId(),
                 context: $this->resolveContext(),
             );
+
             return [Response::HTTP_CREATED, [
                 'data' => ['derivative' => $this->serializer->serialize($derivative)],
             ]];
-        } catch (NoDerivativeProducerException $e) {
-            return $this->rejection(Response::HTTP_CONFLICT, 'NO_PRODUCER', $e->getMessage());
         } catch (Throwable $e) {
-            return $this->rejection(Response::HTTP_UNPROCESSABLE_ENTITY, 'PRODUCER_FAILED', $e->getMessage());
+            return $this->derivativeFailure($e);
         }
+    }
+
+    /**
+     * Map {@see MediaDerivativeService::createFromRequest()} failures
+     * to HTTP shapes. {@see NoDerivativeProducerException} is the
+     * "no producer registered for this format/source pair" 409;
+     * everything else is the producer-side 422.
+     *
+     * @return array{0: int, 1: array<string, mixed>}
+     */
+    private function derivativeFailure(Throwable $e): array
+    {
+        if ($e instanceof NoDerivativeProducerException) {
+            return $this->rejection(Response::HTTP_CONFLICT, 'NO_PRODUCER', $e->getMessage());
+        }
+
+        return $this->rejection(Response::HTTP_UNPROCESSABLE_ENTITY, 'PRODUCER_FAILED', $e->getMessage());
     }
 
     /**

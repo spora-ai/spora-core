@@ -327,13 +327,15 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             includeDerivatives: true,
             derivatives: $derivatives,
         );
+        $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives);
         $tool = new Spora\Tools\MediaTool(
             $ctx['service'],
             $auth ?? makeMediaToolNonAdminAuth(),
-            $database,
-            $local,
             $serializer,
             $derivatives,
+            $sourceReader,
+            $derivativeHandler,
             $config,
             $globalConfig,
         );
@@ -375,8 +377,17 @@ if (!function_exists('buildMediaToolForSchema')) {
             includeDerivatives: true,
             derivatives: $derivatives,
         );
+        $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives);
 
-        return new Spora\Tools\MediaTool($ctx['service'], $auth, $database, $local, $serializer, $derivatives);
+        return new Spora\Tools\MediaTool(
+            $ctx['service'],
+            $auth,
+            $serializer,
+            $derivatives,
+            $sourceReader,
+            $derivativeHandler,
+        );
     }
 }
 

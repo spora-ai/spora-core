@@ -6,10 +6,6 @@ namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
-use Spora\Services\AssetStorageException;
-use Spora\Services\DatabaseAssetStore;
-use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
@@ -23,7 +19,6 @@ use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 use Symfony\Component\HttpFoundation\Request;
-use Throwable;
 
 /**
  * Built-in tool for reading and producing media library content.
@@ -221,10 +216,10 @@ final class MediaTool extends AbstractTool
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
-        private readonly DatabaseAssetStore $database,
-        private readonly LocalAssetStore $local,
         private readonly MediaAssetSerializer $serializer,
         private readonly MediaDerivativeService $derivatives,
+        private readonly MediaSourceReader $sourceReader,
+        private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly ?ToolConfigService $toolConfigService = null,
         Request|array $request = [],
     ) {
@@ -284,8 +279,11 @@ final class MediaTool extends AbstractTool
         $perPage = max(1, min(ListMediaQuery::PER_PAGE_MAX, $limit));
         $page    = max(1, intdiv($offset, $perPage) + 1);
 
+        $mimeArg = $arguments['mime_type'] ?? null;
+        $mediaTypeFilter = (is_string($mimeArg) && trim($mimeArg) !== '') ? MediaType::fromMime($mimeArg) : null;
+
         $query = new ListMediaQuery(
-            mediaType: $this->mediaTypeFromMime($arguments['mime_type'] ?? null),
+            mediaType: $mediaTypeFilter,
             agentId: $scope === 'agent' ? $agentId : null,
             userId: $scope === 'user' && $userId !== null ? $userId : null,
             pluginSlug: isset($arguments['plugin_slug']) ? (string) $arguments['plugin_slug'] : null,
@@ -493,25 +491,30 @@ final class MediaTool extends AbstractTool
             return $asset;
         }
 
-        $bytes = $this->readAssetBytes($asset);
+        $bytes = $this->sourceReader->read($asset);
         if ($bytes === null) {
-            if ($asset->storage_mode === 'external') {
-                return ToolResult::fail(sprintf(
+            return match ($asset->storage_mode) {
+                'external' => ToolResult::fail(sprintf(
                     'Asset %s is stored externally (storage_mode=external) and has no '
                     . 'Spora-side payload. Use `get_media` to retrieve its source URL.',
                     $asset->id,
-                ));
-            }
-            return ToolResult::fail(sprintf(
-                'Asset %s payload could not be read (storage_mode=%s). '
-                    . 'The underlying blob may be missing; try `get_media` for the public URL.',
-                $asset->id,
-                $asset->storage_mode,
-            ));
+                )),
+                default    => ToolResult::fail(sprintf(
+                    'Asset %s payload could not be read (storage_mode=%s). '
+                        . 'The underlying blob may be missing; try `get_media` for the public URL.',
+                    $asset->id,
+                    $asset->storage_mode,
+                )),
+            };
         }
 
+        return $this->buildSourceResponse($asset, $bytes);
+    }
+
+    private function buildSourceResponse(MediaAsset $asset, string $bytes): ToolResult
+    {
         $mime     = (string) ($asset->mime_type ?? 'application/octet-stream');
-        $isText   = self::isTextShapedMime($mime);
+        $isText   = MediaSourceReader::isTextShapedMime($mime);
         $sizeCap  = $isText ? self::GET_SOURCE_TEXT_MAX : self::GET_SOURCE_BINARY_MAX;
         $size     = strlen($bytes);
         $filename = (string) ($asset->filename ?? $asset->id);
@@ -529,11 +532,9 @@ final class MediaTool extends AbstractTool
             ));
         }
 
-        if ($isText) {
-            $header = sprintf('Source of %s (%s, %d bytes, mime=%s):', $asset->id, $filename, $size, $mime);
-            $content = $header . "\n\n" . $bytes;
-            return ToolResult::ok(
-                $content,
+        return $isText
+            ? ToolResult::ok(
+                sprintf('Source of %s (%s, %d bytes, mime=%s):', $asset->id, $filename, $size, $mime) . "\n\n" . $bytes,
                 [
                     'asset_id'  => $asset->id,
                     'filename'  => $filename,
@@ -541,41 +542,32 @@ final class MediaTool extends AbstractTool
                     'byte_size' => $size,
                     'encoding'  => 'utf-8',
                 ],
+            )
+            : ToolResult::ok(
+                sprintf(
+                    'Binary source of %s (%s, %d bytes, mime=%s); base64 payload in data.content_base64.',
+                    $asset->id,
+                    $filename,
+                    $size,
+                    $mime,
+                ),
+                [
+                    'asset_id'       => $asset->id,
+                    'filename'       => $filename,
+                    'mime_type'      => $mime,
+                    'byte_size'      => $size,
+                    'encoding'       => 'base64',
+                    'content_base64' => base64_encode($bytes),
+                ],
             );
-        }
-
-        $header = sprintf(
-            'Binary source of %s (%s, %d bytes, mime=%s); base64 payload in data.content_base64.',
-            $asset->id,
-            $filename,
-            $size,
-            $mime,
-        );
-        return ToolResult::ok(
-            $header,
-            [
-                'asset_id'         => $asset->id,
-                'filename'         => $filename,
-                'mime_type'        => $mime,
-                'byte_size'        => $size,
-                'encoding'         => 'base64',
-                'content_base64'   => base64_encode($bytes),
-            ],
-        );
     }
 
     /**
-     * List the derivative rows attached to a parent asset. Reuses
-     * {@see MediaAssetSerializer::derivativeRowsFor()} so the
-     * LLM-visible row shape stays in lockstep with the operator
-     * dashboard's VersionsStrip — no parallel formatter, no drift.
-     *
-     * The optional `format` filter narrows to a single derivative
-     * kind (e.g. only PNG renders of a `.typ` source). The match
-     * is exact and case-insensitive — the format column on
-     * `media_derivatives` is written lowercase by
-     * {@see MediaDerivativeService::createFromRequest()}, so a
-     * lowercase compare is sufficient.
+     * List the derivative rows attached to a parent asset. Thin
+     * dispatcher — the row formatting + format-filter logic lives
+     * in {@see MediaDerivativeHandler::listDerivatives()} so the
+     * {@see MediaAssetSerializer::derivativeRowsFor()} call site is
+     * shared with `create_derivative` and the operator dashboard.
      *
      * @param  array<string, mixed> $arguments
      */
@@ -586,45 +578,16 @@ final class MediaTool extends AbstractTool
             return $parent;
         }
 
-        $rows = $this->serializer->derivativeRowsFor($parent);
-        $formatFilter = strtolower(trim((string) ($arguments['format'] ?? '')));
-        if ($formatFilter !== '') {
-            $rows = array_values(array_filter(
-                $rows,
-                static fn(array $row): bool => strtolower((string) ($row['format'] ?? '')) === $formatFilter,
-            ));
-        }
-
-        $count = count($rows);
-        $suffix = $formatFilter !== '' ? " matching format \"{$formatFilter}\"" : '';
-        return ToolResult::ok(
-            "Found {$count} derivative(s) of {$parent->id}{$suffix}.",
-            [
-                'parent_id'  => $parent->id,
-                'format'     => $formatFilter !== '' ? $formatFilter : null,
-                'count'      => $count,
-                'derivatives' => $rows,
-            ],
-        );
+        return $this->derivativeHandler->listDerivatives($parent, $arguments);
     }
 
     /**
-     * Produce a fresh derivative of the parent asset via the registered
-     * {@see \Spora\Services\MediaArchive\MediaDerivativeProducerInterface}
-     * that matches the parent's MIME/extension and the requested
-     * `format`. Delegates the full producer-resolution + `produce()` +
-     * `create()` pipeline to {@see MediaDerivativeService::createFromRequest()}
-     * so the tool and the HTTP controller share one code path.
-     *
-     * Idempotent on the natural key `(parent_id, format, producer_plugin,
-     * producer_operation)` — re-rendering the same source with the
-     * same producer returns the same derivative id rather than creating
-     * a sibling row.
-     *
-     * Throws {@see NoDerivativeProducerException} → mapped to a
-     * human-readable `ToolResult::fail()` with a hint to call
-     * `list_derivatives` to discover the available formats. Producer
-     * runtime errors propagate as a generic 422-style failure.
+     * Produce a fresh derivative of the parent asset. Thin
+     * dispatcher — producer resolution + the `produce()` /
+     * `create()` pipeline lives in
+     * {@see MediaDerivativeHandler::createDerivative()} so the tool
+     * and the operator dashboard's REST controller share one
+     * code path.
      *
      * @param  array<string, mixed> $arguments
      */
@@ -635,121 +598,7 @@ final class MediaTool extends AbstractTool
             return $parent;
         }
 
-        $format = strtolower(trim((string) ($arguments['format'] ?? '')));
-        if ($format === '') {
-            return ToolResult::fail('`format` is required for `create_derivative`. '
-                . 'Call `list_derivatives(asset_id: <parent>)` to discover the formats the registered producers support.');
-        }
-
-        $options = $arguments['options'] ?? [];
-        if (!is_array($options)) {
-            return ToolResult::fail('`options` must be an object mapping producer-specific knobs (e.g. {"page": 0, "ppi": 144}).');
-        }
-
-        try {
-            $derivative = $this->derivatives->createFromRequest(
-                parent: $parent,
-                format: $format,
-                options: $options,
-                userId: $userId,
-                context: $context,
-            );
-        } catch (NoDerivativeProducerException $e) {
-            return ToolResult::fail($e->getMessage()
-                . ' Call `list_derivatives(asset_id: ' . $parent->id . ')` to discover the formats the registered producers support.');
-        } catch (Throwable $e) {
-            return ToolResult::fail(sprintf(
-                '`create_derivative` failed: %s',
-                $e->getMessage(),
-            ));
-        }
-
-        return ToolResult::ok(
-            sprintf(
-                "Created derivative %s of %s (format=%s, mime=%s).",
-                $derivative->id,
-                $parent->id,
-                $format,
-                (string) ($derivative->mime_type ?? 'application/octet-stream'),
-            ),
-            [
-                'derivative_id' => $derivative->id,
-                'parent_id'     => $parent->id,
-                'format'        => $format,
-                'mime_type'     => $derivative->mime_type,
-                'byte_size'     => $derivative->byte_size,
-                'width'         => $derivative->width,
-                'height'        => $derivative->height,
-                'asset_url'     => $derivative->publicUrl(),
-                'plugin_slug'   => $derivative->plugin_slug,
-                'tool_name'     => $derivative->tool_name,
-            ],
-        );
-    }
-
-    /**
-     * Read the asset's bytes from whichever storage backend the row
-     * points at. Mirrors {@see \Spora\Http\AssetController::streamAsset()}
-     * but stays private to MediaTool so the tool can layer the
-     * scope check + size cap on top without exposing the read seam.
-     *
-     * `AssetStorageException` is caught and converted to `null` so the
-     * caller can route through its existing "could not be read" branch —
-     * a missing local file or a legacy `data_url` row whose `payload`
-     * was never backfilled should not surface as an uncaught exception
-     * out of a tool the LLM is driving.
-     */
-    private function readAssetBytes(MediaAsset $asset): ?string
-    {
-        try {
-            return match ($asset->storage_mode) {
-                'data_url' => (string) $this->database->read($asset)['bytes'],
-                'local'    => $this->readLocalFile($asset),
-                default    => null,
-            };
-        } catch (AssetStorageException) {
-            return null;
-        }
-    }
-
-    private function readLocalFile(MediaAsset $asset): ?string
-    {
-        try {
-            $payload = $this->local->readFromAsset($asset);
-        } catch (AssetStorageException) {
-            return null;
-        }
-        $path = (string) $payload['path'];
-        if ($path === '') {
-            return null;
-        }
-        $bytes = @file_get_contents($path);
-        return $bytes === false ? null : $bytes;
-    }
-
-    /**
-     * Text-shaped mimes inline into the LLM context. The list mirrors
-     * what the operator-facing converters emit (text, JSON, YAML, XML)
-     * plus the wildcards LLM agents routinely ingest (SVG, CSV).
-     */
-    private static function isTextShapedMime(string $mime): bool
-    {
-        $mime = strtolower(trim($mime));
-        if ($mime === '') {
-            return false;
-        }
-        if (str_starts_with($mime, 'text/')) {
-            return true;
-        }
-        return in_array($mime, [
-            'application/json',
-            'application/xml',
-            'application/yaml',
-            'application/x-yaml',
-            'application/svg+xml',
-            'application/csv',
-            'application/x-typst',
-        ], true);
+        return $this->derivativeHandler->createDerivative($parent, $arguments, $userId, $context);
     }
 
     /**
@@ -808,14 +657,6 @@ final class MediaTool extends AbstractTool
         }
 
         return (int) $asset->agent_id === $agentId;
-    }
-
-    private function mediaTypeFromMime(mixed $mime): ?MediaType
-    {
-        if (!is_string($mime) || trim($mime) === '') {
-            return null;
-        }
-        return MediaType::fromMime($mime);
     }
 
     /**

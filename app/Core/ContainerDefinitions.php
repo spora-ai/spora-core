@@ -165,6 +165,8 @@ use Spora\Speech\SpeechToTextRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\HandoverTool;
+use Spora\Tools\MediaDerivativeHandler;
+use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SkillTool;
@@ -1468,15 +1470,30 @@ final class ContainerDefinitions
                 );
             },
 
+            MediaSourceReader::class => static function (ContainerInterface $c): MediaSourceReader {
+                return new MediaSourceReader(
+                    $c->get(DatabaseAssetStore::class),
+                    $c->get(LocalAssetStore::class),
+                );
+            },
+
+            MediaDerivativeHandler::class => static function (ContainerInterface $c): MediaDerivativeHandler {
+                $derivatives = $c->get(MediaDerivativeService::class);
+                return new MediaDerivativeHandler(
+                    new MediaAssetSerializer(true, $derivatives),
+                    $derivatives,
+                );
+            },
+
             MediaTool::class => static function (ContainerInterface $c): MediaTool {
                 $derivatives = $c->get(MediaDerivativeService::class);
                 return new MediaTool(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
-                    $c->get(DatabaseAssetStore::class),
-                    $c->get(LocalAssetStore::class),
                     new MediaAssetSerializer(true, $derivatives),
                     $derivatives,
+                    $c->get(MediaSourceReader::class),
+                    $c->get(MediaDerivativeHandler::class),
                     $c->get(ToolConfigService::class),
                     $c->get('config'),
                 );
