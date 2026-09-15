@@ -30,6 +30,10 @@ final class CapConfiguredProvider implements SpeechToTextProviderInterface
     {
         // no-op for the stub — tests don't exercise label binding
     }
+    public function bindSettings(array $settings): void
+    {
+        // no-op for the stub — tests don't exercise settings binding
+    }
     public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
         return new TranscriptionResult('unused');
@@ -53,6 +57,10 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
     public function bindLabel(string $label): void
     {
         // no-op for the stub — tests don't exercise label binding
+    }
+    public function bindSettings(array $settings): void
+    {
+        // no-op for the stub — tests don't exercise settings binding
     }
     public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
