@@ -110,6 +110,7 @@ describe('ListMediaQuery::toArray()', function (): void {
             'ownership'        => null,
             'agentOwnerUserId' => null,
             'principalIds'     => null,
+            'includeTemporary' => false,
         ]);
     });
 

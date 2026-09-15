@@ -54,10 +54,12 @@ final class AgentService implements AgentServiceInterface
         'description',
         'system_prompt',
         'llm_driver_config_id',
+        'speech_driver_config_id',
         'max_steps',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
+        'voice_message_retention_count',
         'is_pinned',
         'is_archived',
         'notes',
@@ -171,6 +173,13 @@ final class AgentService implements AgentServiceInterface
             'allow_followup'         => (bool) ($allowed['allow_followup'] ?? true) ? 1 : 0,
             'retry_after_minutes'    => (int) ($allowed['retry_after_minutes'] ?? 0),
             'max_retries'            => (int) ($allowed['max_retries'] ?? 0),
+            // Per-agent ceiling on temp media rows. Migration 0081
+            // backfills every pre-existing agent to the schema's default
+            // (`5`); new agents get the explicit body value when supplied,
+            // falling back to `5` to match the column default so the
+            // "voice recordings auto-purge after 5" mental model holds
+            // out of the box.
+            'voice_message_retention_count' => (int) ($allowed['voice_message_retention_count'] ?? 5),
             'is_active'              => 1,
             'created_at'             => date(self::DATETIME_FORMAT),
             'updated_at'             => date(self::DATETIME_FORMAT),

@@ -139,6 +139,38 @@ final class PluginLoader
     }
 
     /**
+     * Speech-to-text provider class FQCNs contributed by loaded plugins.
+     *
+     * Mirrors {@see toolClasses()} — the speech registry uses this list
+     * to discover plugin-contributed
+     * {@see \Spora\Speech\SpeechToTextProviderInterface} implementations.
+     *
+     * Core ships its own {@see \Spora\Speech\OpenAiCompatibleTranscriber}
+     * for the OpenAI-multipart family (Mistral, OpenAI Whisper, Groq,
+     * Lemonfox, Fireworks, LocalAI, future) — it lives in
+     * `speech_to_text_provider_classes` (not here) so adding a new
+     * OpenAI-multipart vendor is a configuration row, not a code change.
+     * Plugins that need a bespoke wire shape beyond the OpenAI multipart
+     * (today: {@see Muse\MuseTranscribeProvider} for the
+     * Meta Muse STT endpoint with its custom two-part multipart and
+     * ffmpeg preprocessing) contribute their provider classes here.
+     *
+     * @return list<class-string>
+     */
+    public function speechToTextProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->speechToTextProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All agent-template directory paths contributed by loaded plugins.
      * The scanner aggregates these alongside core-shipped and
      * app-contributed templates.

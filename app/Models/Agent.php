@@ -22,11 +22,13 @@ use Throwable;
  * @property string|null $description
  * @property string|null $system_prompt
  * @property int|null $llm_driver_config_id
+ * @property int|null $speech_driver_config_id
  * @property int|null $max_steps
  * @property bool $is_active
  * @property bool $allow_followup
  * @property int $retry_after_minutes
  * @property int $max_retries
+ * @property int $voice_message_retention_count
  * @property bool $is_pinned
  * @property bool $is_archived
  * @property string|null $notes
@@ -52,11 +54,13 @@ final class Agent extends Model
         'description',
         'system_prompt',
         'llm_driver_config_id',
+        'speech_driver_config_id',
         'max_steps',
         'is_active',
         'allow_followup',
         'retry_after_minutes',
         'max_retries',
+        'voice_message_retention_count',
         'is_pinned',
         'is_archived',
         'notes',
@@ -67,7 +71,11 @@ final class Agent extends Model
         'max_steps' => 'integer',
         'principal_id' => 'integer',
         'llm_driver_config_id' => 'integer',
+        'speech_driver_config_id' => 'integer',
         'allow_followup' => 'boolean',
+        'retry_after_minutes' => 'integer',
+        'max_retries' => 'integer',
+        'voice_message_retention_count' => 'integer',
         'is_pinned' => 'boolean',
         'is_archived' => 'boolean',
         'created_at' => 'datetime',
@@ -143,6 +151,26 @@ final class Agent extends Model
     public function profilePicture(): HasOne
     {
         return $this->hasOne(AgentPicture::class, 'agent_id');
+    }
+
+    /**
+     * Tier-1 of the speech cascade — the agent's own speech provider
+     * override (mirrors {@see self::llmDriverConfig()}). BelongsTo
+     * rather than hasOne because the FK lives on `agents`.
+     */
+    public function speechDriverConfig(): BelongsTo
+    {
+        return $this->belongsTo(SpeechProviderConfiguration::class, 'speech_driver_config_id');
+    }
+
+    /**
+     * Tier-1 of the LLM cascade — the agent's own LLM driver
+     * configuration override (if any). BelongsTo rather than hasOne
+     * because the FK lives on `agents`.
+     */
+    public function llmDriverConfig(): BelongsTo
+    {
+        return $this->belongsTo(LLMDriverConfiguration::class, 'llm_driver_config_id');
     }
 
     /**

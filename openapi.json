@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.20.0-5-g10e01a0"
+        "version": "0.23.0-75-gd6286fa5"
     },
     "servers": [
         {
@@ -2315,11 +2315,25 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with status `ABORTED`."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal or already-paused."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
                     }
                 },
                 "security": [
@@ -2337,8 +2351,16 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "AbortSubAgent Task",
+                "summary": "Abort sub-agent and cascade-up",
                 "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     {
                         "name": "taskId",
                         "in": "path",
@@ -2349,8 +2371,14 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with status `ABORTED`."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal or already-paused."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
                     }
                 },
                 "security": [
@@ -2368,8 +2396,16 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "Tick TaskTick",
+                "summary": "Tick a task (client-worker mode only)",
                 "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     {
                         "name": "taskId",
                         "in": "path",
@@ -2380,8 +2416,17 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with the post-tick task resource."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — server mode is active or task is not owned by the calling user."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal, quiescent, or being ticked by another caller."
+                    },
+                    "429": {
+                        "description": "TOO_MANY_REQUESTS — per-user rate limit exceeded."
                     }
                 },
                 "security": [
@@ -2563,6 +2608,37 @@
                 ]
             }
         },
+        "/api/v1/media/{id}/keep": {
+            "post": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Keep KeepMedia",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
         "/api/v1/media/{id}/derivatives": {
             "post": {
                 "tags": [
@@ -2644,6 +2720,464 @@
                     }
                 },
                 "security": []
+            }
+        },
+        "/api/v1/speech/capability": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Speech-to-text provider capability",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Capability summary"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/transcribe": {
+            "post": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Transcribe a recorded audio asset",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "media_id"
+                                ],
+                                "properties": {
+                                    "media_id": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    },
+                                    "language": {
+                                        "description": "BCP-47 hint (e.g. \"en-US\"). null = auto-detect.",
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "agent_id": {
+                                        "description": "Optional agent id (must be owned by the caller). Accepted for backwards compatibility — the controller validates ownership but the speech cascade no longer threads agent_id into settings lookup, so per-agent STT overrides are out of scope.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Transcript"
+                    },
+                    "422": {
+                        "description": "INVALID_AUDIO or validation error"
+                    },
+                    "404": {
+                        "description": "MEDIA_NOT_FOUND"
+                    },
+                    "502": {
+                        "description": "SPEECH_PROVIDER_FAILED"
+                    },
+                    "503": {
+                        "description": "SPEECH_PROVIDER_UNAVAILABLE"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/provider-configs/schema": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Registered speech-to-text provider classes with their settings schemas",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Provider schemas"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/provider-configs": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "List speech provider configurations visible to the caller",
+                "parameters": [
+                    {
+                        "name": "group_id",
+                        "in": "query",
+                        "description": "When set, returns the speech provider configs attached to that group. The caller must be a member of the group or a global admin; non-members receive an empty list.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Configs"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Create a speech provider configuration",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "provider_class",
+                                    "settings"
+                                ],
+                                "properties": {
+                                    "provider_class": {
+                                        "type": "string"
+                                    },
+                                    "display_name": {
+                                        "type": "string"
+                                    },
+                                    "is_global": {
+                                        "description": "Admin-only. When true, the row is the global config; principal_id will be null.",
+                                        "type": "boolean"
+                                    },
+                                    "principal_id": {
+                                        "description": "When set, the config is scoped to this principal (user or group). Caller must control the principal.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "scope": {
+                                        "type": "string",
+                                        "enum": [
+                                            "user",
+                                            "group",
+                                            "global",
+                                            "agent"
+                                        ]
+                                    },
+                                    "group_id": {
+                                        "type": "integer"
+                                    },
+                                    "settings": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created config"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/provider-configs/{id}/set-default": {
+            "post": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Mark a global speech provider configuration as default",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated config (with is_default=true)"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/provider-configs/{id}": {
+            "put": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Update an existing speech provider configuration",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "display_name": {
+                                        "type": "string"
+                                    },
+                                    "settings": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated config"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Delete a speech provider configuration",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/speech/preference": {
+            "get": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Read the caller's preferred speech-to-text provider",
+                "parameters": [
+                    {
+                        "name": "scope",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "user",
+                                "group"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "group_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current preference row"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Speech"
+                ],
+                "summary": "Set or clear the caller's preferred speech-to-text configuration",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "scope",
+                                    "config_id"
+                                ],
+                                "properties": {
+                                    "config_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "scope": {
+                                        "type": "string",
+                                        "enum": [
+                                            "user",
+                                            "group"
+                                        ]
+                                    },
+                                    "group_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated preference row"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-templates": {

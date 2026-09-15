@@ -391,4 +391,22 @@ final class GroupService
 
         return $role !== null ? (string) $role : null;
     }
+
+    /**
+     * Whether the caller can edit the group's settings pages: global
+     * admin (caller passes `$isAdmin = true`) OR `role ∈ {owner, admin}`
+     * for the group. The "last owner" guards still fire on the
+     * individual mutations; this helper is for the read+write gates
+     * (e.g. speech provider configuration, LLM config) where a global
+     * admin needs blanket access.
+     */
+    public static function callerCanManage(int $groupId, int $callerUserId, bool $isAdmin): bool
+    {
+        if ($isAdmin) {
+            return true;
+        }
+        $role = self::fetchCallerRole($groupId, $callerUserId);
+        return $role === GroupMembership::ROLE_OWNER
+            || $role === GroupMembership::ROLE_ADMIN;
+    }
 }

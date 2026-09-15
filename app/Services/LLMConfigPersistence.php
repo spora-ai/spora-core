@@ -291,10 +291,21 @@ final class LLMConfigPersistence
         return true;
     }
 
-    private function detachConfigurationReferences(int $configId): void
+    /**
+     * Static entry point used by callers that don't (or shouldn't)
+     * instantiate the full persistence facade just to null out the
+     * dangling agent / preference FKs before a delete. Body identical
+     * to {@see self::detachConfigurationReferences()}.
+     */
+    public static function detachConfigurationReferencesStatic(int $configId): void
     {
         Agent::where('llm_driver_config_id', $configId)->update(['llm_driver_config_id' => null]);
 
         PrincipalPreference::where('preferred_llm_config_id', $configId)->delete();
+    }
+
+    private function detachConfigurationReferences(int $configId): void
+    {
+        self::detachConfigurationReferencesStatic($configId);
     }
 }

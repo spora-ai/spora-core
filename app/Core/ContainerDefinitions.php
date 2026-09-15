@@ -159,6 +159,9 @@ use Spora\Services\ToolIconResolver;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Skills\SkillScanner;
+use Spora\Speech\OpenAiCompatibleTranscriber;
+use Spora\Speech\SpeechToTextProviderInterface;
+use Spora\Speech\SpeechToTextRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\HandoverTool;
@@ -199,6 +202,7 @@ final class ContainerDefinitions
             self::toolDefinitions(),
             self::extensionDefinitions(),
             self::orchestratorDefinitions(),
+            SpeechProviderConfigContainerBindings::all(),
             self::consoleCommandDefinitions(),
         );
     }
@@ -378,6 +382,7 @@ final class ContainerDefinitions
         $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
         $apply('SPORA_WORKER_RUNTIME_MODE', 'worker_runtime_mode', static fn($v) => $v);
         $apply('SPORA_TICK_LEASE_SECONDS', 'tick_lease_seconds', static fn($v) => (int) $v);
+        $apply('SPORA_TOOLS_GROUP_CASCADE_ENABLED', 'tools_group_cascade_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes', static fn($v) => (int) $v);
         $apply('SPORA_MAX_WORKERS', 'max_workers', static fn($v) => (int) $v);
         $apply('SPORA_LLM_TIMEOUT', 'llm_timeout', static fn($v) => (int) $v);
@@ -548,6 +553,7 @@ final class ContainerDefinitions
             },
 
             ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
+                $config = $c->get('config');
                 return new ToolConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
@@ -556,6 +562,8 @@ final class ContainerDefinitions
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
                     $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    $c->get(PrincipalService::class),
+                    (bool) ($config['tools_group_cascade_enabled'] ?? false),
                 );
             },
 
@@ -625,6 +633,8 @@ final class ContainerDefinitions
                     $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
                 );
             },
+
+            \Spora\Services\MediaArchive\MediaArchiveRetention::class => static fn(): \Spora\Services\MediaArchive\MediaArchiveRetention => new \Spora\Services\MediaArchive\MediaArchiveRetention(),
 
             MediaAssetResolver::class => static function (ContainerInterface $c): MediaAssetResolver {
                 return new MediaAssetResolver(
@@ -760,6 +770,35 @@ final class ContainerDefinitions
             // a separate alias so LLMConfigService can opt into it via constructor
             // injection without rewriting the core list contract.
             'llm_driver_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique($c->get('llm_driver_classes'))),
+
+            // Speech-to-text providers — core ships its own
+            // `OpenAiCompatibleTranscriber` for the OpenAI-multipart
+            // family (Mistral Voxtral, OpenAI Whisper, Groq Whisper,
+            // Lemonfox, Fireworks, LocalAI, future). Plugins contribute
+            // additional bespoke providers alongside — today `Muse` for
+            // Meta's bespoke multipart wire shape and ffmpeg-preprocess.
+            // SpeechToTextRegistry is built from the merged list at boot
+            // so the transcribe controller can pick the first configured
+            // provider per request.
+            'speech_to_text_provider_classes' => [
+                OpenAiCompatibleTranscriber::class,
+            ],
+            'speech_to_text_provider_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique(array_merge(
+                $c->get('speech_to_text_provider_classes'),
+                $c->get(PluginLoader::class)->speechToTextProviderClasses(),
+            ))),
+            SpeechToTextRegistry::class => static function (ContainerInterface $c): SpeechToTextRegistry {
+                $providers = [];
+                foreach ($c->get('speech_to_text_provider_classes_merged') as $class) {
+                    /** @var SpeechToTextProviderInterface $instance */
+                    $instance = $c->get($class);
+                    $providers[] = $instance;
+                }
+                return new SpeechToTextRegistry(
+                    $providers,
+                    $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
+                );
+            },
 
             'app_apps' => [
                 PluginsApp::class,
@@ -1131,6 +1170,7 @@ final class ContainerDefinitions
             MediaUploadController::class => static function (ContainerInterface $c): MediaUploadController {
                 return new MediaUploadController(
                     $c->get(MediaArchiveService::class),
+                    $c->get(\Spora\Services\MediaArchive\MediaArchiveRetention::class),
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(AuthService::class),
                     $c->get(PrincipalResolver::class),

@@ -55,7 +55,7 @@ interface ToolConfigServiceInterface
     public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 
     /**
-     * @return array<string, array{value: mixed, source: 'global'|'principal'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'global'|'group'|'principal'|'agent'|'default'}>
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 

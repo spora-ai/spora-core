@@ -60,6 +60,16 @@ final readonly class MediaIngestRequest
          */
         public string $uploadSource = 'tool',
         public ?string $publicAccessToken = null,
+        /**
+         * Flag the row as temp so `MediaArchiveService::enforceTempRetention()`
+         * can purge the oldest entries for the same (user, agent) pair at
+         * ingest time. False (the default) marks the row permanent —
+         * existing plugin callers don't need to opt in. The upload controller
+         * forwards the multipart form's `is_temporary` field verbatim; the
+         * speech-to-text path flips it on so chat-driven voice recordings
+         * honour the per-agent retention ceiling.
+         */
+        public bool $isTemporary = false,
     ) {
         // Empty strings are not a valid source — only non-empty payloads
         // count toward the "exactly one" invariant. Matches the rest of
@@ -109,6 +119,7 @@ final readonly class MediaIngestRequest
             metadata: $this->metadata,
             uploadSource: $this->uploadSource,
             publicAccessToken: $this->publicAccessToken,
+            isTemporary: $this->isTemporary,
         );
     }
 }

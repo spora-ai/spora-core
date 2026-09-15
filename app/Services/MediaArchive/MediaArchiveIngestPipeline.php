@@ -377,6 +377,11 @@ final class MediaArchiveIngestPipeline
             // from a UUID lookup; DB-mode mints a fresh token to keep the
             // unique index uniform (the token is opaque in DB mode).
             'asset_token'        => fn() => $fields->token ?? bin2hex(random_bytes(16)),
+            // Temp flag (migration 0081) — pre-0081 fixtures don't have
+            // the column and ingest from legacy callers always pass
+            // `isTemporary=false`, so the probe keeps both old and new
+            // schemas happy.
+            'is_temporary'       => fn() => $request->isTemporary,
         ];
         foreach ($optionalFields as $column => $valueFn) {
             if ($schema->hasColumn($table, $column)) {

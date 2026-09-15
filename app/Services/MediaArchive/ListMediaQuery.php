@@ -111,6 +111,17 @@ final readonly class ListMediaQuery
         public ?string $ownership = null,
         public ?int $agentOwnerUserId = null,
         public ?array $principalIds = null,
+        /**
+         * Whether to surface `is_temporary=TRUE` rows in the listing. The
+         * upload controller stamps temp rows on every `POST /api/v1/media`
+         * that opts in (see `MediaUploadController::store`), and the list
+         * endpoint hides them by default — temp rows are usually short-
+         * lived voice transcripts and showing them in the dashboard's
+         * default grid would crowd out permanent media. Operators that
+         * want to debug or audit the temp set opt in explicitly with
+         * `?include_temporary=true`.
+         */
+        public bool $includeTemporary = false,
         public int $page = 1,
         public int $perPage = self::PER_PAGE_DEFAULT,
     ) {}
@@ -148,6 +159,7 @@ final readonly class ListMediaQuery
             'ownership'    => $this->ownership,
             'agentOwnerUserId' => $this->agentOwnerUserId,
             'principalIds'     => $this->principalIds,
+            'includeTemporary' => $this->includeTemporary,
         ];
     }
 

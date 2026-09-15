@@ -8,7 +8,17 @@ use Illuminate\Database\Eloquent\Model;
 use LogicException;
 
 /**
- * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
+ * @property int    $id
+ * @property string $tool_class
+ * @property string $tool_name
+ * @property bool   $is_default  Service-enforced invariant: at most
+ *                                 one row per `tool_class` has
+ *                                 `is_default = true`. Mirrors the
+ *                                 LLM `is_default` pattern.
+ * @property string $settings  (encrypted JSON; never access directly)
+ * @property string|null $created_at
+ * @property string|null $updated_at
+ * @method   static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
 final class ToolConfiguration extends Model
 {
@@ -19,7 +29,13 @@ final class ToolConfiguration extends Model
     protected $fillable = [
         'tool_class',
         'tool_name',
+        'is_default',
         'settings',
+    ];
+
+    /** @var array<string, string> */
+    protected $casts = [
+        'is_default' => 'boolean',
     ];
 
     // settings is intentionally NOT in $casts — all access via ToolConfigService

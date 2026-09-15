@@ -15,6 +15,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Speech\TranscriptionResult;
 
 /**
  * Single entry point for listing, finding, deleting, and ingest-facading
@@ -28,7 +29,8 @@ use Spora\Services\PrincipalService;
  *
  * The ingest pipeline lives in {@see MediaArchiveIngestPipeline} so this
  * class stays under the Sonar 20-method threshold. The URL branch lives
- * in {@see MediaArchiveUrlResolver} for the same reason.
+ * in {@see MediaArchiveUrlResolver} for the same reason. Temp-row
+ * retention / GC lives in {@see MediaArchiveRetention}.
  */
 final class MediaArchiveService
 {
@@ -209,6 +211,14 @@ final class MediaArchiveService
         if ($query->to !== null) {
             $builder->where('created_at', '<=', Carbon::instance(DateTime::createFromInterface($query->to)));
         }
+        if (!$query->includeTemporary) {
+            // The composite index on (user_id, agent_id, is_temporary,
+            // created_at) covers the typical caller filter: a single user
+            // drilling into one agent's permanent history. The planner
+            // can use the `is_temporary` column without a full scan even
+            // when the leading user/agent predicates aren't present.
+            $builder->where('is_temporary', false);
+        }
         if ($query->search !== null && trim($query->search) !== '') {
             $term = '%' . trim($query->search) . '%';
             // Escape LIKE wildcards so user-typed terms do not act as SQL
@@ -258,11 +268,6 @@ final class MediaArchiveService
         $asset->delete();
     }
 
-    public function countForAgent(int $agentId): int
-    {
-        return MediaAsset::query()->where('agent_id', $agentId)->count();
-    }
-
     /**
      * True iff the asset belongs to the given principal: either a direct
      * upload by the principal's owner user, or attached to any agent owned
@@ -301,6 +306,30 @@ final class MediaArchiveService
     }
 
     /**
+     * Cache a successful speech-to-text transcription on the asset row.
+     *
+     * Called by {@see \Spora\Http\SpeechTranscribeController} after every
+     * successful provider call. Subsequent chat re-renders read the
+     * cached value from {@see MediaAsset::$transcript} without re-billing
+     * the upstream STT API.
+     *
+     * Idempotent on re-call (overwrites the previous transcript). The
+     * `language` column is written only when the result carries a
+     * detected language; null leaves the column unchanged so an
+     * auto-detect failure doesn't wipe a previously known language.
+     */
+    public function writeTranscript(string $mediaId, TranscriptionResult $result): void
+    {
+        $updates = ['transcript' => $result->text];
+        if ($result->language !== null) {
+            $updates['transcript_language'] = $result->language;
+        }
+        Capsule::table('media_assets')
+            ->where('id', $mediaId)
+            ->update($updates);
+    }
+
+    /**
      * Best-effort converter invocation. A throw is logged and swallowed
      * so a corrupt PDF or unsupported variant doesn't fail the upload.
      * Skipped when markdown_content is already populated to keep re-ingest
@@ -309,6 +338,11 @@ final class MediaArchiveService
     public function runConversionPipeline(MediaAsset $asset, string $bytes): void
     {
         $this->ingestPipeline->runConversionPipeline($asset, $bytes);
+    }
+
+    public function countForAgent(int $agentId): int
+    {
+        return MediaAsset::query()->where('agent_id', $agentId)->count();
     }
 
     /**

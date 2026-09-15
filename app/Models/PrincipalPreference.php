@@ -18,9 +18,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * pointers and the {@see \Spora\Services\LlmConfigValidator} gates who can
  * write the field for which principal.
  *
+ * The `preferred_speech_config_id` is the FK to
+ * `speech_provider_configurations(id)` introduced in migration 0084
+ * (replacing the legacy `preferred_speech_provider_class` string
+ * column). Migration 0082 unified the speech-config storage into one
+ * table so the FK is the natural shape; migration 0084 dropped the
+ * legacy string column and added the FK alongside the new column.
+ *
  * @property int $id
  * @property int $principal_id
  * @property int|null $preferred_llm_config_id
+ * @property int|null $preferred_speech_config_id
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  */
@@ -29,7 +37,7 @@ final class PrincipalPreference extends Model
     protected $table = 'principal_preferences';
 
     /** @var list<string> */
-    protected $fillable = ['principal_id', 'preferred_llm_config_id'];
+    protected $fillable = ['principal_id', 'preferred_llm_config_id', 'preferred_speech_config_id'];
 
     public $timestamps = true;
 
@@ -41,5 +49,10 @@ final class PrincipalPreference extends Model
     public function preferredLlmConfig(): BelongsTo
     {
         return $this->belongsTo(LLMDriverConfiguration::class, 'preferred_llm_config_id');
+    }
+
+    public function preferredSpeechConfig(): BelongsTo
+    {
+        return $this->belongsTo(SpeechProviderConfiguration::class, 'preferred_speech_config_id');
     }
 }

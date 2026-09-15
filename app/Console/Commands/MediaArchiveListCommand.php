@@ -113,6 +113,7 @@ final class MediaArchiveListCommand extends Command
             search: $this->asString($input->getOption('search')),
             page: $page,
             perPage: $perPage,
+            includeTemporary: true,
         );
 
         return ['query' => $query];

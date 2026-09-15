@@ -585,3 +585,320 @@ Omitted filter (legacy) returns every agent the caller can see across their visi
 ## Updated contract — `POST /api/v1/agents`
 
 Accepts an optional `principal_id` body field. The caller must be admin OR control the target principal (`AgentPrincipalService::callerControlsPrincipal`). When omitted, or when the caller doesn't control the value, the agent lands on the caller's own user-principal (materialised on demand).
+
+## STT provider capability resolution
+
+`GET /api/v1/speech/capability` resolves the list of STT providers the
+SPA can offer the user. The wire shape is one row per provider class,
+keyed by the class-level `name`. Configurable providers (e.g.
+`Spora\Speech\OpenAiCompatibleTranscriber`) report the operator's
+per-config `display_name` instead of the class-level default — the
+registry resolves the effective settings for the calling user via
+`ToolConfigService::getEffectiveSettings()` (which cascades through
+defaults → global → group[0..N] → user → agent_override) and calls
+`OpenAiCompatibleTranscriber::bindLabel()` before reading
+`getName()` / `getDisplayName()`. Class-level providers (the Muse
+plugin's bespoke multipart) keep their static `getName()` /
+`getDisplayName()`.
+
+`configured` is true when ANY cascade level resolves to a usable
+config for the caller — including group-scoped configs the user can
+see because they belong to a group that has a STT config. Anonymous
+callers get `configured: false` (the SPA renders the "please log in"
+hint without a second round-trip).
+
+The capability row also exposes two forward-compat fields:
+
+  - `has_global_default` — true when the operator has a global settings
+    row for the provider class.
+  - `config_id` — the row id of the global settings row when one
+    exists for `OpenAiCompatibleTranscriber` (`null` when no row
+    exists, and `null` for class-level providers that don't write to
+    `tool_configurations`). The SPA deep-links the Capability row
+    into the config edit form via this id.
+
+Anonymous callers still get a 200 with the providers' class-level
+labels and `configured: false` whenever no provider has a usable API
+key — the SPA renders the "please log in" hint without a separate
+round-trip.
+
+`config_id` is populated by `ToolConfigService::globalConfigId($provider::class)` — a thin lookup against `tool_configurations.id` for `OpenAiCompatibleTranscriber` rows. Class-level providers (e.g. the future Muse plugin) keep `config_id: null` since they have no row in `tool_configurations`. The SPA deep-links the Capability row into the operator's `/admin/settings/speech-providers?config=<id>` form via this id.
+
+## Speech provider configuration
+
+Operator-facing CRUD for STT provider configurations. The storage layer reuses the existing `tool_configurations` (global, admin-only writes) and `tool_user_settings` (per-principal) tables — no new database tables — and the `***` sentinel convention from `ToolController` so an unchanged `api_key` round-trips through edits without being re-prompted. Full operator guide and worked examples: [`docs/14_speech.md`](14_speech.md).
+
+### `GET /api/v1/speech/provider-configs`
+
+Returns the configs the caller can see.
+
+- admin: every global config (one per registered provider class that has a row in `tool_configurations`).
+- non-admin: only the caller's own user-scoped configs.
+
+When `?group_id=N` is supplied:
+
+- members of the group (any role) and global admins receive the group-scoped configs for that group
+- non-members receive an empty list (existence-hide)
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "configs": [
+      {
+        "id": 7,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "group",
+        "display_name": "Team Voxtral",
+        "settings": { "display_name": "Team Voxtral", "base_url": "https://api.mistral.ai/v1", "model": "voxtral-mini-latest", "language": "", "http_timeout_seconds": "60", "api_key": "***" },
+        "principal_id": 12,
+        "created_at": "2026-09-11T12:34:56+00:00",
+        "updated_at": "2026-09-11T12:34:56+00:00"
+      }
+    ]
+  }
+}
+```
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "configs": [
+      {
+        "id": 7,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "global",
+        "display_name": "Mistral Voxtral (prod)",
+        "settings": { "display_name": "Mistral Voxtral (prod)", "base_url": "https://api.mistral.ai/v1", "model": "voxtral-mini-latest", "language": "", "http_timeout_seconds": "60", "api_key": "***" },
+        "principal_id": null,
+        "created_at": "2026-09-11T12:34:56+00:00",
+        "updated_at": "2026-09-11T12:34:56+00:00"
+      },
+      {
+        "id": 12,
+        "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "provider_display_name": "OpenAI Compatible",
+        "scope": "user",
+        "display_name": "Personal Mistral",
+        "settings": { "...": "..." },
+        "principal_id": 8,
+        "created_at": "2026-09-11T13:00:00+00:00",
+        "updated_at": "2026-09-11T13:00:00+00:00"
+      }
+    ]
+  }
+}
+```
+
+### Errors
+
+- `401 UNAUTHENTICATED` — `AuthMiddleware` rejects anonymous requests before they reach the controller.
+
+### `GET /api/v1/speech/provider-configs/schema`
+
+Returns the provider-class picker schema: every registered `SpeechToTextProviderInterface` with its declared `#[ToolSetting]` attributes (label, type, default, required, validation regex). Used by the create form's provider picker. Adding a new plugin-provided STT class is a server-side change that auto-appears in the UI.
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "providers": [
+      {
+        "class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+        "display_name": "OpenAI Compatible",
+        "settings_schema": [
+          { "key": "display_name", "label": "Display name", "type": "text", "required": true, "validation": "/^[A-Za-z0-9 _\\-\\.\\(\\)]{1,80}$/" },
+          { "key": "api_key",      "label": "API Key",       "type": "password", "required": true },
+          { "key": "base_url",     "label": "Base URL",      "type": "text", "required": true, "default": "https://api.openai.com/v1", "validation": "#^https?://[^\\s]+$#" },
+          { "key": "model",        "label": "Model",         "type": "text", "required": true, "default": "whisper-1" },
+          { "key": "language",     "label": "Language hint (BCP-47)", "type": "text", "required": false, "default": "" },
+          { "key": "http_timeout_seconds", "label": "HTTP timeout (seconds)", "type": "text", "required": false, "default": "60", "validation": "/^\\d+$/" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/speech/provider-configs`
+
+Create or update a config (upsert by `(scope, provider_class, principal_id)`).
+
+Body:
+
+```jsonc
+{
+  "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+  "scope": "global",          // or "user" or "group"
+  "group_id": 12,             // required when scope="group"; names the group
+  "settings": {
+    "api_key": "sk-...",
+    "display_name": "Mistral Voxtral (prod)",
+    "base_url": "https://api.mistral.ai/v1",
+    "model": "voxtral-mini-latest",
+    "language": "en-US",
+    "http_timeout_seconds": "60"
+  }
+}
+```
+
+Auth rules:
+
+- `scope: 'global'` — global admin only.
+- `scope: 'user'`   — the caller (no extra permission needed).
+- `scope: 'group'`  — caller must be `owner` / `admin` of the named
+  group OR a global admin. The body's `group_id` names the group.
+
+Response:
+
+- `200 OK` — `{data: {config: ConfigResource}}` on success.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — `scope: 'global'` was
+  requested by a non-admin, or `scope: 'group'` was requested by
+  a non-admin caller who isn't a group admin.
+- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — `provider_class` is not
+  a registered speech provider class.
+- `422 SPEECH_PROVIDER_CONFIG_INVALID` — settings key is unknown to
+  the schema, a required field is missing, a value fails its declared
+  regex validation, or `scope: 'group'` was supplied without a
+  positive `group_id` (or `scope` wasn't `'group'` while `group_id`
+  was set).
+
+```bash
+# Global (admin)
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "global",
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Mistral Voxtral (prod)",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+
+# Group (group admin OR global admin)
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "group",
+    "group_id": 12,
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Team Voxtral",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+```
+
+```bash
+curl -X POST https://spora.example.com/api/v1/speech/provider-configs \
+  -b cookies.txt -H 'Content-Type: application/json' \
+  -H 'X-CSRF-Token: ...' \
+  -d '{
+    "provider_class": "Spora\\Speech\\OpenAiCompatibleTranscriber",
+    "scope": "global",
+    "settings": {
+      "api_key": "sk-mistral-...",
+      "display_name": "Mistral Voxtral (prod)",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "voxtral-mini-latest"
+    }
+  }'
+```
+
+### `PUT /api/v1/speech/provider-configs/{id}`
+
+Update the settings on an existing config. The id is the row id from a prior `GET` / `POST` response — admin-only for global configs, owner-only for user-scope configs.
+
+Body: `{"settings": {...}}`. Sending `api_key: "***"` keeps the existing value (matches `ToolConfigService`'s `***` sentinel convention).
+
+Response: same as `POST`.
+
+### `DELETE /api/v1/speech/provider-configs/{id}`
+
+Delete a config by id.
+
+- `200 OK` — `{data: {deleted: true}}` on success.
+- `403 SPEECH_PROVIDER_CONFIG_FORBIDDEN` — caller isn't allowed to delete this row (e.g. non-admin caller trying to delete a global or other-group config).
+- `404 SPEECH_PROVIDER_CONFIG_NOT_FOUND` — id doesn't exist (or isn't visible to the caller).
+
+### `POST /api/v1/speech/transcribe`
+
+Transcribe a recorded audio asset via the first-configured STT provider.
+Backed by the controller's full `defaults → global → group[0..N] → user
+→ agent_override` cascade resolution: the registry picks the first
+provider whose effective `api_key` (or `isConfigured()` for class-level
+providers) resolves for the caller's principal ids.
+
+Body:
+
+```jsonc
+{
+  "media_id": "00000000-0000-4000-8000-000000000abc",   // UUID, required
+  "language": "en-US",                                  // optional BCP-47 hint
+  "agent_id": 42                                        // optional, must belong to caller
+}
+```
+
+Response:
+
+```jsonc
+// 200 OK
+{
+  "data": {
+    "text": "hello world",
+    "language": "en",
+    "duration_ms": 1234
+  }
+}
+```
+
+Errors:
+
+- `401 UNAUTHORIZED` — no active session.
+- `404 MEDIA_NOT_FOUND` — `media_id` does not exist or is not owned by the caller.
+- `422 VALIDATION_ERROR` — body is not valid JSON, `media_id` is missing, or `agent_id` does not belong to the caller.
+- `422 INVALID_AUDIO` — the asset is in external-only storage (provider needs bytes, not a URL), the upstream STT returned an empty transcript, or the asset's MIME is not one the provider accepts (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav`, `audio/mpeg`, `audio/flac`).
+- `502 SPEECH_PROVIDER_FAILED` — upstream STT rejected the request (transport error or HTTP 4xx/5xx).
+- `503 SPEECH_PROVIDER_UNAVAILABLE` — no provider is configured at any cascade level the caller can see.
+
+`agent_id` is threaded through to the cascade as the deepest level, so
+the per-agent override in `agent_tool_overrides` wins over group /
+user / global settings when set. Composers that don't know the active
+agent (e.g. a "New Chat" picker) omit the field; the cascade falls
+through as before.
+
+## Temporary-file media lifecycle
+
+### `POST /api/v1/media/{id}/keep`
+
+Pin a temp row as permanent so the per-(user, agent) retention sweep leaves it alone. Idempotent — calling on a non-temp row returns 200 without re-saving.
+
+- **Auth**: global admin OR asset owner (`asset.user_id == currentUserId`); non-owners receive 403, missing rows 404.
+- **Body**: empty.
+- **Response 200**: `{data: <MediaAsset with is_temporary=false>}`.
+
+### `POST /api/v1/media` — temp opt-in
+
+Accepts `is_temporary` (bool, default false) on the multipart form. When `is_temporary=true` AND `agent_id` is supplied, the upload controller runs `MediaArchiveService::enforceTempRetention()` to keep the (user, agent) temp set under `agents.voice_message_retention_count`.
+
+### `GET /api/v1/media` — include temp rows
+
+Adds `?include_temporary=true` to surface `is_temporary=TRUE` rows (hidden by default — temp voice transcripts crowd out the permanent grid). Operator CLI (`media:list`) sets `includeTemporary: true` by default.
+
+### `agents.voice_message_retention_count`
+
+Per-agent ceiling on temp rows for the (user, agent) pair. Defaults to 5; 0 disables auto-purge (operator must run `media:gc --temporary` or hit `/keep` per row). Range 0–100 (CHECK constraint, validated server-side at PATCH/POST with a 422).
+
+### `media:gc --temporary [--older-than-hours N]`
+
+Reaps `is_temporary=TRUE` rows older than N hours (default 24). Without `--temporary`, the command keeps its orphan-sweep semantics unchanged.

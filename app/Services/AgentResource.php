@@ -43,11 +43,25 @@ final class AgentResource
             'system_prompt'        => $agent->system_prompt,
             'notes'                => $agent->notes,
             'llm_driver_config_id' => $agent->llm_driver_config_id,
+            // Per-agent STT override (tier 1 of the cascade). FK to
+            // speech_provider_configurations.id; SET NULL on delete so
+            // a deleted config silently falls back to the cascade. The
+            // SPA reads this on agent load and writes it via PATCH
+            // /agents/{id} — same path the LLM FK uses.
+            'speech_driver_config_id' => $agent->speech_driver_config_id !== null
+                ? (int) $agent->speech_driver_config_id
+                : null,
             'max_steps'            => (int) $agent->max_steps,
             'is_active'            => (bool) $agent->is_active,
             'allow_followup'       => (bool) $agent->allow_followup,
             'retry_after_minutes'  => (int) ($agent->retry_after_minutes ?? 0),
             'max_retries'          => (int) ($agent->max_retries ?? 0),
+            // Per-agent ceiling on temp rows in the Media Archive
+            // (`POST /api/v1/media` with `is_temporary=true` reaps the
+            // oldest rows once the (user, agent) count exceeds this
+            // value). 0 disables auto-purge — operator can still reap
+            // manually via `media:gc --temporary`. Migration 0081.
+            'voice_message_retention_count' => (int) ($agent->voice_message_retention_count ?? 0),
             'is_pinned'            => (bool) ($agent->is_pinned ?? false),
             'is_archived'          => (bool) ($agent->is_archived ?? false),
             // Per-viewer favourite: read from the context's pre-loaded pivot

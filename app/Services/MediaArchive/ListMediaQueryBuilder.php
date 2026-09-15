@@ -52,6 +52,7 @@ final class ListMediaQueryBuilder
             // carries ids the caller can act as. See `MediaArchiveController
             // ::resolvePrincipalFilter()`.
             principalIds: self::parsePrincipalIds($params->all()['principal_id'] ?? null),
+            includeTemporary: self::parseBool($params->get('include_temporary'), false),
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
@@ -184,6 +185,23 @@ final class ListMediaQueryBuilder
     private static function parseInt(mixed $raw, int $default): int
     {
         return is_string($raw) && ctype_digit($raw) ? (int) $raw : $default;
+    }
+
+    /**
+     * Coerce `?include_temporary=…` (and friends) into a strict bool.
+     * `FILTER_VALIDATE_BOOLEAN` normalises `true` / `1` / `"true"` /
+     * `"1"` / `"yes"` to true; everything else (including `null`,
+     * missing key, `"false"`, `"0"`, typos) falls back to the default.
+     * Mirrors the boolean-flag coercion in
+     * {@see \Spora\Http\AgentController::coerceBooleanFlags()}.
+     */
+    private static function parseBool(mixed $raw, bool $default): bool
+    {
+        if ($raw === null) {
+            return $default;
+        }
+        $normalised = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        return $normalised ?? $default;
     }
 
     /**

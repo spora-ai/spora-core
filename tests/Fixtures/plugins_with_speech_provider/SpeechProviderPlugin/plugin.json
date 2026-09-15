@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
+  "name": "spora-ai/fixture-speech-provider",
+  "slug": "fixture-speech-provider",
+  "description": "Test fixture plugin that contributes a SpeechToTextProvider.",
+  "class": "Tests\\Fixtures\\Plugins\\SpeechProviderPlugin\\Plugin",
+  "icon": "puzzle",
+  "autoload": {
+    "psr-4": {
+      "Tests\\Fixtures\\Plugins\\SpeechProviderPlugin\\": "src/"
+    }
+  }
+}

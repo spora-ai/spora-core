@@ -55,6 +55,18 @@ test('allowedMimeTypes without an agent DOES include image/* (direct operator up
     expect($mimes)->toContain('image/webp');
 });
 
+test('allowedMimeTypes unions in the static audio allowlist', function (): void {
+    // The recording pipeline must be able to upload an audio-only WebM
+    // MediaRecorder blob. Browsers report those as `video/webm` even
+    // though the track list is audio-only — we accept the container
+    // here so the recording flow isn't blocked at the upload gate.
+    [$service] = buildAllowedTypesService();
+    $mimes = $service->allowedMimeTypes();
+    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/flac', 'video/webm'] as $mime) {
+        expect($mimes)->toContain($mime);
+    }
+});
+
 test('allowedMimeTypes adds image/* when the agent\'s LLM is vision-capable', function (): void {
     $authService = bootAuthLayer();
     $userId = bootAuth($authService);
@@ -82,6 +94,13 @@ test('isAllowed reports text MIME as allowed and binary executable as not', func
     [$service] = buildAllowedTypesService();
     expect($service->isAllowed('text/plain', null))->toBeTrue();
     expect($service->isAllowed('application/x-msdownload', null))->toBeFalse();
+});
+
+test('isAllowed accepts the audio allowlist (incl. video/webm for MediaRecorder audio-only WebM)', function (): void {
+    [$service] = buildAllowedTypesService();
+    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'video/webm'] as $mime) {
+        expect($service->isAllowed($mime, null))->toBeTrue();
+    }
 });
 
 /**

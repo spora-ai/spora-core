@@ -13,7 +13,6 @@ use OpenApi\Annotations\PathItem;
 use OpenApi\Annotations\Response;
 use OpenApi\Annotations\SecurityScheme;
 use OpenApi\Annotations\Server;
-use ReflectionAttribute;
 use ReflectionMethod;
 use Spora\Core\RouteDefinitions;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -27,10 +26,16 @@ use Spora\Http\Middleware\CsrfMiddleware;
  * This is the bridge that lets `RouteDefinitions` stay the only place routes are declared
  * while the OpenAPI spec reflects them without duplication. Body detail (`#[OA\RequestBody]`,
  * `#[OA\Response]`, `#[OA\Schema]`) is added per-controller via attributes on the
- * controller methods themselves.
+ * controller methods themselves — the per-method extraction lives in
+ * {@see HandlerOperationExtractor} so this orchestrator stays under the SonarCloud
+ * S1448 20-method-per-class ceiling.
  */
 final class RouteToOpenApi
 {
+    public function __construct(
+        private readonly HandlerOperationExtractor $operationExtractor = new HandlerOperationExtractor(),
+    ) {}
+
     public function build(array $config = []): OpenApi
     {
         $collector = new RouteSpecCollector();
@@ -145,18 +150,28 @@ final class RouteToOpenApi
      * throughout (PHPStan assigns the right concrete type per match arm), so each
      * `PathItem::{get|post|...}` setter accepts the value.
      *
+     * The handler's method-level `#[OA\Get] / #[OA\Post] / ...` attribute is consulted
+     * first: when present, its `summary`, `description`, `tags`, `requestBody`, and
+     * `responses` are folded into the operation so controller-side documentation lands
+     * on the wire without duplicating the route metadata. The synthesised defaults
+     * (`humaniseHandler`, `tagsFromPath`, `defaultResponses`) are only used when the
+     * handler didn't declare an OA operation attribute.
+     *
      * @param array{method:string, route:string, handler:array{0:string,1:string}, middleware:list<string>} $entry
      */
     private function buildAndAttach(PathItem $pathItem, array $entry): void
     {
-        $summary = $this->humaniseHandler($entry['handler']);
-        $tags = $this->tagsFromPath($entry['route']);
+        $handlerOp = $this->operationExtractor->operationFromHandler($entry['handler'], strtolower($entry['method']));
+
+        $summary = $handlerOp['summary'] ?? $this->humaniseHandler($entry['handler']);
+        $tags = $handlerOp['tags'] ?? $this->tagsFromPath($entry['route']);
         $parameters = array_merge(
             $this->parametersFromPath($entry),
-            $this->parametersFromHandler($entry['handler']),
+            $handlerOp['parameters'] ?? $this->operationExtractor->parametersFromHandler($entry['handler']),
         );
         $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
-        $responses = $this->defaultResponses();
+        $responses = $handlerOp['responses'] ?? $this->defaultResponses();
+
         $operation = [
             'method' => strtolower($entry['method']),
             'summary' => $summary,
@@ -165,8 +180,13 @@ final class RouteToOpenApi
             'security' => $security,
             'responses' => $responses,
         ];
-        if ($entry['method'] === 'POST') {
-            $requestBody = $this->requestBodyFromHandler($entry['handler']);
+        if (isset($handlerOp['description'])) {
+            $operation['description'] = $handlerOp['description'];
+        }
+        if (isset($handlerOp['requestBody'])) {
+            $operation['requestBody'] = $handlerOp['requestBody'];
+        } elseif ($entry['method'] === 'POST' || $entry['method'] === 'PUT' || $entry['method'] === 'PATCH') {
+            $requestBody = $this->operationExtractor->requestBodyFromHandler($entry['handler']);
             if ($requestBody !== null) {
                 $operation['requestBody'] = $requestBody;
             }
@@ -182,66 +202,6 @@ final class RouteToOpenApi
             'OPTIONS' => $pathItem->options = new OA\Options($operation),
             default => null,
         };
-    }
-
-    /**
-     * @param array{0:string, 1:string} $handler
-     * @return list<Parameter>
-     */
-    private function parametersFromHandler(array $handler): array
-    {
-        [$class, $method] = $handler;
-        if (!class_exists($class)) {
-            return [];
-        }
-
-        $attributes = (new ReflectionMethod($class, $method))->getAttributes(
-            \OpenApi\Attributes\Parameter::class,
-            ReflectionAttribute::IS_INSTANCEOF,
-        );
-        return array_map(
-            static fn(ReflectionAttribute $attribute): Parameter => $attribute->newInstance(),
-            $attributes,
-        );
-    }
-
-    /**
-     * @param array{0:string, 1:string} $handler
-     */
-    private function requestBodyFromHandler(array $handler): ?OA\RequestBody
-    {
-        [$class, $method] = $handler;
-        if (!class_exists($class)) {
-            return null;
-        }
-
-        $attributes = (new ReflectionMethod($class, $method))->getAttributes(
-            \OpenApi\Attributes\RequestBody::class,
-            ReflectionAttribute::IS_INSTANCEOF,
-        );
-
-        if ($attributes === []) {
-            return null;
-        }
-
-        $requestBody = $attributes[0]->newInstance();
-        $nested = $requestBody->_unmerged;
-        $requestBody->_unmerged = [];
-
-        if (!is_array($requestBody->content)) {
-            $requestBody->content = [];
-        }
-
-        foreach ($nested as $content) {
-            if ($content instanceof OA\JsonContent) {
-                $requestBody->content['application/json'] = new OA\MediaType([
-                    'mediaType' => 'application/json',
-                    'schema' => $content,
-                ]);
-            }
-        }
-
-        return $requestBody;
     }
 
     /**

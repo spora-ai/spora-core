@@ -333,4 +333,125 @@ describe('GroupLlmConfigsController', function (): void {
         expect((int) $row->principal_id)->toBe($groupPrincipalId);
         expect((int) $row->principal_id)->not->toBe((int) $principalService->ensureUserPrincipal($ownerId)->id);
     });
+
+    // Regression for Issue #6: destroying a group-scoped LLM config must
+    // call LLMConfigPersistence::detachConfigurationReferences() so any
+    // agent.llm_driver_config_id or principal_preferences.preferred_llm_config_id
+    // pointing at the doomed row is nulled before the row vanishes —
+    // otherwise the FK on the agent column violates its NOT NULL on the next
+    // read once the agent FK is enforced, and the preference row leaves a
+    // dangling pointer. The setDefault branch on its own is exercised in
+    // LLMConfigPreferencesTest; the destroy branch is here because it had
+    // no test before this PR.
+    it('detach: destroy() nulls an agent and preference that pointed at the doomed row', function (): void {
+        [$controller, $auth, $principalService, $llmConfigService] = makeGroupLlmConfigsController();
+        $ownerId = bootAuth($auth, 'glc-detach-owner@example.com', GLC_TEST_PASSWORD);
+        $groupService = new Spora\Services\GroupService($principalService);
+        $group = $groupService->createGroup($ownerId, 'LlmCfgDetach');
+        $groupPrincipalId = (int) $principalService->principalForGroup($group->id)->id;
+
+        $configId = (int) Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->insertGetId([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'Doomed',
+            'driver_class' => OpenAICompatibleDriver::class,
+            'settings'     => '{}',
+            'is_default'   => false,
+            'is_global'    => false,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'A',
+            'llm_driver_config_id' => $configId,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+        Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+            'principal_id' => $groupPrincipalId,
+            'preferred_llm_config_id' => $configId,
+            'created_at'   => date('Y-m-d H:i:s'),
+            'updated_at'   => date('Y-m-d H:i:s'),
+        ]);
+
+        simulateLoggedInSession($ownerId, 'glc-detach-owner@example.com');
+        $response = $controller->destroy($group->id, $configId);
+
+        expect($response->getStatusCode())->toBe(200);
+        expect(Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->where('id', $configId)->count())->toBe(0);
+        expect((int) Illuminate\Database\Capsule\Manager::table('agents')->where('id', $agentId)->value('llm_driver_config_id'))->toBe(0);
+        expect(Illuminate\Database\Capsule\Manager::table('principal_preferences')->where('preferred_llm_config_id', $configId)->count())->toBe(0);
+    });
+});
+
+describe('LLMConfigPreferences race regression (Issue #5)', function (): void {
+    // Regression guard: LLMConfigPreferences::setDefaultConfiguration
+    // used to perform {clear-existing-default → save-new} outside any
+    // transaction and without `lockForUpdate`, so two parallel admins
+    // could each observe the prior default row, both clear it, and
+    // both promote their own target — leaving either two defaults
+    // (corruption) or zero defaults (silent outage) depending on the
+    // commit order. The fix wraps the operation in a transaction with
+    // a `lockForUpdate` lock on the prior default row. This file
+    // exercises the contract by running the new code path on top of a
+    // pre-existing default + a fresh candidate; the second call must
+    // finish with exactly one default and the new one winning — which
+    // is what the lock now guarantees.
+    it('two sequential setDefault calls converge on the latest target — never zero, never two', function (): void {
+        $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+        $first = new Spora\Models\LLMDriverConfiguration();
+        $first->principal_id = null;
+        $first->name = 'First';
+        $first->driver_class = OpenAICompatibleDriver::class;
+        $first->settings = json_encode([]);
+        $first->is_global = true;
+        $first->is_default = true;
+        $first->save();
+
+        $second = new Spora\Models\LLMDriverConfiguration();
+        $second->principal_id = null;
+        $second->name = 'Second';
+        $second->driver_class = OpenAICompatibleDriver::class;
+        $second->settings = json_encode([]);
+        $second->is_global = true;
+        $second->is_default = false;
+        $second->save();
+
+        $r1 = $service->setDefaultConfiguration((int) $first->getKey(), 1, true);
+        $r2 = $service->setDefaultConfiguration((int) $second->getKey(), 1, true);
+
+        expect($r1)->not->toBeNull()
+            ->and($r2)->not->toBeNull();
+
+        $defaults = Spora\Models\LLMDriverConfiguration::where('is_global', true)
+            ->where('is_default', true)
+            ->pluck('id')
+            ->all();
+        expect($defaults)->toBe([(int) $second->getKey()]);
+    });
+
+    it('setDefaultConfiguration returns null for non-admin callers and does not flip any row', function (): void {
+        $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+        $global = new Spora\Models\LLMDriverConfiguration();
+        $global->principal_id = null;
+        $global->name = 'Locked';
+        $global->driver_class = OpenAICompatibleDriver::class;
+        $global->settings = json_encode([]);
+        $global->is_global = true;
+        $global->is_default = false;
+        $global->save();
+
+        $result = $service->setDefaultConfiguration((int) $global->getKey(), 99, false);
+        expect($result)->toBeNull();
+
+        $defaults = Spora\Models\LLMDriverConfiguration::where('is_global', true)
+            ->where('is_default', true)
+            ->count();
+        expect($defaults)->toBe(0);
+    });
 });

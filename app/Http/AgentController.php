@@ -159,8 +159,18 @@ final class AgentController
                 ? $body['notes']
                 : null,
             'llm_driver_config_id' => isset($body['llm_driver_config_id']) ? (int) $body['llm_driver_config_id'] : null,
+            // Per-agent STT override (tier 1 of the cascade). FK to
+            // speech_provider_configurations.id; SET NULL on delete so
+            // a deleted config silently falls back to the cascade. The
+            // operator's intent on POST is the same as on PATCH — accept
+            // an explicit id or omit for "use cascade default".
+            'speech_driver_config_id' => isset($body['speech_driver_config_id']) ? (int) $body['speech_driver_config_id'] : null,
             'max_steps'     => (int) ($body['max_steps'] ?? 10),
             'allow_followup' => array_key_exists('allow_followup', $body) ? (bool) $body['allow_followup'] : true,
+            // Mirror the schema default when the body omits the field
+            // so a freshly-created agent exposes `voice_message_retention_count: 5`
+            // immediately rather than waiting for a PATCH.
+            'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
         $agent = $this->agentService->createAgent($userId, $data, $principalId);
@@ -260,13 +270,19 @@ final class AgentController
         // Plan A: `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
-        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'is_pinned', 'is_archived'];
+        $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
         $data = array_intersect_key($body, array_flip($allowed));
         $this->coerceBooleanFlags($data);
-
+        $validationError = $this->validateAgentPatch($data);
         $picturePayload = $this->validateProfilePicturePayload($body);
-        if ($picturePayload instanceof JsonResponse) {
-            return $picturePayload;
+
+        // Both validators may produce a 422; the agents-row validator
+        // runs first so the precedence matches the previous short-
+        // circuit order. Consolidated into one guard so this method
+        // stays under the S1142 3-return ceiling.
+        $earlyExit = $validationError ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null);
+        if ($earlyExit !== null) {
+            return $earlyExit;
         }
 
         $agent = $this->agentService->updateAgent($agentId, $userId, $data);
@@ -298,6 +314,38 @@ final class AgentController
                 $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
             }
         }
+    }
+
+    /**
+     * Validate the per-column invariants the DB cannot enforce via a
+     * CHECK constraint (Laravel's SQLite grammar does not emit column-
+     * level CHECK clauses). The DB-side constraint in migration 0081
+     * still backs this up, but a 422 here gives a friendlier error than
+     * a SQLSTATE 23000 surfaced by the SQLite driver.
+     *
+     * @param  array<string, mixed> $data
+     * @return JsonResponse|null 422 response on the first failure.
+     */
+    private function validateAgentPatch(array $data): ?JsonResponse
+    {
+        if (array_key_exists('voice_message_retention_count', $data)) {
+            $value = $data['voice_message_retention_count'];
+            if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
+                return $this->unprocessable(
+                    'VALIDATION_ERROR',
+                    'voice_message_retention_count must be an integer between 0 and 100.',
+                );
+            }
+            $intValue = (int) $value;
+            if ($intValue < 0 || $intValue > 100) {
+                return $this->unprocessable(
+                    'VALIDATION_ERROR',
+                    'voice_message_retention_count must be between 0 and 100.',
+                );
+            }
+            $data['voice_message_retention_count'] = $intValue;
+        }
+        return null;
     }
 
     /**

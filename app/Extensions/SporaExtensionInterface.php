@@ -73,4 +73,21 @@ interface SporaExtensionInterface
      * @return array<class-string<\Spora\Apps\AppInterface>>
      */
     public function apps(): array;
+
+    /**
+     * Speech-to-text provider classes this extension contributes.
+     *
+     * Plugins returning a non-empty list participate in the
+     * {@see \Spora\Speech\SpeechToTextRegistry} alongside core's
+     * {@see \Spora\Speech\OpenAiCompatibleTranscriber} (which covers the
+     * OpenAI-multipart family — Mistral, OpenAI Whisper, Groq, Lemonfox,
+     * Fireworks, LocalAI, future — through configuration alone). Plugins
+     * contribute only when they need a bespoke wire shape beyond
+     * OpenAI-multipart; today {@see spora-plugin-muse} is the lone
+     * contributor (Meta Muse's bespoke multipart + ffmpeg pipeline).
+     * The first configured provider wins per request.
+     *
+     * @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>>
+     */
+    public function speechToTextProviders(): array;
 }

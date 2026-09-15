@@ -32,12 +32,16 @@ use Spora\Skills\SkillScanner;
  * type hints should be switched to ToolConfigServiceInterface.
  *
  * Migration 0067 renamed `tool_user_settings.user_id` to
- * `tool_user_settings.principal_id`. The new effective-settings cascade
- * is `schema defaults → global → principal → agent`. The caller-friendly
- * `(string $toolClass, int $agentId, ?int $userId)` shape is preserved
- * by deriving the principal scope from the user-id when `PrincipalContext`
- * is not provided, so existing controllers and tests don't have to
- * change shape — only the underlying query.
+ * `tool_user_settings.principal_id`. The effective-settings cascade
+ * is `schema defaults → global → group[0..N] → user-principal → agent`.
+ * When the caller passes an explicit `PrincipalContext` only that
+ * single principal id is consulted (preserves the legacy single-principal
+ * semantics for callers that want to bypass the user/group cascade).
+ * When `?int $userId` is supplied without a `PrincipalContext`, the
+ * cascade looks up the user-principal + every group-principal the user
+ * belongs to via {@see PrincipalService::principalIdsForUser()} and walks
+ * them in `groups by id ascending, then user-principal` order so the
+ * user-principal wins on conflict (last write wins).
  */
 class ToolConfigService implements ToolConfigServiceInterface
 {
@@ -49,6 +53,8 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     private readonly ToolConfigSchemaInspector $schema;
 
+    private readonly ToolConfigPrincipalCascade $cascade;
+
     /**
      * @param list<string> $toolClasses
      */
@@ -57,6 +63,8 @@ class ToolConfigService implements ToolConfigServiceInterface
         LoggerInterface $logger,
         array $toolClasses = [],
         ?SkillScanner $skillScanner = null,
+        ?PrincipalService $principalService = null,
+        bool $groupCascadeEnabled = false,
     ) {
         $skillsByName = [];
         if ($skillScanner !== null) {
@@ -70,6 +78,10 @@ class ToolConfigService implements ToolConfigServiceInterface
         $this->schema = new ToolConfigSchemaInspector($skillsByName);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
+        $this->cascade = new ToolConfigPrincipalCascade(
+            $principalService ?? new PrincipalService(new PrincipalResolver()),
+            $groupCascadeEnabled,
+        );
     }
 
     /**
@@ -196,30 +208,30 @@ class ToolConfigService implements ToolConfigServiceInterface
      * Return effective settings: global defaults merged with principal
      * settings and agent-specific overrides.
      *
-     * Cascade: schema defaults → global settings → principal settings → agent overrides.
+     * Cascade: schema defaults → global settings → group[0..N] settings →
+     * user-principal settings → agent overrides. The group-principal
+     * rows are consulted in `principal.id` ASCENDING order so the
+     * iteration is stable across calls; the user-principal is iterated
+     * last so user-scoped settings win on conflict.
      *
      * The `?PrincipalContext` parameter is the preferred shape — it
      * carries the principal id directly so we don't re-derive a
-     * user-principal from `currentUserId()`. The legacy `?int $userId`
-     * parameter is preserved at the front so existing call sites (tools,
-     * controllers) don't have to be updated as part of the migration;
-     * new callers should pass an explicit `PrincipalContext`.
+     * user-principal from `currentUserId()`, and the explicit context
+     * bypasses the group cascade (only the single named principal is
+     * consulted). The legacy `?int $userId` parameter is preserved at
+     * the front so existing call sites (tools, controllers) don't have
+     * to be updated as part of the migration; new callers should pass
+     * an explicit `PrincipalContext`.
      *
      * @return array<string, mixed>
      */
     public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        if ($context !== null) {
-            $principalId = $context->principalId;
-        } elseif ($userId !== null) {
-            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
-        } else {
-            $principalId = null;
-        }
+        $cascadePrincipalIds = $this->cascade->resolvePrincipalIds($userId, $context);
 
         $merged = $this->getGlobalSettings($toolClass);
 
-        if ($principalId !== null) {
+        foreach ($cascadePrincipalIds as $principalId) {
             $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
             foreach ($principalSettings as $key => $value) {
                 $merged[$key] = $value;
@@ -407,21 +419,22 @@ class ToolConfigService implements ToolConfigServiceInterface
      * Return effective settings annotated with their source.
      *
      * In the principals-and-groups model the source values are
-     * `'global' | 'principal' | 'agent' | 'default'`. The `'user'`
-     * source from the previous schema has been renamed to `'principal'`
-     * so the frontend badge aligns with the column name.
+     * `'global' | 'group' | 'principal' | 'agent' | 'default'`.
+     * `'group'` is the new label for any group-principal row consulted
+     * through the cascade; `'principal'` continues to label the
+     * user-principal level (the source name predates the user/group
+     * split and matches the `tool_user_settings.principal_id` column).
+     * Because the cascade iterates `global → group[0..N] → principal →
+     * agent`, the source label for a key is determined by the LAST level
+     * that overwrote it (last write wins), which keeps
+     * `getEffectiveSettingsWithSource` in lockstep with
+     * {@see self::getEffectiveSettings()}.
      *
-     * @return array<string, array{value: mixed, source: 'global'|'principal'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'global'|'group'|'principal'|'agent'|'default'}>
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        if ($context !== null) {
-            $principalId = $context->principalId;
-        } elseif ($userId !== null) {
-            $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
-        } else {
-            $principalId = null;
-        }
+        [$cascadePrincipalIds, $userPrincipalId] = $this->cascade->resolvePrincipalIdsWithUserRef($userId, $context);
 
         $global = $this->getGlobalSettings($toolClass);
         $result = [];
@@ -430,10 +443,11 @@ class ToolConfigService implements ToolConfigServiceInterface
             $result[$key] = ['value' => $value, 'source' => 'global'];
         }
 
-        if ($principalId !== null) {
+        foreach ($cascadePrincipalIds as $principalId) {
             $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
+            $source = ($principalId === $userPrincipalId) ? 'principal' : 'group';
             foreach ($principalSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => 'principal'];
+                $result[$key] = ['value' => $value, 'source' => $source];
             }
         }
 

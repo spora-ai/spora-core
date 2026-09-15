@@ -37,8 +37,8 @@ function makeScheduledRunController(): array
             'step_count'  => 0,
         ]);
     });
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
-    /** @var Mockery\MockInterface&\Spora\Services\MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+    /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
@@ -144,10 +144,10 @@ describe('ScheduledRunController', function (): void {
         createUserPrincipalPublic($ownerId);
         createUserPrincipalPublic($memberId);
 
-        $principalService = new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver());
-        $groupService = new \Spora\Services\GroupService($principalService);
+        $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+        $groupService = new Spora\Services\GroupService($principalService);
         $group = $groupService->createGroup($ownerId, 'ReaderGroup');
-        $groupService->addMember((int) $group->id, (int) $memberId, \Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
+        $groupService->addMember((int) $group->id, (int) $memberId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $ownerId);
         $groupPrincipal = $principalService->principalForGroup((int) $group->id);
 
         $agent = Agent::create([

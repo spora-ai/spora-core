@@ -78,6 +78,15 @@ class StubAgentService implements AgentServiceInterface
                 $agent->$boolKey = (bool) $data[$boolKey];
             }
         }
+        // Mirror the FK writes the real service would land on the row.
+        // The stub doesn't hit the DB, so we have to copy the value into
+        // the model so the response resource carries it.
+        foreach (['llm_driver_config_id', 'speech_driver_config_id'] as $fkKey) {
+            if (array_key_exists($fkKey, $data)) {
+                $value = $data[$fkKey];
+                $agent->$fkKey = ($value === null || $value === '') ? null : (int) $value;
+            }
+        }
 
         return $agent;
     }

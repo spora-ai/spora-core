@@ -138,6 +138,7 @@ final class MediaArchiveController
             ownership: $query->ownership,
             agentOwnerUserId: $query->agentOwnerUserId,
             principalIds: $principalIds,
+            includeTemporary: $query->includeTemporary,
             page: $query->page,
             perPage: $query->perPage,
         );
