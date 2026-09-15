@@ -22,8 +22,9 @@ use Throwable;
  *  - Mistral Voxtral Mini — `base_url = https://api.mistral.ai/v1`,
  *    `model = voxtral-mini-latest`. The Mistral wire adds a `diarize`
  *    boolean and returns `usage.prompt_audio_seconds`; both are absorbed
- *    by the default {@see extractDurationMs()} and the segment pass-through
- *    in {@see extractSegments()} so Mistral works without a subclass.
+ *    by the default duration-ms extraction in {@see parseTranscribePayload()}
+ *    and the segment pass-through there, so Mistral works without a
+ *    subclass.
  *  - Groq Whisper — `base_url = https://api.groq.com/openai/v1`,
  *    `model = whisper-large-v3-turbo`.
  *  - Lemonfox, Fireworks, LocalAI, OpenRouter — same shape.
@@ -395,7 +396,13 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
             ? $payload['language']
             : null;
         $durationMs = $this->extractDurationMs($payload);
-        $segments = $this->extractSegments($payload);
+        // Pass through the vendor's `segments[]` payload verbatim so the
+        // SPA can render word-level timestamps when present (OpenAI
+        // Whisper verbose_json mode). Returns `[]` when the vendor omits
+        // it so the `TranscriptionResult::$metadata` bag stays compact.
+        $segments = isset($payload['segments']) && is_array($payload['segments'])
+            ? array_values($payload['segments'])
+            : [];
 
         return new TranscriptionResult(
             text: $text,
@@ -466,8 +473,8 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * timeout, connection reset) into a `SpeechToTextException` with
      * a sanitised message. The raw exception is the `previous` so the
      * server log keeps the operator-facing detail; the wire-facing
-     * message hides hostnames and ports by routing the raw text
-     * through {@see sanitiseTransportMessage()} before embedding.
+     * message strips `scheme://host[:port][/path]` to a single token
+     * before embedding so the operator's chosen base URL never leaks.
      */
     private function classifyTransportFailure(Throwable $e): SpeechToTextException
     {
@@ -477,26 +484,20 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
             'message'  => $rawMessage,
         ]);
 
-        return new SpeechToTextException(
-            sprintf('%s request failed: %s', $this->getDisplayName(), $this->sanitiseTransportMessage($rawMessage)),
-            0,
-            $e,
-        );
-    }
-
-    /**
-     * Strip `host:port` from a transport-error message so the wire
-     * doesn't leak the operator's chosen base URL. Replaces any
-     * `scheme://host[:port][/path]` match with a single token
-     * preserving the scheme so the SPA can still tell HTTP from HTTPS
-     * failures apart.
-     */
-    private function sanitiseTransportMessage(string $message): string
-    {
-        return (string) preg_replace(
+        // Strip `scheme://host[:port][/path]` to a single token so the
+        // wire doesn't leak the operator's chosen base URL. The scheme
+        // is preserved so the SPA can still tell HTTP from HTTPS
+        // failures apart.
+        $sanitised = (string) preg_replace(
             '#([a-z][a-z0-9+.\-]*://)[^\s/]+#i',
             '$1<host>',
-            $message,
+            $rawMessage,
+        );
+
+        return new SpeechToTextException(
+            sprintf('%s request failed: %s', $this->getDisplayName(), $sanitised),
+            0,
+            $e,
         );
     }
 
@@ -512,7 +513,18 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
     private function classifyHttpFailure(int $status, array $payload): SpeechToTextException
     {
         $vendor = $this->getDisplayName();
-        $body   = $this->stringifyBody($payload);
+
+        // Reduce a JSON-decoded failure body to a single-line,
+        // length-bounded string suitable for surfacing in an exception
+        // message. Avoids leaking the full payload (which can include
+        // the request id or, on some vendors, the API key in a
+        // `WWW-Authenticate` header).
+        $candidate = $payload['error']['message'] ?? $payload['message'] ?? $payload;
+        if (!is_string($candidate)) {
+            $encoded = json_encode($candidate, JSON_UNESCAPED_SLASHES);
+            $candidate = is_string($encoded) ? $encoded : 'unknown error';
+        }
+        $body = substr($candidate, 0, 200);
 
         $this->logger?->error('OpenAI-compatible STT HTTP failure', [
             'provider' => $vendor,
@@ -564,41 +576,4 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         return null;
     }
 
-    /**
-     * Pass through the vendor's `segments[]` payload verbatim so the
-     * SPA can render word-level timestamps when present (OpenAI Whisper
-     * `verbose_json` mode). Returns `[]` when the vendor omits it,
-     * keeping the `TranscriptionResult::$metadata` bag compact.
-     *
-     * @param  array<string, mixed> $payload
-     * @return list<mixed>
-     */
-    private function extractSegments(array $payload): array
-    {
-        if (!isset($payload['segments']) || !is_array($payload['segments'])) {
-            return [];
-        }
-        /** @var list<mixed> */
-        return array_values($payload['segments']);
-    }
-
-    /**
-     * Reduce a JSON-decoded failure body to a single-line, length-bounded
-     * string suitable for surfacing in an exception message. Avoids
-     * leaking the full payload (which can include the request id or, on
-     * some vendors, the API key in a `WWW-Authenticate` header).
-     *
-     * @param  array<string, mixed> $payload
-     */
-    private function stringifyBody(array $payload): string
-    {
-        $candidate = $payload['error']['message'] ?? $payload['message'] ?? $payload;
-        if (!is_string($candidate)) {
-            $candidate = json_encode($candidate, JSON_UNESCAPED_SLASHES);
-            if (!is_string($candidate)) {
-                $candidate = 'unknown error';
-            }
-        }
-        return substr($candidate, 0, 200);
-    }
 }
