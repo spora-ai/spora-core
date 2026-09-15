@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use Spora\Auth\AuthService;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,7 +26,12 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * The update is idempotent: flipping a non-temp row is a no-op that
  * still returns 200 with the serialised payload so the dashboard can
- * re-fetch without branchy client code.
+ * re-fetch without branchy client code. After the flip we re-trigger
+ * {@see MediaArchiveRetention::enforceTempRetention()} so the
+ * (user, agent) temp-row ceiling is re-evaluated — a keep that drops
+ * the count below the ceiling may let an older temp row survive the
+ * next upload's sweep, so we want the ceiling recalculated
+ * immediately.
  *
  * Body: empty. Any `application/json` body is ignored — the wire
  * contract is "this id, this caller, no payload".
@@ -37,6 +43,7 @@ final class KeepMediaController
     public function __construct(
         private readonly MediaArchiveService $mediaArchive,
         private readonly AuthService $auth,
+        private readonly MediaArchiveRetention $retention,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
     ) {}
 
@@ -53,6 +60,18 @@ final class KeepMediaController
         if ((bool) $asset->is_temporary) {
             $asset->is_temporary = false;
             $asset->save();
+            // The keep flipped a temp row to permanent; the temp set
+            // for (user, agent) is now one smaller. Re-evaluate the
+            // ceiling — agents whose retention_count is reached are
+            // cleared opportunistically here so a future upload
+            // doesn't have to. Skipped when there's no agent_id (the
+            // retention policy is per-agent and returns 0 for
+            // agent-less rows).
+            $this->retention->enforceTempRetention(
+                $asset->user_id !== null ? (int) $asset->user_id : null,
+                $asset->agent_id !== null ? (int) $asset->agent_id : null,
+                $asset->id,
+            );
         }
 
         return new JsonResponse(

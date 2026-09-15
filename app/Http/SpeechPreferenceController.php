@@ -7,7 +7,6 @@ namespace Spora\Http;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
-use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -41,6 +40,7 @@ final class SpeechPreferenceController
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
+        private readonly PrincipalService $principalService,
     ) {}
 
     /**
@@ -280,13 +280,12 @@ final class SpeechPreferenceController
 
     private function resolvePrincipalIdForScope(int $userId, string $scope, ?int $groupId): int
     {
-        $principalService = new PrincipalService(new PrincipalResolver());
         if ($scope === 'user') {
-            return (int) $principalService->ensureUserPrincipal($userId)->id;
+            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
         }
         // $scope === 'group' here; cleanGroupIdForScope guarantees
         // $groupId is a positive int.
-        $groupPrincipal = $principalService->principalForGroup((int) $groupId);
+        $groupPrincipal = $this->principalService->principalForGroup((int) $groupId);
         return $groupPrincipal !== null ? (int) $groupPrincipal->id : 0;
     }
 

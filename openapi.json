@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-69-g639eca60"
+        "version": "0.23.0-73-g70fd7d6a"
     },
     "servers": [
         {
@@ -2315,11 +2315,25 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with status `ABORTED`."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal or already-paused."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
                     }
                 },
                 "security": [
@@ -2337,8 +2351,16 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "AbortSubAgent Task",
+                "summary": "Abort sub-agent and cascade-up",
                 "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     {
                         "name": "taskId",
                         "in": "path",
@@ -2349,8 +2371,14 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with status `ABORTED`."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal or already-paused."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
                     }
                 },
                 "security": [
@@ -2368,8 +2396,16 @@
                 "tags": [
                     "Tasks"
                 ],
-                "summary": "Tick TaskTick",
+                "summary": "Tick a task (client-worker mode only)",
                 "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
                     {
                         "name": "taskId",
                         "in": "path",
@@ -2380,8 +2416,17 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` with the post-tick task resource."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — server mode is active or task is not owned by the calling user."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — task is terminal, quiescent, or being ticked by another caller."
+                    },
+                    "429": {
+                        "description": "TOO_MANY_REQUESTS — per-user rate limit exceeded."
                     }
                 },
                 "security": [
@@ -2682,11 +2727,11 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Index SpeechCapability",
+                "summary": "Speech-to-text provider capability",
                 "parameters": [],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Capability summary"
                     }
                 },
                 "security": [
@@ -2701,11 +2746,51 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Transcribe SpeechTranscribe",
+                "summary": "Transcribe a recorded audio asset",
                 "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "media_id"
+                                ],
+                                "properties": {
+                                    "media_id": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    },
+                                    "language": {
+                                        "description": "BCP-47 hint (e.g. \"en-US\"). null = auto-detect.",
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "agent_id": {
+                                        "description": "Optional agent id (must be owned by the caller). Accepted for backwards compatibility — the controller validates ownership but the speech cascade no longer threads agent_id into settings lookup, so per-agent STT overrides are out of scope.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Transcript"
+                    },
+                    "422": {
+                        "description": "INVALID_AUDIO or validation error"
+                    },
+                    "404": {
+                        "description": "MEDIA_NOT_FOUND"
+                    },
+                    "502": {
+                        "description": "SPEECH_PROVIDER_FAILED"
+                    },
+                    "503": {
+                        "description": "SPEECH_PROVIDER_UNAVAILABLE"
                     }
                 },
                 "security": [
@@ -2723,11 +2808,11 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Schema SpeechProviderConfig",
+                "summary": "Registered speech-to-text provider classes with their settings schemas",
                 "parameters": [],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Provider schemas"
                     }
                 },
                 "security": [
@@ -2742,11 +2827,21 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Index SpeechProviderConfig",
-                "parameters": [],
+                "summary": "List speech provider configurations visible to the caller",
+                "parameters": [
+                    {
+                        "name": "group_id",
+                        "in": "query",
+                        "description": "When set, returns the speech provider configs attached to that group. The caller must be a member of the group or a global admin; non-members receive an empty list.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Configs"
                     }
                 },
                 "security": [
@@ -2759,11 +2854,65 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Store SpeechProviderConfig",
+                "summary": "Create a speech provider configuration",
                 "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "provider_class",
+                                    "settings"
+                                ],
+                                "properties": {
+                                    "provider_class": {
+                                        "type": "string"
+                                    },
+                                    "display_name": {
+                                        "type": "string"
+                                    },
+                                    "is_global": {
+                                        "description": "Admin-only. When true, the row is the global config; principal_id will be null.",
+                                        "type": "boolean"
+                                    },
+                                    "principal_id": {
+                                        "description": "When set, the config is scoped to this principal (user or group). Caller must control the principal.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "scope": {
+                                        "type": "string",
+                                        "enum": [
+                                            "user",
+                                            "group",
+                                            "global",
+                                            "agent"
+                                        ]
+                                    },
+                                    "group_id": {
+                                        "type": "integer"
+                                    },
+                                    "settings": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "201": {
+                        "description": "Created config"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
                     }
                 },
                 "security": [
@@ -2781,8 +2930,16 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "SetDefault SpeechProviderConfig",
+                "summary": "Mark a global speech provider configuration as default",
                 "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
                     {
                         "name": "id",
                         "in": "path",
@@ -2793,8 +2950,14 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Updated config (with is_default=true)"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
                     }
                 },
                 "security": [
@@ -2812,8 +2975,16 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Update SpeechProviderConfig",
+                "summary": "Update an existing speech provider configuration",
                 "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
                     {
                         "name": "id",
                         "in": "path",
@@ -2823,9 +2994,35 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "display_name": {
+                                        "type": "string"
+                                    },
+                                    "settings": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Updated config"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
                     }
                 },
                 "security": [
@@ -2841,8 +3038,16 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "Destroy SpeechProviderConfig",
+                "summary": "Delete a speech provider configuration",
                 "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
                     {
                         "name": "id",
                         "in": "path",
@@ -2853,8 +3058,14 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Deleted"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "404": {
+                        "description": "SPEECH_PROVIDER_CONFIG_NOT_FOUND"
                     }
                 },
                 "security": [
@@ -2872,11 +3083,38 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "GetPreference SpeechPreference",
-                "parameters": [],
+                "summary": "Read the caller's preferred speech-to-text provider",
+                "parameters": [
+                    {
+                        "name": "scope",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "user",
+                                "group"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "group_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Current preference row"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
                     }
                 },
                 "security": [
@@ -2889,11 +3127,47 @@
                 "tags": [
                     "Speech"
                 ],
-                "summary": "SetPreferred SpeechPreference",
+                "summary": "Set or clear the caller's preferred speech-to-text configuration",
                 "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "scope",
+                                    "config_id"
+                                ],
+                                "properties": {
+                                    "config_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "scope": {
+                                        "type": "string",
+                                        "enum": [
+                                            "user",
+                                            "group"
+                                        ]
+                                    },
+                                    "group_id": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Updated preference row"
+                    },
+                    "403": {
+                        "description": "SPEECH_PROVIDER_CONFIG_FORBIDDEN"
+                    },
+                    "422": {
+                        "description": "SPEECH_PROVIDER_CONFIG_INVALID"
                     }
                 },
                 "security": [

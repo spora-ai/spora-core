@@ -23,14 +23,25 @@ namespace Spora\Services;
  * Groups are iterated in `principal.id` ASCENDING order so the cascade
  * is stable across calls.
  *
- * `PrincipalService` is optional in the constructor for backward
- * compatibility with callers that construct the helper standalone;
- * production wires the shared container-resolved service in.
+ * **Group-cascade toggle (`$groupCascadeEnabled`)** — default off so the
+ * speech-storage PR (PR #238) ships without silently broadening the
+ * effective-settings read path for every tool. The LLM-parity PR flips
+ * it on (env override `SPORA_TOOLS_GROUP_CASCADE_ENABLED=true` or
+ * `config('spora.tools.group_cascade_enabled', true)`). When off, only
+ * the user-principal is consulted — the legacy single-tier shape, which
+ * matches the expectations of every tool wired before the group
+ * principals landed.
+ *
+ * `PrincipalService` is required and is wired by the DI container;
+ * no inline instantiation is permitted so the controller / service
+ * graph stays single-sourced from the container (mirrors the
+ * M3 cleanup in the other speech services).
  */
 final class ToolConfigPrincipalCascade
 {
     public function __construct(
-        private readonly ?PrincipalService $principalService = null,
+        private readonly PrincipalService $principalService,
+        private readonly bool $groupCascadeEnabled = false,
     ) {}
 
     /**
@@ -38,6 +49,10 @@ final class ToolConfigPrincipalCascade
      * `group[0..N], then user-principal` so the user-principal wins on
      * conflict (last write wins). Returns an empty list when neither a
      * `PrincipalContext` nor a `?int $userId` is supplied.
+     *
+     * When `$groupCascadeEnabled` is false (default) only the
+     * user-principal is returned — the legacy shape, kept for
+     * speech-storage compatibility.
      *
      * @return list<int>
      */
@@ -63,8 +78,13 @@ final class ToolConfigPrincipalCascade
             return [[], null];
         }
 
-        $principalService = $this->principalService ?? new PrincipalService(new PrincipalResolver());
-        $userPrincipalId = $principalService->ensureUserPrincipal($userId)->id;
+        $principalService = $this->principalService;
+        $userPrincipalId = (int) $principalService->ensureUserPrincipal($userId)->id;
+
+        if (!$this->groupCascadeEnabled) {
+            return [[$userPrincipalId], $userPrincipalId];
+        }
+
         $allIds = $principalService->principalIdsForUser($userId);
 
         $groupIds = array_values(array_filter(

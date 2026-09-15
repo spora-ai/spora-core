@@ -382,6 +382,7 @@ final class ContainerDefinitions
         $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
         $apply('SPORA_WORKER_RUNTIME_MODE', 'worker_runtime_mode', static fn($v) => $v);
         $apply('SPORA_TICK_LEASE_SECONDS', 'tick_lease_seconds', static fn($v) => (int) $v);
+        $apply('SPORA_TOOLS_GROUP_CASCADE_ENABLED', 'tools_group_cascade_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
         $apply('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes', static fn($v) => (int) $v);
         $apply('SPORA_MAX_WORKERS', 'max_workers', static fn($v) => (int) $v);
         $apply('SPORA_LLM_TIMEOUT', 'llm_timeout', static fn($v) => (int) $v);
@@ -552,6 +553,7 @@ final class ContainerDefinitions
             },
 
             ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
+                $config = $c->get('config');
                 return new ToolConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
@@ -560,6 +562,8 @@ final class ContainerDefinitions
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
                     $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    $c->get(PrincipalService::class),
+                    (bool) ($config['tools_group_cascade_enabled'] ?? false),
                 );
             },
 

@@ -39,6 +39,9 @@ function makeCascadeToolConfigService(): ToolConfigService
         new SecurityManager(random_bytes(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Logger('test'),
         [TestTool::class],
+        null,
+        null,
+        true, // group cascade enabled for these tests
     );
 }
 

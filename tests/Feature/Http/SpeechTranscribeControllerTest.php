@@ -63,6 +63,10 @@ final class TransStubConfigured implements SpeechToTextProviderInterface
     {
         return true;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
+    }
 
     public function transcribe(
         string $bytes,
@@ -98,6 +102,10 @@ final class TransStubUnconfigured implements SpeechToTextProviderInterface
     public function isConfigured(): bool
     {
         return false;
+    }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
     }
     public function transcribe(
         string $bytes,
@@ -157,7 +165,7 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     );
 
     $controller = new SpeechTranscribeController(
-        registry: new SpeechToTextRegistry([$provider]),
+        registry: new SpeechToTextRegistry([$provider], new PrincipalService(new PrincipalResolver())),
         mediaReader: $reader,
         mediaArchive: $service,
         auth: $auth,

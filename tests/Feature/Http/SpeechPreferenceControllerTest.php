@@ -34,14 +34,14 @@ function makeSpeechPreferenceController(): array
 
     $registry = new SpeechToTextRegistry([
         new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
-    ]);
+    ], $principalService);
 
     $validator = new SpeechProviderConfigValidator($registry);
     $persistence = new SpeechProviderConfigPersistence($security, $validator);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 
-    return [new SpeechPreferenceController($auth, $service), $auth];
+    return [new SpeechPreferenceController($auth, $service, $principalService), $auth];
 }
 
 function jsonSprefRequest(string $method, string $uri, array $body = []): Request
@@ -79,17 +79,18 @@ function seedGlobalSpeechConfig(AuthService $auth, array $body): int
 {
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new ToolConfigService($security, new \Psr\Log\NullLogger(), []);
+    $principalService = new PrincipalService(new PrincipalResolver());
     $registry = new SpeechToTextRegistry([
         new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
-    ]);
+    ], $principalService);
     $validator = new SpeechProviderConfigValidator($registry);
     $persistence = new SpeechProviderConfigPersistence($security, $validator);
-    $preferences = new SpeechProviderConfigPreferences(new PrincipalService(new PrincipalResolver()));
+    $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService(
         $validator,
         $persistence,
         $preferences,
-        new PrincipalService(new PrincipalResolver()),
+        $principalService,
     );
 
     $config = $service->createConfiguration((int) $auth->currentUserId(), $body, true);

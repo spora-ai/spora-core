@@ -63,6 +63,8 @@ class ToolConfigService implements ToolConfigServiceInterface
         LoggerInterface $logger,
         array $toolClasses = [],
         ?SkillScanner $skillScanner = null,
+        ?PrincipalService $principalService = null,
+        bool $groupCascadeEnabled = false,
     ) {
         $skillsByName = [];
         if ($skillScanner !== null) {
@@ -76,7 +78,10 @@ class ToolConfigService implements ToolConfigServiceInterface
         $this->schema = new ToolConfigSchemaInspector($skillsByName);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
-        $this->cascade = new ToolConfigPrincipalCascade();
+        $this->cascade = new ToolConfigPrincipalCascade(
+            $principalService ?? new PrincipalService(new PrincipalResolver()),
+            $groupCascadeEnabled,
+        );
     }
 
     /**

@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -43,6 +44,14 @@ use Symfony\Component\HttpFoundation\Response;
  *   - User-scope writes require principal_id = caller user-principal.
  *   - Group-scope writes require GroupService::callerCanManage(groupId, userId, isAdmin).
  *   - Reads are existence-hide for non-members / non-owners (mirrors LLMConfigController).
+ *
+ * Error mapping:
+ *   The service layer throws {@see SpeechProviderConfigException}
+ *   for the cases the HTTP layer cares about: notFound (404),
+ *   forbidden (403), validation (422). {@see mapException()} converts
+ *   each to the wire envelope so the per-route handlers stay under
+ *   the S1142 return-count ceiling and the JSON shape is identical
+ *   across endpoints.
  *
  * The controller stays a thin HTTP layer; the service owns auth,
  * scope resolution, schema validation, and persistence.
@@ -196,10 +205,10 @@ final class SpeechProviderConfigController
         }
         $body = $resolved;
 
-        $config = $this->service->createConfiguration($userId, $body, $isAdmin);
-
-        if ($config === null) {
-            return $this->forbidden();
+        try {
+            $config = $this->service->createConfiguration($userId, $body, $isAdmin);
+        } catch (SpeechProviderConfigException $e) {
+            return $this->mapException($e);
         }
 
         return new JsonResponse(
@@ -240,10 +249,10 @@ final class SpeechProviderConfigController
             return $body;
         }
         $userId = $this->requireUserId();
-        $config = $this->service->updateConfiguration($id, $userId, $body, $this->authService->isAdmin());
-
-        if ($config === null) {
-            return $this->forbidden();
+        try {
+            $config = $this->service->updateConfiguration($id, $userId, $body, $this->authService->isAdmin());
+        } catch (SpeechProviderConfigException $e) {
+            return $this->mapException($e);
         }
 
         return new JsonResponse(['data' => ['config' => $this->service->configResource($config)]]);
@@ -267,7 +276,11 @@ final class SpeechProviderConfigController
     public function destroy(int $id): JsonResponse
     {
         $userId = $this->requireUserId();
-        $deleted = $this->service->deleteConfiguration($id, $userId, $this->authService->isAdmin());
+        try {
+            $deleted = $this->service->deleteConfiguration($id, $userId, $this->authService->isAdmin());
+        } catch (SpeechProviderConfigException $e) {
+            return $this->mapException($e);
+        }
 
         if (!$deleted) {
             return $this->notFound($id);
@@ -298,18 +311,14 @@ final class SpeechProviderConfigController
     public function setDefault(int $id): JsonResponse
     {
         $userId = $this->requireUserId();
-        $config = $this->service->setDefaultConfiguration($id, $userId, $this->authService->isAdmin());
-
-        if ($config === null) {
-            return $this->forbidden();
+        try {
+            $config = $this->service->setDefaultConfiguration($id, $userId, $this->authService->isAdmin());
+        } catch (SpeechProviderConfigException $e) {
+            return $this->mapException($e);
         }
 
         return new JsonResponse(['data' => ['config' => $this->service->configResource($config)]]);
     }
-
-    // ---------------------------------------------------------------------
-    // Helpers
-    // ---------------------------------------------------------------------
 
     /**
      * Decode the JSON body or return a 422 envelope — callers check the
@@ -410,6 +419,20 @@ final class SpeechProviderConfigController
             return 0; // endpoints handle the 0 user case below
         }
         return $userId;
+    }
+
+    /**
+     * Translate the service-layer exception into the wire envelope
+     * with the documented HTTP status. Extracted from the per-route
+     * try/catch blocks so each handler stays under the S1142 return
+     * ceiling.
+     */
+    private function mapException(SpeechProviderConfigException $e): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => $e->errorCode, 'message' => $e->getMessage()]],
+            $e->statusCode,
+        );
     }
 
     private function forbidden(): JsonResponse

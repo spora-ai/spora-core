@@ -42,7 +42,7 @@ function makeSpeechProviderConfigController(): array
 
     $registry = new SpeechToTextRegistry([
         new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
-    ]);
+    ], $principalService);
 
     $validator = new SpeechProviderConfigValidator($registry);
     $persistence = new SpeechProviderConfigPersistence($security, $validator, $registry);
@@ -199,7 +199,10 @@ describe('SpeechProviderConfigController', function (): void {
         expect(SpeechProviderConfiguration::find($configId))->toBeNull();
     });
 
-    it('non-admin cannot update or delete another user\'s config', function (): void {
+    it('non-admin cannot update or delete another user\'s config (404 — invisible to caller)', function (): void {
+        // Existence-hide: user B can't see user A's per-user config
+        // at all (different user-principal), so the controller must
+        // surface 404 not 403. Mirrors the LLM-config visibility rule.
         [$controller, $auth] = makeSpeechProviderConfigController();
 
         // user A creates a config
@@ -218,7 +221,72 @@ describe('SpeechProviderConfigController', function (): void {
         $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
             'settings' => fullSettings('sk-b'),
         ]));
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+
+        $delResp = $controller->destroy($configId);
+        expect($delResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+    });
+
+    it('non-admin: 403 for visible-but-not-owned (admin-only global config)', function (): void {
+        // An admin creates a global config. A non-admin can SEE the
+        // row (globals are visible to everyone) but cannot edit it
+        // → 403, not 404. Pins the visibility-vs-editability split
+        // introduced by C3.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $adminId = bootAuth($auth, 'spc-admin-global@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-global'),
+        ]));
+        expect($createResp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        clearSession();
+        $nonAdminId = bootAuth($auth, 'spc-nonadmin-global@example.com', SPC_TEST_PASSWORD);
+
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'settings' => fullSettings('sk-x'),
+        ]));
         expect($updateResp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+
+        $delResp = $controller->destroy($configId);
+        expect($delResp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+    });
+
+    it('store with unknown provider_class returns 404 (provider not registered)', function (): void {
+        // Regression for C4: an unknown `provider_class` must throw
+        // `notFound()` (HTTP 404) — the controller maps it to a
+        // 404 envelope with `SPEECH_PROVIDER_CONFIG_NOT_FOUND`.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-unknown-class@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => 'Spora\\Speech\\NotARealProvider',
+            'settings' => fullSettings(),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
+    });
+
+    it('store with missing required setting returns 422 (validation)', function (): void {
+        // Regression for C4: a registered provider class without
+        // a required `api_key` throws `validation()` → 422.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        bootAuth($auth, 'spc-validation@example.com', SPC_TEST_PASSWORD);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'settings' => [], // api_key required
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
     });
 
     it('set-default promotes one global config (admin only)', function (): void {

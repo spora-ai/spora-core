@@ -50,6 +50,19 @@ interface SpeechToTextProviderInterface
     public function isConfigured(): bool;
 
     /**
+     * Bind the operator's per-config `display_name` so the next
+     * {@see getName()} / {@see getDisplayName()} call returns it
+     * instead of the class-level default. The registry calls this
+     * once per `describe()` / `configuredProvider()` invocation so
+     * multi-tenant requests don't bleed labels across calls.
+     *
+     * Implementations MUST treat this as transient — the bound value
+     * is reset on every call. Implementations without a per-config
+     * `display_name` override can no-op.
+     */
+    public function bindLabel(string $label): void;
+
+    /**
      * Transcribe raw audio bytes to text.
      *
      * The optional `$agentId` and `$userId` let providers with per-agent

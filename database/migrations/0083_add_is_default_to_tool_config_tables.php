@@ -121,12 +121,33 @@ return new class extends Migration {
             });
         }
 
+        // Driver-branched unique index on `(tool_class) WHERE is_default=true`.
+        // SQLite + PostgreSQL: native partial unique index.
+        // MySQL / MariaDB: no native partial index; emulate via a generated
+        //     column `tool_class_when_default = CASE WHEN is_default THEN tool_class ELSE NULL END`
+        //     plus a unique index on that column (NULLs are not unique
+        //     under the SQL standard, so multiple `is_default=false`
+        //     rows coexist without conflict).
+        $driver = Capsule::connection()->getDriverName();
         if ($schema->hasTable('tool_configurations')
-            && !$this->indexExists('tool_configurations', 'idx_tool_configurations_default')
+            && !$this->indexExists('tool_configurations', 'uq_tool_configurations_default_per_class')
         ) {
-            $schema->table('tool_configurations', static function (Blueprint $table): void {
-                $table->index('is_default', 'idx_tool_configurations_default');
-            });
+            if ($driver === 'mysql' || $driver === 'mariadb') {
+                if (!$schema->hasColumn('tool_configurations', 'tool_class_when_default')) {
+                    $schema->table('tool_configurations', static function (Blueprint $table): void {
+                        $table->string('tool_class_when_default')->nullable()->virtualAs('CASE WHEN is_default THEN tool_class ELSE NULL END');
+                    });
+                }
+                $schema->table('tool_configurations', static function (Blueprint $table): void {
+                    $table->unique('tool_class_when_default', 'uq_tool_configurations_default_per_class');
+                });
+            } else {
+                // SQLite + PostgreSQL: emit a native partial unique index.
+                Capsule::statement(
+                    'CREATE UNIQUE INDEX uq_tool_configurations_default_per_class '
+                    . 'ON tool_configurations (tool_class) WHERE is_default = true',
+                );
+            }
         }
 
         if ($schema->hasTable('tool_user_settings')
@@ -173,20 +194,34 @@ return new class extends Migration {
         // `down` would lose the data this migration just wrote
         // (operators downgrading would have to re-create it manually).
 
-        if ($schema->hasTable('tool_configurations')
-            && $this->indexExists('tool_configurations', 'idx_tool_configurations_default')
-        ) {
-            $schema->table('tool_configurations', static function (Blueprint $table): void {
-                $table->dropIndex('idx_tool_configurations_default');
-            });
-        }
+        $driver = Capsule::connection()->getDriverName();
+        if ($schema->hasTable('tool_configurations')) {
+            if ($driver === 'mysql' || $driver === 'mariadb') {
+                if ($this->indexExists('tool_configurations', 'uq_tool_configurations_default_per_class')) {
+                    $schema->table('tool_configurations', static function (Blueprint $table): void {
+                        $table->dropUnique('uq_tool_configurations_default_per_class');
+                    });
+                }
+                if ($schema->hasColumn('tool_configurations', 'tool_class_when_default')) {
+                    $schema->table('tool_configurations', static function (Blueprint $table): void {
+                        $table->dropColumn('tool_class_when_default');
+                    });
+                }
+            } else {
+                // SQLite + PostgreSQL: drop the partial unique index.
+                Capsule::statement('DROP INDEX IF EXISTS uq_tool_configurations_default_per_class');
+            }
 
-        if ($schema->hasTable('tool_configurations')
-            && $schema->hasColumn('tool_configurations', 'is_default')
-        ) {
-            $schema->table('tool_configurations', static function (Blueprint $table): void {
-                $table->dropColumn('is_default');
-            });
+            if ($this->indexExists('tool_configurations', 'idx_tool_configurations_default')) {
+                $schema->table('tool_configurations', static function (Blueprint $table): void {
+                    $table->dropIndex('idx_tool_configurations_default');
+                });
+            }
+            if ($schema->hasColumn('tool_configurations', 'is_default')) {
+                $schema->table('tool_configurations', static function (Blueprint $table): void {
+                    $table->dropColumn('is_default');
+                });
+            }
         }
     }
 

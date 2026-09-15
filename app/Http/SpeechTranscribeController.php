@@ -48,9 +48,12 @@ use Symfony\Component\HttpFoundation\Request;
  * Optional `agent_id`: when present, the controller validates that the
  * caller owns the agent (`AgentService::getAgent($agentId, $userId)`)
  * — a 422 `VALIDATION_ERROR` surfaces a non-owned id without leaking
- * whether it exists. The id is resolved only for ownership checking;
- * the speech cascade no longer reads `agent_tool_overrides`, so the
- * resolved `$agentId` is never threaded into the registry or provider.
+ * whether it exists. The id IS threaded into the registry
+ * (`configuredProvider($userId, $agentId)` — tier 1 reads from
+ * `agents.speech_driver_config_id`) but is NOT threaded into the
+ * provider call itself: the provider reads user / group / global
+ * settings from `SpeechProviderConfiguration` directly, so it
+ * receives `0` for the `$agentId` argument.
  *
  * Provider API keys NEVER leave the server. The provider's exception
  * message is logged server-side (operator-visible) and the sanitised
@@ -123,11 +126,10 @@ final class SpeechTranscribeController
             $agentId  = $this->resolveAgentId($payload, $userId);
             $provider = $this->requireConfiguredProvider($userId, $agentId);
             $asset    = $this->loadAsset($payload['media_id'], $userId);
-            $result   = $this->transcribeWithProvider(
+            $result = $this->transcribeWithProvider(
                 $provider,
                 $asset,
                 $payload['language'] ?? null,
-                $agentId,
                 $userId,
             );
         } catch (SpeechTranscribeException $e) {
@@ -272,7 +274,6 @@ final class SpeechTranscribeController
         SpeechToTextProviderInterface $provider,
         array $asset,
         ?string $language,
-        ?int $agentId,
         int $userId,
     ): TranscriptionResult {
         // Speech cascade is FK-driven: the registry already resolved
@@ -280,10 +281,7 @@ final class SpeechTranscribeController
         // and the user/group/global preference tiers. The provider
         // call itself doesn't take an agentId — it reads user / group
         // / global settings from SpeechProviderConfiguration
-        // directly. The signature keeps $agentId for symmetry with the
-        // controller's ownership-validation flow; bind it to a fresh
-        // local so the parameter itself is not reassigned.
-        unset($agentId);
+        // directly — so we pass 0.
         try {
             return $provider->transcribe(
                 $asset['bytes'],

@@ -17,10 +17,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  * regardless of how many plugins ship them), plus a derived
  * `available` / `configured` summary the frontend uses to decide whether
  * to render the recording button at all. Every row also carries the
- * effective-class + tier label resolved by
- * {@see SpeechToTextRegistry::resolveEffectiveClassWithSource()} so
- * the SPA can render "Currently using: X" against a single source of
- * truth.
+ * effective-class + tier label + config-id resolved by
+ * {@see SpeechToTextRegistry::describeWithConfig()} so the SPA can
+ * render "Currently using: X" against a single source of truth.
  *
  * Mirrors the shape of {@see MediaAllowedTypesController}:
  * read-only, auth-only (no CSRF).
@@ -66,9 +65,6 @@ final class SpeechCapabilityController
     public function index(): JsonResponse
     {
         $userId = $this->auth->currentUserId();
-        $providers = $this->registry->all();
-
-        [$effectiveClass, $effectiveSource] = $this->registry->describe($userId, null);
 
         // "configured" summary: a provider was resolved AND it self-
         // reports configured. The fallback tier picks the first
@@ -78,21 +74,11 @@ final class SpeechCapabilityController
         $resolvedProvider = $this->registry->configuredProvider($userId, null);
         $isReady = $resolvedProvider !== null && $resolvedProvider->isConfigured();
 
-        $rows = [];
-        foreach ($providers as $provider) {
-            $rows[] = [
-                'name' => $provider->getName(),
-                'display_name' => $provider->getDisplayName(),
-                'configured' => $provider->isConfigured(),
-                'effective_class' => $effectiveClass,
-                'effective_source' => $effectiveSource,
-                'effective_config_id' => null,
-            ];
-        }
+        $rows = $this->registry->describeWithConfig($userId ?? 0, null);
 
         return new JsonResponse([
             'data' => [
-                'available' => $providers !== [],
+                'available' => $rows !== [],
                 'configured' => $isReady,
                 'providers' => $rows,
             ],

@@ -149,8 +149,10 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * Optimistic — the actual API-key check happens at transcribe time so
      * settings edited via the UI after registry construction are picked
      * up on the next call. The Capability endpoint reads the effective
-     * config directly to derive `configured`, so this true-returning
-     * default never lets an unconfigured provider be picked for a real
+     * config directly to derive `configured`, and the registry's
+     * `configuredProvider()` filters non-configured providers out of
+     * every tier (not just the fallback) so this true-returning default
+     * means an unconfigured provider is never picked for a real
      * transcribe call.
      */
     public function isConfigured(): bool
@@ -170,9 +172,6 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         return $this->parseTranscribePayload($payload);
     }
 
-    /**
-     * @return array{url: string, headers: array<string, string>, body: array<string, mixed>, timeout: int}
-     */
     /**
      * Build the HTTP request descriptor for `/audio/transcriptions`.
      *
@@ -422,19 +421,37 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * timeout, connection reset) into a `SpeechToTextException` with
      * a sanitised message. The raw exception is the `previous` so the
      * server log keeps the operator-facing detail; the wire-facing
-     * message hides hostnames and ports.
+     * message hides hostnames and ports by routing the raw text
+     * through {@see sanitiseTransportMessage()} before embedding.
      */
     private function classifyTransportFailure(Throwable $e): SpeechToTextException
     {
+        $rawMessage = $e->getMessage();
         $this->logger?->error('OpenAI-compatible STT transport failure', [
             'provider' => $this->getDisplayName(),
-            'message'  => $e->getMessage(),
+            'message'  => $rawMessage,
         ]);
 
         return new SpeechToTextException(
-            sprintf('%s request failed: %s', $this->getDisplayName(), $e->getMessage()),
+            sprintf('%s request failed: %s', $this->getDisplayName(), $this->sanitiseTransportMessage($rawMessage)),
             0,
             $e,
+        );
+    }
+
+    /**
+     * Strip `host:port` from a transport-error message so the wire
+     * doesn't leak the operator's chosen base URL. Replaces any
+     * `scheme://host[:port][/path]` match with a single token
+     * preserving the scheme so the SPA can still tell HTTP from HTTPS
+     * failures apart.
+     */
+    private function sanitiseTransportMessage(string $message): string
+    {
+        return (string) preg_replace(
+            '#([a-z][a-z0-9+.\-]*://)[^\s/]+#i',
+            '$1<host>',
+            $message,
         );
     }
 

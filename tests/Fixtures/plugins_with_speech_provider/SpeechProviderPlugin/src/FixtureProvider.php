@@ -28,6 +28,10 @@ final class FixtureProvider implements SpeechToTextProviderInterface
     {
         return false;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the test fixture — fixture never picks up a per-config label
+    }
     public function transcribe(
         string $bytes,
         string $mimeType,

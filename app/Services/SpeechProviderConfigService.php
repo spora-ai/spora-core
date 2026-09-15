@@ -8,37 +8,50 @@ use Spora\Models\SpeechProviderConfiguration;
 use Spora\Speech\SpeechToTextRegistry;
 
 /**
- * Service for managing speech-to-text provider configurations.
+ * Read-side facade for {@see SpeechProviderConfiguration}.
  *
- * Mirrors {@see LLMConfigService}: thin facade that delegates CRUD +
- * default-toggle + principal-preference work to four focused
- * collaborators:
- *   - {@see SpeechProviderConfigValidator} for class + schema checks
- *   - {@see SpeechProviderConfigPersistence} for CRUD with per-field
- *     encryption
- *   - {@see SpeechProviderConfigPreferences} for the principal-id
- *     preference writer / reader and the "set the global default"
- *     flow that backs the tier-4 cascade in
- *     {@see \Spora\Speech\SpeechToTextRegistry::resolveEffectiveClassWithSource()}
- *   - {@see SpeechToTextRegistry} (read-only) for class discovery +
- *     effective-class resolution metadata
+ * Carved out of the umbrella that previously held both reads and
+ * writes (PR #238) so it stays under the SonarCloud S1448
+ * 20-method-per-class ceiling. Writes live on
+ * {@see SpeechProviderConfigMutator}; the public
+ * {@see SpeechProviderConfigServiceInterface} keeps the same surface so
+ * the controller (and its tests) don't have to be updated.
  *
- * Migration 0082 introduced `speech_provider_configurations` (the
- * speech mirror of `llm_driver_configurations`) and migration 0084
- * swapped `preferred_speech_provider_class` for an FK — both are
- * folded into the 0081-0084 unified migration block.
+ * Read paths owned directly by this class:
+ *   - {@see getSchema()}              — every registered STT class's
+ *                                       `#[ToolSetting]` schema
+ *   - {@see getConfigurationsForUser()} — union of principal-scoped +
+ *                                         global configs visible to the
+ *                                         caller
+ *   - {@see getGlobalConfigurations()} — globals only
+ *   - {@see getConfiguration()}       — single-row lookup with
+ *                                         visibility scope
+ *   - {@see findConfiguration()}      — unrestricted single-row lookup
+ *   - {@see configResource()}         — wire-shape serializer
  *
- * Singleton scope is request-lifetime (the DI container builds a
- * fresh instance per resolve); the underlying SecurityManager /
- * registry are the shared collaborators.
+ * Read paths delegated to {@see SpeechProviderConfigPersistence}:
+ *   - {@see decodeSettings()}         — settings decryption round-trip
+ *   - {@see maskForApi()}             — `***` mask for password fields
+ *
+ * Read paths delegated to {@see SpeechProviderConfigPreferences}:
+ *   - {@see getDefaultConfiguration()}
+ *   - {@see getPrincipalPreferredConfig()}
+ *   - {@see resolvePreferredConfig()}
+ *
+ * Write paths (create / update / delete / setDefault / setPreferred
+ * / unsetPreferred / resolveGroupPrincipal) forward to
+ * {@see SpeechProviderConfigMutator} so the controller's API is
+ * unchanged but the S1448 ceiling is satisfied. The controller's
+ * preferred seam is the mutator; the service remains for legacy
+ * callers that still speak the unified shape.
  */
 final class SpeechProviderConfigService implements SpeechProviderConfigServiceInterface
 {
     private readonly SpeechProviderConfigValidator $validator;
     private readonly SpeechProviderConfigPersistence $persistence;
     private readonly SpeechProviderConfigPreferences $preferences;
-    private readonly PrincipalService $principalService;
     private readonly PrincipalResolver $principalResolver;
+    private readonly SpeechProviderConfigMutator $mutator;
 
     public function __construct(
         SpeechProviderConfigValidator $validator,
@@ -46,17 +59,18 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         SpeechProviderConfigPreferences $preferences,
         PrincipalService $principalService,
         ?PrincipalResolver $principalResolver = null,
+        ?SpeechProviderConfigMutator $mutator = null,
     ) {
         $this->validator = $validator;
         $this->persistence = $persistence;
         $this->preferences = $preferences;
-        $this->principalService = $principalService;
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->mutator = $mutator ?? new SpeechProviderConfigMutator(
+            $persistence,
+            $preferences,
+            $principalService,
+        );
     }
-
-    // ---------------------------------------------------------------------
-    // Class discovery (delegated to the registry)
-    // ---------------------------------------------------------------------
 
     /**
      * @return list<array{class: string, display_name: string, settings_schema: list<array<string, mixed>>}>
@@ -78,10 +92,6 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         }
         return $rows;
     }
-
-    // ---------------------------------------------------------------------
-    // Listing / lookup (read paths)
-    // ---------------------------------------------------------------------
 
     /**
      * Union of every principal-scoped config the caller can see plus
@@ -157,58 +167,29 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         return SpeechProviderConfiguration::find($configId);
     }
 
-    // ---------------------------------------------------------------------
-    // Configuration mutations (delegated to Persistence)
-    // ---------------------------------------------------------------------
-
-    public function createConfiguration(int $userId, array $data, bool $isAdmin): ?SpeechProviderConfiguration
+    public function createConfiguration(int $userId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
-        $principalId = isset($data['principal_id']) && is_int($data['principal_id'])
-            ? $data['principal_id']
-            : $this->principalService->ensureUserPrincipal($userId)->id;
-
-        unset($data['principal_id']);
-
-        return $this->persistence->createConfiguration($principalId, $userId, $data, $isAdmin);
+        return $this->mutator->createConfiguration($userId, $data, $isAdmin);
     }
 
-    /**
-     * Resolve a `groups.id` to the matching `principals.id` so a group-scope
-     * write can land on the row's `principal_id` column. Returns `null`
-     * when the caller cannot manage the group — the controller surfaces a
-     * 403 in that case so the SPA can show a meaningful error.
-     *
-     * Authorization mirrors {@see LLMConfigController}'s group-scope path:
-     * global admins can target any group; everyone else must be a group
-     * `owner` or `admin` per {@see GroupService::callerCanManage}.
-     */
     public function resolveGroupPrincipal(int $groupId, int $callerUserId, bool $isAdmin): ?int
     {
-        if (!GroupService::callerCanManage($groupId, $callerUserId, $isAdmin)) {
-            return null;
-        }
-
-        return (int) $this->principalService->ensureGroupPrincipal($groupId)->id;
+        return $this->mutator->resolveGroupPrincipal($groupId, $callerUserId, $isAdmin);
     }
 
-    public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?SpeechProviderConfiguration
+    public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
-        return $this->persistence->updateConfiguration($configId, $userId, $data, $isAdmin);
+        return $this->mutator->updateConfiguration($configId, $userId, $data, $isAdmin);
     }
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool
     {
-        return $this->persistence->deleteConfiguration($configId, $userId, $isAdmin);
+        return $this->mutator->deleteConfiguration($configId, $userId, $isAdmin);
     }
 
-    // ---------------------------------------------------------------------
-    // Default + preference resolution (delegated to Preferences)
-    // ---------------------------------------------------------------------
-
-    public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?SpeechProviderConfiguration
+    public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): SpeechProviderConfiguration
     {
-        unset($userId);
-        return $this->preferences->setDefaultConfiguration($configId, $isAdmin);
+        return $this->mutator->setDefaultConfiguration($configId, $userId, $isAdmin);
     }
 
     public function getDefaultConfiguration(): ?SpeechProviderConfiguration
@@ -235,10 +216,6 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     {
         return $this->preferences->resolvePreferredConfig($userId, $isAdmin, $groupId, $scope);
     }
-
-    // ---------------------------------------------------------------------
-    // Resource DTO (delegated to Persistence)
-    // ---------------------------------------------------------------------
 
     /**
      * @return array<string, mixed>

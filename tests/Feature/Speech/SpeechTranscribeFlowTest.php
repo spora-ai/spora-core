@@ -88,6 +88,7 @@ function buildFlowController(
     return new SpeechTranscribeController(
         registry: new SpeechToTextRegistry(
             [new OpenAiCompatibleTranscriber($http, $toolConfig)],
+            $principalService,
         ),
         mediaReader: $reader,
         mediaArchive: $mediaArchive,

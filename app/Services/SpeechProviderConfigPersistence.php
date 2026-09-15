@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
+use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Models\PrincipalPreference;
@@ -34,6 +35,14 @@ use Spora\Speech\SpeechToTextRegistry;
  * is dropped. The agent-side FK is `ON DELETE SET NULL` so the row
  * detached pass is a belt-and-braces protection for callers that
  * bypass the persistence layer.
+ *
+ * Error model: schema/validation failures raise
+ * {@see SpeechProviderConfigException::validation()} (422) and auth
+ * failures (non-admin trying to write a global, or non-owner trying
+ * to edit someone else's config) raise `forbidden()` (403). Lookups
+ * that can't see the row at all raise `notFound()` (404). The
+ * controller's `mapException()` helper maps these to the right wire
+ * status without the controller having to re-derive the cause.
  */
 final class SpeechProviderConfigPersistence
 {
@@ -50,7 +59,10 @@ final class SpeechProviderConfigPersistence
     ) {
         $this->security = $security;
         $this->validator = $validator;
-        $this->speechRegistry = $speechRegistry ?? new SpeechToTextRegistry([]);
+        $this->speechRegistry = $speechRegistry ?? new SpeechToTextRegistry(
+            [],
+            new PrincipalService(new PrincipalResolver()),
+        );
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
@@ -62,16 +74,16 @@ final class SpeechProviderConfigPersistence
      *
      * @param array<string, mixed> $data
      *
+     * @throws SpeechProviderConfigException 422 on schema/validation
+     *         failure (unknown provider class, missing required
+     *         setting, regex mismatch); 403 when a non-admin sets
+     *         `is_global=true`.
      * @throws PrincipalNotAccessibleException when the caller cannot
      *         write under the requested principal.
      */
-    public function createConfiguration(int $principalId, int $callerUserId, array $data, bool $isAdmin): ?SpeechProviderConfiguration
+    public function createConfiguration(int $principalId, int $callerUserId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
         $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
-        if ($validated === null) {
-            return null;
-        }
-
         $isGlobal = $validated['is_global'];
 
         if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
@@ -92,17 +104,29 @@ final class SpeechProviderConfigPersistence
 
     /**
      * @param array<string, mixed> $data
+     *
+     * @throws SpeechProviderConfigException 404 when the config is
+     *         not visible to the caller; 403 when it is visible but
+     *         the caller cannot edit it; 422 on schema/validation
+     *         failure.
      */
-    public function updateConfiguration(int $configId, int $callerUserId, array $data, bool $isAdmin): ?SpeechProviderConfiguration
+    public function updateConfiguration(int $configId, int $callerUserId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
         $config = $this->loadEditableConfiguration($configId, $isAdmin, $callerUserId);
         if ($config === null) {
-            return null;
+            // Visibility-not-found: caller cannot see the row at all
+            // → 404. Editable-not-found (visible but not allowed) is
+            // raised as 403 by loadEditableConfiguration.
+            throw $this->findConfigurationForCaller($configId, $callerUserId, $isAdmin) === null
+                ? SpeechProviderConfigException::notFound("Speech provider configuration {$configId} not found.")
+                : SpeechProviderConfigException::forbidden("Not authorised to edit speech provider configuration {$configId}.");
         }
 
         $applied = $this->applyConfigurationUpdates($config, $data);
         if ($applied === null) {
-            return null;
+            throw SpeechProviderConfigException::validation(
+                'Invalid update payload for speech provider configuration.',
+            );
         }
 
         $config->save();
@@ -119,42 +143,38 @@ final class SpeechProviderConfigPersistence
      * - Admin: deletes any config (global or principal-scoped).
      * - Non-admin: refuses on globals; principal-scoped rows require
      *   the caller to own the principal.
+     *
+     * @throws SpeechProviderConfigException 404 when the row is
+     *         invisible; 403 when visible but not owned by a non-admin.
      */
     public function deleteConfiguration(int $configId, int $callerUserId, bool $isAdmin): bool
     {
-        $config = SpeechProviderConfiguration::find($configId);
+        $config = $this->findConfigurationForCaller($configId, $callerUserId, $isAdmin);
         if ($config === null) {
-            return false;
+            throw SpeechProviderConfigException::notFound(
+                "Speech provider configuration {$configId} not found.",
+            );
+        }
+        if (!$isAdmin) {
+            if ($config->is_global) {
+                throw SpeechProviderConfigException::forbidden(
+                    'Not authorised to delete a global speech provider configuration.',
+                );
+            }
+            if (!$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
+                throw SpeechProviderConfigException::forbidden(
+                    "Not authorised to delete speech provider configuration {$configId}.",
+                );
+            }
         }
 
-        if ($isAdmin) {
-            $this->detachConfigurationReferencesStatic($configId);
-            $config->delete();
-            return true;
-        }
-
-        return $this->deleteConfigurationForNonAdmin($config, $callerUserId);
-    }
-
-    private function deleteConfigurationForNonAdmin(SpeechProviderConfiguration $config, int $callerUserId): bool
-    {
-        if ($config->is_global) {
-            return false;
-        }
-        if (!$this->principalResolver->isPrincipalOwner($callerUserId, (int) $config->principal_id)) {
-            return false;
-        }
-
-        $this->detachConfigurationReferencesStatic((int) $config->id);
+        $this->detachConfigurationReferencesStatic($configId);
         $config->delete();
 
         return true;
     }
 
     /**
-     * Encode settings for storage: password fields encrypted
-     * per-field, everything else plain JSON.
-     *
      * @param array<string, mixed> $settings
      */
     public function encodeSettings(string $providerClass, array $settings): array
@@ -319,9 +339,12 @@ final class SpeechProviderConfigPersistence
     }
 
     /**
-     * @return array{provider_class: string, display_name: string, settings: array<string, mixed>, is_global: bool}|null
+     * @throws SpeechProviderConfigException 422 on schema failure; 403
+     *         when a non-admin sets `is_global=true`.
+     *
+     * @return array{provider_class: string, display_name: string, settings: array<string, mixed>, is_global: bool}
      */
-    private function validateNewConfigurationInputs(array $data, bool $isAdmin): ?array
+    private function validateNewConfigurationInputs(array $data, bool $isAdmin): array
     {
         $providerClass = trim((string) ($data['provider_class'] ?? ''));
         $displayName = trim((string) ($data['display_name'] ?? ''));
@@ -332,19 +355,23 @@ final class SpeechProviderConfigPersistence
         $settings = is_array($rawSettings) ? $rawSettings : [];
         $isGlobal = !empty($data['is_global']);
 
-        $invalid = $providerClass === ''
-            || !$this->validator->isRegisteredProviderClass($providerClass)
-            || ($isGlobal && !$isAdmin);
-
-        if ($invalid) {
-            return null;
+        if ($providerClass === '') {
+            throw SpeechProviderConfigException::validation(
+                "Field 'provider_class' is required and must be a non-empty string.",
+            );
+        }
+        if (!$this->validator->isRegisteredProviderClass($providerClass)) {
+            throw SpeechProviderConfigException::notFound(
+                "Speech provider class '{$providerClass}' is not registered.",
+            );
+        }
+        if ($isGlobal && !$isAdmin) {
+            throw SpeechProviderConfigException::forbidden(
+                'Only admins can create global speech provider configurations.',
+            );
         }
 
-        try {
-            $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
-        } catch (\Spora\Http\Exceptions\SpeechProviderConfigException) {
-            return null;
-        }
+        $this->validator->assertSettingsAgainstSchema($providerClass, $settings);
 
         return [
             'provider_class' => $providerClass,
@@ -354,9 +381,37 @@ final class SpeechProviderConfigPersistence
         ];
     }
 
+    /**
+     * Visibility-scoped lookup: returns the row only if the caller
+     * can see it under the same rules as
+     * {@see getConfiguration()}. Used by the update / delete paths so
+     * "row doesn't exist for them" surfaces as 404 and "row exists but
+     * they can't edit it" surfaces as 403.
+     */
+    private function findConfigurationForCaller(int $configId, int $callerUserId, bool $isAdmin): ?SpeechProviderConfiguration
+    {
+        $query = SpeechProviderConfiguration::where('id', $configId);
+        if (!$isAdmin) {
+            $principalIds = $this->principalResolver->visiblePrincipalIds($callerUserId);
+            $query->where(static function ($q) use ($principalIds): void {
+                if ($principalIds === []) {
+                    $q->whereRaw('1 = 0');
+                } else {
+                    $q->whereIn('principal_id', $principalIds);
+                }
+                $q->orWhere('is_global', true);
+            });
+        }
+        return $query->first();
+    }
+
+    /**
+     * @throws SpeechProviderConfigException 404 when not visible;
+     *         403 when visible but not editable.
+     */
     private function loadEditableConfiguration(int $configId, bool $isAdmin, int $callerUserId): ?SpeechProviderConfiguration
     {
-        $config = SpeechProviderConfiguration::find($configId);
+        $config = $this->findConfigurationForCaller($configId, $callerUserId, $isAdmin);
         if ($config === null) {
             return null;
         }

@@ -26,6 +26,10 @@ final class CapConfiguredProvider implements SpeechToTextProviderInterface
     {
         return true;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
+    }
     public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
         return new TranscriptionResult('unused');
@@ -46,6 +50,10 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
     {
         return false;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
+    }
     public function transcribe(string $bytes, string $mimeType, ?string $languageHint = null, ?int $agentId = null, ?int $userId = null): TranscriptionResult
     {
         return new TranscriptionResult('unused');
@@ -63,7 +71,13 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
 function buildSpeechCapabilityController(array $providers): array
 {
     $auth = Mockery::mock(AuthService::class);
-    return [new SpeechCapabilityController(new SpeechToTextRegistry($providers), $auth), $auth];
+    return [
+        new SpeechCapabilityController(
+            new SpeechToTextRegistry($providers, new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver())),
+            $auth,
+        ),
+        $auth,
+    ];
 }
 
 test('capability returns 200 with available=false and configured=false when no providers are loaded', function (): void {

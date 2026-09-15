@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Models\PrincipalPreference;
 use Spora\Models\SpeechProviderConfiguration;
+use Throwable;
 
 /**
  * Default-resolution + principal-preference logic for
@@ -28,19 +30,32 @@ use Spora\Models\SpeechProviderConfiguration;
 final class SpeechProviderConfigPreferences
 {
     public function __construct(
-        private readonly PrincipalService $principalService = new PrincipalService(new PrincipalResolver()),
+        private readonly PrincipalService $principalService,
     ) {}
 
-    public function setDefaultConfiguration(int $configId, bool $isAdmin): ?SpeechProviderConfiguration
+    /**
+     * @throws SpeechProviderConfigException 404 when the config id
+     *         doesn't exist; 403 when the row exists but isn't
+     *         global or the caller isn't admin.
+     * @throws Throwable on transaction failure (rethrown); the inner
+     *         `save()` calls bubble up model exceptions as-is.
+     */
+    public function setDefaultConfiguration(int $configId, bool $isAdmin): SpeechProviderConfiguration
     {
         return Capsule::connection()->transaction(
-            function () use ($configId, $isAdmin): ?SpeechProviderConfiguration {
+            function () use ($configId, $isAdmin): SpeechProviderConfiguration {
                 $config = SpeechProviderConfiguration::where('id', $configId)
                     ->lockForUpdate()
                     ->first();
-                $eligible = $config !== null && (bool) $config->is_global && $isAdmin;
-                if (!$eligible) {
-                    return null;
+                if ($config === null) {
+                    throw SpeechProviderConfigException::notFound(
+                        "Speech provider configuration {$configId} not found.",
+                    );
+                }
+                if (!$isAdmin || !(bool) $config->is_global) {
+                    throw SpeechProviderConfigException::forbidden(
+                        'Only admins can set a global speech provider configuration as default.',
+                    );
                 }
 
                 $priorDefault = SpeechProviderConfiguration::where('is_global', true)

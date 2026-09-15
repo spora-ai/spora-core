@@ -128,9 +128,70 @@ return new class extends Migration {
             });
         }
 
-        // No-op for the agent_tool_overrides sweep — we don't know
-        // what the original settings were, and recreating them with
-        // empty settings would be misleading.
+        // Restore the legacy class-string column so the
+        // pre-0084 `preferred_speech_provider_class` field is back
+        // for any downgraded install. Populated from the FK target's
+        // `provider_class` where available (this is the only
+        // recoverable mapping; user-entered overrides that pointed at
+        // a since-deleted row fall through to NULL).
+        if (!$schema->hasColumn('principal_preferences', 'preferred_speech_provider_class')) {
+            $schema->table('principal_preferences', static function (Blueprint $table): void {
+                $table->string('preferred_speech_provider_class')->nullable()->after('preferred_llm_config_id');
+            });
+        }
+        if ($schema->hasColumn('principal_preferences', 'preferred_speech_provider_class')) {
+            Capsule::table('principal_preferences')
+                ->whereNotNull('preferred_speech_config_id')
+                ->orderBy('id')
+                ->chunkById(100, function (\Illuminate\Support\Collection $rows): void {
+                    foreach ($rows as $row) {
+                        $providerClass = Capsule::table('speech_provider_configurations')
+                            ->where('id', $row->preferred_speech_config_id)
+                            ->value('provider_class');
+                        if (is_string($providerClass) && $providerClass !== '') {
+                            Capsule::table('principal_preferences')
+                                ->where('id', $row->id)
+                                ->update(['preferred_speech_provider_class' => $providerClass]);
+                        }
+                    }
+                });
+        }
+
+        // Restore the agent_tool_overrides rows from the backup table
+        // captured during `up()`. The backup lives next to the regular
+        // table so a `down()` finds it without env-specific config.
+        if ($schema->hasTable('agent_tool_overrides_0084_backup')) {
+            $existing = Capsule::table('agent_tool_overrides')
+                ->select(['agent_id', 'tool_class'])
+                ->get();
+            $existingKeys = [];
+            foreach ($existing as $row) {
+                $existingKeys[(int) $row->agent_id . ':' . (string) $row->tool_class] = true;
+            }
+            $restored = 0;
+            foreach (Capsule::table('agent_tool_overrides_0084_backup')->orderBy('id')->get() as $backup) {
+                $key = (int) $backup->agent_id . ':' . (string) $backup->tool_class;
+                if (isset($existingKeys[$key])) {
+                    continue;
+                }
+                Capsule::table('agent_tool_overrides')->insert([
+                    'agent_id'   => $backup->agent_id,
+                    'tool_class' => $backup->tool_class,
+                    'settings'   => $backup->settings,
+                    'created_at' => $backup->created_at,
+                    'updated_at' => $backup->updated_at,
+                ]);
+                $existingKeys[$key] = true;
+                $restored++;
+            }
+            if ($restored > 0) {
+                error_log("[migration 0084 down] restored {$restored} agent_tool_overrides row(s) from agent_tool_overrides_0084_backup");
+            }
+            // Leave the backup table in place — operators can drop it
+            // in a future migration once they're confident the down
+            // worked. Removing it automatically would lock out a
+            // second `up()` / `down()` cycle.
+        }
     }
 
     private function swapPreferredSpeechProviderToFk(\Illuminate\Database\Schema\Builder $schema): void
@@ -178,6 +239,45 @@ return new class extends Migration {
             \Spora\Speech\OpenAiCompatibleTranscriber::class,
         ];
 
+        // Snapshot every row about to be deleted into
+        // `agent_tool_overrides_0084_backup` so a `down()` can restore
+        // them. We capture the full row (settings included) — settings
+        // are encrypted bytes copied verbatim, so the backup mirrors
+        // the live table's encryption-at-rest posture and survives a
+        // round-trip without re-keying.
+        if (!$schema->hasTable('agent_tool_overrides_0084_backup')) {
+            $schema->create('agent_tool_overrides_0084_backup', static function (Blueprint $table): void {
+                $table->bigIncrements('id');
+                $table->unsignedBigInteger('agent_id');
+                $table->string('tool_class');
+                $table->text('settings')->nullable();
+                $table->timestamp('created_at')->nullable();
+                $table->timestamp('updated_at')->nullable();
+                $table->index(['agent_id', 'tool_class'], 'idx_agent_tool_overrides_0084_backup_lookup');
+            });
+        }
+
+        $backedUp = 0;
+        Capsule::table('agent_tool_overrides')
+            ->whereIn('tool_class', $coreShippedSttClasses)
+            ->orderBy('id')
+            ->chunkById(100, function (\Illuminate\Support\Collection $rows) use (&$backedUp): void {
+                $batch = [];
+                foreach ($rows as $row) {
+                    $batch[] = [
+                        'agent_id'   => $row->agent_id,
+                        'tool_class' => $row->tool_class,
+                        'settings'   => $row->settings,
+                        'created_at' => $row->created_at,
+                        'updated_at' => $row->updated_at,
+                    ];
+                    $backedUp++;
+                }
+                if ($batch !== []) {
+                    Capsule::table('agent_tool_overrides_0084_backup')->insert($batch);
+                }
+            });
+
         $deleted = Capsule::table('agent_tool_overrides')
             ->whereIn('tool_class', $coreShippedSttClasses)
             ->delete();
@@ -186,7 +286,7 @@ return new class extends Migration {
         // when they upgrade. Useful for verifying the migration
         // without a separate query.
         if ($deleted > 0) {
-            error_log("[migration 0084] removed {$deleted} agent_tool_overrides row(s) for core-shipped STT classes");
+            error_log("[migration 0084] removed {$deleted} agent_tool_overrides row(s) for core-shipped STT classes ({$backedUp} backed up)");
         }
     }
 };

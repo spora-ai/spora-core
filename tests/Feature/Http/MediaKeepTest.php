@@ -7,6 +7,7 @@ use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\KeepMediaController;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Support\MediaArchiveTestSupport;
 
@@ -59,7 +60,7 @@ function buildKeepController(?AuthService $auth): KeepMediaController
         ),
     );
     $auth ??= buildAdminAuth();
-    return new KeepMediaController($service, $auth);
+    return new KeepMediaController($service, $auth, new MediaArchiveRetention());
 }
 
 function buildAdminAuth(): AuthService

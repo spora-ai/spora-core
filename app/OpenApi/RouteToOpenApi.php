@@ -145,18 +145,28 @@ final class RouteToOpenApi
      * throughout (PHPStan assigns the right concrete type per match arm), so each
      * `PathItem::{get|post|...}` setter accepts the value.
      *
+     * The handler's method-level `#[OA\Get] / #[OA\Post] / ...` attribute is consulted
+     * first: when present, its `summary`, `description`, `tags`, `requestBody`, and
+     * `responses` are folded into the operation so controller-side documentation lands
+     * on the wire without duplicating the route metadata. The synthesised defaults
+     * (`humaniseHandler`, `tagsFromPath`, `defaultResponses`) are only used when the
+     * handler didn't declare an OA operation attribute.
+     *
      * @param array{method:string, route:string, handler:array{0:string,1:string}, middleware:list<string>} $entry
      */
     private function buildAndAttach(PathItem $pathItem, array $entry): void
     {
-        $summary = $this->humaniseHandler($entry['handler']);
-        $tags = $this->tagsFromPath($entry['route']);
+        $handlerOp = $this->operationFromHandler($entry['handler'], strtolower($entry['method']));
+
+        $summary = $handlerOp['summary'] ?? $this->humaniseHandler($entry['handler']);
+        $tags = $handlerOp['tags'] ?? $this->tagsFromPath($entry['route']);
         $parameters = array_merge(
             $this->parametersFromPath($entry),
-            $this->parametersFromHandler($entry['handler']),
+            $handlerOp['parameters'] ?? $this->parametersFromHandler($entry['handler']),
         );
         $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
-        $responses = $this->defaultResponses();
+        $responses = $handlerOp['responses'] ?? $this->defaultResponses();
+
         $operation = [
             'method' => strtolower($entry['method']),
             'summary' => $summary,
@@ -165,7 +175,12 @@ final class RouteToOpenApi
             'security' => $security,
             'responses' => $responses,
         ];
-        if ($entry['method'] === 'POST') {
+        if (isset($handlerOp['description'])) {
+            $operation['description'] = $handlerOp['description'];
+        }
+        if (isset($handlerOp['requestBody'])) {
+            $operation['requestBody'] = $handlerOp['requestBody'];
+        } elseif ($entry['method'] === 'POST' || $entry['method'] === 'PUT' || $entry['method'] === 'PATCH') {
             $requestBody = $this->requestBodyFromHandler($entry['handler']);
             if ($requestBody !== null) {
                 $operation['requestBody'] = $requestBody;
@@ -182,6 +197,141 @@ final class RouteToOpenApi
             'OPTIONS' => $pathItem->options = new OA\Options($operation),
             default => null,
         };
+    }
+
+    /**
+     * Read the controller's per-method `#[OA\Get] / #[OA\Post] / #[OA\Put] /
+     * #[OA\Delete] / #[OA\Patch]` attribute and surface the documented
+     * `summary` / `description` / `tags` / `requestBody` / `responses`
+     * for merge into the synthesised operation. Returns `[]` when no
+     * matching attribute is on the handler — callers then fall back
+     * to the synthesised defaults.
+     *
+     * Only the fields the OpenAPI 3.0 operation object supports are
+     * surfaced; attributes like `path`, `operationId`, `deprecated`,
+     * `security`, `servers` are intentionally not lifted (the route
+     * table is the single source of truth for path-level metadata).
+     *
+     * The `requestBody` / `responses` / `parameters` / `tags` /
+     * `summary` / `description` properties on a freshly-instantiated
+     * `OA\Operation` start as the library's `Undefined` sentinel
+     * (`@OA\UNDEFINED🙈` — a string) until the OA analyser merges
+     * nested attribute payloads. We never run the analyser on the
+     * attribute, so each property needs a runtime type-check before
+     * it lands in the output bag.
+     *
+     * @param array{0:string, 1:string} $handler
+     * @return array{
+     *     summary?: string,
+     *     description?: string,
+     *     tags?: list<string>,
+     *     requestBody?: OA\RequestBody,
+     *     responses?: array<string, Response>,
+     *     parameters?: list<Parameter>,
+     * }
+     */
+    private function operationFromHandler(array $handler, string $method): array
+    {
+        [$class, $methodName] = $handler;
+        if (!class_exists($class)) {
+            return [];
+        }
+
+        $reflection = new ReflectionMethod($class, $methodName);
+        $attributeClass = match (strtoupper($method)) {
+            'GET' => \OpenApi\Attributes\Get::class,
+            'POST' => \OpenApi\Attributes\Post::class,
+            'PUT' => \OpenApi\Attributes\Put::class,
+            'PATCH' => \OpenApi\Attributes\Patch::class,
+            'DELETE' => \OpenApi\Attributes\Delete::class,
+            'HEAD' => \OpenApi\Attributes\Head::class,
+            'OPTIONS' => \OpenApi\Attributes\Options::class,
+            default => null,
+        };
+        if ($attributeClass === null) {
+            return [];
+        }
+
+        $attrs = $reflection->getAttributes($attributeClass, ReflectionAttribute::IS_INSTANCEOF);
+        if ($attrs === []) {
+            return [];
+        }
+
+        // $op is typed as `mixed` deliberately: the OA\Operation
+        // attributes carry `Undefined` string sentinels in
+        // summary/description/tags/requestBody/responses/parameters
+        // until the OA analyser runs, and we never run it. Each
+        // property needs a runtime check before it lands in the
+        // output bag — see the method-level comment.
+        /** @var mixed $op */
+        $op = $attrs[0]->newInstance();
+
+        $out = [];
+        if (is_string($op->summary) && $op->summary !== '') {
+            $out['summary'] = $op->summary;
+        }
+        if (is_string($op->description) && $op->description !== '') {
+            $out['description'] = $op->description;
+        }
+        if (is_array($op->tags) && $op->tags !== []) {
+            $out['tags'] = $op->tags;
+        }
+        if ($op->requestBody instanceof OA\RequestBody) {
+            $out['requestBody'] = $this->normaliseRequestBody($op->requestBody);
+        }
+        if (is_array($op->responses) && $op->responses !== []) {
+            $out['responses'] = $this->normaliseResponses($op->responses);
+        }
+        if (is_array($op->parameters) && $op->parameters !== []) {
+            $out['parameters'] = array_values($op->parameters);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Convert the `#[OA\RequestBody]` instance returned by the OA
+     * attribute into a clean {@see OA\RequestBody} with the unmerged
+     * payloads folded into `content[application/json]` entries so the
+     * JSON shape serialises properly through json_encode.
+     */
+    private function normaliseRequestBody(OA\RequestBody $requestBody): OA\RequestBody
+    {
+        $nested = $requestBody->_unmerged;
+        $requestBody->_unmerged = [];
+
+        if (!is_array($requestBody->content)) {
+            $requestBody->content = [];
+        }
+
+        foreach ($nested as $content) {
+            if ($content instanceof OA\JsonContent) {
+                $requestBody->content['application/json'] = new OA\MediaType([
+                    'mediaType' => 'application/json',
+                    'schema' => $content,
+                ]);
+            }
+        }
+
+        return $requestBody;
+    }
+
+    /**
+     * Index the documented `#[OA\Response]` entries by their declared
+     * `response` code (string form per the OpenAPI 3.0 spec) so the
+     * operation object can map status code → response directly.
+     *
+     * @param list<Response> $responses
+     * @return array<string, Response>
+     */
+    private function normaliseResponses(array $responses): array
+    {
+        $out = [];
+        foreach ($responses as $response) {
+            $key = (string) $response->response;
+            $out[$key] = $response;
+        }
+        return $out;
     }
 
     /**

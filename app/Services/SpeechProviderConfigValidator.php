@@ -24,6 +24,9 @@ final class SpeechProviderConfigValidator
         private readonly SpeechToTextRegistry $registry,
     ) {}
 
+    /**
+     * @throws SpeechProviderConfigException 404 when the class isn't registered.
+     */
     public function assertRegisteredProviderClass(string $class): void
     {
         if (!$this->isRegisteredProviderClass($class)) {

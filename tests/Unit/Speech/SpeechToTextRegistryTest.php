@@ -36,6 +36,10 @@ final class StubConfiguredProvider implements SpeechToTextProviderInterface
     {
         return true;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
+    }
     public function transcribe(
         string $bytes,
         string $mimeType,
@@ -61,6 +65,10 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
     {
         return false;
     }
+    public function bindLabel(string $label): void
+    {
+        // no-op for the stub — tests don't exercise label binding
+    }
     public function transcribe(
         string $bytes,
         string $mimeType,
@@ -74,7 +82,7 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
 
 function buildRegistry(array $providers): SpeechToTextRegistry
 {
-    return new SpeechToTextRegistry($providers);
+    return new SpeechToTextRegistry($providers, new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()));
 }
 
 test('empty registry — all returns empty, configured returns null, describe returns empty', function (): void {
@@ -82,7 +90,7 @@ test('empty registry — all returns empty, configured returns null, describe re
 
     expect($registry->all())->toBe([])
         ->and($registry->configuredProvider())->toBeNull()
-        ->and($registry->describe())->toBe([null, null]);
+        ->and($registry->describe())->toBe([null, null, null]);
 });
 
 test('configuredProvider() returns the first registered class when no other tier matches', function (): void {

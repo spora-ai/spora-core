@@ -26,12 +26,12 @@ defined('SPC_TEST_PASSWORD') || define('SPC_TEST_PASSWORD', 'Password1!');
 function makeSpeechConfigService(): SpeechProviderConfigService
 {
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $principalService = new PrincipalService(new PrincipalResolver());
     $validator = new SpeechProviderConfigValidator(new SpeechToTextRegistry([new OpenAiCompatibleTranscriber(
         new Symfony\Component\HttpClient\MockHttpClient(),
         new Spora\Services\ToolConfigService($security, new Psr\Log\NullLogger(), []),
-    )]));
+    )], $principalService));
     $persistence = new SpeechProviderConfigPersistence($security, $validator);
-    $principalService = new PrincipalService(new PrincipalResolver());
     $preferences = new SpeechProviderConfigPreferences($principalService);
     return new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 }
@@ -94,13 +94,18 @@ describe('SpeechProviderConfigService', function (): void {
 
         $service = makeSpeechConfigService();
 
-        $created = $service->createConfiguration($userId, [
-            'provider_class' => OpenAiCompatibleTranscriber::class,
-            'is_global' => true,
-            'settings' => [],
-        ], isAdmin: false);
+        $threw = false;
+        try {
+            $service->createConfiguration($userId, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => true,
+                'settings' => [],
+            ], isAdmin: false);
+        } catch (Spora\Http\Exceptions\SpeechProviderConfigException $e) {
+            $threw = $e->statusCode === 403;
+        }
 
-        expect($created)->toBeNull();
+        expect($threw)->toBeTrue();
     });
 
     it('non-admin can create a per-user config under their own user-principal', function (): void {

@@ -7,8 +7,8 @@ namespace Spora\Core;
 use Psr\Container\ContainerInterface;
 use Spora\Http\SpeechPreferenceController;
 use Spora\Http\SpeechProviderConfigController;
-use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\SpeechProviderConfigMutator;
 use Spora\Services\SpeechProviderConfigPersistence;
 use Spora\Services\SpeechProviderConfigPreferences;
 use Spora\Services\SpeechProviderConfigService;
@@ -45,21 +45,27 @@ final class SpeechProviderConfigContainerBindings
             },
 
             SpeechProviderConfigPreferences::class => static function (ContainerInterface $c): SpeechProviderConfigPreferences {
-                $principalService = $c->has(PrincipalService::class)
-                    ? $c->get(PrincipalService::class)
-                    : new PrincipalService(new PrincipalResolver());
-                return new SpeechProviderConfigPreferences($principalService);
+                return new SpeechProviderConfigPreferences(
+                    $c->get(PrincipalService::class),
+                );
+            },
+
+            SpeechProviderConfigMutator::class => static function (ContainerInterface $c): SpeechProviderConfigMutator {
+                return new SpeechProviderConfigMutator(
+                    $c->get(SpeechProviderConfigPersistence::class),
+                    $c->get(SpeechProviderConfigPreferences::class),
+                    $c->get(PrincipalService::class),
+                );
             },
 
             SpeechProviderConfigService::class => static function (ContainerInterface $c): SpeechProviderConfigService {
-                $principalService = $c->has(PrincipalService::class)
-                    ? $c->get(PrincipalService::class)
-                    : new PrincipalService(new PrincipalResolver());
                 return new SpeechProviderConfigService(
                     $c->get(SpeechProviderConfigValidator::class),
                     $c->get(SpeechProviderConfigPersistence::class),
                     $c->get(SpeechProviderConfigPreferences::class),
-                    $principalService,
+                    $c->get(PrincipalService::class),
+                    null,
+                    $c->get(SpeechProviderConfigMutator::class),
                 );
             },
 
@@ -75,6 +81,7 @@ final class SpeechProviderConfigContainerBindings
                 return new SpeechPreferenceController(
                     $c->get(\Spora\Auth\AuthService::class),
                     $c->get(SpeechProviderConfigService::class),
+                    $c->get(PrincipalService::class),
                 );
             },
         ];
