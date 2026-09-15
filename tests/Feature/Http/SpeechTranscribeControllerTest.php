@@ -67,6 +67,10 @@ final class TransStubConfigured implements SpeechToTextProviderInterface
     {
         // no-op for the stub — tests don't exercise label binding
     }
+    public function bindSettings(array $settings): void
+    {
+        // no-op for the stub — tests don't exercise settings binding
+    }
 
     public function transcribe(
         string $bytes,
@@ -106,6 +110,10 @@ final class TransStubUnconfigured implements SpeechToTextProviderInterface
     public function bindLabel(string $label): void
     {
         // no-op for the stub — tests don't exercise label binding
+    }
+    public function bindSettings(array $settings): void
+    {
+        // no-op for the stub — tests don't exercise settings binding
     }
     public function transcribe(
         string $bytes,

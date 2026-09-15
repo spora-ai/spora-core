@@ -24,6 +24,9 @@ use Spora\Speech\TranscriptionResult;
 
 final class StubConfiguredProvider implements SpeechToTextProviderInterface
 {
+    /** @var array<string, mixed> */
+    public array $boundSettings = [];
+
     public function getName(): string
     {
         return 'stub-configured';
@@ -39,6 +42,10 @@ final class StubConfiguredProvider implements SpeechToTextProviderInterface
     public function bindLabel(string $label): void
     {
         // no-op for the stub — tests don't exercise label binding
+    }
+    public function bindSettings(array $settings): void
+    {
+        $this->boundSettings = $settings;
     }
     public function transcribe(
         string $bytes,
@@ -69,6 +76,10 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
     {
         // no-op for the stub — tests don't exercise label binding
     }
+    public function bindSettings(array $settings): void
+    {
+        // no-op — the unconfigured stub doesn't care about settings
+    }
     public function transcribe(
         string $bytes,
         string $mimeType,
@@ -82,7 +93,20 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
 
 function buildRegistry(array $providers): SpeechToTextRegistry
 {
-    return new SpeechToTextRegistry($providers, new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()));
+    // Wire the registry's optional persistence dependency so
+    // `configuredProvider()` can decode v2 settings on tiers 1-4.
+    // The circular `registry ← validator ← persistence ← registry`
+    // dependency is broken by constructing the registry first with
+    // no persistence, then handing it to the validator, then handing
+    // the validator to the persistence, then re-wiring the registry
+    // with the now-complete persistence.
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $registry = new SpeechToTextRegistry($providers, $principalService);
+    $validator = new Spora\Services\SpeechProviderConfigValidator($registry);
+    $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $persistence = new Spora\Services\SpeechProviderConfigPersistence($security, $validator);
+
+    return new SpeechToTextRegistry($providers, $principalService, $persistence);
 }
 
 test('empty registry — all returns empty, configured returns null, describe returns empty', function (): void {
@@ -320,4 +344,67 @@ test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)',
     [$class, $source] = $registry->describe($userId, null);
     expect($class)->toBe(StubConfiguredProvider::class)
         ->and($source)->toBe('fallback');
+});
+
+test('configuredProvider() pushes decoded v2 settings into bindSettings() on tier 2', function (): void {
+    $userId = 21;
+    $userPrincipalId = createUserPrincipalPublic($userId);
+
+    // Insert a v2 config whose settings column is the encrypted blob the
+    // persistence layer would produce for `{"api_key":"sk-from-v2"}`.
+    // We use the real SecurityManager + Validator so decodeSettings
+    // round-trips like production. The persistence prunes settings
+    // against the provider class's #[ToolSetting] schema, so we use
+    // OpenAiCompatibleTranscriber (which declares `api_key`).
+    $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $openAi = new OpenAiCompatibleTranscriber(
+        new Symfony\Component\HttpClient\MockHttpClient(),
+        Mockery::mock(Spora\Services\ToolConfigService::class),
+    );
+    $registry = buildRegistry([$openAi]);
+    $validator = new Spora\Services\SpeechProviderConfigValidator($registry);
+    $persistence = new Spora\Services\SpeechProviderConfigPersistence($security, $validator);
+    $encrypted = $persistence->encodeSettingsString(
+        OpenAiCompatibleTranscriber::class,
+        ['api_key' => 'sk-from-v2'],
+    );
+
+    $configId = (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $userPrincipalId,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'V2 user-scope',
+        'settings' => $encrypted,
+        'is_default' => false,
+        'is_global' => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+        'principal_id' => $userPrincipalId,
+        'preferred_speech_config_id' => $configId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $configured = $registry->configuredProvider($userId, null);
+    expect($configured)->toBeInstanceOf(OpenAiCompatibleTranscriber::class);
+
+    // The decoded v2 settings must reach the provider — proves the
+    // registry now hands the cascade-resolved config to providers
+    // instead of forcing them to read from `tool_user_settings`.
+    /** @var Spora\Speech\OpenAiCompatibleTranscriber $configured */
+    expect($configured->boundSettings())->toBe(['api_key' => 'sk-from-v2']);
+});
+
+test('configuredProvider() does not push settings on tier 5 fallback (no FK)', function (): void {
+    $stub = new StubConfiguredProvider();
+    $registry = buildRegistry([$stub]);
+
+    $configured = $registry->configuredProvider(99, null);
+    expect($configured)->toBeInstanceOf(StubConfiguredProvider::class);
+    // Tier 5 has no SpeechProviderConfiguration row to decode; the
+    // provider's bound settings stay at the default (empty array)
+    // and falls through to ToolConfigService in transcribe().
+    /** @var StubConfiguredProvider $configured */
+    expect($configured->boundSettings)->toBe([]);
 });

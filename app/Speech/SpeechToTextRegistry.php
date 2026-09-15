@@ -6,6 +6,7 @@ namespace Spora\Speech;
 
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalService;
+use Spora\Services\SpeechProviderConfigPersistence;
 
 /**
  * Discovers every plugin-contributed + core-shipped
@@ -48,7 +49,9 @@ use Spora\Services\PrincipalService;
  */
 final readonly class SpeechToTextRegistry
 {
-    private readonly SpeechToTextCascadeResolver $cascade;
+    private SpeechToTextCascadeResolver $cascade;
+
+    private ?SpeechProviderConfigPersistence $persistence;
 
     /**
      * @param list<SpeechToTextProviderInterface> $providers
@@ -56,8 +59,10 @@ final readonly class SpeechToTextRegistry
     public function __construct(
         private array $providers,
         PrincipalService $principalService,
+        ?SpeechProviderConfigPersistence $persistence = null,
     ) {
         $this->cascade = new SpeechToTextCascadeResolver($providers, $principalService);
+        $this->persistence = $persistence;
     }
 
     /**
@@ -110,15 +115,21 @@ final readonly class SpeechToTextRegistry
         // applies the same gate so a non-configured provider is never
         // handed to the transcribe call regardless of which tier
         // resolved the class.
+        //
+        // `bindSettings()` MUST fire BEFORE `isConfigured()` is read so
+        // providers can consult the bound v2 settings when answering
+        // the gate (otherwise the gate stays optimistic for v2 rows
+        // with an empty api_key and the transcribe call still throws).
         foreach ($this->providers as $provider) {
             if ($provider::class !== $class) {
                 continue;
             }
-            if (!$provider->isConfigured()) {
-                continue;
-            }
             if ($configId !== null) {
                 $this->bindProviderLabel($provider, $configId);
+                $this->bindProviderSettings($provider, $configId);
+            }
+            if (!$provider->isConfigured()) {
+                continue;
             }
 
             return $provider;
@@ -188,6 +199,29 @@ final readonly class SpeechToTextRegistry
             return;
         }
         $provider->bindLabel((string) $config->display_name);
+    }
+
+    /**
+     * Decode the resolved v2 row's `settings` blob and push it into the
+     * provider via {@see SpeechToTextProviderInterface::bindSettings()}.
+     * Skipped on tier-5 fallback (no FK → no row to decode) and when
+     * the registry was constructed without a persistence dependency
+     * (the legacy `SpeechProviderConfigPersistence::__construct` self-
+     * default for `$speechRegistry` — empty registry, no providers, no
+     * decode calls).
+     */
+    private function bindProviderSettings(SpeechToTextProviderInterface $provider, int $configId): void
+    {
+        if ($this->persistence === null) {
+            return;
+        }
+        $config = SpeechProviderConfiguration::find($configId);
+        if ($config === null) {
+            return;
+        }
+        $rawSettings = $config->getRawOriginal('settings');
+        $decoded = $this->persistence->decodeSettings($provider::class, $rawSettings);
+        $provider->bindSettings($decoded);
     }
 
     /**

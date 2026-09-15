@@ -32,6 +32,10 @@ final class FixtureProvider implements SpeechToTextProviderInterface
     {
         // no-op for the test fixture — fixture never picks up a per-config label
     }
+    public function bindSettings(array $settings): void
+    {
+        // no-op for the test fixture — fixture never picks up v2-cascade settings
+    }
     public function transcribe(
         string $bytes,
         string $mimeType,

@@ -24,6 +24,8 @@ use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SpeechProviderConfigValidator;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
@@ -90,6 +92,37 @@ function buildFlowController(
             [new OpenAiCompatibleTranscriber($http, $toolConfig)],
             $principalService,
         ),
+        mediaReader: $reader,
+        mediaArchive: $mediaArchive,
+        auth: $auth,
+        agentService: $agentService,
+    );
+}
+
+function buildFlowControllerWithSpeechPersistence(
+    AuthService $auth,
+    PrincipalService $principalService,
+    ToolConfigService $toolConfig,
+    MockHttpClient $http,
+    AgentService $agentService,
+    MediaArchiveService $mediaArchive,
+    MediaAssetReader $reader,
+    SecurityManager $security,
+): SpeechTranscribeController {
+    // Wire the registry with a real SpeechProviderConfigPersistence so
+    // tiers 1-4 of the cascade push decoded v2 settings into the
+    // provider via bindSettings(). Tests using this helper prove the
+    // v2 storage layer (`speech_provider_configurations`) is the
+    // single source of truth, with no `tool_user_settings` mirror
+    // required.
+    $provider = new OpenAiCompatibleTranscriber($http, $toolConfig);
+    $registry = new SpeechToTextRegistry([$provider], $principalService);
+    $validator = new SpeechProviderConfigValidator($registry);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, $registry);
+    $registry = new SpeechToTextRegistry([$provider], $principalService, $persistence);
+
+    return new SpeechTranscribeController(
+        registry: $registry,
         mediaReader: $reader,
         mediaArchive: $mediaArchive,
         auth: $auth,
@@ -474,4 +507,80 @@ test('non-owned agent_id surfaces as 422 VALIDATION_ERROR and never invokes the 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id, 'agent_id' => 999_999]));
     expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
     expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+test('v2-cascade: only speech_provider_configurations is set — no tool_user_settings mirror', function (): void {
+    // Regression guard for the v1/v2 split: an operator who saves the
+    // api_key via the new speech-provider-config UI writes only to
+    // `speech_provider_configurations` + `principal_preferences`. No
+    // row in `tool_user_settings` or `tool_configurations`. The
+    // controller must still drive a successful transcribe — the
+    // registry now pushes decoded v2 settings into the provider via
+    // bindSettings() before transcribe() fires, so the provider sees
+    // the api_key even though ToolConfigService::getEffectiveSettings
+    // returns an empty array.
+    $fx = buildFlowFixtures();
+    $userId = bootAuth($fx['auth'], 'flow-v2@example.com', 'Password1!');
+    $userPrincipalId = (int) $fx['principalService']->ensureUserPrincipal($userId)->id;
+
+    // Write a v2 user-scope row with an api_key the controller's
+    // mock HTTP layer will echo back as the transcript.
+    $persistence = new SpeechProviderConfigPersistence(
+        $fx['security'],
+        new SpeechProviderConfigValidator(
+            new SpeechToTextRegistry(
+                [new OpenAiCompatibleTranscriber(
+                    new MockHttpClient(),
+                    $fx['toolConfig'],
+                )],
+                $fx['principalService'],
+            ),
+        ),
+        null,
+        null,
+    );
+    $configId = (int) Capsule::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $userPrincipalId,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'V2 user-scope',
+        'settings' => $persistence->encodeSettingsString(OpenAiCompatibleTranscriber::class, [
+            'api_key'  => 'sk-from-v2',
+            'base_url' => 'https://api.mistral.ai/v1',
+            'model'    => 'voxtral-mini-latest',
+        ]),
+        'is_default' => false,
+        'is_global'  => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Capsule::table('principal_preferences')->insert([
+        'principal_id' => $userPrincipalId,
+        'preferred_speech_config_id' => $configId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    // Sanity: NO mirror in the legacy v1 tables.
+    expect(Capsule::table('tool_user_settings')
+        ->where('principal_id', $userPrincipalId)
+        ->count())->toBe(0);
+    expect(Capsule::table('tool_configurations')
+        ->where('tool_class', OpenAiCompatibleTranscriber::class)
+        ->count())->toBe(0);
+
+    $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
+    $controller = buildFlowControllerWithSpeechPersistence(
+        $fx['auth'],
+        $fx['principalService'],
+        $fx['toolConfig'],
+        new MockHttpClient([new MockResponse(json_encode(['text' => 'v2-transcript']))]),
+        $fx['agentService'],
+        $fx['mediaArchive'],
+        $fx['reader'],
+        $fx['security'],
+    );
+
+    $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('v2-transcript');
 });
