@@ -59,8 +59,6 @@ interface SpeechProviderConfigServiceInterface
 
     public function resolvePreferredConfig(int $userId, bool $isAdmin, ?int $groupId = null, string $scope = 'user'): ?SpeechProviderConfiguration;
 
-    public function findConfiguration(int $configId): ?SpeechProviderConfiguration;
-
     /**
      * @return array<string, mixed>
      */

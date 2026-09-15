@@ -71,22 +71,17 @@ final class ToolConfigPrincipalCascade
      */
     public function resolvePrincipalIdsWithUserRef(?int $userId, ?PrincipalContext $context): array
     {
-        if ($context !== null) {
-            return [[$context->principalId], null];
-        }
-        if ($userId === null) {
-            return [[], null];
+        if ($context !== null || $userId === null) {
+            return [$context === null ? [] : [$context->principalId], null];
         }
 
-        $principalService = $this->principalService;
-        $userPrincipalId = (int) $principalService->ensureUserPrincipal($userId)->id;
+        $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
 
         if (!$this->groupCascadeEnabled) {
             return [[$userPrincipalId], $userPrincipalId];
         }
 
-        $allIds = $principalService->principalIdsForUser($userId);
-
+        $allIds = $this->principalService->principalIdsForUser($userId);
         $groupIds = array_values(array_filter(
             $allIds,
             static fn(int $id): bool => $id !== $userPrincipalId,

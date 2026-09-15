@@ -232,12 +232,30 @@ final class RouteToOpenApi
      */
     private function operationFromHandler(array $handler, string $method): array
     {
-        [$class, $methodName] = $handler;
-        if (!class_exists($class)) {
+        $op = $this->handlerOperationAttribute($handler, $method);
+        if ($op === null) {
             return [];
         }
 
-        $reflection = new ReflectionMethod($class, $methodName);
+        return $this->extractOperationFields($op);
+    }
+
+    /**
+     * Locate the controller method's `#[OA\Get|Post|Put|Patch|Delete|...`]
+     * attribute, or `null` when the handler doesn't declare one. The
+     * returned object carries the `Undefined` sentinel strings the OA
+     * library would normally resolve at analyse time — we never run the
+     * analyser here, so {@see extractOperationFields()} filters them.
+     *
+     * @param array{0:string, 1:string} $handler
+     */
+    private function handlerOperationAttribute(array $handler, string $method): mixed
+    {
+        [$class, $methodName] = $handler;
+        if (!class_exists($class)) {
+            return null;
+        }
+
         $attributeClass = match (strtoupper($method)) {
             'GET' => \OpenApi\Attributes\Get::class,
             'POST' => \OpenApi\Attributes\Post::class,
@@ -249,23 +267,37 @@ final class RouteToOpenApi
             default => null,
         };
         if ($attributeClass === null) {
-            return [];
+            return null;
         }
 
-        $attrs = $reflection->getAttributes($attributeClass, ReflectionAttribute::IS_INSTANCEOF);
-        if ($attrs === []) {
-            return [];
-        }
+        $attrs = (new ReflectionMethod($class, $methodName))->getAttributes(
+            $attributeClass,
+            ReflectionAttribute::IS_INSTANCEOF,
+        );
 
-        // $op is typed as `mixed` deliberately: the OA\Operation
-        // attributes carry `Undefined` string sentinels in
-        // summary/description/tags/requestBody/responses/parameters
-        // until the OA analyser runs, and we never run it. Each
-        // property needs a runtime check before it lands in the
-        // output bag — see the method-level comment.
-        /** @var mixed $op */
-        $op = $attrs[0]->newInstance();
+        return $attrs === [] ? null : $attrs[0]->newInstance();
+    }
 
+    /**
+     * Lift the documented fields (`summary`, `description`, `tags`,
+     * `requestBody`, `responses`, `parameters`) onto a fresh output
+     * bag. Every property is runtime-checked because the OA library
+     * leaves string sentinels on freshly-instantiated attributes until
+     * its own analyser runs — and we never run it.
+     *
+     * @param mixed $op the OA\Operation attribute instance, or `null`
+     *                  (caller-side guard; this method requires non-null)
+     * @return array{
+     *     summary?: string,
+     *     description?: string,
+     *     tags?: list<string>,
+     *     requestBody?: OA\RequestBody,
+     *     responses?: array<string, Response>,
+     *     parameters?: list<Parameter>,
+     * }
+     */
+    private function extractOperationFields(mixed $op): array
+    {
         $out = [];
         if (is_string($op->summary) && $op->summary !== '') {
             $out['summary'] = $op->summary;

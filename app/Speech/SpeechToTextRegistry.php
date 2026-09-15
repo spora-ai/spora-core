@@ -4,12 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Speech;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Models\Agent;
-use Spora\Models\PrincipalPreference;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalService;
-use Throwable;
 
 /**
  * Discovers every plugin-contributed + core-shipped
@@ -32,7 +28,8 @@ use Throwable;
  *      group's preference; first match wins.
  *   4. **Global default** —
  *      `speech_provider_configurations WHERE is_global = true AND
- *      is_default = true`. First match wins.
+ *      is_default = true`. First match wins, ordered
+ *      `updated_at DESC, id DESC`.
  *   5. **First-registered-wins fallback** — iterate providers in
  *      constructor order, return the first whose effective settings
  *      resolve to a configured state. (Legacy behaviour, preserved
@@ -45,22 +42,23 @@ use Throwable;
  * as unset and the cascade falls through, matching the existing
  * behaviour.
  *
- * The previous PR's per-agent override via `agent_tool_overrides`
- * was removed in migration 0084 — the new tier 1 reads from
- * `agents.speech_driver_config_id` directly. Migration 0084 also
- * cleans up the legacy override rows for core STT classes; plugin
- * operators either re-create via the new endpoint or leave the
- * legacy rows in place (the cascade ignores them anyway).
+ * The cascade walk lives in {@see SpeechToTextCascadeResolver}; this
+ * class stays small (one constructor + six public methods) so it
+ * stays under the SonarCloud S1448 20-method-per-class ceiling.
  */
 final readonly class SpeechToTextRegistry
 {
+    private readonly SpeechToTextCascadeResolver $cascade;
+
     /**
      * @param list<SpeechToTextProviderInterface> $providers
      */
     public function __construct(
         private array $providers,
-        private PrincipalService $principalService,
-    ) {}
+        PrincipalService $principalService,
+    ) {
+        $this->cascade = new SpeechToTextCascadeResolver($providers, $principalService);
+    }
 
     /**
      * @return list<SpeechToTextProviderInterface>
@@ -98,7 +96,7 @@ final readonly class SpeechToTextRegistry
         $userId ??= 0;
         $agentId ??= 0;
 
-        [$class, $source, $configId] = $this->resolveEffectiveClassWithSource($userId, $agentId);
+        [$class, , $configId] = $this->cascade->resolveEffectiveClassWithSource($userId, $agentId);
         if ($class === null) {
             return null;
         }
@@ -122,8 +120,10 @@ final readonly class SpeechToTextRegistry
             if ($configId !== null) {
                 $this->bindProviderLabel($provider, $configId);
             }
+
             return $provider;
         }
+
         return null;
     }
 
@@ -157,12 +157,12 @@ final readonly class SpeechToTextRegistry
         $userId ??= 0;
         $agentId ??= 0;
 
-        [$effectiveClass, $effectiveSource, $effectiveConfigId] = $this->resolveEffectiveClassWithSource($userId, $agentId);
+        [$effectiveClass, $effectiveSource, $effectiveConfigId] = $this->cascade->resolveEffectiveClassWithSource($userId, $agentId);
 
         $rows = [];
         foreach ($this->providers as $provider) {
             $providerClass = $provider::class;
-            $resolvedConfig = $this->resolveConfigForClass($providerClass, $userId, $agentId);
+            $resolvedConfig = $this->cascade->resolveConfigForClass($providerClass, $userId, $agentId);
 
             if ($resolvedConfig !== null) {
                 $this->bindProviderLabel($provider, (int) $resolvedConfig->id);
@@ -191,60 +191,12 @@ final readonly class SpeechToTextRegistry
     }
 
     /**
-     * Look up the {@see SpeechProviderConfiguration} row that picked
-     * the given provider class for the calling user. Returns `null`
-     * when the class was resolved via the tier-5 fallback (no FK
-     * behind the choice).
-     */
-    private function resolveConfigForClass(string $providerClass, int $userId, int $agentId): ?SpeechProviderConfiguration
-    {
-        $agentConfig = $this->loadAgentSpeechConfig($agentId);
-        if ($agentConfig !== null && $agentConfig->provider_class === $providerClass) {
-            return $agentConfig;
-        }
-
-        $preferred = $this->resolvePreferredConfigRow($userId);
-        if ($preferred !== null && $preferred->provider_class === $providerClass) {
-            return $preferred;
-        }
-
-        $default = SpeechProviderConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->where('provider_class', $providerClass)
-            ->orderBy('updated_at', 'desc')
-            ->orderBy('id', 'desc')
-            ->first();
-        if ($default !== null) {
-            return $default;
-        }
-
-        return null;
-    }
-
-    private function resolvePreferredConfigRow(int $userId): ?SpeechProviderConfiguration
-    {
-        if ($userId <= 0 || $this->registeredSttClasses() === []) {
-            return null;
-        }
-
-        try {
-            $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
-        } catch (Throwable) {
-            return null;
-        }
-        $preference = PrincipalPreference::where('principal_id', $userPrincipalId)->first();
-        if ($preference === null || $preference->preferred_speech_config_id === null) {
-            return null;
-        }
-        return SpeechProviderConfiguration::find((int) $preference->preferred_speech_config_id);
-    }
-
-    /**
      * Walk the cascade and return the resolved class FQCN, the tier
      * label that produced it, and the configuration row id that
-     * backed the choice. Backed by
-     * {@see self::resolveEffectiveClassWithSource()} so the transcribe
-     * flow and the capability endpoint stay in lockstep.
+     * backed the choice. Forwarded to
+     * {@see SpeechToTextCascadeResolver::resolveEffectiveClassWithSource()}
+     * so the transcribe flow and the capability endpoint stay in
+     * lockstep.
      *
      * @return array{0: string|null, 1: string|null, 2: int|null}
      */
@@ -253,195 +205,6 @@ final readonly class SpeechToTextRegistry
         $userId ??= 0;
         $agentId ??= 0;
 
-        return $this->resolveEffectiveClassWithSource($userId, $agentId);
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolveEffectiveClassWithSource(int $userId, int $agentId = 0): array
-    {
-        // Tier 1: agent-specific config.
-        $agentTier = $this->resolveAgentClass($agentId);
-        if ($agentTier[0] !== null) {
-            return $agentTier;
-        }
-
-        // Tiers 2 + 3: user / group preference (FK).
-        $prefTier = $this->resolvePreferredClassWithSource($userId);
-        if ($prefTier[0] !== null) {
-            return $prefTier;
-        }
-
-        return $this->resolveTailClass();
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolveTailClass(): array
-    {
-        // Tier 4: global default.
-        $globalTier = $this->resolveGlobalDefaultClass();
-        if ($globalTier[0] !== null) {
-            return $globalTier;
-        }
-        // Tier 5: fallback — first registered STT class.
-        return $this->resolveFallbackClass();
-    }
-
-    /**
-     * @return array{0: string|null, 1: string, 2: int|null}
-     */
-    private function resolveAgentClass(int $agentId): array
-    {
-        $config = $this->loadAgentSpeechConfig($agentId);
-        if ($config === null) {
-            return [null, 'fallback', null];
-        }
-        return $this->resolveRegisteredClass($config->provider_class, 'agent', $config);
-    }
-
-    private function loadAgentSpeechConfig(int $agentId): ?SpeechProviderConfiguration
-    {
-        if ($agentId <= 0) {
-            return null;
-        }
-        $agent = Agent::find($agentId);
-        if ($agent === null || $agent->speech_driver_config_id === null) {
-            return null;
-        }
-        return SpeechProviderConfiguration::find($agent->speech_driver_config_id);
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolvePreferredClassWithSource(int $userId): array
-    {
-        if ($this->registeredSttClasses() === [] || $userId <= 0) {
-            return [null, 'fallback', null];
-        }
-
-        $userTier = $this->resolveUserPreferenceTier($userId);
-        if ($userTier[0] !== null) {
-            return $userTier;
-        }
-        return $this->resolveGroupPreferenceTier($userId);
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolveUserPreferenceTier(int $userId): array
-    {
-        try {
-            $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
-        } catch (Throwable) {
-            return [null, 'fallback', null];
-        }
-        $config = $this->configForPrincipalPreferred($userPrincipalId);
-        if ($config === null) {
-            return [null, 'fallback', null];
-        }
-        return [$config->provider_class, 'user_preference', (int) $config->id];
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolveGroupPreferenceTier(int $userId): array
-    {
-        // Tier 3: group preferences, joined_at ASC.
-        $groupRows = Capsule::table('group_memberships')
-            ->join('principals', 'principals.group_id', '=', 'group_memberships.group_id')
-            ->where('group_memberships.user_id', $userId)
-            ->where('principals.type', \Spora\Models\Principal::TYPE_GROUP)
-            ->orderBy('group_memberships.joined_at')
-            ->orderBy('principals.id')
-            ->select('principals.id as principal_id')
-            ->get();
-
-        foreach ($groupRows as $groupRow) {
-            $config = $this->configForPrincipalPreferred((int) $groupRow->principal_id);
-            if ($config !== null && in_array($config->provider_class, $this->registeredSttClasses(), true)) {
-                return [$config->provider_class, 'group_preference', (int) $config->id];
-            }
-        }
-        return [null, 'fallback', null];
-    }
-
-    private function configForPrincipalPreferred(int $principalId): ?SpeechProviderConfiguration
-    {
-        $configId = PrincipalPreference::where('principal_id', $principalId)
-            ->value('preferred_speech_config_id');
-        if (!is_int($configId) || $configId <= 0) {
-            return null;
-        }
-        $config = SpeechProviderConfiguration::find($configId);
-        if ($config === null) {
-            return null;
-        }
-        if (!in_array($config->provider_class, $this->registeredSttClasses(), true)) {
-            return null;
-        }
-        return $config;
-    }
-
-    /**
-     * @return array{0: string|null, 1: string, 2: int|null}
-     */
-    private function resolveGlobalDefaultClass(): array
-    {
-        // Most-recently-promoted default wins — ties broken by id DESC
-        // so the same `updated_at` ordering is deterministic.
-        $defaultConfig = SpeechProviderConfiguration::where('is_global', true)
-            ->where('is_default', true)
-            ->orderBy('updated_at', 'desc')
-            ->orderBy('id', 'desc')
-            ->first();
-        if ($defaultConfig === null) {
-            return [null, 'global_default', null];
-        }
-        $registered = $this->registeredSttClasses();
-        if (!in_array($defaultConfig->provider_class, $registered, true)) {
-            return [null, 'global_default', null];
-        }
-        return [$defaultConfig->provider_class, 'global_default', (int) $defaultConfig->id];
-    }
-
-    /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
-     */
-    private function resolveFallbackClass(): array
-    {
-        if ($this->providers === []) {
-            return [null, null, null];
-        }
-        $first = $this->providers[0];
-        return [$first::class, 'fallback', null];
-    }
-
-    /**
-     * @return array{0: string|null, 1: string, 2: int|null}
-     */
-    private function resolveRegisteredClass(string $class, string $source, SpeechProviderConfiguration $config): array
-    {
-        if (in_array($class, $this->registeredSttClasses(), true)) {
-            return [$class, $source, (int) $config->id];
-        }
-        return [null, 'fallback', null];
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function registeredSttClasses(): array
-    {
-        $classes = [];
-        foreach ($this->providers as $provider) {
-            $classes[] = $provider::class;
-        }
-        return $classes;
+        return $this->cascade->resolveEffectiveClassWithSource($userId, $agentId);
     }
 }

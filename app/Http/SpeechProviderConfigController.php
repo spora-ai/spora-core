@@ -203,8 +203,15 @@ final class SpeechProviderConfigController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
-        $body = $resolved;
 
+        return $this->createAndRespond($userId, $resolved, $isAdmin);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function createAndRespond(int $userId, array $body, bool $isAdmin): JsonResponse
+    {
         try {
             $config = $this->service->createConfiguration($userId, $body, $isAdmin);
         } catch (SpeechProviderConfigException $e) {

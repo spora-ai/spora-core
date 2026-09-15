@@ -162,11 +162,6 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         });
     }
 
-    public function findConfiguration(int $configId): ?SpeechProviderConfiguration
-    {
-        return SpeechProviderConfiguration::find($configId);
-    }
-
     public function createConfiguration(int $userId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
         return $this->mutator->createConfiguration($userId, $data, $isAdmin);
