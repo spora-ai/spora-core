@@ -45,15 +45,22 @@ use Symfony\Component\HttpFoundation\Request;
  *                           link) the assistant can drop into its reply,
  *                           pointing at the local archive URL. Auto-approved
  *                           read-only operation.
- *   - `get_source`        — return the raw bytes of a single asset so the LLM
+ *   - `get_source`        — return the source of a single asset so the LLM
  *                           can iterate on it (e.g. read a `.typ` source,
  *                           re-ingest an extracted document). Text-shaped
- *                           mimes inline up to {@see self::GET_SOURCE_TEXT_MAX};
- *                           binary mimes inline base64 up to
- *                           {@see self::GET_SOURCE_BINARY_MAX}. Hidden by
- *                           default (`enabledByDefault: false`) and always
- *                           requires approval — every call surfaces the asset's
- *                           bytes to the LLM, which is a stronger promise than
+ *                           mimes (text/*, JSON, XML, YAML, SVG, CSV, x-typst)
+ *                           inline up to {@see self::GET_SOURCE_TEXT_MAX};
+ *                           binary mimes do NOT return raw bytes — instead
+ *                           the asset's extracted `markdown_content` is
+ *                           surfaced (truncated to
+ *                           {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) so
+ *                           the LLM gets something it can actually iterate
+ *                           on. When no markdown_content exists, fail with a
+ *                           hint pointing at `get_media` /
+ *                           `list_derivatives`. Hidden by default
+ *                           (`enabledByDefault: false`) and always requires
+ *                           approval — every call surfaces the asset's source
+ *                           to the LLM, which is a stronger promise than
  *                           `get_media`'s embed-only contract.
  *   - `list_derivatives`  — return the derivative rows of a parent asset
  *                           (e.g. the PNG/PDF renders of a `.typ` source).
@@ -131,15 +138,18 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'get_source',
-    description: 'Return the raw bytes of a single asset so the LLM can iterate on it '
+    description: 'Return the source of a single asset so the LLM can iterate on it '
                . '(e.g. read a .typ file, re-ingest an extracted document). Text-shaped '
-               . 'mimes (text/*, application/json, application/xml) return the bytes '
-               . 'inline; binary mimes return a base64-encoded payload under '
-               . 'data.content_base64. Hard size cap (see {@see self::GET_SOURCE_TEXT_MAX} '
-               . 'and {@see self::GET_SOURCE_BINARY_MAX}); oversized assets fail with a '
-               . 'message pointing the LLM at `get_media` for the public URL. External '
-               . 'assets (storage_mode=external) have no Spora-side payload — fail with '
-               . 'a hint to use `get_media` for the source URL. Off by default; each '
+               . 'mimes (text/*, application/json, application/xml, application/yaml, '
+               . 'application/x-yaml, application/svg+xml, application/csv, '
+               . 'application/x-typst) return the bytes inline, capped at '
+               . '{@see self::GET_SOURCE_TEXT_MAX}. Binary mimes do NOT return raw '
+               . 'bytes; instead the asset\'s extracted `markdown_content` is '
+               . 'surfaced (truncated to {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) '
+               . 'when available. When no markdown_content exists, fail with a hint '
+               . 'pointing at `get_media` / `list_derivatives`. External assets '
+               . '(storage_mode=external) have no Spora-side payload — fail with a '
+               . 'hint to use `get_media` for the source URL. Off by default; each '
                . 'call requires operator approval.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
@@ -203,13 +213,6 @@ final class MediaTool extends AbstractTool
      * `get_media`'s public URL, not inlined into the LLM context.
      */
     private const GET_SOURCE_TEXT_MAX = 5 * 1024 * 1024;
-
-    /**
-     * Binary inline cap for `get_source`. Base64 inflation + the LLM
-     * context window makes binary inlining much more expensive than
-     * text, so the cap sits well below the text cap.
-     */
-    private const GET_SOURCE_BINARY_MAX = 2 * 1024 * 1024;
 
     private readonly array $config;
 
@@ -462,25 +465,33 @@ final class MediaTool extends AbstractTool
     }
 
     /**
-     * Read the asset's bytes back to the caller so the LLM can iterate
-     * (e.g. re-typeset a previously uploaded source). Scope, ownership,
-     * and approval are inherited from {@see resolveAssetOrFail()} and
+     * Read the asset's source back to the caller so the LLM can
+     * iterate (e.g. re-typeset a previously uploaded `.typ` source,
+     * re-ingest an extracted document). Scope, ownership, and
+     * approval are inherited from {@see resolveAssetOrFail()} and
      * the per-op `requiresApprovalByDefault: true`.
      *
+     * Behavior by MIME shape:
+     *  - Text-shaped (text/*, application/json, application/xml,
+     *    application/yaml, application/x-yaml, application/svg+xml,
+     *    application/csv, application/x-typst): read the bytes
+     *    inline, capped at {@see self::GET_SOURCE_TEXT_MAX}.
+     *  - Binary (everything else): do NOT read bytes. Return the
+     *    asset's extracted `markdown_content` (truncated to
+     *    {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) when the
+     *    operator already populated it during ingestion — that's
+     *    the natural shape for an LLM to iterate on. When no
+     *    markdown_content exists, fail with a hint pointing at
+     *    `get_media` and `list_derivatives`. Base64-encoding raw
+     *    binary bytes into the chat context is not useful for an
+     *    LLM and ballooned the previous tool, so it was removed.
+     *
      * Storage handling:
-     *  - `data_url` / `local`: read bytes via the asset stores.
+     *  - `data_url` / `local`: read bytes via the asset stores
+     *    (text path only).
      *  - `external`: no Spora-side payload — point the LLM at
      *    `get_media` for the source URL instead of pretending the
      *    payload is local.
-     *
-     * Size handling:
-     *  - Text-shaped mimes (text/*, application/json, application/xml,
-     *    application/yaml, application/x-yaml) inline up to
-     *    {@see self::GET_SOURCE_TEXT_MAX} bytes.
-     *  - Binary mimes inline up to {@see self::GET_SOURCE_BINARY_MAX}
-     *    bytes, base64-encoded under `data.content_base64`.
-     *  - Anything larger fails with an actionable message that points
-     *    the LLM at the public URL (`get_media`).
      *
      * @param  array<string, mixed> $arguments
      */
@@ -491,75 +502,110 @@ final class MediaTool extends AbstractTool
             return $asset;
         }
 
-        $bytes = $this->sourceReader->read($asset);
-        if ($bytes === null) {
-            return match ($asset->storage_mode) {
-                'external' => ToolResult::fail(sprintf(
-                    'Asset %s is stored externally (storage_mode=external) and has no '
-                    . 'Spora-side payload. Use `get_media` to retrieve its source URL.',
-                    $asset->id,
-                )),
-                default    => ToolResult::fail(sprintf(
-                    'Asset %s payload could not be read (storage_mode=%s). '
-                        . 'The underlying blob may be missing; try `get_media` for the public URL.',
-                    $asset->id,
-                    $asset->storage_mode,
-                )),
-            };
-        }
-
-        return $this->buildSourceResponse($asset, $bytes);
-    }
-
-    private function buildSourceResponse(MediaAsset $asset, string $bytes): ToolResult
-    {
-        $mime     = (string) ($asset->mime_type ?? 'application/octet-stream');
-        $isText   = MediaSourceReader::isTextShapedMime($mime);
-        $sizeCap  = $isText ? self::GET_SOURCE_TEXT_MAX : self::GET_SOURCE_BINARY_MAX;
-        $size     = strlen($bytes);
-        $filename = (string) ($asset->filename ?? $asset->id);
-
-        if ($size > $sizeCap) {
+        // External assets never have a Spora-side payload — surface that
+        // first so the LLM isn't routed to the binary-fallback path
+        // (which would say "no markdown_content" and miss the real reason).
+        if ($asset->storage_mode === 'external') {
             return ToolResult::fail(sprintf(
-                'Asset %s (%s, %.1f MiB) exceeds the inline `get_source` cap of %d MiB for %s '
-                    . 'mimes. Use `get_media` to fetch the public URL and stream the bytes '
-                    . 'out-of-band.',
+                'Asset %s is stored externally (storage_mode=external) and has no '
+                . 'Spora-side payload. Use `get_media` to retrieve its source URL.',
                 $asset->id,
-                $filename,
-                $size / (1024 * 1024),
-                (int) ($sizeCap / (1024 * 1024)),
-                $isText ? 'text-shaped' : 'binary',
             ));
         }
 
-        return $isText
-            ? ToolResult::ok(
-                sprintf('Source of %s (%s, %d bytes, mime=%s):', $asset->id, $filename, $size, $mime) . "\n\n" . $bytes,
-                [
-                    'asset_id'  => $asset->id,
-                    'filename'  => $filename,
-                    'mime_type' => $mime,
-                    'byte_size' => $size,
-                    'encoding'  => 'utf-8',
-                ],
-            )
-            : ToolResult::ok(
-                sprintf(
-                    'Binary source of %s (%s, %d bytes, mime=%s); base64 payload in data.content_base64.',
-                    $asset->id,
-                    $filename,
-                    $size,
-                    $mime,
-                ),
-                [
-                    'asset_id'       => $asset->id,
-                    'filename'       => $filename,
-                    'mime_type'      => $mime,
-                    'byte_size'      => $size,
-                    'encoding'       => 'base64',
-                    'content_base64' => base64_encode($bytes),
-                ],
-            );
+        $mime = (string) ($asset->mime_type ?? 'application/octet-stream');
+        if (!MediaSourceReader::isTextShapedMime($mime)) {
+            return $this->binarySourceFallback($asset, $mime);
+        }
+
+        $bytes = $this->sourceReader->read($asset);
+        if ($bytes === null) {
+            return ToolResult::fail(sprintf(
+                'Asset %s payload could not be read (storage_mode=%s). '
+                    . 'The underlying blob may be missing; try `get_media` for the public URL.',
+                $asset->id,
+                $asset->storage_mode,
+            ));
+        }
+
+        return $this->buildTextSourceResponse($asset, $bytes, $mime);
+    }
+
+    private function buildTextSourceResponse(MediaAsset $asset, string $bytes, string $mime): ToolResult
+    {
+        $filename = (string) ($asset->filename ?? $asset->id);
+        $size     = strlen($bytes);
+
+        if ($size > self::GET_SOURCE_TEXT_MAX) {
+            return ToolResult::fail(sprintf(
+                'Asset %s (%s, %.1f MiB) exceeds the inline `get_source` text cap of %d MiB. '
+                    . 'Use `get_media` to fetch the public URL and stream the bytes out-of-band.',
+                $asset->id,
+                $filename,
+                $size / (1024 * 1024),
+                (int) (self::GET_SOURCE_TEXT_MAX / (1024 * 1024)),
+            ));
+        }
+
+        return ToolResult::ok(
+            sprintf('Source of %s (%s, %d bytes, mime=%s):', $asset->id, $filename, $size, $mime) . "\n\n" . $bytes,
+            [
+                'asset_id'  => $asset->id,
+                'filename'  => $filename,
+                'mime_type' => $mime,
+                'byte_size' => $size,
+                'encoding'  => 'utf-8',
+            ],
+        );
+    }
+
+    /**
+     * Binary files don't return their raw bytes through `get_source`.
+     * If the operator already extracted a markdown/text preview during
+     * ingestion, surface that — it's the shape an LLM can actually
+     * iterate on (re-typeset from `.typ`, re-prompt on the doc). When
+     * nothing was extracted, fail with a clear hint pointing at
+     * `get_media` and `list_derivatives` so the LLM doesn't keep
+     * guessing.
+     */
+    private function binarySourceFallback(MediaAsset $asset, string $mime): ToolResult
+    {
+        $markdownContent = $asset->markdown_content;
+        if (!is_string($markdownContent) || $markdownContent === '') {
+            return ToolResult::fail(sprintf(
+                'Asset %s (%s) is a binary mime; `get_source` does not return raw bytes '
+                    . 'for binary mimes, and no extracted markdown_content is available. '
+                    . 'Use `get_media` for the asset URL or `list_derivatives` to see '
+                    . 'rendered alternatives.',
+                $asset->id,
+                $mime,
+            ));
+        }
+
+        $preview  = $this->previewMarkdownContent($markdownContent);
+        $truncated = strlen($markdownContent) > self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES;
+        $filename = (string) ($asset->filename ?? $asset->id);
+
+        return ToolResult::ok(
+            sprintf(
+                "⚠ Asset %s (%s) is a binary mime; `get_source` does not return raw bytes. "
+                    . "Returning the extracted markdown_content%s instead. Use `get_media` "
+                    . "for the asset URL.\n\n%s",
+                $asset->id,
+                $mime,
+                $truncated ? ' (truncated to ' . self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES . ' bytes)' : '',
+                $preview,
+            ),
+            [
+                'asset_id'      => $asset->id,
+                'filename'      => $filename,
+                'mime_type'     => $mime,
+                'byte_size'     => $asset->byte_size,
+                'fallback'      => 'markdown_content',
+                'truncated'     => $truncated,
+                'content'       => $preview,
+            ],
+        );
     }
 
     /**

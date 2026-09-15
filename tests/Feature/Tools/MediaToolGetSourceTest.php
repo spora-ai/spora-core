@@ -7,9 +7,11 @@ use Spora\Models\MediaAsset;
 
 /**
  * End-to-end tests for `MediaTool::get_source` — the op that surfaces
- * the raw bytes of a single media_assets row so the LLM can iterate
+ * the source of a single media_assets row so the LLM can iterate
  * (re-typeset a previously uploaded `.typ` source, re-ingest an
- * extracted document, etc.).
+ * extracted document, etc.). Text-shaped mimes get inline bytes
+ * (capped at GET_SOURCE_TEXT_MAX); binary mimes fall back to the
+ * asset's extracted `markdown_content` preview.
  *
  * Tests run with admin auth so the scope check is bypassed and the
  * behaviour under test is the read pipeline + size cap + storage_mode
@@ -68,15 +70,18 @@ describe('MediaTool::get_source', function (): void {
         }
     });
 
-    it('returns binary bytes as base64 under data.content_base64', function (): void {
+    it('returns the asset\'s markdown_content for binary mimes when an extracted preview exists', function (): void {
         // Small PNG header — not a valid PNG but enough to prove the
         // binary branch is hit (mime doesn't start with text/).
         $bytes = "\x89PNG\r\n\x1a\n" . random_bytes(32);
-        seedSourceAsset(
+        $extractedText = "# Screenshot\n\nOperator-curated description of the binary asset.";
+        $asset = seedSourceAsset(
             id: 'bbbbbbbb-1111-2222-3333-444444444444',
             bytes: $bytes,
             mime: 'image/png',
         );
+        $asset->markdown_content = $extractedText;
+        $asset->save();
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
@@ -87,20 +92,82 @@ describe('MediaTool::get_source', function (): void {
             );
 
             expect($result->success)->toBeTrue();
-            expect($result->content)->toContain('Binary source');
-            expect($result->data['encoding'])->toBe('base64');
+            // Warning prefix so the LLM knows this isn't the raw bytes.
+            expect($result->content)->toContain('⚠');
+            expect($result->content)->toContain('binary mime');
+            expect($result->content)->toContain('markdown_content');
+            expect($result->content)->toContain($extractedText);
+            // Wire shape pins the fallback contract.
+            expect($result->data['fallback'])->toBe('markdown_content');
             expect($result->data['mime_type'])->toBe('image/png');
-            expect($result->data['byte_size'])->toBe(strlen($bytes));
-            expect(base64_decode((string) $result->data['content_base64'], true))->toBe($bytes);
+            expect($result->data['content'])->toBe($extractedText);
+            expect($result->data['truncated'])->toBeFalse();
+            expect($result->data)->not->toHaveKey('content_base64');
+            expect($result->data)->not->toHaveKey('encoding');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('truncates a long markdown_content to GET_MEDIA_MARKDOWN_PREVIEW_BYTES and flags it', function (): void {
+        $bytes = random_bytes(64);
+        $longText = str_repeat('Sentence. ', 4000); // ~44 KB, well over 8 KB
+        $asset = seedSourceAsset(
+            id: 'b2bbbbbb-1111-2222-3333-444444444444',
+            bytes: $bytes,
+            mime: 'application/pdf',
+        );
+        $asset->markdown_content = $longText;
+        $asset->save();
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_source', 'asset_id' => 'b2bbbbbb-1111-2222-3333-444444444444'],
+                agentId: 1,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['truncated'])->toBeTrue();
+            expect($result->content)->toContain('truncated to');
+            // The preview is the truncated string, not the full text.
+            expect(strlen((string) $result->data['content']))->toBeLessThan(strlen($longText));
+        } finally {
+            $restore();
+        }
+    });
+
+    it('fails with a get_media / list_derivatives hint when a binary asset has no markdown_content', function (): void {
+        $bytes = random_bytes(64);
+        $asset = seedSourceAsset(
+            id: 'dddddddd-1111-2222-3333-444444444444',
+            bytes: $bytes,
+            mime: 'image/png',
+        );
+        $asset->markdown_content = null;
+        $asset->save();
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_source', 'asset_id' => 'dddddddd-1111-2222-3333-444444444444'],
+                agentId: 1,
+                userId: 99,
+            );
+
+            expect($result->success)->toBeFalse();
+            expect($result->content)->toContain('binary mime');
+            expect($result->content)->toContain('does not return raw bytes');
+            expect($result->content)->toContain('get_media');
+            expect($result->content)->toContain('list_derivatives');
         } finally {
             $restore();
         }
     });
 
     it('refuses text-shaped payloads above GET_SOURCE_TEXT_MAX with a get_media hint', function (): void {
-        // Build a payload that's just over the 5 MiB text cap. Use a
-        // text-shaped mime so the cap is the text one, not the smaller
-        // binary cap.
+        // Build a payload that's just over the 5 MiB text cap.
         $bytes = str_repeat('a', (5 * 1024 * 1024) + 1);
         seedSourceAsset(
             id: 'cccccccc-1111-2222-3333-444444444444',
@@ -117,35 +184,9 @@ describe('MediaTool::get_source', function (): void {
             );
 
             expect($result->success)->toBeFalse();
-            expect($result->content)->toContain('exceeds the inline `get_source` cap');
+            expect($result->content)->toContain('exceeds the inline `get_source`');
             expect($result->content)->toContain('get_media');
             expect($result->content)->toContain('5 MiB');
-        } finally {
-            $restore();
-        }
-    });
-
-    it('refuses binary payloads above GET_SOURCE_BINARY_MAX', function (): void {
-        // 3 MiB binary — well over the 2 MiB binary cap.
-        $bytes = random_bytes(3 * 1024 * 1024);
-        seedSourceAsset(
-            id: 'dddddddd-1111-2222-3333-444444444444',
-            bytes: $bytes,
-            mime: 'image/png',
-        );
-
-        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
-        try {
-            $result = $tool->execute(
-                ['action' => 'get_source', 'asset_id' => 'dddddddd-1111-2222-3333-444444444444'],
-                agentId: 1,
-                userId: 99,
-            );
-
-            expect($result->success)->toBeFalse();
-            expect($result->content)->toContain('exceeds the inline `get_source` cap');
-            expect($result->content)->toContain('2 MiB');
-            expect($result->content)->toContain('binary');
         } finally {
             $restore();
         }
