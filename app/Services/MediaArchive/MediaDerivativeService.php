@@ -10,6 +10,7 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetStore;
+use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalService;
 use Throwable;
@@ -51,6 +52,102 @@ final class MediaDerivativeService
         private readonly ContainerInterface $container,
         private readonly ?LoggerInterface $logger = null,
     ) {}
+
+    /**
+     * Produce a derivative end-to-end: resolve the producer, call
+     * `produce()`, persist the bytes + the `media_derivatives` join row
+     * with attribution, and return the resulting `MediaAsset`.
+     *
+     * Single entry point for both {@see MediaDerivativeController} and
+     * {@see \Spora\Tools\MediaTool::createDerivative} so producer
+     * resolution lives in one place — adding a new producer or a new
+     * attribution field is a single-site change.
+     *
+     * @param  array<string, mixed> $options
+     *
+     * @throws NoDerivativeProducerException when no registered producer
+     *         advertises `$format` for the parent's MIME/extension.
+     *         The HTTP controller maps this to 409 Conflict; the LLM
+     *         tool maps it to a `ToolResult::fail()` so the assistant
+     *         sees a human-readable explanation and can retry.
+     * @throws Throwable any error from the producer's `produce()`
+     *         propagates verbatim — the HTTP layer maps it to 422,
+     *         the tool layer to `ToolResult::fail()`.
+     */
+    public function createFromRequest(
+        MediaAsset $parent,
+        string $format,
+        array $options = [],
+        ?int $userId = null,
+        ?PrincipalContext $context = null,
+    ): MediaAsset {
+        $producer = $this->findProducer($parent, $format);
+        if ($producer === null) {
+            throw new NoDerivativeProducerException(sprintf(
+                'No derivative producer supports format "%s" for asset %s (mime=%s, filename=%s).',
+                $format,
+                $parent->id,
+                (string) ($parent->mime_type ?? ''),
+                (string) ($parent->filename ?? ''),
+            ));
+        }
+        $output = $producer->produce($parent, $format, $options);
+        return $this->create(
+            parent: $parent,
+            output: $output,
+            format: $format,
+            producerPlugin: $producer->pluginSlug(),
+            producerOperation: $producer->operationName(),
+            userId: $userId,
+            context: $context,
+        );
+    }
+
+    /**
+     * Reverse lookup: given a derivative `media_assets` id, return the
+     * parent asset id (or null when the asset isn't a derivative of
+     * anything in the Spora archive). Mirrors the join shape used by
+     * {@see create()}'s natural key — a derivative row has exactly one
+     * parent row, when one exists.
+     */
+    public function parentOf(string $derivativeId): ?string
+    {
+        $parentId = Capsule::table('media_derivatives')
+            ->where('derivative_id', $derivativeId)
+            ->value('parent_id');
+        return $parentId !== null ? (string) $parentId : null;
+    }
+
+    /**
+     * Walk {@see MediaDerivativeProducerDiscovery::all()} and return the
+     * first producer that accepts `$parent`'s MIME/extension and emits
+     * `$format`. Mirrors the controller's `findProducer()` but lives
+     * on the service so the controller and the tool both call the
+     * same code path.
+     */
+    private function findProducer(MediaAsset $parent, string $format): ?MediaDerivativeProducerInterface
+    {
+        $format = strtolower($format);
+        $mime   = strtolower((string) ($parent->mime_type ?? ''));
+        $ext    = strtolower(pathinfo((string) ($parent->filename ?? ''), PATHINFO_EXTENSION));
+
+        foreach (MediaDerivativeProducerDiscovery::all() as $class) {
+            /** @var MediaDerivativeProducerInterface $producer */
+            $producer = $this->container->get($class);
+            $sources = array_map('strtolower', $producer->supportedSourceFormats());
+            $outputs = array_map('strtolower', $producer->supportedDerivativeFormats());
+
+            $sourceMatches = $mime !== '' && in_array($mime, $sources, true);
+            if (!$sourceMatches && $ext !== '') {
+                $sourceMatches = in_array($ext, $sources, true);
+            }
+
+            if (in_array($format, $outputs, true) && $sourceMatches) {
+                return $producer;
+            }
+        }
+        return null;
+    }
 
     /**
      * Create or refresh a derivative. The bytes on the new `media_assets`

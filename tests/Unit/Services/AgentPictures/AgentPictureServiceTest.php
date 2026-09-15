@@ -8,7 +8,6 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use RuntimeException;
 use Spora\Models\Agent;
-use Spora\Models\MediaAsset;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPictures\Archetype;
 use Spora\Services\AgentPictures\Palette;
@@ -91,7 +90,7 @@ test('attachImage swaps in the upload and preserves the avatar fields', function
 
     $picture = $this->service->attachImage(agentPictureLoadAgent(1), $asset);
 
-    expect($picture->media_asset_id)->toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    expect($picture->media_asset_id)->toBe($asset->id);
     // avatar fields preserved so detach restores the operator's previous choice
     expect($picture->archetype)->toBe('researcher');
     expect($picture->variant_key)->toBe('v1');
@@ -174,7 +173,7 @@ test('toWireShape returns the image shape for an uploaded picture', function ():
 
     expect($wire['kind'])->toBe('image');
     expect($wire['archetype'])->toBeNull();
-    expect($wire['image_url'])->toBe('/api/v1/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.png');
+    expect($wire['image_url'])->toBe("/api/v1/assets/{$asset->id}.png");
 });
 
 test('applyTemplateMetadata returns null when no picture fields are present', function (): void {
@@ -208,21 +207,6 @@ test('normaliseVariantKey accepts v0, v1, v2 only', function (): void {
     expect($this->service->normaliseVariantKey('v2'))->toBe('v2');
     $this->service->normaliseVariantKey('v3');
 })->throws(InvalidArgumentException::class);
-
-function seedMediaAsset(?int $userId): MediaAsset
-{
-    $id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-    Capsule::table('media_assets')->insert([
-        'id' => $id,
-        'asset_url' => "/api/v1/assets/{$id}.png",
-        'storage_mode' => 'local',
-        'user_id' => $userId,
-        'upload_source' => 'avatar',
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
-    ]);
-    return MediaAsset::find($id);
-}
 
 function agentPictureLoadAgent(int $agentId): Agent
 {

@@ -60,7 +60,7 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
             return $this->admin;
         }
     };
-    $controller = new MediaDerivativeController($derivatives, $auth, $container, $serializer);
+    $controller = new MediaDerivativeController($derivatives, $auth, $serializer);
 
     return [$controller, $service, $auth];
 }

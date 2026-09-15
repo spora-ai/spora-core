@@ -70,6 +70,28 @@ final class MediaAssetSerializer
     }
 
     /**
+     * Return the derivative rows attached to `$asset` in the same wire
+     * shape the `derivatives[]` field of {@see serialize()} emits. Public
+     * so other surfaces (e.g. `MediaTool::list_derivatives`) can reuse
+     * the exact chip label, producer attribution, and asset_url format
+     * the operator dashboard renders — keeping the LLM-visible and
+     * operator-visible shapes in lockstep without copying code.
+     *
+     * When the serializer was constructed without a
+     * {@see MediaDerivativeService} (e.g. for tests that don't need
+     * derivatives), this returns `[]`.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function derivativeRowsFor(MediaAsset $asset): array
+    {
+        if ($this->derivatives === null) {
+            return [];
+        }
+        return $this->buildDerivativeRows($asset);
+    }
+
+    /**
      * @param string|null $baseUrl Absolute base URL (with scheme + host) the
      *        caller wants the share link to use. Controllers pass the
      *        resolved `config.app_url` (configured via `config.php` /
@@ -96,11 +118,8 @@ final class MediaAssetSerializer
     /**
      * @return list<array<string, mixed>>
      */
-    private function loadDerivatives(MediaAsset $asset): array
+    private function buildDerivativeRows(MediaAsset $asset): array
     {
-        if (!$this->includeDerivatives || $this->derivatives === null) {
-            return [];
-        }
         $rows = $this->derivatives->listFor($asset->id);
         $out = [];
         foreach ($rows as $row) {
@@ -124,5 +143,20 @@ final class MediaAssetSerializer
             ];
         }
         return $out;
+    }
+
+    /**
+     * Back-compat accessor for the `serialize()` opt-out flag. The list
+     * loop pass `includeDerivatives: false` to skip the per-row
+     * `listFor()` call; the detail page keeps it `true` (the default).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function loadDerivatives(MediaAsset $asset): array
+    {
+        if (!$this->includeDerivatives) {
+            return [];
+        }
+        return $this->derivativeRowsFor($asset);
     }
 }

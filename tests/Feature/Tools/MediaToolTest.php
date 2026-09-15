@@ -3,113 +3,11 @@
 declare(strict_types=1);
 
 
-use Spora\Auth\AuthService;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\MediaTool;
-
-/**
- * Create an Agent row so the FK on media_assets.agent_id resolves. The
- * tests use unique email + namespaced agent names so a single Pest run
- * never collides between cases (each test runs in its own transaction).
- */
-function seedMediaToolAgent(string $name = 'Test Agent'): int
-{
-    // Create the user row first to satisfy the agents.user_id FK.
-    // The exact id doesn't matter — only the row needs to exist.
-    $pdo  = Illuminate\Database\Capsule\Manager::connection()->getPdo();
-    $stmt = $pdo->prepare(
-        'INSERT INTO users (email, password, username, verified, resettable, roles_mask, registered, created_at, updated_at) '
-        . 'VALUES (?, ?, ?, 1, 1, 0, ?, ?, ?)',
-    );
-    $email = sprintf('mediatool-%s-%s@example.com', bin2hex(random_bytes(4)), microtime(true));
-    $now   = time();
-    $stmt->execute([
-        $email,
-        password_hash('Password1!', PASSWORD_BCRYPT),
-        $email,
-        $now,
-        date('Y-m-d H:i:s', $now),
-        date('Y-m-d H:i:s', $now),
-    ]);
-    $userId = (int) $pdo->lastInsertId();
-
-    return Agent::create([
-        'principal_id' => createUserPrincipalPublic($userId),
-        'name'      => $name,
-        'is_active' => true,
-    ])->id;
-}
-
-function seedMediaAsset(
-    ?int $agentId = null,
-    ?int $userId = null,
-    ?string $publicToken = null,
-    ?string $pluginSlug = null,
-    ?string $mime = 'image/png',
-    ?string $idOverride = null,
-): MediaAsset {
-    $id = $idOverride ?? sprintf(
-        '%08x-aaaa-bbbb-cccc-%012x',
-        random_int(0, 0xffffffff),
-        random_int(0, 0xffffffffffff),
-    );
-
-    return MediaAsset::create([
-        'id'                            => $id,
-        'asset_url'                     => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $id . '.png',
-        'storage_mode'                  => 'data_url',
-        'mime_type'                     => $mime,
-        'media_type'                    => 'image',
-        'byte_size'                     => 1024,
-        'agent_id'                      => $agentId,
-        'user_id' => (int) $userId,
-        'plugin_slug'                   => $pluginSlug,
-        'asset_token'                   => bin2hex(random_bytes(16)),
-        'public_access_token'           => $publicToken,
-        'filename'                      => 'sample.png',
-        'migrated_from_inline_data_url' => false,
-    ]);
-}
-
-function makeMediaToolNonAdminAuth(): AuthService
-{
-    $auth = Mockery::mock(AuthService::class);
-    $auth->allows('isAdmin')->andReturn(false);
-    $auth->allows('currentUserId')->andReturn(null);
-    return $auth;
-}
-
-function makeMediaToolAdminAuth(): AuthService
-{
-    $auth = Mockery::mock(AuthService::class);
-    $auth->allows('isAdmin')->andReturn(true);
-    $auth->allows('currentUserId')->andReturn(1);
-    return $auth;
-}
-
-/**
- * Build a MediaTool wired to a real MediaArchiveService so the test
- * exercises the same query path the LLM hits in production. Returns the
- * tool + a cleanup closure that wipes the tmp asset dir.
- */
-function makeMediaToolWithRealArchive(?AuthService $auth = null, ?ToolConfigService $config = null, array $globalConfig = []): array
-{
-    // Reuse the same builder that MediaArchiveServiceTest uses so we get a
-    // fully-wired service (asset store, resolver, converters, decoder).
-    $ctx = makeMediaArchiveService();
-    $tool = new MediaTool(
-        $ctx['service'],
-        $auth ?? makeMediaToolNonAdminAuth(),
-        $config,
-        $globalConfig,
-    );
-
-    return ['tool' => $tool, 'restore' => $ctx['restore']];
-}
 
 describe('MediaTool::search', function (): void {
     it('returns paginated metadata with asset_url in the opaque local form', function (): void {
