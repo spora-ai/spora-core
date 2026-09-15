@@ -171,10 +171,11 @@ use Throwable;
                . 'producer_plugin, producer_operation)` makes the operation idempotent — '
                . 're-rendering returns the same derivative id. Optional `options` carries '
                . 'producer-specific knobs (e.g. {"page": 0, "ppi": 144} for typst). Returns '
-               . 'the new derivative\'s id + asset_url + producer attribution. Off by '
-               . 'default; each call requires operator approval because the producer may '
-               . 'take seconds and always writes a fresh `media_assets` row.',
-    enabledByDefault: false,
+               . 'the new derivative\'s id + asset_url + producer attribution. Each call '
+               . 'requires operator approval because the producer may take seconds and '
+               . 'always writes a fresh `media_assets` row, but the operation is exposed '
+               . 'by default so agents can propose renders without an enable step.',
+    enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
