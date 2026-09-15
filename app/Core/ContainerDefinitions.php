@@ -147,6 +147,7 @@ use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SpeechProviderConfigPersistence;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
@@ -799,6 +800,7 @@ final class ContainerDefinitions
                 return new SpeechToTextRegistry(
                     $providers,
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
+                    $c->get(SpeechProviderConfigPersistence::class),
                 );
             },
 

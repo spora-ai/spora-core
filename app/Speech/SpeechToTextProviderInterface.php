@@ -31,6 +31,18 @@ namespace Spora\Speech;
  *    call with `method_exists` so providers without `bindLabel()` keep
  *    their static names. The label is rebound on every `describe()`
  *    call so multi-tenant requests don't bleed labels across calls.
+ *  - Providers MUST also implement `bindSettings(array $settings): void`.
+ *    The registry decodes the resolved
+ *    {@see \Spora\Models\SpeechProviderConfiguration::settings} blob and
+ *    pushes the result into the provider before every transcribe call,
+ *    so the provider sees the operator's v2-cascade settings (the
+ *    `agents.speech_driver_config_id` →
+ *    `principal_preferences.preferred_speech_config_id` →
+ *    `speech_provider_configurations` cascade). Providers prefer bound
+ *    settings over `ToolConfigService::getEffectiveSettings()` so the
+ *    v2 UI is the single source of truth; legacy v1
+ *    (`tool_user_settings`) operators keep working because the bound
+ *    settings are only populated when the v2 row exists.
  */
 interface SpeechToTextProviderInterface
 {
@@ -61,6 +73,26 @@ interface SpeechToTextProviderInterface
      * `display_name` override can no-op.
      */
     public function bindLabel(string $label): void;
+
+    /**
+     * Bind the operator's per-config decoded settings (the
+     * `#[ToolSetting]` schema for the resolved
+     * {@see \Spora\Models\SpeechProviderConfiguration}). The registry
+     * calls this on every `configuredProvider()` invocation so
+     * multi-tenant requests don't bleed settings across calls.
+     *
+     * Implementations MUST treat the bound value as transient and
+     * prefer it over `ToolConfigService::getEffectiveSettings()` in
+     * `transcribe()` so the v2 cascade is the single source of truth.
+     * Legacy v1 (`tool_user_settings`) operators keep working because
+     * the registry only calls this hook when a v2
+     * `SpeechProviderConfiguration` row exists.
+     *
+     * @param array<string, mixed> $settings decoded `settings` column
+     *        (password fields already decrypted by
+     *        {@see \Spora\Services\SpeechProviderConfigPersistence::decodeSettings()}).
+     */
+    public function bindSettings(array $settings): void;
 
     /**
      * Transcribe raw audio bytes to text.

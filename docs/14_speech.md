@@ -3,8 +3,12 @@
 Operator guide for configuring the Spora speech-to-text (STT) surface.
 This document covers the *what* and the *why*; the API contract lives
 in [`docs/04_api.md`](04_api.md#speech-provider-configuration) and the
-underlying provider implementation in
-[`OpenAiCompatibleTranscriber`](../app/Speech/OpenAiCompatibleTranscriber.php).
+underlying provider implementations in
+[`OpenAiCompatibleTranscriber`](../app/Speech/OpenAiCompatibleTranscriber.php)
+plus any plugin-contributed
+[`SpeechToTextProviderInterface`](../app/Speech/SpeechToTextProviderInterface.php)
+classes (today: [`spora-plugin-muse`](../spora-plugin-muse) and
+[`spora-plugin-minimax`](../spora-plugin-minimax) for STT).
 
 ## Overview
 
@@ -13,7 +17,36 @@ Two surfaces configure the recording button inside Spora's composers:
 1. **Admin → Speech Providers** (`/admin/settings/speech-providers`) — global defaults shared by every authenticated user. Admin-only writes; the form opens here when the recording button is missing because the operator has never set up a provider.
 2. **User Settings → Speech** (`/settings/speech`) — per-user overrides. Useful for users whose workflow needs a different vendor (e.g. a personal Groq key for fast drafts) without changing what the rest of the team uses.
 
-Both surfaces share the same wire shape and validation rules. The cascade (per-user override → global default → schema defaults) is handled inside [`ToolConfigService::getEffectiveSettings()`](../app/Services/ToolConfigService.php) — the UI just writes the right row.
+Both surfaces write to a single storage layer: the `speech_provider_configurations` table. The wire shape and validation rules are the same across the two surfaces; the cascade (per-user → per-group → global default → schema defaults) is handled by
+[`SpeechToTextRegistry`](../app/Speech/SpeechToTextRegistry.php) when
+*picking* the provider class, and by `SpeechToTextRegistry`'s
+`bindSettings()` call when *pushing* the resolved settings into the
+provider's `transcribe()` call.
+
+## Storage model
+
+The v1-era `tool_configurations` / `tool_user_settings` tables no
+longer drive STT settings. The single source of truth is
+`speech_provider_configurations`:
+
+| Column | Purpose |
+|---|---|
+| `id` | Surrogate PK. |
+| `principal_id` | `null` for global rows; otherwise a user-principal or group-principal id from `principals`. |
+| `provider_class` | FQCN of a registered [`SpeechToTextProviderInterface`](../app/Speech/SpeechToTextProviderInterface.php) implementation. |
+| `display_name` | Operator-facing label surfaced in the recording-button tooltip and the Capability endpoint. |
+| `settings` | Encrypted JSON; password fields per-row encrypted via `SecurityManager`. |
+| `is_global` / `is_default` | Tier-4 marker (`is_global=true AND is_default=true` is the operator-set fallback). |
+
+The two-tier XOR invariant (`principal_id IS NULL XOR is_global`) is
+enforced at the model layer
+([`SpeechProviderConfiguration::validateGlobalXor()`](../app/Models/SpeechProviderConfiguration.php))
+because MySQL 5.7 and some SQLite engine versions silently ignore
+`CHECK` clauses.
+
+The `principal_preferences.preferred_speech_config_id` FK is what
+backs the per-user "use this provider" toggle; same FK shape as
+`agents.speech_driver_config_id` for per-agent pinning.
 
 ## How to configure Mistral Voxtral (via OpenAI-Compatible)
 
@@ -75,12 +108,9 @@ If you don't see the Muse card, the plugin isn't installed or its
 
 ## Per-user overrides
 
-Every user can set their own per-principal override. The cascade is:
-
-1. **user-scope setting** (if set) — wins
-2. **group-scope setting** (if set, for any group the caller belongs to) — fallback
-3. **global setting** (if set) — fallback
-4. **schema defaults** — final fallback
+Every user can set their own per-principal override by setting
+`principal_preferences.preferred_speech_config_id` to point at a
+`speech_provider_configurations` row under their user-principal.
 
 To create a personal override:
 
@@ -98,23 +128,18 @@ it's set.
 ## Per-agent STT override (Agent Settings → Speech)
 
 If an operator wants agent X to use Voxtral for production chats and
-agent Y to use Whisper for the support inbox, the per-agent STT section
-in the agent settings page exposes the override.
-
-Behind the scenes the override lands in `agent_tool_overrides` —
-Spora's existing per-agent settings table — keyed on
-`(agent_id, tool_class)`. The transcribe controller threads the
-agent id through to the registry so the per-agent override is the
-last level in the cascade (beats group + user + global).
+agent Y to use Whisper for the support inbox, set
+`agents.speech_driver_config_id` to point at the chosen
+`speech_provider_configurations.id`. The transcribe controller threads
+the agent id through to the registry so the per-agent override wins
+on tier 1 of the cascade.
 
 Enable the override:
 
-1. Sign in and open the agent's settings page.
+1. Open the agent's settings page.
 2. Add a **Speech** section if not already present.
-3. Pick the provider class and fill in only the fields that should
-   differ from the upstream cascade. The form shows the inherited
-   values as form defaults, but any field you set overrides the
-   cascade at that key only.
+3. Pick the provider config and save. The FK is updated and the
+   cascade picks it on the next transcribe request.
 
 When no override is set, the cascade falls through to user → group →
 global as before.
@@ -144,51 +169,56 @@ Enable the group config:
 1. As a group admin, open the group's settings page.
 2. Open the **Speech** section.
 3. Pick the provider class and fill in the settings.
-4. Save. Members of the group immediately see the recording button
-   in composers that consult the group's effective settings.
+4. Save. The cascade picks it on the next transcribe request for any
+   group member.
 
-Storage is the same `tool_user_settings` table; the row's
-`principal_id` is the group's group-principal id (rather than the
-caller's user-principal id).
+Storage is the same `speech_provider_configurations` table; the
+row's `principal_id` is the group's group-principal id (rather than
+the caller's user-principal id).
 
-## The cascade: global → group → user → agent
+## The cascade: agent → user → group → global → first-registered
 
-Every effective settings read walks the cascade in this order:
+The class pick walks a five-tier cascade in
+[`SpeechToTextRegistry`](../app/Speech/SpeechToTextRegistry.php) +
+[`SpeechToTextCascadeResolver`](../app/Speech/SpeechToTextCascadeResolver.php):
 
 ```
-defaults  →  global  →  group[0..N]  →  user  →  agent_override
+agent.speech_driver_config_id
+  → principal_preferences.preferred_speech_config_id (user-principal)
+  → principal_preferences.preferred_speech_config_id (each group-principal, joined_at ASC)
+  → speech_provider_configurations WHERE is_global = true AND is_default = true
+  → first registered SpeechToTextProviderInterface class (fallback)
 ```
 
 Read aloud:
 
-1. **Schema defaults** — every `#[ToolSetting]` declaration has a
-   `default:` attribute. The cascade fills missing keys with the
-   schema default last (so an unset key gets the schema default,
-   not nothing).
-2. **Global settings** — the operator's
-   `tool_configurations` row for the provider class. One row per
-   provider class; admin writes.
-3. **Group settings (per group the user belongs to)** — every
-   `tool_user_settings` row whose `principal_id` points at one of
-   the caller's group-principals. Groups are iterated in **principal
-   id ascending order** so the iteration is stable across calls;
-   the **user-principal wins on conflict** with any group.
-4. **User settings** — the `tool_user_settings` row whose
-   `principal_id` points at the caller's user-principal. One row
-   per user per provider class.
-5. **Agent override** — `agent_tool_overrides` keyed on the active
-   agent id (per chat / composer). Wins over everything above.
+1. **Agent override** — `agents.speech_driver_config_id` points at a
+   `speech_provider_configurations.id`. If the resolved class is
+   registered, that row wins.
+2. **User preference** — `principal_preferences.preferred_speech_config_id`
+   for the caller's user-principal. Same resolution as tier 1.
+3. **Group preference** — for every group the caller belongs to
+   (ordered by `group_memberships.joined_at ASC`), check that group's
+   preference; first match wins.
+4. **Global default** — `speech_provider_configurations WHERE is_global = true AND is_default = true`. First match wins, ordered `updated_at DESC, id DESC`.
+5. **First-registered-wins fallback** — the first provider in
+   constructor order, returned with no FK backing. Pre-existing
+   behaviour preserved so an operator with no preferences / agent
+   override / global default still gets the same fallback they did
+   before this PR.
 
-The "last write wins" rule produces a single effective key/value map
-that the provider's `transcribe()` call sees. The
-`getEffectiveSettingsWithSource()` companion method returns the same
-map annotated with which level won per key — the SPA uses that
-annotation to render "Inherited from group / Personal override / etc."
-badges next to each field.
+Once the class is picked, the same row's `settings` column is
+decoded via
+[`SpeechProviderConfigPersistence::decodeSettings()`](../app/Services/SpeechProviderConfigPersistence.php)
+and pushed into the provider via
+[`bindSettings()`](../app/Speech/SpeechToTextProviderInterface.php#bindsettingsarray-settings-void).
+The provider's `transcribe()` consults `$boundSettings` first,
+falling back to `ToolConfigService::getEffectiveSettings()` only when
+no bound settings are present (legacy v1 operators whose only config
+is in `tool_user_settings` / `tool_configurations`).
 
-When the cascade order matters for debugging, the `describe()`
-endpoint shows the resolved `display_name` for the OpenAI-compatible
-provider — that label is what the recording button's tooltip shows.
+The capability endpoint reflects tier 1-4's class via `effective_class`
++ `effective_source` + `effective_config_id` on every provider row.
 
 ## Display names and collision behaviour
 
