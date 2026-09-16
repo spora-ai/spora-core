@@ -162,24 +162,52 @@ final readonly class SpeechToTextCascadeResolver
             return [null, 'fallback', null];
         }
 
+        return $this->resolvePreferredTierForCaller($userId, $agentId);
+    }
+
+    /**
+     * Dispatch between the per-agent principal path and the caller-
+     * scoped user → group path so {@see resolvePreferredClassWithSource}
+     * stays under the S1142 3-return ceiling.
+     *
+     * @return array{0: string|null, 1: string|null, 2: int|null}
+     */
+    private function resolvePreferredTierForCaller(int $userId, int $agentId): array
+    {
         $agentPrincipal = $this->resolveAgentPrincipalForPreference($agentId);
         if ($agentPrincipal !== null) {
-            $config = $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
-            if ($config !== null && in_array($config->provider_class, $this->registeredSttClasses(), true)) {
-                $source = $agentPrincipal['type'] === Principal::TYPE_GROUP ? 'group_preference' : 'user_preference';
-
-                return [$config->provider_class, $source, (int) $config->id];
-            }
-
-            return [null, 'fallback', null];
+            return $this->resolveAgentPrincipalPreferredTier($agentPrincipal);
         }
 
+        return $this->resolveCallerUserOrGroupPreferredTier($userId);
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null, 2: int|null}
+     */
+    private function resolveAgentPrincipalPreferredTier(array $agentPrincipal): array
+    {
+        $registered = $this->registeredSttClasses();
+        $config = $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
+        if ($config !== null && in_array($config->provider_class, $registered, true)) {
+            $source = $agentPrincipal['type'] === Principal::TYPE_GROUP ? 'group_preference' : 'user_preference';
+
+            return [$config->provider_class, $source, (int) $config->id];
+        }
+
+        return [null, 'fallback', null];
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null, 2: int|null}
+     */
+    private function resolveCallerUserOrGroupPreferredTier(int $userId): array
+    {
         $userTier = $this->resolveUserPreferenceTier($userId);
-        if ($userTier[0] !== null) {
-            return $userTier;
-        }
 
-        return $this->resolveGroupPreferenceTier($userId);
+        return $userTier[0] !== null
+            ? $userTier
+            : $this->resolveGroupPreferenceTier($userId);
     }
 
     /**
@@ -202,7 +230,15 @@ final readonly class SpeechToTextCascadeResolver
             return null;
         }
 
-        $principal = Principal::find((int) $agent->principal_id);
+        return $this->buildAgentPrincipalRow((int) $agent->principal_id);
+    }
+
+    /**
+     * @return array{principal_id: int, type: string}|null
+     */
+    private function buildAgentPrincipalRow(int $agentPrincipalId): ?array
+    {
+        $principal = Principal::find($agentPrincipalId);
         if ($principal === null) {
             return null;
         }
@@ -344,24 +380,25 @@ final readonly class SpeechToTextCascadeResolver
 
         $agentPrincipal = $this->resolveAgentPrincipalForPreference($agentId);
         if ($agentPrincipal !== null) {
-            $config = $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
-            if ($config !== null) {
-                return $config;
-            }
-
-            return null;
+            return $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
         }
 
+        return $this->resolveCallerUserPrincipalPreferredConfig($userId);
+    }
+
+    /**
+     * Resolve the caller-scoped preferred config: materialise the
+     * caller's user-principal and look up its preferred config. Errors
+     * from `ensureUserPrincipal()` fall through to `null`.
+     */
+    private function resolveCallerUserPrincipalPreferredConfig(int $userId): ?SpeechProviderConfiguration
+    {
         try {
             $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
-            $config = $this->configForPrincipalPreferred($userPrincipalId);
-            if ($config !== null) {
-                return $config;
-            }
-        } catch (Throwable) {
-            // fall through to null
-        }
 
-        return null;
+            return $this->configForPrincipalPreferred($userPrincipalId);
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

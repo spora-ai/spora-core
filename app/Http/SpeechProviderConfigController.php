@@ -160,18 +160,34 @@ final class SpeechProviderConfigController
         // `?group_id`. A request that combines both is malformed — the
         // per-agent path is the more specific intent and the controller
         // honours it.
-        $agentId = $this->parseAgentId($request);
+        $agentId = SpeechProviderConfigQueryParser::parseAgentId($request);
         if ($agentId !== null) {
             return $this->indexForAgent($userId, $agentId);
         }
 
-        $groupId = $this->parseGroupId($request);
+        return $this->listForCaller($userId, $request);
+    }
+
+    /**
+     * Route the `?group_id=N` branch here so {@see index()} stays under
+     * the S1142 3-return ceiling. The unscoped path also lives here.
+     */
+    private function listForCaller(int $userId, Request $request): JsonResponse
+    {
+        // When `?group_id=N` is present, narrow to one group's configs +
+        // globals. Visibility is enforced inside the service: a non-admin
+        // caller must be a member of the group, otherwise the service
+        // returns `[]` (existence-hide). Without this dispatch the
+        // controller was falling through to `getConfigurationsForUser()`
+        // and leaking every group the caller belongs to into the
+        // single-group settings page.
+        $groupId = SpeechProviderConfigQueryParser::parseGroupId($request);
         if ($groupId !== null) {
-            return $this->indexForGroup($userId, $groupId);
+            $configs = $this->service->getConfigurationsForGroup($groupId, $userId, $this->authService->isAdmin());
+            return new JsonResponse(['data' => ['configs' => $configs]]);
         }
 
-        $configs = $this->service->getConfigurationsForUser($userId);
-        return new JsonResponse(['data' => ['configs' => $configs]]);
+        return new JsonResponse(['data' => ['configs' => $this->service->getConfigurationsForUser($userId)]]);
     }
 
     /**
@@ -193,63 +209,6 @@ final class SpeechProviderConfigController
 
         $configs = $this->service->getConfigurationsForAgent($agentId);
         return new JsonResponse(['data' => ['configs' => $configs]]);
-    }
-
-    /**
-     * When `?group_id=N` is present, narrow the response to one group's
-     * configs plus every global config. Visibility is enforced inside
-     * {@see SpeechProviderConfigService::getConfigurationsForGroup()}: a
-     * non-admin caller must be a member of the group, otherwise the
-     * service returns `[]` (existence-hide).
-     *
-     * Without this dispatch the controller was falling through to
-     * `getConfigurationsForUser()` and returning every config the
-     * caller could see across all their groups — leaking other groups'
-     * providers into the single-group settings page.
-     */
-    private function indexForGroup(int $userId, int $groupId): JsonResponse
-    {
-        $configs = $this->service->getConfigurationsForGroup($groupId, $userId, $this->authService->isAdmin());
-        return new JsonResponse(['data' => ['configs' => $configs]]);
-    }
-
-    /**
-     * Parse a positive integer `?agent_id=N` query parameter. Returns
-     * `null` when missing, negative, zero, or non-numeric; non-positive
-     * values yield `null` so the controller falls back to the unscoped
-     * `getConfigurationsForUser()` path instead of erroring.
-     */
-    private function parseAgentId(Request $request): ?int
-    {
-        $raw = $request->query->get('agent_id');
-        if ($raw === null || $raw === '') {
-            return null;
-        }
-        $value = filter_var($raw, FILTER_VALIDATE_INT);
-        if ($value === false || $value <= 0) {
-            return null;
-        }
-        return (int) $value;
-    }
-
-    /**
-     * Parse a positive integer `?group_id=N` query parameter. Mirrors
-     * {@see parseAgentId()} so the controller treats malformed group
-     * ids the same way it treats malformed agent ids: fall through to
-     * the unscoped path instead of erroring. Used by the group settings
-     * page; the agent page is the only place that sends `?agent_id`.
-     */
-    private function parseGroupId(Request $request): ?int
-    {
-        $raw = $request->query->get('group_id');
-        if ($raw === null || $raw === '') {
-            return null;
-        }
-        $value = filter_var($raw, FILTER_VALIDATE_INT);
-        if ($value === false || $value <= 0) {
-            return null;
-        }
-        return (int) $value;
     }
 
     private function unauthenticated(): JsonResponse
