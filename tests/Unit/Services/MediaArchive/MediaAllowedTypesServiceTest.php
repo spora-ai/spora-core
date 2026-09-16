@@ -56,12 +56,8 @@ test('allowedMimeTypes without an agent DOES include image/* (direct operator up
 });
 
 test('allowedMimeTypes unions in the static audio allowlist', function (): void {
-    // The recording pipeline must be able to upload audio-only WebM and
-    // MP4 MediaRecorder blobs. Browsers report those as `video/webm`
-    // and `video/mp4` (Safari uses `video/mp4` for audio-only MP4
-    // because the container is technically a video container) even
-    // though the track list is audio-only — we accept both containers
-    // here so the recording flow isn't blocked at the upload gate.
+    // `video/{webm,mp4}` covers Safari's audio-only MediaRecorder quirk
+    // — the sniffer can't distinguish audio-only from video containers.
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
     foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/flac', 'video/webm', 'video/mp4'] as $mime) {

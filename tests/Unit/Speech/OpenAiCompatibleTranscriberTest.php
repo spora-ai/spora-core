@@ -113,11 +113,9 @@ test('transcribe() Mistral wire: usage.prompt_audio_seconds × 1000 → duration
 });
 
 test('transcribe() accepts video/webm as audio-only WebM (MediaRecorder quirk)', function (): void {
-    // The W3C MediaRecorder spec labels audio-only WebM recordings as
-    // `video/webm` — the container is identical to a video WebM, only
-    // the track list differs. The server's byte sniffer cannot tell
-    // them apart, so we accept the container here and the multipart
-    // filename extension (`webm`) keeps every shipped STT vendor happy.
+    // Same MediaRecorder quirk as the video/mp4 test below — Safari
+    // labels audio-only WebM as video/webm; the multipart extension
+    // (`webm`) keeps every shipped STT vendor happy.
     $provider = buildOaiProvider(
         ['api_key' => 'sk-test', 'model' => 'whisper-1'],
         json_encode(['text' => 'hello from audio-only webm']),
@@ -129,13 +127,9 @@ test('transcribe() accepts video/webm as audio-only WebM (MediaRecorder quirk)',
 });
 
 test('transcribe() accepts video/mp4 as audio-only MP4 (Safari MediaRecorder quirk)', function (): void {
-    // Safari's MediaRecorder reports audio-only MP4 recordings as
-    // `video/mp4` because the MP4 container is technically a video
-    // container — the byte sniffer cannot distinguish audio-only MP4
-    // from a video MP4 without parsing the track list, which we don't
-    // do. The multipart filename extension (`m4a`) keeps every shipped
-    // STT vendor happy. Without this mapping Safari recordings get
-    // rejected at the upload allowlist gate.
+    // Mirrors the video/webm test above — Safari reports audio-only
+    // MP4 as video/mp4; the multipart filename extension (m4a) keeps
+    // every shipped STT vendor happy.
     $provider = buildOaiProvider(
         ['api_key' => 'sk-test', 'model' => 'whisper-1'],
         json_encode(['text' => 'hello from audio-only mp4']),
