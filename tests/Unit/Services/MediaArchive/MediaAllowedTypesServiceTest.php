@@ -56,13 +56,11 @@ test('allowedMimeTypes without an agent DOES include image/* (direct operator up
 });
 
 test('allowedMimeTypes unions in the static audio allowlist', function (): void {
-    // The recording pipeline must be able to upload an audio-only WebM
-    // MediaRecorder blob. Browsers report those as `video/webm` even
-    // though the track list is audio-only — we accept the container
-    // here so the recording flow isn't blocked at the upload gate.
+    // `video/{webm,mp4}` covers Safari's audio-only MediaRecorder quirk
+    // — the sniffer can't distinguish audio-only from video containers.
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
-    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/flac', 'video/webm'] as $mime) {
+    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/flac', 'video/webm', 'video/mp4'] as $mime) {
         expect($mimes)->toContain($mime);
     }
 });
@@ -96,9 +94,9 @@ test('isAllowed reports text MIME as allowed and binary executable as not', func
     expect($service->isAllowed('application/x-msdownload', null))->toBeFalse();
 });
 
-test('isAllowed accepts the audio allowlist (incl. video/webm for MediaRecorder audio-only WebM)', function (): void {
+test('isAllowed accepts the audio allowlist (incl. video/webm and video/mp4 for MediaRecorder audio-only WebM/MP4)', function (): void {
     [$service] = buildAllowedTypesService();
-    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'video/webm'] as $mime) {
+    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'video/webm', 'video/mp4'] as $mime) {
         expect($service->isAllowed($mime, null))->toBeTrue();
     }
 });

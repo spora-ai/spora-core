@@ -440,27 +440,20 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
 
     /**
      * Map a browser-native audio MIME to a file extension for the
-     * multipart filename. Mirrors the v1 plugins' coverage
-     * (webm/ogg/mp4/wav/mpeg/flac) so the only MIME that fails is one
-     * no STT vendor would accept anyway.
-     *
-     * The `video/webm` case is a deliberate exception: the W3C MediaRecorder
-     * spec labels audio-only WebM recordings as `video/webm` (the container
-     * is identical to a video WebM; only the track list differs), and the
-     * server's {@see \Spora\Services\MediaArchive\MimeSniffer} cannot tell
-     * the two apart at the byte level. We accept the container here so
-     * the audio-only recording survives the upload; the multipart
-     * filename extension (`webm`) keeps every shipped STT vendor happy.
+     * multipart filename. The `video/{webm,mp4}` arms cover Safari's
+     * MediaRecorder labelling audio-only recordings with the video
+     * container type; the byte sniffer can't tell them apart.
      */
     private function extensionFor(string $mimeType): string
     {
         return match (strtolower($mimeType)) {
-            'audio/webm', 'video/webm'   => 'webm',
-            'audio/ogg'                  => 'ogg',
-            'audio/mp4', 'audio/x-m4a'   => 'm4a',
-            'audio/wav', 'audio/x-wav'   => 'wav',
-            'audio/mpeg', 'audio/mp3'    => 'mp3',
-            'audio/flac'                 => 'flac',
+            'audio/webm', 'video/webm'         => 'webm',
+            'audio/ogg'                        => 'ogg',
+            'audio/mp4', 'video/mp4',
+            'audio/x-m4a'                      => 'm4a',
+            'audio/wav', 'audio/x-wav'         => 'wav',
+            'audio/mpeg', 'audio/mp3'          => 'mp3',
+            'audio/flac'                       => 'flac',
             default => throw new InvalidAudioException(sprintf(
                 'Unsupported audio MIME: %s',
                 $mimeType,
