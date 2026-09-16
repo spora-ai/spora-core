@@ -218,7 +218,22 @@ no bound settings are present (legacy v1 operators whose only config
 is in `tool_user_settings` / `tool_configurations`).
 
 The capability endpoint reflects tier 1-4's class via `effective_class`
-+ `effective_source` + `effective_config_id` on every provider row.
++ `effective_source` + `effective_config_id` on every provider row. Each
+row also carries `class` (the row's **own** provider FQCN — distinct
+from `effective_class`, which is the cascade-resolved class repeated
+across rows) and `preferred_audio_mimes: list<string>` — the recorder
+uses these to pick a `MediaRecorder`-supported container the active
+provider actually accepts. Sources:
+
+  - The provider class's `#[AcceptedAudioMime]` attribute declaration,
+    when present.
+  - The common-superset default
+    (`['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/wav']`)
+    when the provider doesn't declare any. Plugin authors are
+    encouraged to declare their own preference order — e.g. MiniMax
+    prefers OGG over Opus (Chrome 105+ + Firefox natively supported)
+    ahead of MP4 (Safari) ahead of legacy WebM (avoided because the
+    Matroska container is the only format MiniMax rejects).
 
 ## Display names and collision behaviour
 

@@ -8,6 +8,7 @@ use Closure;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SpeechProviderConfigValidator;
 
 /**
  * Discovers every plugin-contributed + core-shipped
@@ -50,16 +51,27 @@ use Spora\Services\SpeechProviderConfigPersistence;
  */
 final readonly class SpeechToTextRegistry
 {
+    /**
+     * Common-superset fallback MIME list when a provider class doesn't
+     * declare its own `#[AcceptedAudioMime]` attributes. Order is
+     * preference order — the SPA picker walks the list and the first
+     * `MediaRecorder.isTypeSupported()` hit wins on the user's browser.
+     */
+    private const DEFAULT_PREFERRED_AUDIO_MIMES = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+        'audio/wav',
+    ];
+
     private SpeechToTextCascadeResolver $cascade;
 
     /**
-     * Lazy resolver into {@see SpeechProviderConfigPersistence}. The
-     * eager graph `Validator -> Registry -> Persistence -> Validator`
-     * is cyclic; PHP-DI's factory for {@see SpeechToTextRegistry}
-     * therefore injects a Closure (not the service itself) and defers
-     * the resolution to {@see bindProviderSettings()} call time, when
-     * the controller flow has already built Persistence through the
-     * Service chain.
+     * Lazy resolver into {@see SpeechProviderConfigPersistence}.
+     * Injected as a Closure (not the service itself) to break the
+     * `Validator -> Registry -> Persistence -> Validator` cycle —
+     * see spora-core#242 for the cycle guard.
      *
      * @var (Closure(): ?SpeechProviderConfigPersistence)|null
      */
@@ -167,13 +179,20 @@ final readonly class SpeechToTextRegistry
      * available) so the `display_name` reflects the operator's
      * per-config override.
      *
+     * Each row's `class` is the provider's **own FQCN** — distinct
+     * from `effective_class` (per-principal, identical across every
+     * row). The SPA picker needs `class` to identify which row's
+     * `preferred_audio_mimes` belongs to the resolved provider.
+     *
      * @return list<array{
      *     name: string,
+     *     class: class-string<SpeechToTextProviderInterface>,
      *     display_name: string,
      *     configured: bool,
      *     effective_class: string,
      *     effective_source: string,
-     *     effective_config_id: int|null
+     *     effective_config_id: int|null,
+     *     preferred_audio_mimes: list<string>
      * }>
      */
     public function describeWithConfig(?int $userId, ?int $agentId = null): array
@@ -194,15 +213,32 @@ final readonly class SpeechToTextRegistry
 
             $rows[] = [
                 'name' => $provider->getName(),
+                'class' => $providerClass,
                 'display_name' => $provider->getDisplayName(),
                 'configured' => $provider->isConfigured(),
                 'effective_class' => $effectiveClass,
                 'effective_source' => $effectiveSource,
                 'effective_config_id' => $effectiveConfigId,
+                // MiniMax rejects the Matroska container (HTTP 502 /
+                // error 2013) so plugin authors declare OGG-over-Opus
+                // ahead of WebM via `#[AcceptedAudioMime]`. The picker
+                // falls back to the default when the provider opts out.
+                'preferred_audio_mimes' => $this->preferredAudioMimesFor($providerClass),
             ];
         }
 
         return $rows;
+    }
+
+    /** @return list<string> Per-provider declared list, or the common-superset default when the provider opts out. */
+    private function preferredAudioMimesFor(string $providerClass): array
+    {
+        $declared = SpeechProviderConfigValidator::collectAcceptedAudioMimes($providerClass);
+        if ($declared !== []) {
+            return $declared;
+        }
+
+        return self::DEFAULT_PREFERRED_AUDIO_MIMES;
     }
 
     private function bindProviderLabel(SpeechToTextProviderInterface $provider, int $configId): void

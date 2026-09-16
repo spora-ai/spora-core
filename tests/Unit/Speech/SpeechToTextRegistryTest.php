@@ -93,13 +93,10 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
 
 function buildRegistry(array $providers): SpeechToTextRegistry
 {
-    // Wire the registry's optional persistence dependency so
-    // `configuredProvider()` can decode v2 settings on tiers 1-4.
-    // The circular `registry ← validator ← persistence ← registry`
-    // dependency is broken by constructing the registry first with
-    // no persistence, then handing it to the validator, then handing
-    // the validator to the persistence, then re-wiring the registry
-    // with the now-complete persistence.
+    // Two-step wire-up breaks the `Registry <-> Persistence` cycle:
+    // build the registry with a resolver that points at a sentinel,
+    // build persistence against that registry, then patch the
+    // sentinel. Mirrors how PHP-DI assembles the production graph.
     $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
     $persistenceRef = new stdClass();
     $persistenceRef->persistence = null;
@@ -687,3 +684,70 @@ test('DI bindings resolve Registry + Persistence + Validator without a cycle', f
     $persistence = ($resolver)();
     expect($persistence)->toBeInstanceOf(Spora\Services\SpeechProviderConfigPersistence::class);
 });
+
+test('describeWithConfig() emits the common-superset default MIMEs for providers that opt out', function (): void {
+    $stub = new StubConfiguredProvider();
+    $registry = buildRegistry([$stub]);
+
+    $rows = $registry->describeWithConfig(99, null);
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]['name'])->toBe('stub-configured');
+    expect($rows[0]['class'])->toBe(StubConfiguredProvider::class);
+    expect($rows[0]['preferred_audio_mimes'])->toBe([
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+        'audio/wav',
+    ]);
+});
+
+test('describeWithConfig() emits per-provider MIMEs declared via #[AcceptedAudioMime]', function (): void {
+    // Local fixture mirrors the MiniMax declaration shape so the test
+    // stays meaningful for the MiniMax use case without depending on
+    // the plugin path repo.
+    $provider = new ProviderDeclaringMimes();
+    $registry = buildRegistry([$provider]);
+
+    $rows = $registry->describeWithConfig(99, null);
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]['name'])->toBe('mime-declaring-stub');
+    expect($rows[0]['class'])->toBe(ProviderDeclaringMimes::class);
+    expect($rows[0]['preferred_audio_mimes'])->toBe([
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+    ]);
+});
+
+// Mirrors the MiniMax declaration shape so this test exercises the
+// plugin-side ordering without depending on the plugin path repo.
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/ogg;codecs=opus')]
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/mp4')]
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/webm;codecs=opus')]
+final class ProviderDeclaringMimes implements SpeechToTextProviderInterface
+{
+    public function getName(): string
+    {
+        return 'mime-declaring-stub';
+    }
+    public function getDisplayName(): string
+    {
+        return 'MIME Declaring Stub';
+    }
+    public function isConfigured(): bool
+    {
+        return true;
+    }
+    public function bindLabel(string $label): void {}
+    public function bindSettings(array $settings): void {}
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
+        return new TranscriptionResult('unused');
+    }
+}

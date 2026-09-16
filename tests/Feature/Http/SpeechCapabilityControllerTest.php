@@ -123,11 +123,19 @@ test('capability reports available=true and configured=true with effective_class
         ->and($body['data']['providers'])->toBe([
             [
                 'name' => 'cap-configured',
+                'class' => CapConfiguredProvider::class,
                 'display_name' => 'Cap Configured',
                 'configured' => true,
                 'effective_class' => CapConfiguredProvider::class,
                 'effective_source' => 'fallback',
                 'effective_config_id' => null,
+                'preferred_audio_mimes' => [
+                    'audio/webm;codecs=opus',
+                    'audio/ogg;codecs=opus',
+                    'audio/mp4',
+                    'audio/webm',
+                    'audio/wav',
+                ],
             ],
         ]);
 });
