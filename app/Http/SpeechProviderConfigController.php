@@ -9,6 +9,8 @@ use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -59,12 +61,20 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SpeechProviderConfigController
 {
+    private readonly PrincipalResolver $principalResolver;
+    private readonly PrincipalService $principalService;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
         private readonly SpeechToTextRegistry $registry,
         private readonly AgentServiceInterface $agentService,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->principalService = $principalService ?? new PrincipalService($this->principalResolver);
+    }
 
     /**
      * GET /api/v1/speech/provider-configs/schema
@@ -454,7 +464,7 @@ final class SpeechProviderConfigController
         }
         if ($scope !== 'group') {
             unset($body['scope'], $body['group_id']);
-            return $body;
+            return $this->normalizeUserPrincipalId($body, $userId);
         }
         // Pull `group_id` off the body BEFORE stripping so the resolver
         // helper doesn't have to re-parse it from a now-empty field.
@@ -478,6 +488,38 @@ final class SpeechProviderConfigController
         }
         $body['principal_id'] = $principalId;
         $body['is_global'] = false;
+        return $body;
+    }
+
+    /**
+     * Defensive normalisation for `scope=user` (and unscoped) writes:
+     * a foreign `principal_id` is silently rewritten to the caller's
+     * user-principal id instead of letting it reach the persistence
+     * layer. Mirrors {@see \Spora\Services\LlmConfigValidator::prepareStoreData()}
+     * so a request that supplies a foreign id produces the same wire
+     * response shape as one that omits `principal_id` — the caller
+     * can't distinguish "you can't target that principal" from "you
+     * didn't target a principal", so the path isn't an oracle for
+     * probing which principal ids exist. The persistence-layer
+     * {@see \Spora\Services\SpeechProviderConfigPersistence::createConfiguration()}
+     * gate is preserved as a backstop; admins are unaffected because
+     * their visible set includes every principal.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function normalizeUserPrincipalId(array $body, int $callerUserId): array
+    {
+        if (!isset($body['principal_id']) || !is_int($body['principal_id'])) {
+            return $body;
+        }
+
+        $visible = $this->principalResolver->visiblePrincipalIds($callerUserId);
+        if (in_array($body['principal_id'], $visible, true)) {
+            return $body;
+        }
+
+        $body['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
         return $body;
     }
 
