@@ -10,6 +10,7 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\LLMConfigController;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LlmConfigValidator;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,7 +23,8 @@ function makeLLMConfigController(): array
     $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
     $validator = new LlmConfigValidator($service);
-    $controller = new LLMConfigController($authService, $service, $validator);
+    $agentService = new AgentService();
+    $controller = new LLMConfigController($authService, $service, $validator, $agentService);
 
     return [$controller, $authService, $service, $key];
 }
@@ -46,7 +48,7 @@ describe('LLMConfigController::index', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
 
-        $response = $controller->index();
+        $response = $controller->index(Request::create('/api/v1/llm-configs', 'GET'));
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);

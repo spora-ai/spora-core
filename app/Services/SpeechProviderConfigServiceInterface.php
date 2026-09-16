@@ -28,6 +28,20 @@ interface SpeechProviderConfigServiceInterface
     public function getConfigurationsForUser(int $userId): array;
 
     /**
+     * Configs valid for a specific agent's principal scope, plus every
+     * global config. Used by the SPA's agent-settings page so that a
+     * user-owned agent doesn't show configs owned by groups the caller
+     * happens to belong to (and vice versa).
+     *
+     * Visibility is the controller's concern; callers must pre-check
+     * that the user is allowed to view the agent (or is an admin)
+     * before invoking this method.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getConfigurationsForAgent(int $agentId): array;
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function getGlobalConfigurations(): array;
@@ -63,15 +77,4 @@ interface SpeechProviderConfigServiceInterface
      * @return array<string, mixed>
      */
     public function configResource(SpeechProviderConfiguration $config): array;
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function decodeSettings(string $providerClass, ?string $raw): array;
-
-    /**
-     * @param array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    public function maskForApi(string $providerClass, array $settings): array;
 }

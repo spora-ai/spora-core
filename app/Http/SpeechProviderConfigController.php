@@ -8,6 +8,7 @@ use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -62,6 +63,7 @@ final class SpeechProviderConfigController
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
         private readonly SpeechToTextRegistry $registry,
+        private readonly AgentServiceInterface $agentService,
     ) {}
 
     /**
@@ -115,6 +117,13 @@ final class SpeechProviderConfigController
                 schema: new OA\Schema(type: 'integer'),
                 description: 'When set, returns the speech provider configs attached to that group. The caller must be a member of the group or a global admin; non-members receive an empty list.',
             ),
+            new OA\Parameter(
+                name: 'agent_id',
+                in: 'query',
+                required: false,
+                schema: new OA\Schema(type: 'integer'),
+                description: 'When set, returns only the configs valid for that agent\'s principal scope (configs scoped to the agent\'s owning principal, plus every global config). Use this on the agent-settings page so a user-owned agent does not surface configs owned by groups the caller happens to belong to.',
+            ),
         ],
         responses: [
             new OA\Response(
@@ -138,15 +147,60 @@ final class SpeechProviderConfigController
             ),
         ],
     )]
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
             return $this->unauthenticated();
         }
 
+        $agentId = $this->parseAgentId($request);
+        if ($agentId !== null) {
+            return $this->indexForAgent($userId, $agentId);
+        }
+
         $configs = $this->service->getConfigurationsForUser($userId);
         return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
+     * When `?agent_id=N` is present, narrow the response to the agent's
+     * principal scope. Visibility: the agent must be retrievable via
+     * {@see AgentServiceInterface::getAgent()} (which checks ownership)
+     * OR the caller must be an admin; otherwise the response is an
+     * empty list (existence-hide).
+     */
+    private function indexForAgent(int $userId, int $agentId): JsonResponse
+    {
+        $isAdmin = $this->authService->isAdmin();
+        if (!$isAdmin) {
+            $agent = $this->agentService->getAgent($agentId, $userId);
+            if ($agent === null) {
+                return new JsonResponse(['data' => ['configs' => []]]);
+            }
+        }
+
+        $configs = $this->service->getConfigurationsForAgent($agentId);
+        return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
+     * Parse a positive integer `?agent_id=N` query parameter. Returns
+     * `null` when missing, negative, zero, or non-numeric; non-positive
+     * values yield `null` so the controller falls back to the unscoped
+     * `getConfigurationsForUser()` path instead of erroring.
+     */
+    private function parseAgentId(Request $request): ?int
+    {
+        $raw = $request->query->get('agent_id');
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $value = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($value === false || $value <= 0) {
+            return null;
+        }
+        return (int) $value;
     }
 
     private function unauthenticated(): JsonResponse

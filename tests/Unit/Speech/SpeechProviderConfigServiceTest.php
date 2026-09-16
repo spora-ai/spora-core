@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
 use Spora\Core\SecurityManager;
+use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -277,5 +278,155 @@ describe('SpeechProviderConfigService', function (): void {
         $service->unsetPrincipalPreferredConfig($principalId);
         $resolved = $service->resolvePreferredConfig($userId, isAdmin: true, scope: 'user');
         expect($resolved)->toBeNull();
+    });
+
+    describe('getConfigurationsForAgent', function (): void {
+        it('returns the agent-principal configs plus every global config (user-owned agent)', function (): void {
+            $auth = bootAuthLayer();
+            $userA = bootAuth($auth, 'spc-scope-a@example.com', SPC_TEST_PASSWORD);
+            $userB = bootAuth($auth, 'spc-scope-b@example.com', SPC_TEST_PASSWORD);
+            bootAdmin($userA, $auth);
+
+            $service = makeSpeechConfigService();
+
+            // Global config (visible to every agent).
+            $global = $service->createConfiguration($userA, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => true,
+                'settings' => [
+                    'api_key' => 'sk-g',
+                    'display_name' => 'Global',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: true);
+
+            $userAPrincipalId = createUserPrincipalPublic($userA);
+            $userBPrincipalId = createUserPrincipalPublic($userB);
+
+            // User A's own config.
+            $userAConfig = $service->createConfiguration($userA, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => false,
+                'display_name' => 'A-User',
+                'settings' => [
+                    'api_key' => 'sk-a',
+                    'display_name' => 'A-User',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: false);
+
+            // User B has their own config — must not leak into user A's
+            // agent dropdown.
+            $service->createConfiguration($userB, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => false,
+                'display_name' => 'B-User',
+                'settings' => [
+                    'api_key' => 'sk-b',
+                    'display_name' => 'B-User',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: false);
+
+            $agentA = (int) Capsule::table('agents')->insertGetId([
+                'principal_id' => $userAPrincipalId,
+                'name' => 'A',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $returned = $service->getConfigurationsForAgent($agentA);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            sort($ids);
+
+            expect($ids)->toBe([(int) $global->id, (int) $userAConfig->id]);
+        });
+
+        it('returns only the group-scope configs when the agent is owned by a group, plus global', function (): void {
+            $auth = bootAuthLayer();
+            $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
+            bootAdmin($ownerId, $auth);
+
+            $service = makeSpeechConfigService();
+
+            $global = $service->createConfiguration($ownerId, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => true,
+                'settings' => [
+                    'api_key' => 'sk-g',
+                    'display_name' => 'Global',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: true);
+
+            $userPrincipalId = createUserPrincipalPublic($ownerId);
+
+            $groupId = (int) Capsule::table('groups')->insertGetId([
+                'name' => 'spc-scope-group',
+                'description' => null,
+                'created_by_user_id' => $ownerId,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $groupPrincipalId = (int) Capsule::table('principals')->insertGetId([
+                'type'     => Principal::TYPE_GROUP,
+                'group_id' => $groupId,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Group-scoped config (owned by the group principal).
+            $groupConfig = new SpeechProviderConfiguration();
+            $groupConfig->principal_id = $groupPrincipalId;
+            $groupConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupConfig->settings = json_encode([
+                'api_key' => 'sk-group',
+                'display_name' => 'Group',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ]);
+            $groupConfig->display_name = 'Group';
+            $groupConfig->is_default = false;
+            $groupConfig->is_global = false;
+            $groupConfig->save();
+
+            // User-scoped config must NOT leak into a group-owned agent.
+            $userScoped = new SpeechProviderConfiguration();
+            $userScoped->principal_id = $userPrincipalId;
+            $userScoped->provider_class = OpenAiCompatibleTranscriber::class;
+            $userScoped->settings = json_encode([
+                'api_key' => 'sk-u',
+                'display_name' => 'U',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ]);
+            $userScoped->display_name = 'U';
+            $userScoped->is_default = false;
+            $userScoped->is_global = false;
+            $userScoped->save();
+
+            $groupAgentId = (int) Capsule::table('agents')->insertGetId([
+                'principal_id' => $groupPrincipalId,
+                'name' => 'G',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $returned = $service->getConfigurationsForAgent($groupAgentId);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            sort($ids);
+
+            expect($ids)->toBe([(int) $global->id, (int) $groupConfig->id])
+                ->and($ids)->not->toContain((int) $userScoped->id);
+        });
+
+        it('returns an empty list when the agent row does not exist', function (): void {
+            $service = makeSpeechConfigService();
+            expect($service->getConfigurationsForAgent(999_999_999))->toBe([]);
+        });
     });
 });

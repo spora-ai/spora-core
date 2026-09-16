@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Spora\Models\Agent;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Speech\SpeechToTextRegistry;
 
@@ -116,6 +117,42 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     }
 
     /**
+     * Configs valid for one agent's principal scope, plus every global
+     * config. Mirrors {@see LLMConfigService::getConfigurationsForAgent()}.
+     *
+     * Behaviour:
+     *  - Agent row missing → `[]`.
+     *  - Agent has no resolvable principal (data corruption) → `[]`.
+     *  - Otherwise → `principal_id = agent.principal_id` ∪ `is_global = true`.
+     *
+     * Visibility is the controller's concern: callers must pre-check
+     * that the user is allowed to view the agent (or is an admin)
+     * before invoking this method. The list endpoint takes
+     * `?agent_id=N` and uses this method so a user-owned agent's
+     * dropdown shows only configs valid for its principal scope
+     * instead of leaking config rows owned by groups the caller
+     * happens to belong to.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getConfigurationsForAgent(int $agentId): array
+    {
+        $agent = Agent::find($agentId);
+        if ($agent === null) {
+            return [];
+        }
+
+        $principalId = (int) $agent->principal_id;
+
+        $query = SpeechProviderConfiguration::where(static function ($q) use ($principalId): void {
+            $q->where('principal_id', $principalId)
+                ->orWhere('is_global', true);
+        });
+
+        return $this->mapToResources($query->get());
+    }
+
+    /**
      * @param \Illuminate\Database\Eloquent\Collection<int, SpeechProviderConfiguration> $configs
      * @return list<array<string, mixed>>
      */
@@ -218,22 +255,5 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     public function configResource(SpeechProviderConfiguration $config): array
     {
         return $this->persistence->configResource($config);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function decodeSettings(string $providerClass, ?string $raw): array
-    {
-        return $this->persistence->decodeSettings($providerClass, $raw);
-    }
-
-    /**
-     * @param array<string, mixed> $settings
-     * @return array<string, mixed>
-     */
-    public function maskForApi(string $providerClass, array $settings): array
-    {
-        return $this->persistence->maskForApi($providerClass, $settings);
     }
 }

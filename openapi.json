@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-7-g5c6d9502"
+        "version": "0.23.0-5-gbbfa5253"
     },
     "servers": [
         {
@@ -2833,6 +2833,15 @@
                         "name": "group_id",
                         "in": "query",
                         "description": "When set, returns the speech provider configs attached to that group. The caller must be a member of the group or a global admin; non-members receive an empty list.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "agent_id",
+                        "in": "query",
+                        "description": "When set, returns only the configs valid for that agent's principal scope (configs scoped to the agent's owning principal, plus every global config). Use this on the agent-settings page so a user-owned agent does not surface configs owned by groups the caller happens to belong to.",
                         "required": false,
                         "schema": {
                             "type": "integer"

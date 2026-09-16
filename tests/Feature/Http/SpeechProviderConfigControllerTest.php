@@ -10,6 +10,7 @@ use Spora\Core\SecurityManager;
 use Spora\Http\SpeechProviderConfigController;
 use Spora\Models\GroupMembership;
 use Spora\Models\SpeechProviderConfiguration;
+use Spora\Services\AgentService;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -48,8 +49,9 @@ function makeSpeechProviderConfigController(): array
     $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
+    $agentService = new AgentService();
 
-    return [new SpeechProviderConfigController($auth, $service, $registry), $auth];
+    return [new SpeechProviderConfigController($auth, $service, $registry, $agentService), $auth];
 }
 
 function jsonSpcRequest(string $method, string $uri, array $body = []): Request
@@ -64,6 +66,12 @@ function jsonSpcRequest(string $method, string $uri, array $body = []): Request
         ['CONTENT_TYPE' => 'application/json'],
         $content,
     );
+}
+
+function indexSpcRequest(string $query = ''): Request
+{
+    $uri = $query === '' ? '/api/v1/speech/provider-configs' : '/api/v1/speech/provider-configs?' . $query;
+    return Request::create($uri, 'GET');
 }
 
 function fullSettings(string $apiKey = 'sk-test'): array
@@ -99,7 +107,7 @@ describe('SpeechProviderConfigController', function (): void {
 
     it('returns 401 for an unauthenticated caller on index', function (): void {
         [$controller] = makeSpeechProviderConfigController();
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         expect($resp->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
     });
 
@@ -107,7 +115,7 @@ describe('SpeechProviderConfigController', function (): void {
         [$controller, $auth] = makeSpeechProviderConfigController();
         $userId = bootAuth($auth, 'spc-empty@example.com', SPC_TEST_PASSWORD);
 
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
         expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
     });
@@ -563,7 +571,7 @@ describe('SpeechProviderConfigController', function (): void {
             'settings' => fullSettings('sk-shape-team'),
         ]));
 
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
         $configs = json_decode($resp->getContent(), true)['data']['configs'];
         expect($configs)->toHaveCount(3);
@@ -594,7 +602,7 @@ describe('SpeechProviderConfigController', function (): void {
             'settings' => fullSettings('sk-sg'),
         ]));
 
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         $configs = json_decode($resp->getContent(), true)['data']['configs'];
         expect($configs[0]['scope'])->toBe('global');
         expect($configs[0]['is_global'])->toBeTrue();
@@ -612,7 +620,7 @@ describe('SpeechProviderConfigController', function (): void {
             'settings' => fullSettings('sk-su'),
         ]));
 
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         $configs = json_decode($resp->getContent(), true)['data']['configs'];
         expect($configs[0]['scope'])->toBe('user');
         expect($configs[0]['is_global'])->toBeFalse();
@@ -639,10 +647,96 @@ describe('SpeechProviderConfigController', function (): void {
             'settings' => fullSettings('sk-st'),
         ]));
 
-        $resp = $controller->index();
+        $resp = $controller->index(indexSpcRequest());
         $configs = json_decode($resp->getContent(), true)['data']['configs'];
         expect($configs[0]['scope'])->toBe('group');
         expect($configs[0]['is_global'])->toBeFalse();
         expect((int) $configs[0]['principal_id'])->toBe($groupPrincipalId);
+    });
+
+    describe('GET /api/v1/speech/provider-configs?agent_id=N', function (): void {
+        it('narrows to the agent-principal scope for a user-owned agent', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $callerId = bootAuth($auth, 'spc-scope-caller@example.com', SPC_TEST_PASSWORD);
+            makeAdmin($auth, $callerId);
+
+            // Global config visible to every agent.
+            $global = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => true,
+                'settings' => fullSettings('sk-scope-global'),
+            ]));
+            $globalId = (int) json_decode($global->getContent(), true)['data']['config']['id'];
+
+            // User-scoped config under caller's user-principal.
+            $userConfig = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'settings' => fullSettings('sk-scope-user'),
+            ]));
+            $userConfigId = (int) json_decode($userConfig->getContent(), true)['data']['config']['id'];
+
+            // Seed an unrelated user's config — must NOT leak.
+            $strangerId = bootAuth($auth, 'spc-scope-stranger@example.com', SPC_TEST_PASSWORD);
+            $strangerPrincipalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($strangerId)->id;
+            $strangerConfigId = (int) Capsule::table('speech_provider_configurations')->insertGetId([
+                'principal_id' => $strangerPrincipalId,
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'display_name' => 'Stranger',
+                'is_default' => false,
+                'is_global' => false,
+                'settings' => json_encode(['api_key' => 'sk-stranger', 'display_name' => 'Stranger', 'base_url' => 'https://api.openai.com/v1', 'model' => 'whisper-1']),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Re-authenticate as the caller — the helper above switched the
+            // session to the stranger user.
+            simulateLoggedInSession($callerId, 'spc-scope-caller@example.com');
+
+            // Agent owned by the caller.
+            $agentId = (int) Capsule::table('agents')->insertGetId([
+                'principal_id' => (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($callerId)->id,
+                'name' => 'Caller Agent',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $resp = $controller->index(indexSpcRequest("agent_id={$agentId}"));
+            expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], json_decode($resp->getContent(), true)['data']['configs']);
+            sort($ids);
+
+            expect($ids)->toBe([min($globalId, $userConfigId), max($globalId, $userConfigId)])
+                ->and($ids)->not->toContain($strangerConfigId);
+        });
+
+        it('returns an empty list when the agent row does not exist', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $userId = bootAuth($auth, 'spc-scope-missing-agent@example.com', SPC_TEST_PASSWORD);
+
+            $resp = $controller->index(indexSpcRequest('agent_id=999999999'));
+            expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
+        });
+
+        it('returns an empty list when the caller cannot see the agent and is not admin', function (): void {
+            // Two users; A owns the agent, B queries ?agent_id=A's agent.
+            // Without admin status, the visibility check returns null and
+            // the response is empty (existence-hide).
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $ownerId = bootAuth($auth, 'spc-scope-owner@example.com', SPC_TEST_PASSWORD);
+            $agentId = (int) Capsule::table('agents')->insertGetId([
+                'principal_id' => (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($ownerId)->id,
+                'name' => 'Owner Agent',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Authenticate as a different caller.
+            bootAuth($auth, 'spc-scope-other@example.com', SPC_TEST_PASSWORD);
+
+            $resp = $controller->index(indexSpcRequest("agent_id={$agentId}"));
+            expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
+        });
     });
 });
