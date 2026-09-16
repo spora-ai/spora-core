@@ -125,8 +125,11 @@ final readonly class SpeechToTextCascadeResolver
         if ($config === null) {
             return [null, 'fallback', null];
         }
+        if (!in_array($config->provider_class, $this->registeredSttClasses(), true)) {
+            return [null, 'fallback', null];
+        }
 
-        return $this->resolveRegisteredClass($config->provider_class, 'agent', $config);
+        return [$config->provider_class, 'agent', (int) $config->id];
     }
 
     private function loadAgentSpeechConfig(int $agentId): ?SpeechProviderConfiguration
@@ -335,18 +338,6 @@ final readonly class SpeechToTextCascadeResolver
         $first = $this->providers[0];
 
         return [$first::class, 'fallback', null];
-    }
-
-    /**
-     * @return array{0: string|null, 1: string, 2: int|null}
-     */
-    private function resolveRegisteredClass(string $class, string $source, SpeechProviderConfiguration $config): array
-    {
-        if (in_array($class, $this->registeredSttClasses(), true)) {
-            return [$class, $source, (int) $config->id];
-        }
-
-        return [null, 'fallback', null];
     }
 
     /**
