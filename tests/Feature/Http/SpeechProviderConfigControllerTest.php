@@ -236,6 +236,69 @@ describe('SpeechProviderConfigController', function (): void {
         expect($delResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });
 
+    it('admin delete returns 404 when the config does not exist (no exception)', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_NOT_FOUND, ...)`
+        // branch in `destroy()` — exercised when the service returns `false`
+        // instead of throwing. Admin + non-existent id is the only call
+        // path that hits this branch; non-admin paths throw a
+        // `SpeechProviderConfigException` caught by `mapException`.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-delete-404@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $delResp = $controller->destroy(99999);
+        expect($delResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+        $body = json_decode($delResp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
+    });
+
+    it('store with a malformed JSON body returns 422 SPEECH_PROVIDER_CONFIG_INVALID', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_INVALID, ...)`
+        // branch in `decodeBody()` — the path where the request body
+        // is not parseable as JSON. We construct the Request directly
+        // because `jsonSpcRequest()` always json_encodes its body.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-bad-json@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $req = Request::create(
+            '/api/v1/speech/provider-configs',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            'this is not json {{',
+        );
+
+        $resp = $controller->store($req);
+        expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
+    });
+
+    it('store with scope=group but missing/invalid group_id returns 403', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_FORBIDDEN, ...)`
+        // branch in `resolveGroupScopeBody()` for `$groupId <= 0`. The
+        // existing 'group non-member' test (line 419) covers the
+        // `$principalId === null` branch (line 487), but not the
+        // invalid-id branch above it.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-bad-groupid@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => 0,
+            'settings' => fullSettings('sk-bad'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+    });
+
     it('non-admin: 403 for visible-but-not-owned (admin-only global config)', function (): void {
         // An admin creates a global config. A non-admin can SEE the
         // row (globals are visible to everyone) but cannot edit it
