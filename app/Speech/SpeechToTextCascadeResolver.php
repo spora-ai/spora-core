@@ -23,20 +23,28 @@ use Throwable;
  * configuredProvider / describeWithConfig / describe / bindProviderLabel)
  * and delegates the cascade walk to this helper.
  *
- * The cascade:
+ * The cascade (per-agent path with `agentId > 0`):
  *   1. **Agent override** — `agents.speech_driver_config_id` →
  *      `speech_provider_configurations.provider_class`.
- *   2. **User preference** —
- *      `principal_preferences.preferred_speech_config_id` for the
- *      agent's user-principal.
- *   3. **Group preference** — every group the user belongs to, in
- *      `group_memberships.joined_at ASC` order; first match wins.
- *   4. **Global default** —
+ *   2. **Principal preference** — `principal_preferences.preferred_speech_config_id`
+ *      for the AGENT's principal (user-principal OR group-principal,
+ *      depending on `agents.principal_id`). This is the critical fix:
+ *      a group-owned agent must consult its group's preference, not
+ *      the caller's user-principal preference.
+ *   3. **Global default** —
  *      `speech_provider_configurations WHERE is_global = true AND
  *      is_default = true`. First match wins, ordered `updated_at DESC,
  *      id DESC`.
- *   5. **First-registered-wins fallback** — the first provider in the
+ *   4. **First-registered-wins fallback** — the first provider in the
  *      constructor list, regardless of configuration state.
+ *
+ * The cascade (caller-scoped path with `agentId <= 0`, e.g. the
+ * composer recording button which has no agent context):
+ *   1. **User preference** — the caller's own user-principal preference.
+ *   2. **Group preference** — every group the caller belongs to, in
+ *      `group_memberships.joined_at ASC` order; first match wins.
+ *   3. **Global default** — same as above.
+ *   4. **First-registered-wins fallback** — same as above.
  *
  * Every tier validates that the resolved class is registered; an
  * unregistered class (e.g. the operator removed a plugin) is treated
@@ -62,7 +70,7 @@ final readonly class SpeechToTextCascadeResolver
             return $agentTier;
         }
 
-        $prefTier = $this->resolvePreferredClassWithSource($userId);
+        $prefTier = $this->resolvePreferredClassWithSource($userId, $agentId);
         if ($prefTier[0] !== null) {
             return $prefTier;
         }
@@ -80,7 +88,7 @@ final readonly class SpeechToTextCascadeResolver
     public function resolveConfigForClass(string $providerClass, int $userId, int $agentId): ?SpeechProviderConfiguration
     {
         foreach (
-            [$this->loadAgentSpeechConfig($agentId), $this->resolvePreferredConfigRow($userId)] as $candidate
+            [$this->loadAgentSpeechConfig($agentId), $this->resolvePreferredConfigRow($userId, $agentId)] as $candidate
         ) {
             if ($candidate !== null && $candidate->provider_class === $providerClass) {
                 return $candidate;
@@ -135,11 +143,34 @@ final readonly class SpeechToTextCascadeResolver
     }
 
     /**
+     * Pick the principal we should consult for tier 2 (preference).
+     *
+     * Per-agent reads must reflect the AGENT's principal (`agents.principal_id`),
+     * not the caller's user-principal — otherwise a group-owned agent would
+     * resolve to the operator's personal preference and report `'user_preference'`
+     * in the capability badge, when the agent's principal is actually the group.
+     *
+     * Caller-scoped reads (no agent) have no principal to attach to, so they
+     * fall back to the caller-only path (`resolveUserPreferenceTier` →
+     * `resolveGroupPreferenceTier`) used by the composer recording button.
+     *
      * @return array{0: string|null, 1: string|null, 2: int|null}
      */
-    private function resolvePreferredClassWithSource(int $userId): array
+    private function resolvePreferredClassWithSource(int $userId, int $agentId = 0): array
     {
         if ($this->registeredSttClasses() === [] || $userId <= 0) {
+            return [null, 'fallback', null];
+        }
+
+        $agentPrincipal = $this->resolveAgentPrincipalForPreference($agentId);
+        if ($agentPrincipal !== null) {
+            $config = $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
+            if ($config !== null && in_array($config->provider_class, $this->registeredSttClasses(), true)) {
+                $source = $agentPrincipal['type'] === Principal::TYPE_GROUP ? 'group_preference' : 'user_preference';
+
+                return [$config->provider_class, $source, (int) $config->id];
+            }
+
             return [null, 'fallback', null];
         }
 
@@ -149,6 +180,34 @@ final readonly class SpeechToTextCascadeResolver
         }
 
         return $this->resolveGroupPreferenceTier($userId);
+    }
+
+    /**
+     * Resolve the agent's principal into the shape the cascade wants.
+     * Returns `null` when `agentId` is unset/zero, the agent row is
+     * missing, or its principal points at a malformed row (data
+     * integrity defect — fall through to the caller-scoped path so the
+     * cascade doesn't error out on the recording button).
+     *
+     * @return array{principal_id: int, type: string}|null
+     */
+    private function resolveAgentPrincipalForPreference(int $agentId): ?array
+    {
+        if ($agentId <= 0) {
+            return null;
+        }
+
+        $agent = Agent::find($agentId);
+        if ($agent === null) {
+            return null;
+        }
+
+        $principal = Principal::find((int) $agent->principal_id);
+        if ($principal === null) {
+            return null;
+        }
+
+        return ['principal_id' => (int) $principal->id, 'type' => (string) $principal->type];
     }
 
     /**
@@ -267,17 +326,37 @@ final readonly class SpeechToTextCascadeResolver
         return $classes;
     }
 
-    private function resolvePreferredConfigRow(int $userId): ?SpeechProviderConfiguration
+    /**
+     * Resolve the actual `SpeechProviderConfiguration` row backing the
+     * agent's preferred tier — used by `resolveConfigForClass()` to
+     * surface the operator's per-config `display_name` in the badge.
+     *
+     * For agent-scoped reads, the principal is the agent's (looked up
+     * via `resolveAgentPrincipalForPreference()`), not the caller's. For
+     * caller-scoped reads (no agent), the principal is the caller's
+     * user-principal — composer recording button falls through here.
+     */
+    private function resolvePreferredConfigRow(int $userId, int $agentId = 0): ?SpeechProviderConfiguration
     {
         if ($userId <= 0 || $this->registeredSttClasses() === []) {
             return null;
         }
 
+        $agentPrincipal = $this->resolveAgentPrincipalForPreference($agentId);
+        if ($agentPrincipal !== null) {
+            $config = $this->configForPrincipalPreferred($agentPrincipal['principal_id']);
+            if ($config !== null) {
+                return $config;
+            }
+
+            return null;
+        }
+
         try {
             $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
-            $preference = PrincipalPreference::where('principal_id', $userPrincipalId)->first();
-            if ($preference !== null && $preference->preferred_speech_config_id !== null) {
-                return SpeechProviderConfiguration::find((int) $preference->preferred_speech_config_id);
+            $config = $this->configForPrincipalPreferred($userPrincipalId);
+            if ($config !== null) {
+                return $config;
             }
         } catch (Throwable) {
             // fall through to null

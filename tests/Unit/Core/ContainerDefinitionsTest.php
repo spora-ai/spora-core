@@ -431,6 +431,55 @@ it('apiAuthControllerDefinitions includes auth/config controllers', function ():
     expect($def)->toHaveKey(Spora\Http\UserProfileController::class);
 });
 
+it('apiAuthControllerDefinitions: LLMConfigController factory wires the right types (regression for agent-scope fix)', function (): void {
+    // The agent-settings scope fix added AgentServiceInterface to
+    // LLMConfigController::__construct(). The factory that builds the
+    // controller under that key MUST pass an AgentServiceInterface to
+    // slot #4 and PrincipalResolver to slot #5 — otherwise the controller
+    // throws `Argument #4 ($agentService) must be of type ... PrincipalResolver given`
+    // at first request, which is exactly what shipped in the first
+    // iteration of PR #244 (round 1) and broke /api/v1/llm-configs in
+    // production. This test guards against the same drift recurring.
+    $def = callContainerMethod('apiAuthControllerDefinitions');
+    $factory = $def[Spora\Http\LLMConfigController::class];
+
+    $authService = bootAuthLayer();
+    $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $security = new SecurityManager($key);
+    $llmConfigService = new Spora\Services\LLMConfigService($security, [
+        Spora\Drivers\OpenAICompatibleDriver::class,
+        Spora\Drivers\AnthropicCompatibleDriver::class,
+    ]);
+    $validator = new Spora\Services\LlmConfigValidator($llmConfigService);
+    $agentService = new Spora\Services\AgentService();
+    $principalResolver = new Spora\Services\PrincipalResolver();
+
+    $builder = new ContainerBuilder();
+    $builder->addDefinitions([
+        'config' => static fn(): array => [
+            'app_env'   => 'testing',
+            'key_path'  => null,
+            'log_path'  => 'php://stdout',
+            'log_level' => 'WARNING',
+        ],
+        SecurityManagerInterface::class => static fn(): SecurityManager => $security,
+        AuthService::class => static fn(): AuthService => $authService,
+        Spora\Services\LLMConfigServiceInterface::class => static fn(): Spora\Services\LLMConfigServiceInterface => $llmConfigService,
+        Spora\Services\LlmConfigValidator::class => static fn(): Spora\Services\LlmConfigValidator => $validator,
+        Spora\Services\AgentServiceInterface::class => static fn(): Spora\Services\AgentServiceInterface => $agentService,
+        Spora\Services\PrincipalResolver::class => static fn(): Spora\Services\PrincipalResolver => $principalResolver,
+        LoggerInterface::class => static fn(): LoggerInterface => new NullLogger(),
+    ]);
+    $container = $builder->build();
+
+    // Must throw TypeError if the factory drifts — the constructor's
+    // `private readonly AgentServiceInterface $agentService` rejects
+    // a PrincipalResolver in slot #4.
+    $controller = $factory($container);
+
+    expect($controller)->toBeInstanceOf(Spora\Http\LLMConfigController::class);
+});
+
 it('apiResourceControllerDefinitions includes resource controllers', function (): void {
     $def = callContainerMethod('apiResourceControllerDefinitions');
 
