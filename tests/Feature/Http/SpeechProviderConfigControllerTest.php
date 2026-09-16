@@ -45,7 +45,7 @@ function makeSpeechProviderConfigController(): array
     ], $principalService);
 
     $validator = new SpeechProviderConfigValidator($registry);
-    $persistence = new SpeechProviderConfigPersistence($security, $validator, $registry);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 

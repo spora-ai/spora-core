@@ -31,6 +31,7 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
+use stdClass;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -116,10 +117,20 @@ function buildFlowControllerWithSpeechPersistence(
     // single source of truth, with no `tool_user_settings` mirror
     // required.
     $provider = new OpenAiCompatibleTranscriber($http, $toolConfig);
-    $registry = new SpeechToTextRegistry([$provider], $principalService);
+    $persistenceRef = new stdClass();
+    $persistenceRef->persistence = null;
+    $registry = new SpeechToTextRegistry(
+        [$provider],
+        $principalService,
+        static fn(): ?SpeechProviderConfigPersistence => $persistenceRef->persistence,
+    );
     $validator = new SpeechProviderConfigValidator($registry);
-    $persistence = new SpeechProviderConfigPersistence($security, $validator, $registry);
-    $registry = new SpeechToTextRegistry([$provider], $principalService, $persistence);
+    $persistence = new SpeechProviderConfigPersistence(
+        $security,
+        $validator,
+        static fn(): SpeechToTextRegistry => $registry,
+    );
+    $persistenceRef->persistence = $persistence;
 
     return new SpeechTranscribeController(
         registry: $registry,
@@ -525,20 +536,23 @@ test('v2-cascade: only speech_provider_configurations is set — no tool_user_se
 
     // Write a v2 user-scope row with an api_key the controller's
     // mock HTTP layer will echo back as the transcript.
+    $persistenceRef = new stdClass();
+    $persistenceRef->persistence = null;
+    $registry = new SpeechToTextRegistry(
+        [new OpenAiCompatibleTranscriber(
+            new MockHttpClient(),
+            $fx['toolConfig'],
+        )],
+        $fx['principalService'],
+        static fn(): ?SpeechProviderConfigPersistence => $persistenceRef->persistence,
+    );
     $persistence = new SpeechProviderConfigPersistence(
         $fx['security'],
-        new SpeechProviderConfigValidator(
-            new SpeechToTextRegistry(
-                [new OpenAiCompatibleTranscriber(
-                    new MockHttpClient(),
-                    $fx['toolConfig'],
-                )],
-                $fx['principalService'],
-            ),
-        ),
-        null,
+        new SpeechProviderConfigValidator($registry),
+        static fn(): SpeechToTextRegistry => $registry,
         null,
     );
+    $persistenceRef->persistence = $persistence;
     $configId = (int) Capsule::table('speech_provider_configurations')->insertGetId([
         'principal_id' => $userPrincipalId,
         'provider_class' => OpenAiCompatibleTranscriber::class,

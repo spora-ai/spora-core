@@ -37,10 +37,14 @@ final class SpeechProviderConfigContainerBindings
             },
 
             SpeechProviderConfigPersistence::class => static function (ContainerInterface $c): SpeechProviderConfigPersistence {
+                // Mirror of the Registry factory — see
+                // {@see SpeechToTextRegistry::$persistenceResolver}.
                 return new SpeechProviderConfigPersistence(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(SpeechProviderConfigValidator::class),
-                    $c->get(SpeechToTextRegistry::class),
+                    static fn(): ?SpeechToTextRegistry => $c->has(SpeechToTextRegistry::class)
+                        ? $c->get(SpeechToTextRegistry::class)
+                        : null,
                 );
             },
 

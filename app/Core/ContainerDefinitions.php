@@ -797,10 +797,15 @@ final class ContainerDefinitions
                     $instance = $c->get($class);
                     $providers[] = $instance;
                 }
+                // Persistence is injected as a lazy Closure — the eager
+                // graph is cyclic. See
+                // {@see SpeechToTextRegistry::$persistenceResolver}.
                 return new SpeechToTextRegistry(
                     $providers,
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
-                    $c->get(SpeechProviderConfigPersistence::class),
+                    static fn(): ?SpeechProviderConfigPersistence => $c->has(SpeechProviderConfigPersistence::class)
+                        ? $c->get(SpeechProviderConfigPersistence::class)
+                        : null,
                 );
             },
 
