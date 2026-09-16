@@ -114,6 +114,7 @@ test('capability reports available=true and configured=true with effective_class
         ->and($body['data']['providers'])->toBe([
             [
                 'name' => 'cap-configured',
+                'class' => CapConfiguredProvider::class,
                 'display_name' => 'Cap Configured',
                 'configured' => true,
                 'effective_class' => CapConfiguredProvider::class,

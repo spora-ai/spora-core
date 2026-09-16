@@ -219,8 +219,10 @@ is in `tool_user_settings` / `tool_configurations`).
 
 The capability endpoint reflects tier 1-4's class via `effective_class`
 + `effective_source` + `effective_config_id` on every provider row. Each
-row also carries `preferred_audio_mimes: list<string>` — the recorder
-uses this to pick a `MediaRecorder`-supported container the active
+row also carries `class` (the row's **own** provider FQCN — distinct
+from `effective_class`, which is the cascade-resolved class repeated
+across rows) and `preferred_audio_mimes: list<string>` — the recorder
+uses these to pick a `MediaRecorder`-supported container the active
 provider actually accepts. Sources:
 
   - The provider class's `#[AcceptedAudioMime]` attribute declaration,

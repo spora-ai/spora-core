@@ -183,6 +183,12 @@ final readonly class SpeechToTextRegistry
      * available) so the `display_name` reflects the operator's
      * per-config override.
      *
+     * Each row's `class` is the **provider's own FQCN** so callers
+     * (notably the SPA's recorder picker) can identify which row
+     * belongs to the resolved class — `effective_class` is per-
+     * principal and identical across rows, so without `class` the
+     * picker can't tell which row's `preferred_audio_mimes` to use.
+     *
      * @return list<array{
      *     name: string,
      *     class: class-string<SpeechToTextProviderInterface>,

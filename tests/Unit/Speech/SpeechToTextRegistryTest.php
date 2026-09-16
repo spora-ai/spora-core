@@ -512,6 +512,7 @@ test('describeWithConfig() emits the common-superset default MIMEs for providers
 
     $rows = $registry->describeWithConfig(99, null);
     expect($rows)->toHaveCount(1);
+    expect($rows[0]['name'])->toBe('stub-configured');
     expect($rows[0]['class'])->toBe(StubConfiguredProvider::class);
     expect($rows[0]['preferred_audio_mimes'])->toBe([
         'audio/webm;codecs=opus',
@@ -531,6 +532,7 @@ test('describeWithConfig() emits per-provider MIMEs declared via #[AcceptedAudio
 
     $rows = $registry->describeWithConfig(99, null);
     expect($rows)->toHaveCount(1);
+    expect($rows[0]['name'])->toBe('mime-declaring-stub');
     expect($rows[0]['class'])->toBe(ProviderDeclaringMimes::class);
     expect($rows[0]['preferred_audio_mimes'])->toBe([
         'audio/ogg;codecs=opus',
