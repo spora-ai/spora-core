@@ -53,14 +53,13 @@ final readonly class SpeechToTextRegistry
     private SpeechToTextCascadeResolver $cascade;
 
     /**
-     * Lazy resolver into {@see SpeechProviderConfigPersistence}. Passed
-     * as a Closure (not the service itself) so PHP-DI's container
-     * build does not eagerly resolve Persistence during this factory —
-     * the eager graph `Validator -> Registry -> Persistence ->
-     * Validator` is cyclic and the container refuses to resolve it.
-     * The Closure is only invoked on first call to
-     * {@see bindProviderSettings()}, by which time the controller flow
-     * has already resolved Persistence through the Service chain.
+     * Lazy resolver into {@see SpeechProviderConfigPersistence}. The
+     * eager graph `Validator -> Registry -> Persistence -> Validator`
+     * is cyclic; PHP-DI's factory for {@see SpeechToTextRegistry}
+     * therefore injects a Closure (not the service itself) and defers
+     * the resolution to {@see bindProviderSettings()} call time, when
+     * the controller flow has already built Persistence through the
+     * Service chain.
      *
      * @var (Closure(): ?SpeechProviderConfigPersistence)|null
      */
@@ -69,8 +68,6 @@ final readonly class SpeechToTextRegistry
     /**
      * @param list<SpeechToTextProviderInterface> $providers
      * @param (Closure(): ?SpeechProviderConfigPersistence)|null $persistenceResolver
-     *        Lazy injector for the v2 persistence collaborator. See
-     *        {@see $persistenceResolver} for the cycle rationale.
      */
     public function __construct(
         private readonly array $providers,
@@ -220,10 +217,10 @@ final readonly class SpeechToTextRegistry
     /**
      * Decode the resolved v2 row's `settings` blob and push it into the
      * provider via {@see SpeechToTextProviderInterface::bindSettings()}.
-     * Skipped on tier-5 fallback (no FK → no row to decode) and when
-     * the registry was constructed without a persistence resolver (the
-     * `SpeechProviderConfigPersistence::__construct` self-default —
-     * empty registry, no providers, no decode calls).
+     * Not invoked on tier-5 fallback — {@see configuredProvider()} only
+     * calls this when `$configId !== null`. Early-returns when the
+     * registry was built without a persistence resolver (unit-test /
+     * controller-less paths where there is no row to decode).
      */
     private function bindProviderSettings(SpeechToTextProviderInterface $provider, int $configId): void
     {

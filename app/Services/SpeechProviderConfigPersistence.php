@@ -50,14 +50,13 @@ final class SpeechProviderConfigPersistence
     private readonly SecurityManagerInterface $security;
     private readonly SpeechProviderConfigValidator $validator;
     /**
-     * Lazy resolver into {@see SpeechToTextRegistry}. Passed as a
-     * Closure (not the service itself) so PHP-DI does not eagerly
-     * resolve the registry during this factory — the eager graph
-     * `Validator -> Registry -> Persistence -> Validator` is cyclic
-     * and the container refuses to resolve it. The Closure is only
-     * invoked when {@see configResource()} actually walks the
-     * registry (response-shape paths), by which time the controller
-     * flow has already resolved Registry.
+     * Lazy resolver into {@see SpeechToTextRegistry}. Mirror of
+     * {@see SpeechToTextRegistry::$persistenceResolver} — the eager
+     * graph is cyclic, so PHP-DI injects a Closure and defers
+     * resolution to {@see configResource()} call time. Null when the
+     * persistence is built without a registry (unit-test path) so
+     * {@see configResource()} can still emit a response without the
+     * provider's display name.
      *
      * @var (Closure(): ?SpeechToTextRegistry)|null
      */
@@ -344,12 +343,8 @@ final class SpeechProviderConfigPersistence
     }
 
     /**
-     * Resolve the speech-to-text registry lazily. Returns null when no
-     * resolver was wired (the controller-less or unit-test path) so
-     * {@see configResource()} can still build a response without the
-     * provider's display name. The resolver itself is a Closure —
-     * {@see SpeechToTextRegistry} is resolved on first call, by which
-     * time the registry has been built eagerly through the container.
+     * Invoke the lazy {@see $speechRegistryResolver}; returns null when
+     * no resolver was wired (unit-test / controller-less paths).
      */
     private function resolveSpeechRegistry(): ?SpeechToTextRegistry
     {

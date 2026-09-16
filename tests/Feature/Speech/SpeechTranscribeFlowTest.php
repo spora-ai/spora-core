@@ -536,8 +536,6 @@ test('v2-cascade: only speech_provider_configurations is set — no tool_user_se
 
     // Write a v2 user-scope row with an api_key the controller's
     // mock HTTP layer will echo back as the transcript.
-    $registryRef = new stdClass();
-    $registryRef->registry = null;
     $persistenceRef = new stdClass();
     $persistenceRef->persistence = null;
     $registry = new SpeechToTextRegistry(

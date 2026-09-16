@@ -425,26 +425,14 @@ test('configuredProvider() does not push settings on tier 5 fallback (no FK)', f
 });
 
 test('DI bindings resolve Registry + Persistence + Validator without a cycle', function (): void {
-    // Regression guard for the cycle that landed when the speech-input
-    // contract (#238) was added:
-    //   SpeechProviderConfigController
-    //     -> SpeechProviderConfigService
-    //       -> SpeechProviderConfigValidator
-    //         -> SpeechToTextRegistry
-    //           -> SpeechProviderConfigPersistence
-    //             -> SpeechProviderConfigValidator  (cycle)
-    //
-    // The cycle is broken by injecting the cross-class collaborators as
-    // lazy Closures (see the `?Closure $persistenceResolver` /
-    // `?Closure $speechRegistryResolver` constructor params) — neither
-    // factory resolves the other class during its own construction, so
-    // PHP-DI's container build stays acyclic. This test boots a minimal
-    // container with the same factories
-    // `SpeechProviderConfigContainerBindings` ships, asks it for every
-    // leg of the graph, and asserts the build completes without
-    // `DI\DependencyException: Circular dependency detected`. If anyone
-    // re-introduces an eager `->get()` of the cross-class collaborator
-    // in either factory the test fails.
+    // Regression guard for the cycle that landed with the speech-input
+    // contract (#238):
+    //   Controller -> Service -> Validator -> Registry -> Persistence -> Validator
+    // Broken by injecting the cross-class collaborators as lazy
+    // Closures — neither factory resolves the other class during its
+    // own construction, so PHP-DI's container build stays acyclic.
+    // Any future eager `->get()` of the cross-class collaborator in
+    // either factory re-introduces the cycle and fails this test.
     $provider = new class implements SpeechToTextProviderInterface {
         public function getName(): string
         {
@@ -490,9 +478,6 @@ test('DI bindings resolve Registry + Persistence + Validator without a cycle', f
             return new SpeechToTextRegistry(
                 $providers,
                 $c->has(Spora\Services\PrincipalService::class) ? $c->get(Spora\Services\PrincipalService::class) : new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
-                // Pass a lazy Closure that resolves Persistence on
-                // first call from bindProviderSettings() — see the
-                // class docblock for the cycle rationale.
                 static fn(): ?Spora\Services\SpeechProviderConfigPersistence
                     => $c->has(Spora\Services\SpeechProviderConfigPersistence::class)
                         ? $c->get(Spora\Services\SpeechProviderConfigPersistence::class)
