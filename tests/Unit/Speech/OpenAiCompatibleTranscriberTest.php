@@ -128,6 +128,24 @@ test('transcribe() accepts video/webm as audio-only WebM (MediaRecorder quirk)',
     expect($result->text)->toBe('hello from audio-only webm');
 });
 
+test('transcribe() accepts video/mp4 as audio-only MP4 (Safari MediaRecorder quirk)', function (): void {
+    // Safari's MediaRecorder reports audio-only MP4 recordings as
+    // `video/mp4` because the MP4 container is technically a video
+    // container — the byte sniffer cannot distinguish audio-only MP4
+    // from a video MP4 without parsing the track list, which we don't
+    // do. The multipart filename extension (`m4a`) keeps every shipped
+    // STT vendor happy. Without this mapping Safari recordings get
+    // rejected at the upload allowlist gate.
+    $provider = buildOaiProvider(
+        ['api_key' => 'sk-test', 'model' => 'whisper-1'],
+        json_encode(['text' => 'hello from audio-only mp4']),
+    );
+
+    $result = $provider->transcribe('fake-bytes', 'video/mp4');
+
+    expect($result->text)->toBe('hello from audio-only mp4');
+});
+
 test('transcribe() OpenAI gpt-4o-transcribe wire: usage.seconds × 1000 → durationMs', function (): void {
     $provider = buildOaiProvider(
         ['api_key' => 'sk-test'],

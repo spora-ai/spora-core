@@ -444,23 +444,28 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * (webm/ogg/mp4/wav/mpeg/flac) so the only MIME that fails is one
      * no STT vendor would accept anyway.
      *
-     * The `video/webm` case is a deliberate exception: the W3C MediaRecorder
-     * spec labels audio-only WebM recordings as `video/webm` (the container
-     * is identical to a video WebM; only the track list differs), and the
-     * server's {@see \Spora\Services\MediaArchive\MimeSniffer} cannot tell
-     * the two apart at the byte level. We accept the container here so
-     * the audio-only recording survives the upload; the multipart
-     * filename extension (`webm`) keeps every shipped STT vendor happy.
+     * `video/webm` and `video/mp4` are deliberate exceptions: the W3C
+     * MediaRecorder spec labels audio-only WebM and MP4 recordings as
+     * `video/{webm,mp4}` (the container is technically a video
+     * container), and the server's {@see \Spora\Services\MediaArchive\MimeSniffer}
+     * cannot tell an audio-only track from a video track at the byte
+     * level. We accept the containers here so the audio-only recording
+     * survives the upload; the multipart filename extension (`webm` /
+     * `m4a`) keeps every shipped STT vendor happy. Safari's
+     * MediaRecorder in particular reports `video/mp4` for audio-only
+     * MP4 recordings — without this mapping the upload gate rejects
+     * the file even though every other layer would accept it.
      */
     private function extensionFor(string $mimeType): string
     {
         return match (strtolower($mimeType)) {
-            'audio/webm', 'video/webm'   => 'webm',
-            'audio/ogg'                  => 'ogg',
-            'audio/mp4', 'audio/x-m4a'   => 'm4a',
-            'audio/wav', 'audio/x-wav'   => 'wav',
-            'audio/mpeg', 'audio/mp3'    => 'mp3',
-            'audio/flac'                 => 'flac',
+            'audio/webm', 'video/webm'         => 'webm',
+            'audio/ogg'                        => 'ogg',
+            'audio/mp4', 'video/mp4',
+            'audio/x-m4a'                      => 'm4a',
+            'audio/wav', 'audio/x-wav'         => 'wav',
+            'audio/mpeg', 'audio/mp3'          => 'mp3',
+            'audio/flac'                       => 'flac',
             default => throw new InvalidAudioException(sprintf(
                 'Unsupported audio MIME: %s',
                 $mimeType,

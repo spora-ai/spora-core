@@ -82,9 +82,15 @@ final class MediaAllowedTypesService
     /**
      * Static audio allowlist for the speech-to-text pipeline. Every MIME
      * here feeds the upstream STT provider as multipart `file`; the byte
-     * is treated as opaque audio data by every shipped provider. The list
-     * deliberately includes `video/webm` for the MediaRecorder quirk
-     * noted on the class docblock — see there for the rationale before
+     * is treated as opaque audio data by every shipped provider.
+     *
+     * The list includes `video/webm` and `video/mp4` for the MediaRecorder
+     * quirk noted on the class docblock: Safari's MediaRecorder reports
+     * audio-only WebM and MP4 recordings as `video/webm` / `video/mp4`
+     * because the MP4 container is technically a video container. The
+     * server-side `MimeSniffer` reads the actual bytes and confirms the
+     * container — the `video/*` MIME here is the correct sniff for an
+     * audio-only MP4/WebM track. See there for the rationale before
      * changing this set.
      */
     public const AUDIO_MIME_TYPES = [
@@ -98,6 +104,7 @@ final class MediaAllowedTypesService
         'audio/x-m4a',
         'audio/flac',
         'video/webm',
+        'video/mp4',
     ];
 
     /**
