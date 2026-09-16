@@ -52,11 +52,10 @@ use Spora\Services\SpeechProviderConfigValidator;
 final readonly class SpeechToTextRegistry
 {
     /**
-     * Common-superset default for the SPA picker's preferred MIME
-     * list when a provider class doesn't declare its own
-     * `#[AcceptedAudioMime]` attributes. Order is preference order:
-     * the SPA walks the list and the first `MediaRecorder.isTypeSupported()`
-     * hit wins on the user's browser.
+     * Common-superset fallback MIME list when a provider class doesn't
+     * declare its own `#[AcceptedAudioMime]` attributes. Order is
+     * preference order — the SPA picker walks the list and the first
+     * `MediaRecorder.isTypeSupported()` hit wins on the user's browser.
      */
     private const DEFAULT_PREFERRED_AUDIO_MIMES = [
         'audio/webm;codecs=opus',
@@ -69,13 +68,10 @@ final readonly class SpeechToTextRegistry
     private SpeechToTextCascadeResolver $cascade;
 
     /**
-     * Lazy resolver into {@see SpeechProviderConfigPersistence}. The
-     * eager graph `Validator -> Registry -> Persistence -> Validator`
-     * is cyclic; PHP-DI's factory for {@see SpeechToTextRegistry}
-     * therefore injects a Closure (not the service itself) and defers
-     * the resolution to {@see bindProviderSettings()} call time, when
-     * the controller flow has already built Persistence through the
-     * Service chain.
+     * Lazy resolver into {@see SpeechProviderConfigPersistence}.
+     * Injected as a Closure (not the service itself) to break the
+     * `Validator -> Registry -> Persistence -> Validator` cycle —
+     * see spora-core#242 for the cycle guard.
      *
      * @var (Closure(): ?SpeechProviderConfigPersistence)|null
      */
@@ -183,11 +179,10 @@ final readonly class SpeechToTextRegistry
      * available) so the `display_name` reflects the operator's
      * per-config override.
      *
-     * Each row's `class` is the **provider's own FQCN** so callers
-     * (notably the SPA's recorder picker) can identify which row
-     * belongs to the resolved class — `effective_class` is per-
-     * principal and identical across rows, so without `class` the
-     * picker can't tell which row's `preferred_audio_mimes` to use.
+     * Each row's `class` is the provider's **own FQCN** — distinct
+     * from `effective_class` (per-principal, identical across every
+     * row). The SPA picker needs `class` to identify which row's
+     * `preferred_audio_mimes` belongs to the resolved provider.
      *
      * @return list<array{
      *     name: string,
@@ -224,12 +219,10 @@ final readonly class SpeechToTextRegistry
                 'effective_class' => $effectiveClass,
                 'effective_source' => $effectiveSource,
                 'effective_config_id' => $effectiveConfigId,
-                // Per-provider preferred MIME list, surfaced so the
-                // recorder's MIME picker can prefer MiniMax-friendly
-                // OGG-over-Opus over Chrome's default Matroska/WebM
-                // (which MiniMax rejects with error 2013). Falls back
-                // to the common-superset default when the provider
-                // doesn't declare any `#[AcceptedAudioMime]`.
+                // MiniMax rejects the Matroska container (HTTP 502 /
+                // error 2013) so plugin authors declare OGG-over-Opus
+                // ahead of WebM via `#[AcceptedAudioMime]`. The picker
+                // falls back to the default when the provider opts out.
                 'preferred_audio_mimes' => $this->preferredAudioMimesFor($providerClass),
             ];
         }
@@ -237,12 +230,7 @@ final readonly class SpeechToTextRegistry
         return $rows;
     }
 
-    /**
-     * Per-provider preferred audio MIME list (or the common-superset
-     * default when the provider opts out).
-     *
-     * @return list<string>
-     */
+    /** @return list<string> Per-provider declared list, or the common-superset default when the provider opts out. */
     private function preferredAudioMimesFor(string $providerClass): array
     {
         $declared = SpeechProviderConfigValidator::collectAcceptedAudioMimes($providerClass);

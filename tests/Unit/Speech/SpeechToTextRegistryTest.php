@@ -93,13 +93,10 @@ final class StubUnconfiguredProvider implements SpeechToTextProviderInterface
 
 function buildRegistry(array $providers): SpeechToTextRegistry
 {
-    // Wire the registry's optional persistence dependency so
-    // `configuredProvider()` can decode v2 settings on tiers 1-4.
-    // The circular `registry ← validator ← persistence ← registry`
-    // dependency is broken by constructing the registry first with
-    // no persistence, then handing it to the validator, then handing
-    // the validator to the persistence, then re-wiring the registry
-    // with the now-complete persistence.
+    // Two-step wire-up breaks the `Registry <-> Persistence` cycle:
+    // build the registry with a resolver that points at a sentinel,
+    // build persistence against that registry, then patch the
+    // sentinel. Mirrors how PHP-DI assembles the production graph.
     $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
     $persistenceRef = new stdClass();
     $persistenceRef->persistence = null;
@@ -541,10 +538,8 @@ test('describeWithConfig() emits per-provider MIMEs declared via #[AcceptedAudio
     ]);
 });
 
-// Fixture provider for the per-provider preferred-MIME test. Declares
-// #[AcceptedAudioMime] so the registry's describeWithConfig() reflects
-// the plugin's preferred order (OGG/Opus → MP4 → WebM/Opus) instead of
-// the common-superset default.
+// Mirrors the MiniMax declaration shape so this test exercises the
+// plugin-side ordering without depending on the plugin path repo.
 #[Spora\Speech\Attributes\AcceptedAudioMime('audio/ogg;codecs=opus')]
 #[Spora\Speech\Attributes\AcceptedAudioMime('audio/mp4')]
 #[Spora\Speech\Attributes\AcceptedAudioMime('audio/webm;codecs=opus')]

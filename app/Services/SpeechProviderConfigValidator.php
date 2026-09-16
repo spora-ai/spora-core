@@ -94,16 +94,12 @@ final class SpeechProviderConfigValidator
 
     /**
      * Walk `#[AcceptedAudioMime]` attributes on a provider class and
-     * return the declared MIMEs in declaration order. Declared static
-     * so the registry can use it without a circular dep on this
-     * validator (the validator already depends on
-     * {@see SpeechToTextRegistry}).
+     * return the declared MIMEs in declaration order. Static so the
+     * registry can call it without the circular `Validator → Registry`
+     * dependency.
      *
-     * Providers that opt out (no attribute) return `[]`; the caller
-     * falls back to the common-superset default so the SPA picker
-     * still has something to walk.
-     *
-     * @return list<string>
+     * @return list<string> `[]` when the class doesn't exist or opts out;
+     *                    the caller falls back to the common-superset default.
      */
     public static function collectAcceptedAudioMimes(string $providerClass): array
     {

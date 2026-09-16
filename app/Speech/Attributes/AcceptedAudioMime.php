@@ -11,17 +11,16 @@ use Attribute;
  * implementation accepts on its `transcribe()` call.
  *
  * Plugin authors add one attribute per supported MIME, in preference
- * order. The first matching `MediaRecorder.isTypeSupported()` probe
- * the browser reports wins — so declaring `audio/ogg;codecs=opus`
- * ahead of `audio/webm;codecs=opus` steers Chrome 105+ off the
- * Matroska container (MiniMax rejects "matroska,webm" even though
- * the underlying Opus codec is identical to OGG-wrapped Opus) without
- * any server-side transcoding.
+ * order. The first matching `MediaRecorder.isTypeSupported()` probe the
+ * browser reports wins — declaring `audio/ogg;codecs=opus` ahead of
+ * `audio/webm;codecs=opus` steers Chrome 105+ off the Matroska container
+ * (MiniMax rejects "matroska,webm" even though the underlying Opus
+ * codec is identical to OGG-wrapped Opus) without any server-side
+ * transcoding.
  *
  * Collected by {@see \Spora\Services\SpeechProviderConfigValidator::collectAcceptedAudioMimes()}
- * (exposed via the `GET /api/v1/speech/capability` response so the
- * recorder's MIME picker is provider-aware) and surfaced on each row
- * of the capability payload as `preferred_audio_mimes: list<string>`.
+ * and surfaced per-row on `GET /api/v1/speech/capability` as
+ * `preferred_audio_mimes: list<string>`.
  *
  * Examples
  * --------
@@ -31,9 +30,7 @@ use Attribute;
  *   #[AcceptedAudioMime('audio/ogg;codecs=opus')]
  *   #[AcceptedAudioMime('audio/mp4')]
  *   #[AcceptedAudioMime('audio/webm;codecs=opus')]
- *   final class MiniMaxTranscribeProvider implements SpeechToTextProviderInterface
- *   {
- *   }
+ *   final class MiniMaxTranscribeProvider implements SpeechToTextProviderInterface {}
  *
  * OpenAI-compatible-style preference (WebM first; OpenAI/Mistral/Groq
  * all accept the W3C "audio-only" WebM container quirk):
@@ -42,20 +39,12 @@ use Attribute;
  *   #[AcceptedAudioMime('audio/ogg;codecs=opus')]
  *   #[AcceptedAudioMime('audio/mp4')]
  *   #[AcceptedAudioMime('audio/wav')]
- *   final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
- *   {
- *   }
+ *   final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface {}
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class AcceptedAudioMime
 {
-    /**
-     * @param string $mime MediaRecorder-style MIME hint, e.g.
-     *        `audio/ogg;codecs=opus`, `audio/mp4`, `audio/wav`. The
-     *        browser's `MediaRecorder.isTypeSupported()` is the gate
-     *        that decides whether the candidate is actually usable on
-     *        this platform; the registry just forwards the list.
-     */
+    /** @param string $mime MediaRecorder-style MIME hint, e.g. `audio/ogg;codecs=opus`, `audio/mp4`, `audio/wav`. */
     public function __construct(
         public readonly string $mime,
     ) {}
