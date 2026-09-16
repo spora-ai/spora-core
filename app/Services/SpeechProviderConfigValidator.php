@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use ReflectionClass;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
+use Spora\Speech\Attributes\AcceptedAudioMime;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Tools\Attributes\ToolSetting;
 
@@ -89,6 +90,34 @@ final class SpeechProviderConfigValidator
             ];
         }
         return $settings;
+    }
+
+    /**
+     * Walk `#[AcceptedAudioMime]` attributes on a provider class and
+     * return the declared MIMEs in declaration order. Declared static
+     * so the registry can use it without a circular dep on this
+     * validator (the validator already depends on
+     * {@see SpeechToTextRegistry}).
+     *
+     * Providers that opt out (no attribute) return `[]`; the caller
+     * falls back to the common-superset default so the SPA picker
+     * still has something to walk.
+     *
+     * @return list<string>
+     */
+    public static function collectAcceptedAudioMimes(string $providerClass): array
+    {
+        if (!class_exists($providerClass)) {
+            return [];
+        }
+        $ref = new ReflectionClass($providerClass);
+        $mimes = [];
+        foreach ($ref->getAttributes(AcceptedAudioMime::class) as $attr) {
+            /** @var AcceptedAudioMime $instance */
+            $instance = $attr->newInstance();
+            $mimes[] = $instance->mime;
+        }
+        return $mimes;
     }
 
     /**

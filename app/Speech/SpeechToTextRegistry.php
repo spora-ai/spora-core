@@ -8,6 +8,7 @@ use Closure;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SpeechProviderConfigValidator;
 
 /**
  * Discovers every plugin-contributed + core-shipped
@@ -50,6 +51,21 @@ use Spora\Services\SpeechProviderConfigPersistence;
  */
 final readonly class SpeechToTextRegistry
 {
+    /**
+     * Common-superset default for the SPA picker's preferred MIME
+     * list when a provider class doesn't declare its own
+     * `#[AcceptedAudioMime]` attributes. Order is preference order:
+     * the SPA walks the list and the first `MediaRecorder.isTypeSupported()`
+     * hit wins on the user's browser.
+     */
+    private const DEFAULT_PREFERRED_AUDIO_MIMES = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+        'audio/wav',
+    ];
+
     private SpeechToTextCascadeResolver $cascade;
 
     /**
@@ -169,11 +185,13 @@ final readonly class SpeechToTextRegistry
      *
      * @return list<array{
      *     name: string,
+     *     class: class-string<SpeechToTextProviderInterface>,
      *     display_name: string,
      *     configured: bool,
      *     effective_class: string,
      *     effective_source: string,
-     *     effective_config_id: int|null
+     *     effective_config_id: int|null,
+     *     preferred_audio_mimes: list<string>
      * }>
      */
     public function describeWithConfig(?int $userId, ?int $agentId = null): array
@@ -194,15 +212,39 @@ final readonly class SpeechToTextRegistry
 
             $rows[] = [
                 'name' => $provider->getName(),
+                'class' => $providerClass,
                 'display_name' => $provider->getDisplayName(),
                 'configured' => $provider->isConfigured(),
                 'effective_class' => $effectiveClass,
                 'effective_source' => $effectiveSource,
                 'effective_config_id' => $effectiveConfigId,
+                // Per-provider preferred MIME list, surfaced so the
+                // recorder's MIME picker can prefer MiniMax-friendly
+                // OGG-over-Opus over Chrome's default Matroska/WebM
+                // (which MiniMax rejects with error 2013). Falls back
+                // to the common-superset default when the provider
+                // doesn't declare any `#[AcceptedAudioMime]`.
+                'preferred_audio_mimes' => $this->preferredAudioMimesFor($providerClass),
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Per-provider preferred audio MIME list (or the common-superset
+     * default when the provider opts out).
+     *
+     * @return list<string>
+     */
+    private function preferredAudioMimesFor(string $providerClass): array
+    {
+        $declared = SpeechProviderConfigValidator::collectAcceptedAudioMimes($providerClass);
+        if ($declared !== []) {
+            return $declared;
+        }
+
+        return self::DEFAULT_PREFERRED_AUDIO_MIMES;
     }
 
     private function bindProviderLabel(SpeechToTextProviderInterface $provider, int $configId): void

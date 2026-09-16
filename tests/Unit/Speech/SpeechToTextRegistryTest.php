@@ -505,3 +505,70 @@ test('DI bindings resolve Registry + Persistence + Validator without a cycle', f
     $persistence = ($resolver)();
     expect($persistence)->toBeInstanceOf(Spora\Services\SpeechProviderConfigPersistence::class);
 });
+
+test('describeWithConfig() emits the common-superset default MIMEs for providers that opt out', function (): void {
+    $stub = new StubConfiguredProvider();
+    $registry = buildRegistry([$stub]);
+
+    $rows = $registry->describeWithConfig(99, null);
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]['class'])->toBe(StubConfiguredProvider::class);
+    expect($rows[0]['preferred_audio_mimes'])->toBe([
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm',
+        'audio/wav',
+    ]);
+});
+
+test('describeWithConfig() emits per-provider MIMEs declared via #[AcceptedAudioMime]', function (): void {
+    // Local fixture mirrors the MiniMax declaration shape so the test
+    // stays meaningful for the MiniMax use case without depending on
+    // the plugin path repo.
+    $provider = new ProviderDeclaringMimes();
+    $registry = buildRegistry([$provider]);
+
+    $rows = $registry->describeWithConfig(99, null);
+    expect($rows)->toHaveCount(1);
+    expect($rows[0]['class'])->toBe(ProviderDeclaringMimes::class);
+    expect($rows[0]['preferred_audio_mimes'])->toBe([
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+    ]);
+});
+
+// Fixture provider for the per-provider preferred-MIME test. Declares
+// #[AcceptedAudioMime] so the registry's describeWithConfig() reflects
+// the plugin's preferred order (OGG/Opus → MP4 → WebM/Opus) instead of
+// the common-superset default.
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/ogg;codecs=opus')]
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/mp4')]
+#[Spora\Speech\Attributes\AcceptedAudioMime('audio/webm;codecs=opus')]
+final class ProviderDeclaringMimes implements SpeechToTextProviderInterface
+{
+    public function getName(): string
+    {
+        return 'mime-declaring-stub';
+    }
+    public function getDisplayName(): string
+    {
+        return 'MIME Declaring Stub';
+    }
+    public function isConfigured(): bool
+    {
+        return true;
+    }
+    public function bindLabel(string $label): void {}
+    public function bindSettings(array $settings): void {}
+    public function transcribe(
+        string $bytes,
+        string $mimeType,
+        ?string $languageHint = null,
+        ?int $agentId = null,
+        ?int $userId = null,
+    ): TranscriptionResult {
+        return new TranscriptionResult('unused');
+    }
+}
