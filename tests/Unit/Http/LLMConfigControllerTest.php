@@ -10,6 +10,7 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\LLMConfigController;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\AgentService;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LlmConfigValidator;
 use Symfony\Component\HttpFoundation\Request;
@@ -22,7 +23,8 @@ function makeLLMConfigController(): array
     $security = new SecurityManager($key);
     $service = new LLMConfigService($security, [OpenAICompatibleDriver::class, AnthropicCompatibleDriver::class]);
     $validator = new LlmConfigValidator($service);
-    $controller = new LLMConfigController($authService, $service, $validator);
+    $agentService = new AgentService();
+    $controller = new LLMConfigController($authService, $service, $validator, $agentService);
 
     return [$controller, $authService, $service, $key];
 }
@@ -46,11 +48,51 @@ describe('LLMConfigController::index', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
 
-        $response = $controller->index();
+        $response = $controller->index(Request::create('/api/v1/llm-configs', 'GET'));
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['configs'])->toBeArray();
+    });
+
+    test('narrows to the agent-principal scope when ?agent_id=N is set', function (): void {
+        [$controller, $authService] = makeLLMConfigController();
+        bootAuth($authService);
+
+        $response = $controller->index(Request::create('/api/v1/llm-configs?agent_id=1', 'GET'));
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode($response->getContent(), true)['data']['configs'])->toBeArray();
+    });
+
+    test('returns an empty list when ?agent_id points to a missing agent (non-admin caller)', function (): void {
+        [$controller, $authService] = makeLLMConfigController();
+        bootAuth($authService);
+
+        $response = $controller->index(Request::create('/api/v1/llm-configs?agent_id=999999999', 'GET'));
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode($response->getContent(), true)['data']['configs'])->toBe([]);
+    });
+
+    test('falls back to the unscoped path when ?agent_id is missing', function (): void {
+        [$controller, $authService] = makeLLMConfigController();
+        bootAuth($authService);
+
+        // No agent_id → goes through the original getConfigurationsForUser path.
+        $response = $controller->index(Request::create('/api/v1/llm-configs', 'GET'));
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+    });
+
+    test('ignores malformed ?agent_id values (non-numeric, zero, negative)', function (): void {
+        [$controller, $authService] = makeLLMConfigController();
+        bootAuth($authService);
+
+        foreach (['agent_id=abc', 'agent_id=0', 'agent_id=-1', 'agent_id='] as $query) {
+            $response = $controller->index(Request::create('/api/v1/llm-configs?' . $query, 'GET'));
+            expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        }
     });
 });
 

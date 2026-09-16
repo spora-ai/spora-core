@@ -78,6 +78,7 @@ final class SpeechProviderConfigContainerBindings
                     $c->get(\Spora\Auth\AuthService::class),
                     $c->get(SpeechProviderConfigService::class),
                     $c->get(SpeechToTextRegistry::class),
+                    $c->get(\Spora\Services\AgentServiceInterface::class),
                 );
             },
 

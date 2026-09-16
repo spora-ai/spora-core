@@ -357,6 +357,188 @@ test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)',
         ->and($source)->toBe('fallback');
 });
 
+test('Per-agent cascade: a group-owned agent picks the GROUP preference, not the caller\'s user preference', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(Spora\Services\ToolConfigService::class));
+
+    $callerId = 30;
+    $callerPrincipalId = createUserPrincipalPublic($callerId);
+
+    // Caller's user-principal preference points at OAI; group's principal
+    // preference points at the stub. The wrong behaviour (old cascade) would
+    // return the caller's user preference; the correct behaviour for a
+    // group-owned agent is the group's preference.
+    $userConfigId = (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $callerPrincipalId,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'My Personal',
+        'settings' => '{}',
+        'is_default' => false,
+        'is_global' => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+        'principal_id' => $callerPrincipalId,
+        'preferred_speech_config_id' => $userConfigId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $ownerId = 31;
+    createUserPrincipalPublic($ownerId);
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $groupService = new Spora\Services\GroupService($principalService);
+    $group = $groupService->createGroup($ownerId, 'RegCascadeGrp');
+    $groupService->addMember((int) $group->id, $callerId, Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
+    $groupPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', Spora\Models\Principal::TYPE_GROUP)
+        ->where('group_id', $group->id)
+        ->value('id');
+
+    $groupConfigId = (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $groupPrincipalId,
+        'provider_class' => StubConfiguredProvider::class,
+        'display_name' => 'Group Default',
+        'settings' => '{}',
+        'is_default' => false,
+        'is_global' => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+        'principal_id' => $groupPrincipalId,
+        'preferred_speech_config_id' => $groupConfigId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $groupAgentId = (int) Spora\Models\Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name' => 'GroupAgent',
+        'max_steps' => 5,
+        'is_active' => true,
+    ])->id;
+
+    $registry = buildRegistry([$oai, new StubConfiguredProvider()]);
+
+    [$class, $source] = $registry->describe($callerId, $groupAgentId);
+    expect($class)->toBe(StubConfiguredProvider::class)
+        ->and($source)->toBe('group_preference');
+});
+
+test('Per-agent cascade: a user-owned agent still picks the user-principal preference', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(Spora\Services\ToolConfigService::class));
+
+    $userId = 32;
+    $userPrincipalId = createUserPrincipalPublic($userId);
+
+    $configId = (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $userPrincipalId,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'My Own',
+        'settings' => '{}',
+        'is_default' => false,
+        'is_global' => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+        'principal_id' => $userPrincipalId,
+        'preferred_speech_config_id' => $configId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $userAgentId = (int) Spora\Models\Agent::create([
+        'principal_id' => $userPrincipalId,
+        'name' => 'UserAgent',
+        'max_steps' => 5,
+        'is_active' => true,
+    ])->id;
+
+    $registry = buildRegistry([$oai, new StubConfiguredProvider()]);
+
+    [$class, $source] = $registry->describe($userId, $userAgentId);
+    expect($class)->toBe(OpenAiCompatibleTranscriber::class)
+        ->and($source)->toBe('user_preference');
+});
+
+test('Per-agent cascade: a group-owned agent with no group preference falls through to global default', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(Spora\Services\ToolConfigService::class));
+
+    Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
+        'principal_id' => null,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'GlobalDefault',
+        'settings' => '{}',
+        'is_default' => true,
+        'is_global' => true,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $callerId = 33;
+    $ownerId = 34;
+    createUserPrincipalPublic($callerId);
+    createUserPrincipalPublic($ownerId);
+    $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
+    $groupService = new Spora\Services\GroupService($principalService);
+    $group = $groupService->createGroup($ownerId, 'RegCascadeGrp2');
+    $groupService->addMember((int) $group->id, $callerId, Spora\Models\GroupMembership::ROLE_MEMBER, $ownerId);
+    $groupPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', Spora\Models\Principal::TYPE_GROUP)
+        ->where('group_id', $group->id)
+        ->value('id');
+    $groupAgentId = (int) Spora\Models\Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name' => 'GroupAgent2',
+        'max_steps' => 5,
+        'is_active' => true,
+    ])->id;
+
+    $registry = buildRegistry([$oai]);
+
+    [$class, $source, $configId] = $registry->describe($callerId, $groupAgentId);
+    expect($class)->toBe(OpenAiCompatibleTranscriber::class)
+        ->and($source)->toBe('global_default')
+        ->and($configId)->toBeInt();
+});
+
+test('Per-agent cascade: malformed agent id or missing principal falls back to caller-scoped path', function (): void {
+    $oai = new OpenAiCompatibleTranscriber(new Symfony\Component\HttpClient\MockHttpClient(), Mockery::mock(Spora\Services\ToolConfigService::class));
+
+    $userId = 35;
+    $userPrincipalId = createUserPrincipalPublic($userId);
+    $configId = (int) Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id' => $userPrincipalId,
+        'provider_class' => OpenAiCompatibleTranscriber::class,
+        'display_name' => 'Mine',
+        'settings' => '{}',
+        'is_default' => false,
+        'is_global' => false,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Illuminate\Database\Capsule\Manager::table('principal_preferences')->insert([
+        'principal_id' => $userPrincipalId,
+        'preferred_speech_config_id' => $configId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $registry = buildRegistry([$oai, new StubConfiguredProvider()]);
+
+    // Both `agentId <= 0` and "agent doesn't exist" should degrade to the
+    // legacy caller-scoped path so the composer recording button keeps
+    // working even when the agent page hasn't loaded yet.
+    [$classA, $sourceA] = $registry->describe($userId, 0);
+    [$classB, $sourceB] = $registry->describe($userId, 999_999_999);
+    expect($classA)->toBe(OpenAiCompatibleTranscriber::class)
+        ->and($sourceA)->toBe('user_preference')
+        ->and($classB)->toBe(OpenAiCompatibleTranscriber::class)
+        ->and($sourceB)->toBe('user_preference');
+});
+
 test('configuredProvider() pushes decoded v2 settings into bindSettings() on tier 2', function (): void {
     $userId = 21;
     $userPrincipalId = createUserPrincipalPublic($userId);

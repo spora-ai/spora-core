@@ -949,6 +949,7 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(LLMConfigServiceInterface::class),
                     $c->get(LlmConfigValidator::class),
+                    $c->get(AgentServiceInterface::class),
                     $c->get(PrincipalResolver::class),
                 );
             },

@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigServiceInterface;
 use Spora\Services\LlmConfigValidator;
 use Spora\Services\PrincipalResolver;
@@ -36,6 +37,7 @@ final class LLMConfigController
         private readonly AuthService $authService,
         private readonly LLMConfigServiceInterface $llmConfigService,
         private readonly LlmConfigValidator $validator,
+        private readonly AgentServiceInterface $agentService,
         ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
@@ -61,14 +63,65 @@ final class LLMConfigController
      *
      * Returns the current user's personal configs merged with all global configs
      * (for browsing and selecting defaults). Use globalConfigs() for admin management.
+     *
+     * With `?agent_id=N`, narrows to configs valid for that agent's principal
+     * scope only — owned by the agent's principal plus every global config.
+     * Used by the agent-settings page so a user-owned agent does not show
+     * configs owned by groups the caller happens to belong to (and vice versa).
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->validator->error('AUTH_REQUIRED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        }
+
+        $agentId = $this->parseAgentId($request);
+        if ($agentId !== null) {
+            return $this->indexForAgent($userId, $agentId);
+        }
 
         $configs = $this->llmConfigService->getConfigurationsForUser($userId);
 
         return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
+     * Visibility: the agent must be retrievable via
+     * {@see AgentServiceInterface::getAgent()} (which checks ownership) OR
+     * the caller must be an admin; otherwise the response is an empty list
+     * (existence-hide).
+     */
+    private function indexForAgent(int $userId, int $agentId): JsonResponse
+    {
+        if (!$this->authService->isAdmin()) {
+            $agent = $this->agentService->getAgent($agentId, $userId);
+            if ($agent === null) {
+                return new JsonResponse(['data' => ['configs' => []]]);
+            }
+        }
+
+        $configs = $this->llmConfigService->getConfigurationsForAgent($agentId);
+        return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
+     * Parse a positive integer `?agent_id=N` query parameter. Returns
+     * `null` when missing, negative, zero, or non-numeric; non-positive
+     * values yield `null` so the controller falls back to the unscoped
+     * `getConfigurationsForUser()` path instead of erroring.
+     */
+    private function parseAgentId(Request $request): ?int
+    {
+        $raw = $request->query->get('agent_id');
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $value = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($value === false || $value <= 0) {
+            return null;
+        }
+        return (int) $value;
     }
 
     /**

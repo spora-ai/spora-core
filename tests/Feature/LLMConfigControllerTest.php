@@ -34,7 +34,8 @@ function makeLLMConfigController(): array
         AnthropicCompatibleDriver::class,
     ]);
     $validator = new Spora\Services\LlmConfigValidator($llmConfigService);
-    $controller = new Spora\Http\LLMConfigController($authService, $llmConfigService, $validator);
+    $agentService = new Spora\Services\AgentService();
+    $controller = new Spora\Http\LLMConfigController($authService, $llmConfigService, $validator, $agentService);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfService = new CsrfTokenService();
     $csrfMiddleware = new CsrfMiddleware($csrfService);

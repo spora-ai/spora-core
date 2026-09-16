@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Core\SecurityManagerInterface;
+use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 
 /**
@@ -133,6 +134,37 @@ final class LLMConfigService implements LLMConfigServiceInterface
                 $q->whereRaw('1 = 0');
             }
             $q->orWhere('is_global', true);
+        });
+
+        return $query->get()
+            ->map(fn(LLMDriverConfiguration $config): array => $this->configResource($config))
+            ->all();
+    }
+
+    /**
+     * Configs valid for one agent's principal scope, plus every global
+     * config. Mirrors {@see SpeechProviderConfigService::getConfigurationsForAgent()}.
+     *
+     * Visibility is the controller's concern; callers must pre-check
+     * that the user is allowed to view the agent (or is an admin)
+     * before invoking this method. Used by the agent-settings page so a
+     * user-owned agent doesn't show configs owned by groups the caller
+     * happens to belong to (and vice versa).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getConfigurationsForAgent(int $agentId): array
+    {
+        $agent = Agent::find($agentId);
+        if ($agent === null) {
+            return [];
+        }
+
+        $principalId = (int) $agent->principal_id;
+
+        $query = LLMDriverConfiguration::where(static function ($q) use ($principalId): void {
+            $q->where('principal_id', $principalId)
+                ->orWhere('is_global', true);
         });
 
         return $query->get()

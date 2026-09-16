@@ -845,4 +845,165 @@ describe('LLMConfigService facade → schema inspector (getPasswordKeys)', funct
         $keys = $inspector->getPasswordKeysFor(NoPasswordFixtureDriver::class);
         expect($keys)->toBe([]);
     });
+
+    describe('getConfigurationsForAgent', function (): void {
+        test('returns the agent-principal configs plus every global config', function (): void {
+            $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+            $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+            $userA = (int) Capsule::table('users')->insertGetId([
+                'email'      => 'scope-llm-a@example.com',
+                'username'   => 'scope_llm_a',
+                'password'   => str_repeat("\0", 60),
+                'status'     => 1,
+                'verified'   => 1,
+                'resettable' => 1,
+                'roles_mask' => 0,
+                'registered' => time(),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $userB = (int) Capsule::table('users')->insertGetId([
+                'email'      => 'scope-llm-b@example.com',
+                'username'   => 'scope_llm_b',
+                'password'   => str_repeat("\0", 60),
+                'status'     => 1,
+                'verified'   => 1,
+                'resettable' => 1,
+                'roles_mask' => 0,
+                'registered' => time(),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $principalA = createUserPrincipalPublic($userA);
+            $principalB = createUserPrincipalPublic($userB);
+
+            $userAConfig = new LLMDriverConfiguration();
+            $userAConfig->principal_id = $principalA;
+            $userAConfig->name = 'A-User';
+            $userAConfig->driver_class = OpenAICompatibleDriver::class;
+            $userAConfig->settings = '{}';
+            $userAConfig->is_default = false;
+            $userAConfig->save();
+
+            $userBConfig = new LLMDriverConfiguration();
+            $userBConfig->principal_id = $principalB;
+            $userBConfig->name = 'B-User';
+            $userBConfig->driver_class = OpenAICompatibleDriver::class;
+            $userBConfig->settings = '{}';
+            $userBConfig->is_default = false;
+            $userBConfig->save();
+
+            $globalConfig = new LLMDriverConfiguration();
+            $globalConfig->name = 'Global';
+            $globalConfig->driver_class = OpenAICompatibleDriver::class;
+            $globalConfig->settings = '{}';
+            $globalConfig->is_default = false;
+            $globalConfig->is_global = true;
+            $globalConfig->save();
+
+            $agentRow = new Agent();
+            $agentRow->id = 8001;
+            $agentRow->principal_id = $principalA;
+            $agentRow->llm_driver_config_id = null;
+
+            // Insert the agent row directly so Agent::find() in the
+            // service can resolve principal_id (Agent is an Eloquent
+            // model with the agents table; save it via Capsule).
+            Capsule::table('agents')->insert([
+                'id'         => 8001,
+                'principal_id' => $principalA,
+                'name'       => 'A',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $returned = $service->getConfigurationsForAgent(8001);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            sort($ids);
+
+            expect($ids)->toBe([min((int) $globalConfig->id, (int) $userAConfig->id), max((int) $globalConfig->id, (int) $userAConfig->id)])
+                ->and($ids)->not->toContain((int) $userBConfig->id);
+        });
+
+        test('returns only the group-scope configs when the agent is owned by a group, plus global', function (): void {
+            $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+            $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+
+            $ownerId = (int) Capsule::table('users')->insertGetId([
+                'email'      => 'scope-llm-grp-owner@example.com',
+                'username'   => 'scope_llm_grp',
+                'password'   => str_repeat("\0", 60),
+                'status'     => 1,
+                'verified'   => 1,
+                'resettable' => 1,
+                'roles_mask' => 0,
+                'registered' => time(),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $userPrincipalId = createUserPrincipalPublic($ownerId);
+
+            $groupId = (int) Capsule::table('groups')->insertGetId([
+                'name'               => 'scope-llm-group',
+                'description'        => null,
+                'created_by_user_id' => $ownerId,
+                'created_at'         => date('Y-m-d H:i:s'),
+                'updated_at'         => date('Y-m-d H:i:s'),
+            ]);
+            $groupPrincipalId = (int) Capsule::table('principals')->insertGetId([
+                'type'       => \Spora\Models\Principal::TYPE_GROUP,
+                'group_id'   => $groupId,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $groupConfig = new LLMDriverConfiguration();
+            $groupConfig->principal_id = $groupPrincipalId;
+            $groupConfig->name = 'Group';
+            $groupConfig->driver_class = OpenAICompatibleDriver::class;
+            $groupConfig->settings = '{}';
+            $groupConfig->is_default = false;
+            $groupConfig->save();
+
+            $userConfig = new LLMDriverConfiguration();
+            $userConfig->principal_id = $userPrincipalId;
+            $userConfig->name = 'User';
+            $userConfig->driver_class = OpenAICompatibleDriver::class;
+            $userConfig->settings = '{}';
+            $userConfig->is_default = false;
+            $userConfig->save();
+
+            $globalConfig = new LLMDriverConfiguration();
+            $globalConfig->name = 'Global';
+            $globalConfig->driver_class = OpenAICompatibleDriver::class;
+            $globalConfig->settings = '{}';
+            $globalConfig->is_default = false;
+            $globalConfig->is_global = true;
+            $globalConfig->save();
+
+            Capsule::table('agents')->insert([
+                'id'         => 8002,
+                'principal_id' => $groupPrincipalId,
+                'name'       => 'G',
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            $returned = $service->getConfigurationsForAgent(8002);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            sort($ids);
+
+            expect($ids)->toBe([min((int) $globalConfig->id, (int) $groupConfig->id), max((int) $globalConfig->id, (int) $groupConfig->id)])
+                ->and($ids)->not->toContain((int) $userConfig->id);
+        });
+
+        test('returns an empty list when the agent row does not exist', function (): void {
+            $security = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+            $service = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+            expect($service->getConfigurationsForAgent(999_999_999))->toBe([]);
+        });
+    });
 });
