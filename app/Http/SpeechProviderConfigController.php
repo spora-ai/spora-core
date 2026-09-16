@@ -154,9 +154,20 @@ final class SpeechProviderConfigController
             return $this->unauthenticated();
         }
 
+        // Precedence: `?agent_id=N` (per-agent scope) wins over `?group_id=N`
+        // (per-group scope). The agent-settings page is the only caller
+        // that sends `?agent_id`; the group settings page sends
+        // `?group_id`. A request that combines both is malformed — the
+        // per-agent path is the more specific intent and the controller
+        // honours it.
         $agentId = $this->parseAgentId($request);
         if ($agentId !== null) {
             return $this->indexForAgent($userId, $agentId);
+        }
+
+        $groupId = $this->parseGroupId($request);
+        if ($groupId !== null) {
+            return $this->indexForGroup($userId, $groupId);
         }
 
         $configs = $this->service->getConfigurationsForUser($userId);
@@ -185,6 +196,24 @@ final class SpeechProviderConfigController
     }
 
     /**
+     * When `?group_id=N` is present, narrow the response to one group's
+     * configs plus every global config. Visibility is enforced inside
+     * {@see SpeechProviderConfigService::getConfigurationsForGroup()}: a
+     * non-admin caller must be a member of the group, otherwise the
+     * service returns `[]` (existence-hide).
+     *
+     * Without this dispatch the controller was falling through to
+     * `getConfigurationsForUser()` and returning every config the
+     * caller could see across all their groups — leaking other groups'
+     * providers into the single-group settings page.
+     */
+    private function indexForGroup(int $userId, int $groupId): JsonResponse
+    {
+        $configs = $this->service->getConfigurationsForGroup($groupId, $userId, $this->authService->isAdmin());
+        return new JsonResponse(['data' => ['configs' => $configs]]);
+    }
+
+    /**
      * Parse a positive integer `?agent_id=N` query parameter. Returns
      * `null` when missing, negative, zero, or non-numeric; non-positive
      * values yield `null` so the controller falls back to the unscoped
@@ -193,6 +222,26 @@ final class SpeechProviderConfigController
     private function parseAgentId(Request $request): ?int
     {
         $raw = $request->query->get('agent_id');
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $value = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($value === false || $value <= 0) {
+            return null;
+        }
+        return (int) $value;
+    }
+
+    /**
+     * Parse a positive integer `?group_id=N` query parameter. Mirrors
+     * {@see parseAgentId()} so the controller treats malformed group
+     * ids the same way it treats malformed agent ids: fall through to
+     * the unscoped path instead of erroring. Used by the group settings
+     * page; the agent page is the only place that sends `?agent_id`.
+     */
+    private function parseGroupId(Request $request): ?int
+    {
+        $raw = $request->query->get('group_id');
         if ($raw === null || $raw === '') {
             return null;
         }

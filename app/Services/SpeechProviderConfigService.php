@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
+use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Speech\SpeechToTextRegistry;
 
@@ -143,6 +144,55 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         }
 
         $principalId = (int) $agent->principal_id;
+
+        $query = SpeechProviderConfiguration::where(static function ($q) use ($principalId): void {
+            $q->where('principal_id', $principalId)
+                ->orWhere('is_global', true);
+        });
+
+        return $this->mapToResources($query->get());
+    }
+
+    /**
+     * Configs valid for ONE group (the group identified by
+     * `groups.id`), plus every global config. Used by the SPA's group
+     * settings page so configs owned by other groups the caller
+     * belongs to don't leak into the single-group dropdown.
+     *
+     * Mirrors {@see LLMConfigService::getConfigurationsForAgent()}
+     * in pattern: caller-side dispatch keyed on the group's principal
+     * id, with the same existence-hide fallback as the per-agent path.
+     *
+     * Visibility gate:
+     *  - Group missing the principal row → `[]` (data corruption).
+     *  - Caller is admin → returns the group's configs + globals.
+     *  - Caller is a member (their visible principals include the
+     *    group's principal) → returns the group's configs + globals.
+     *  - Otherwise → `[]` (existence-hide for non-members).
+     *
+     * Used by `GET /api/v1/speech/provider-configs?group_id=N` so the
+     * caller-scoped fallback (`getConfigurationsForUser()`) doesn't
+     * leak every group the caller belongs to into the single-group
+     * page response.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getConfigurationsForGroup(int $groupId, int $userId, bool $isAdmin): array
+    {
+        $principalId = (int) Principal::where('type', Principal::TYPE_GROUP)
+            ->where('group_id', $groupId)
+            ->value('id');
+
+        if ($principalId <= 0) {
+            return [];
+        }
+
+        if (!$isAdmin) {
+            $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
+            if (!in_array($principalId, $visiblePrincipalIds, true)) {
+                return [];
+            }
+        }
 
         $query = SpeechProviderConfiguration::where(static function ($q) use ($principalId): void {
             $q->where('principal_id', $principalId)

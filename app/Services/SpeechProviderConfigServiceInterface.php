@@ -42,6 +42,20 @@ interface SpeechProviderConfigServiceInterface
     public function getConfigurationsForAgent(int $agentId): array;
 
     /**
+     * Configs valid for ONE group (the group identified by
+     * `groups.id`), plus every global config. Used by the SPA's group
+     * settings page so configs owned by other groups the caller belongs
+     * to don't leak into the single-group dropdown / list view.
+     *
+     * Visibility gate: non-admin callers must be a member of the
+     * group; non-members get `[]` (existence-hide). Mirrors the gate on
+     * {@see LLMConfigService::index()} for the parallel LLM resource.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getConfigurationsForGroup(int $groupId, int $userId, bool $isAdmin): array;
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function getGlobalConfigurations(): array;

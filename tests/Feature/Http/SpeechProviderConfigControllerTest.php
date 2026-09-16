@@ -9,6 +9,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\SecurityManager;
 use Spora\Http\SpeechProviderConfigController;
 use Spora\Models\GroupMembership;
+use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\AgentService;
 use Spora\Services\GroupService;
@@ -737,6 +738,122 @@ describe('SpeechProviderConfigController', function (): void {
 
             $resp = $controller->index(indexSpcRequest("agent_id={$agentId}"));
             expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
+        });
+    });
+
+    describe('?group_id=N', function (): void {
+        it('returns only the requested group\'s configs plus every global config for an admin caller (regression for groups page)', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $adminId = bootAuth($auth, 'spc-grp-admin@example.com', SPC_TEST_PASSWORD);
+            $auth->grantRole($adminId, \Delight\Auth\Role::ADMIN);
+
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $groupA = $groupService->createGroup($adminId, 'SpGrpScopeA' . random_int(1, 999999));
+            $groupB = $groupService->createGroup($adminId, 'SpGrpScopeB' . random_int(1, 999999));
+            $groupAPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $groupA->id)->value('id');
+            $groupBPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $groupB->id)->value('id');
+
+            $groupAConfig = new SpeechProviderConfiguration();
+            $groupAConfig->principal_id = $groupAPrincipalId;
+            $groupAConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupAConfig->display_name = 'A';
+            $groupAConfig->settings = json_encode(['api_key' => 'sk-a']);
+            $groupAConfig->is_default = false;
+            $groupAConfig->is_global = false;
+            $groupAConfig->save();
+
+            $groupBConfig = new SpeechProviderConfiguration();
+            $groupBConfig->principal_id = $groupBPrincipalId;
+            $groupBConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupBConfig->display_name = 'B';
+            $groupBConfig->settings = json_encode(['api_key' => 'sk-b']);
+            $groupBConfig->is_default = false;
+            $groupBConfig->is_global = false;
+            $groupBConfig->save();
+
+            $global = new SpeechProviderConfiguration();
+            $global->principal_id = null;
+            $global->provider_class = OpenAiCompatibleTranscriber::class;
+            $global->display_name = 'Global';
+            $global->settings = json_encode(['api_key' => 'sk-g']);
+            $global->is_default = false;
+            $global->is_global = true;
+            $global->save();
+
+            // BEFORE the fix this endpoint fell through to
+            // getConfigurationsForUser and returned every group + user +
+            // global the caller could see — leaking B's config into the
+            // single-group A page. AFTER the fix it's scoped to A + globals.
+            $resp = $controller->index(indexSpcRequest("group_id={$groupA->id}"));
+            expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], json_decode($resp->getContent(), true)['data']['configs']);
+            sort($ids);
+
+            expect($ids)->toBe([min($global->id, $groupAConfig->id), max($global->id, $groupAConfig->id)])
+                ->and($ids)->not->toContain($groupBConfig->id);
+        });
+
+        it('returns an empty list for a non-member caller (existence-hide for other groups)', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $adminId = bootAuth($auth, 'spc-grp-private-admin@example.com', SPC_TEST_PASSWORD);
+            $auth->grantRole($adminId, \Delight\Auth\Role::ADMIN);
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $group = $groupService->createGroup($adminId, 'SpGrpPrivate' . random_int(1, 999999));
+            $groupPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $group->id)->value('id');
+            $config = new SpeechProviderConfiguration();
+            $config->principal_id = $groupPrincipalId;
+            $config->provider_class = OpenAiCompatibleTranscriber::class;
+            $config->display_name = 'Private';
+            $config->settings = json_encode(['api_key' => 'sk-p']);
+            $config->is_default = false;
+            $config->is_global = false;
+            $config->save();
+
+            // Authenticate as a non-member.
+            bootAuth($auth, 'spc-grp-private-other@example.com', SPC_TEST_PASSWORD);
+
+            $resp = $controller->index(indexSpcRequest("group_id={$group->id}"));
+            expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            expect(json_decode($resp->getContent(), true)['data']['configs'])->toBe([]);
+        });
+
+        it('returns the configs for a member caller', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $adminId = bootAuth($auth, 'spc-grp-member-admin@example.com', SPC_TEST_PASSWORD);
+            $auth->grantRole($adminId, \Delight\Auth\Role::ADMIN);
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $group = $groupService->createGroup($adminId, 'SpGrpMember' . random_int(1, 999999));
+            $memberId = bootAuth($auth, 'spc-grp-member@example.com', SPC_TEST_PASSWORD);
+            createUserPrincipalPublic($memberId);
+            $groupService->addMember($group->id, $memberId, GroupMembership::ROLE_MEMBER, $adminId);
+            $groupPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $group->id)->value('id');
+
+            $config = new SpeechProviderConfiguration();
+            $config->principal_id = $groupPrincipalId;
+            $config->provider_class = OpenAiCompatibleTranscriber::class;
+            $config->display_name = 'MemberVisible';
+            $config->settings = json_encode(['api_key' => 'sk-m']);
+            $config->is_default = false;
+            $config->is_global = false;
+            $config->save();
+
+            $resp = $controller->index(indexSpcRequest("group_id={$group->id}"));
+            expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], json_decode($resp->getContent(), true)['data']['configs']);
+            expect($ids)->toBe([(int) $config->id]);
+        });
+
+        it('ignores malformed ?group_id values and falls back to the unscoped path', function (): void {
+            [$controller, $auth] = makeSpeechProviderConfigController();
+            $userId = bootAuth($auth, 'spc-grp-malformed@example.com', SPC_TEST_PASSWORD);
+
+            foreach (['group_id=abc', 'group_id=0', 'group_id=-1', 'group_id='] as $query) {
+                $resp = $controller->index(indexSpcRequest($query));
+                expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+            }
         });
     });
 });

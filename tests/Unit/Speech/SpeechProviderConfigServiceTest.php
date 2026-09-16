@@ -5,8 +5,10 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
 use Spora\Core\SecurityManager;
+use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
+use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigPersistence;
@@ -427,6 +429,140 @@ describe('SpeechProviderConfigService', function (): void {
         it('returns an empty list when the agent row does not exist', function (): void {
             $service = makeSpeechConfigService();
             expect($service->getConfigurationsForAgent(999_999_999))->toBe([]);
+        });
+    });
+
+    describe('getConfigurationsForGroup', function (): void {
+        it('returns only the requested group\'s configs plus every global config for an admin caller', function (): void {
+            $auth = bootAuthLayer();
+            $ownerId = bootAuth($auth, 'spc-grp-scope-owner@example.com', SPC_TEST_PASSWORD);
+            $adminId = bootAdmin($ownerId, $auth);
+
+            $service = makeSpeechConfigService();
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+
+            $groupA = $groupService->createGroup($adminId, 'SpGroupScopeA' . random_int(1, 999999));
+            $groupB = $groupService->createGroup($adminId, 'SpGroupScopeB' . random_int(1, 999999));
+            $groupAPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $groupA->id)->value('id');
+            $groupBPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $groupB->id)->value('id');
+
+            // Bypass the controller's scope translation and insert the
+            // group-scope config rows directly via the model — service-level
+            // tests don't exercise that translation (see getConfigurationsForAgent).
+            $groupAConfig = new SpeechProviderConfiguration();
+            $groupAConfig->principal_id = $groupAPrincipalId;
+            $groupAConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupAConfig->display_name = 'A';
+            $groupAConfig->settings = json_encode(['api_key' => 'sk-a']);
+            $groupAConfig->is_default = false;
+            $groupAConfig->is_global = false;
+            $groupAConfig->save();
+
+            $groupBConfig = new SpeechProviderConfiguration();
+            $groupBConfig->principal_id = $groupBPrincipalId;
+            $groupBConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupBConfig->display_name = 'B';
+            $groupBConfig->settings = json_encode(['api_key' => 'sk-b']);
+            $groupBConfig->is_default = false;
+            $groupBConfig->is_global = false;
+            $groupBConfig->save();
+
+            $globalConfig = new SpeechProviderConfiguration();
+            $globalConfig->principal_id = null;
+            $globalConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $globalConfig->display_name = 'Global';
+            $globalConfig->settings = json_encode(['api_key' => 'sk-g']);
+            $globalConfig->is_default = false;
+            $globalConfig->is_global = true;
+            $globalConfig->save();
+
+            // Admin requests group A's page → must see A + globals, NOT B.
+            $returned = $service->getConfigurationsForGroup($groupA->id, $adminId, true);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            sort($ids);
+
+            expect($ids)->toBe([min((int) $globalConfig->id, (int) $groupAConfig->id), max((int) $globalConfig->id, (int) $groupAConfig->id)])
+                ->and($ids)->not->toContain((int) $groupBConfig->id);
+        });
+
+        it('returns an empty list for a non-member caller (existence-hide for other groups)', function (): void {
+            $auth = bootAuthLayer();
+            $ownerId = bootAuth($auth, 'spc-grp-nonmember-owner@example.com', SPC_TEST_PASSWORD);
+            $memberId = bootAuth($auth, 'spc-grp-nonmember@example.com', SPC_TEST_PASSWORD);
+            $adminId = bootAdmin($ownerId, $auth);
+
+            $service = makeSpeechConfigService();
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $group = $groupService->createGroup($adminId, 'SpPrivateGroup' . random_int(1, 999999));
+            $groupPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $group->id)->value('id');
+
+            $groupConfig = new SpeechProviderConfiguration();
+            $groupConfig->principal_id = $groupPrincipalId;
+            $groupConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupConfig->display_name = 'Private';
+            $groupConfig->settings = json_encode(['api_key' => 'sk-p']);
+            $groupConfig->is_default = false;
+            $groupConfig->is_global = false;
+            $groupConfig->save();
+
+            // Non-admin, non-member caller → existence-hide. Without this
+            // gate the controller would leak the group's configs into the
+            // caller's dropdown on the group page.
+            $returned = $service->getConfigurationsForGroup($group->id, $memberId, false);
+            expect($returned)->toBe([]);
+        });
+
+        it('returns the configs for a member caller', function (): void {
+            $auth = bootAuthLayer();
+            $ownerId = bootAuth($auth, 'spc-grp-member-owner@example.com', SPC_TEST_PASSWORD);
+            $memberId = bootAuth($auth, 'spc-grp-member@example.com', SPC_TEST_PASSWORD);
+            $adminId = bootAdmin($ownerId, $auth);
+
+            $service = makeSpeechConfigService();
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $group = $groupService->createGroup($adminId, 'SpMemberGroup' . random_int(1, 999999));
+            $groupService->addMember($group->id, $memberId, GroupMembership::ROLE_MEMBER, $adminId);
+            $groupPrincipalId = (int) Principal::where('type', Principal::TYPE_GROUP)->where('group_id', $group->id)->value('id');
+
+            // Materialise $memberId's user-principal so `visiblePrincipalIds()`
+            // doesn't short-circuit to `[]` (it returns `[]` if the user has
+            // no principal row, even when they're a group member).
+            createUserPrincipalPublic($memberId);
+
+            $groupConfig = new SpeechProviderConfiguration();
+            $groupConfig->principal_id = $groupPrincipalId;
+            $groupConfig->provider_class = OpenAiCompatibleTranscriber::class;
+            $groupConfig->display_name = 'MemberVisible';
+            $groupConfig->settings = json_encode(['api_key' => 'sk-m']);
+            $groupConfig->is_default = false;
+            $groupConfig->is_global = false;
+            $groupConfig->save();
+
+            $returned = $service->getConfigurationsForGroup($group->id, $memberId, false);
+            $ids = array_map(static fn(array $r): int => (int) $r['id'], $returned);
+            expect($ids)->toBe([(int) $groupConfig->id]);
+        });
+
+        it('returns an empty list when the group has no principal row (data integrity)', function (): void {
+            $auth = bootAuthLayer();
+            $ownerId = bootAuth($auth, 'spc-grp-no-principal-owner@example.com', SPC_TEST_PASSWORD);
+
+            $service = makeSpeechConfigService();
+            $principalService = new PrincipalService(new PrincipalResolver());
+            $groupService = new GroupService($principalService);
+            $group = $groupService->createGroup($ownerId, 'SpOrphanGroup' . random_int(1, 999999));
+
+            // Simulate a rolled-back transaction that left a `groups` row
+            // without a matching principal row. Existence-hide — never error.
+            Capsule::table('principals')
+                ->where('type', Principal::TYPE_GROUP)
+                ->where('group_id', $group->id)
+                ->delete();
+
+            expect($service->getConfigurationsForGroup($group->id, $ownerId, true))->toBe([]);
         });
     });
 });
