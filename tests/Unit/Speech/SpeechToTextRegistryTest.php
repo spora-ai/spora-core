@@ -101,12 +101,23 @@ function buildRegistry(array $providers): SpeechToTextRegistry
     // the validator to the persistence, then re-wiring the registry
     // with the now-complete persistence.
     $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
-    $registry = new SpeechToTextRegistry($providers, $principalService);
+    $persistenceRef = new stdClass();
+    $persistenceRef->persistence = null;
+    $registry = new SpeechToTextRegistry(
+        $providers,
+        $principalService,
+        static fn(): ?Spora\Services\SpeechProviderConfigPersistence => $persistenceRef->persistence,
+    );
     $validator = new Spora\Services\SpeechProviderConfigValidator($registry);
     $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $persistence = new Spora\Services\SpeechProviderConfigPersistence($security, $validator);
+    $persistence = new Spora\Services\SpeechProviderConfigPersistence(
+        $security,
+        $validator,
+        static fn(): SpeechToTextRegistry => $registry,
+    );
+    $persistenceRef->persistence = $persistence;
 
-    return new SpeechToTextRegistry($providers, $principalService, $persistence);
+    return $registry;
 }
 
 test('empty registry — all returns empty, configured returns null, describe returns empty', function (): void {
@@ -363,7 +374,11 @@ test('configuredProvider() pushes decoded v2 settings into bindSettings() on tie
     );
     $registry = buildRegistry([$openAi]);
     $validator = new Spora\Services\SpeechProviderConfigValidator($registry);
-    $persistence = new Spora\Services\SpeechProviderConfigPersistence($security, $validator);
+    $persistence = new Spora\Services\SpeechProviderConfigPersistence(
+        $security,
+        $validator,
+        static fn(): SpeechToTextRegistry => $registry,
+    );
     $encrypted = $persistence->encodeSettingsString(
         OpenAiCompatibleTranscriber::class,
         ['api_key' => 'sk-from-v2'],
@@ -407,4 +422,101 @@ test('configuredProvider() does not push settings on tier 5 fallback (no FK)', f
     // and falls through to ToolConfigService in transcribe().
     /** @var StubConfiguredProvider $configured */
     expect($configured->boundSettings)->toBe([]);
+});
+
+test('DI bindings resolve Registry + Persistence + Validator without a cycle', function (): void {
+    // Regression guard for the cycle that landed when the speech-input
+    // contract (#238) was added:
+    //   SpeechProviderConfigController
+    //     -> SpeechProviderConfigService
+    //       -> SpeechProviderConfigValidator
+    //         -> SpeechToTextRegistry
+    //           -> SpeechProviderConfigPersistence
+    //             -> SpeechProviderConfigValidator  (cycle)
+    //
+    // The cycle is broken by injecting the cross-class collaborators as
+    // lazy Closures (see the `?Closure $persistenceResolver` /
+    // `?Closure $speechRegistryResolver` constructor params) — neither
+    // factory resolves the other class during its own construction, so
+    // PHP-DI's container build stays acyclic. This test boots a minimal
+    // container with the same factories
+    // `SpeechProviderConfigContainerBindings` ships, asks it for every
+    // leg of the graph, and asserts the build completes without
+    // `DI\DependencyException: Circular dependency detected`. If anyone
+    // re-introduces an eager `->get()` of the cross-class collaborator
+    // in either factory the test fails.
+    $provider = new class implements SpeechToTextProviderInterface {
+        public function getName(): string
+        {
+            return 'stub';
+        }
+        public function getDisplayName(): string
+        {
+            return 'Stub';
+        }
+        public function isConfigured(): bool
+        {
+            return true;
+        }
+        public function transcribe(
+            string $bytes,
+            string $mimeType,
+            ?string $languageHint = null,
+            ?int $agentId = null,
+            ?int $userId = null,
+        ): TranscriptionResult {
+            return new TranscriptionResult(text: 'stub', language: null, durationMs: null, metadata: []);
+        }
+        public function bindSettings(array $settings): void {}
+        public function bindLabel(string $label): void {}
+    };
+
+    $builder = new DI\ContainerBuilder();
+    $builder->addDefinitions([
+        'config' => ['app_env' => 'testing', 'key_path' => null],
+        Spora\Core\SecurityManagerInterface::class => static fn(): Spora\Core\SecurityManager
+            => new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        Spora\Plugins\PluginLoader::class => static fn(): Spora\Plugins\PluginLoader
+            => new Spora\Plugins\PluginLoader([]),
+        Spora\Services\PrincipalService::class => static fn(): Spora\Services\PrincipalService
+            => new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
+        'speech_to_text_provider_classes' => [],
+        'speech_to_text_provider_classes_merged' => static fn(): array => [$provider],
+        SpeechToTextRegistry::class => static function (Psr\Container\ContainerInterface $c): SpeechToTextRegistry {
+            $providers = [];
+            foreach ($c->get('speech_to_text_provider_classes_merged') as $instance) {
+                $providers[] = $instance;
+            }
+            return new SpeechToTextRegistry(
+                $providers,
+                $c->has(Spora\Services\PrincipalService::class) ? $c->get(Spora\Services\PrincipalService::class) : new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
+                // Pass a lazy Closure that resolves Persistence on
+                // first call from bindProviderSettings() — see the
+                // class docblock for the cycle rationale.
+                static fn(): ?Spora\Services\SpeechProviderConfigPersistence
+                    => $c->has(Spora\Services\SpeechProviderConfigPersistence::class)
+                        ? $c->get(Spora\Services\SpeechProviderConfigPersistence::class)
+                        : null,
+            );
+        },
+    ]);
+    $builder->addDefinitions(Spora\Core\SpeechProviderConfigContainerBindings::all());
+
+    $container = $builder->build();
+
+    expect($container->get(SpeechToTextRegistry::class))->toBeInstanceOf(SpeechToTextRegistry::class);
+    expect($container->get(Spora\Services\SpeechProviderConfigPersistence::class))->toBeInstanceOf(Spora\Services\SpeechProviderConfigPersistence::class);
+    expect($container->get(Spora\Services\SpeechProviderConfigValidator::class))->toBeInstanceOf(Spora\Services\SpeechProviderConfigValidator::class);
+
+    // Resolve Registry BEFORE Persistence (the controller autowiring
+    // path) and confirm the lazy Closure still wires persistence into
+    // the registry once Persistence is built — guards the
+    // "Registry built first, Persistence built later" runtime path.
+    $registry = $container->get(SpeechToTextRegistry::class);
+    $container->get(Spora\Services\SpeechProviderConfigPersistence::class);
+    $reflection = new ReflectionClass($registry);
+    $resolver = $reflection->getProperty('persistenceResolver')->getValue($registry);
+    expect($resolver)->toBeInstanceOf(Closure::class);
+    $persistence = ($resolver)();
+    expect($persistence)->toBeInstanceOf(Spora\Services\SpeechProviderConfigPersistence::class);
 });

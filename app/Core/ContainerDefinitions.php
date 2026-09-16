@@ -797,10 +797,19 @@ final class ContainerDefinitions
                     $instance = $c->get($class);
                     $providers[] = $instance;
                 }
+                // Persistence is injected as a lazy Closure, not an eager
+                // service: the eager graph
+                //   Validator -> Registry -> Persistence -> Validator
+                // is cyclic and PHP-DI refuses to resolve it. The Closure
+                // is only invoked from `bindProviderSettings()`, by which
+                // time the controller flow has already resolved
+                // Persistence through the Service chain.
                 return new SpeechToTextRegistry(
                     $providers,
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : new PrincipalService(new PrincipalResolver()),
-                    $c->get(SpeechProviderConfigPersistence::class),
+                    static fn(): ?SpeechProviderConfigPersistence => $c->has(SpeechProviderConfigPersistence::class)
+                        ? $c->get(SpeechProviderConfigPersistence::class)
+                        : null,
                 );
             },
 

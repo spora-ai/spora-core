@@ -37,7 +37,7 @@ function makeSpeechPreferenceController(): array
     ], $principalService);
 
     $validator = new SpeechProviderConfigValidator($registry);
-    $persistence = new SpeechProviderConfigPersistence($security, $validator);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 
@@ -84,7 +84,7 @@ function seedGlobalSpeechConfig(AuthService $auth, array $body): int
         new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
     ], $principalService);
     $validator = new SpeechProviderConfigValidator($registry);
-    $persistence = new SpeechProviderConfigPersistence($security, $validator);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     $service = new SpeechProviderConfigService(
         $validator,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Speech;
 
+use Closure;
 use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigPersistence;
@@ -51,18 +52,33 @@ final readonly class SpeechToTextRegistry
 {
     private SpeechToTextCascadeResolver $cascade;
 
-    private ?SpeechProviderConfigPersistence $persistence;
+    /**
+     * Lazy resolver into {@see SpeechProviderConfigPersistence}. Passed
+     * as a Closure (not the service itself) so PHP-DI's container
+     * build does not eagerly resolve Persistence during this factory —
+     * the eager graph `Validator -> Registry -> Persistence ->
+     * Validator` is cyclic and the container refuses to resolve it.
+     * The Closure is only invoked on first call to
+     * {@see bindProviderSettings()}, by which time the controller flow
+     * has already resolved Persistence through the Service chain.
+     *
+     * @var (Closure(): ?SpeechProviderConfigPersistence)|null
+     */
+    private readonly ?Closure $persistenceResolver;
 
     /**
      * @param list<SpeechToTextProviderInterface> $providers
+     * @param (Closure(): ?SpeechProviderConfigPersistence)|null $persistenceResolver
+     *        Lazy injector for the v2 persistence collaborator. See
+     *        {@see $persistenceResolver} for the cycle rationale.
      */
     public function __construct(
-        private array $providers,
+        private readonly array $providers,
         PrincipalService $principalService,
-        ?SpeechProviderConfigPersistence $persistence = null,
+        ?Closure $persistenceResolver = null,
     ) {
         $this->cascade = new SpeechToTextCascadeResolver($providers, $principalService);
-        $this->persistence = $persistence;
+        $this->persistenceResolver = $persistenceResolver;
     }
 
     /**
@@ -205,14 +221,17 @@ final readonly class SpeechToTextRegistry
      * Decode the resolved v2 row's `settings` blob and push it into the
      * provider via {@see SpeechToTextProviderInterface::bindSettings()}.
      * Skipped on tier-5 fallback (no FK → no row to decode) and when
-     * the registry was constructed without a persistence dependency
-     * (the legacy `SpeechProviderConfigPersistence::__construct` self-
-     * default for `$speechRegistry` — empty registry, no providers, no
-     * decode calls).
+     * the registry was constructed without a persistence resolver (the
+     * `SpeechProviderConfigPersistence::__construct` self-default —
+     * empty registry, no providers, no decode calls).
      */
     private function bindProviderSettings(SpeechToTextProviderInterface $provider, int $configId): void
     {
-        if ($this->persistence === null) {
+        if ($this->persistenceResolver === null) {
+            return;
+        }
+        $persistence = ($this->persistenceResolver)();
+        if (!$persistence instanceof SpeechProviderConfigPersistence) {
             return;
         }
         $config = SpeechProviderConfiguration::find($configId);
@@ -220,7 +239,7 @@ final readonly class SpeechToTextRegistry
             return;
         }
         $rawSettings = $config->getRawOriginal('settings');
-        $decoded = $this->persistence->decodeSettings($provider::class, $rawSettings);
+        $decoded = $persistence->decodeSettings($provider::class, $rawSettings);
         $provider->bindSettings($decoded);
     }
 

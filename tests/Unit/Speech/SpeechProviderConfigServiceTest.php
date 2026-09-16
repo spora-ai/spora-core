@@ -27,11 +27,12 @@ function makeSpeechConfigService(): SpeechProviderConfigService
 {
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $principalService = new PrincipalService(new PrincipalResolver());
-    $validator = new SpeechProviderConfigValidator(new SpeechToTextRegistry([new OpenAiCompatibleTranscriber(
+    $registry = new SpeechToTextRegistry([new OpenAiCompatibleTranscriber(
         new Symfony\Component\HttpClient\MockHttpClient(),
         new Spora\Services\ToolConfigService($security, new Psr\Log\NullLogger(), []),
-    )], $principalService));
-    $persistence = new SpeechProviderConfigPersistence($security, $validator);
+    )], $principalService);
+    $validator = new SpeechProviderConfigValidator($registry);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
     $preferences = new SpeechProviderConfigPreferences($principalService);
     return new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
 }

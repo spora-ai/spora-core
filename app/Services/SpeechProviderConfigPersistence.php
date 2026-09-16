@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Closure;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
@@ -48,21 +49,30 @@ final class SpeechProviderConfigPersistence
 {
     private readonly SecurityManagerInterface $security;
     private readonly SpeechProviderConfigValidator $validator;
-    private readonly SpeechToTextRegistry $speechRegistry;
+    /**
+     * Lazy resolver into {@see SpeechToTextRegistry}. Passed as a
+     * Closure (not the service itself) so PHP-DI does not eagerly
+     * resolve the registry during this factory — the eager graph
+     * `Validator -> Registry -> Persistence -> Validator` is cyclic
+     * and the container refuses to resolve it. The Closure is only
+     * invoked when {@see configResource()} actually walks the
+     * registry (response-shape paths), by which time the controller
+     * flow has already resolved Registry.
+     *
+     * @var (Closure(): ?SpeechToTextRegistry)|null
+     */
+    private readonly ?Closure $speechRegistryResolver;
     private readonly PrincipalResolver $principalResolver;
 
     public function __construct(
         SecurityManagerInterface $security,
         SpeechProviderConfigValidator $validator,
-        ?SpeechToTextRegistry $speechRegistry = null,
+        ?Closure $speechRegistryResolver = null,
         ?PrincipalResolver $principalResolver = null,
     ) {
         $this->security = $security;
         $this->validator = $validator;
-        $this->speechRegistry = $speechRegistry ?? new SpeechToTextRegistry(
-            [],
-            new PrincipalService(new PrincipalResolver()),
-        );
+        $this->speechRegistryResolver = $speechRegistryResolver;
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
@@ -268,11 +278,14 @@ final class SpeechProviderConfigPersistence
 
         $providerName = null;
         $providerDisplayName = null;
-        foreach ($this->speechRegistry->allProviders() as $provider) {
-            if ($provider::class === $config->provider_class) {
-                $providerName = $provider->getName();
-                $providerDisplayName = $provider->getDisplayName();
-                break;
+        $registry = $this->resolveSpeechRegistry();
+        if ($registry !== null) {
+            foreach ($registry->allProviders() as $provider) {
+                if ($provider::class === $config->provider_class) {
+                    $providerName = $provider->getName();
+                    $providerDisplayName = $provider->getDisplayName();
+                    break;
+                }
             }
         }
 
@@ -328,6 +341,23 @@ final class SpeechProviderConfigPersistence
     {
         Agent::where('speech_driver_config_id', $configId)->update(['speech_driver_config_id' => null]);
         PrincipalPreference::where('preferred_speech_config_id', $configId)->update(['preferred_speech_config_id' => null]);
+    }
+
+    /**
+     * Resolve the speech-to-text registry lazily. Returns null when no
+     * resolver was wired (the controller-less or unit-test path) so
+     * {@see configResource()} can still build a response without the
+     * provider's display name. The resolver itself is a Closure —
+     * {@see SpeechToTextRegistry} is resolved on first call, by which
+     * time the registry has been built eagerly through the container.
+     */
+    private function resolveSpeechRegistry(): ?SpeechToTextRegistry
+    {
+        if ($this->speechRegistryResolver === null) {
+            return null;
+        }
+        $registry = ($this->speechRegistryResolver)();
+        return $registry instanceof SpeechToTextRegistry ? $registry : null;
     }
 
     /**

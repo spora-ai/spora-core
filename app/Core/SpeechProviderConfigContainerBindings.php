@@ -37,10 +37,16 @@ final class SpeechProviderConfigContainerBindings
             },
 
             SpeechProviderConfigPersistence::class => static function (ContainerInterface $c): SpeechProviderConfigPersistence {
+                // Registry is injected as a lazy Closure for the same cycle
+                // reason as in the Registry factory — see
+                // {@see \Spora\Speech\SpeechToTextRegistry::__construct}
+                // for the rationale.
                 return new SpeechProviderConfigPersistence(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(SpeechProviderConfigValidator::class),
-                    $c->get(SpeechToTextRegistry::class),
+                    static fn(): ?SpeechToTextRegistry => $c->has(SpeechToTextRegistry::class)
+                        ? $c->get(SpeechToTextRegistry::class)
+                        : null,
                 );
             },
 
