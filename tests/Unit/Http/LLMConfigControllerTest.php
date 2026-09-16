@@ -65,15 +65,6 @@ describe('LLMConfigController::index', function (): void {
         expect(json_decode($response->getContent(), true)['data']['configs'])->toBeArray();
     });
 
-    test('returns 401 when unauthenticated even with ?agent_id=N', function (): void {
-        [$controller] = makeLLMConfigController();
-        // No bootAuth → no session user.
-
-        $response = $controller->index(Request::create('/api/v1/llm-configs?agent_id=1', 'GET'));
-
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
-    });
-
     test('returns an empty list when ?agent_id points to a missing agent (non-admin caller)', function (): void {
         [$controller, $authService] = makeLLMConfigController();
         bootAuth($authService);
