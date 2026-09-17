@@ -44,9 +44,16 @@ final class SpeechProviderConfigMutator implements SpeechProviderConfigMutatorIn
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
-        $principalId = isset($data['principal_id']) && is_int($data['principal_id'])
-            ? $data['principal_id']
-            : $this->principalService->ensureUserPrincipal($userId)->id;
+        // Global rows always null `principal_id` in the persistence layer,
+        // so for those we skip `ensureUserPrincipal()` to avoid a wasted
+        // DB round-trip just to throw the id away.
+        if (isset($data['principal_id']) && is_int($data['principal_id'])) {
+            $principalId = $data['principal_id'];
+        } elseif (empty($data['is_global'])) {
+            $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
 
         unset($data['principal_id']);
 
