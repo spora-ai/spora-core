@@ -264,13 +264,16 @@ return new class extends Migration {
 
     private function hasDuplicatePairs(string $table): bool
     {
+        // MariaDB requires every derived table to have an alias (MySQL
+        // tolerates the bare form, MariaDB rejects it with SQLSTATE
+        // 1064 near the closing paren). SQLite accepts both.
         $row = Capsule::selectOne(
             "SELECT COUNT(*) AS c FROM (
                 SELECT principal_id, tool_class
                 FROM {$table}
                 GROUP BY principal_id, tool_class
                 HAVING COUNT(*) > 1
-            )",
+            ) AS duplicates",
         );
         return ((int) ($row->c ?? 0)) > 0;
     }
