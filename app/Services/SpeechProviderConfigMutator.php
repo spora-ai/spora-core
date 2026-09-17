@@ -44,16 +44,16 @@ final class SpeechProviderConfigMutator implements SpeechProviderConfigMutatorIn
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
-        // Only default the principal to the caller's user-principal when
-        // the request is principal-scoped. Global rows always null out
-        // `principal_id` in the persistence layer, so materialising a
-        // user-principal just to throw it away is a wasted DB round-trip
-        // (per the 2026-09-17 light review).
-        $principalId = isset($data['principal_id']) && is_int($data['principal_id'])
-            ? $data['principal_id']
-            : (empty($data['is_global'])
-                ? $this->principalService->ensureUserPrincipal($userId)->id
-                : null);
+        // Global rows always null `principal_id` in the persistence layer,
+        // so for those we skip `ensureUserPrincipal()` to avoid a wasted
+        // DB round-trip just to throw the id away.
+        if (isset($data['principal_id']) && is_int($data['principal_id'])) {
+            $principalId = $data['principal_id'];
+        } elseif (empty($data['is_global'])) {
+            $principalId = $this->principalService->ensureUserPrincipal($userId)->id;
+        } else {
+            $principalId = null;
+        }
 
         unset($data['principal_id']);
 
