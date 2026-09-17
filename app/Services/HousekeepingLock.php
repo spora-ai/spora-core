@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Models\WorkerHousekeepingLock;
 use Throwable;
 
 /**
@@ -19,7 +19,6 @@ use Throwable;
  */
 final class HousekeepingLock
 {
-    private const SINGLETON_ID = 1;
     private const DB_DATETIME_FORMAT = 'Y-m-d H:i:s';
 
     /**
@@ -32,7 +31,7 @@ final class HousekeepingLock
         $until = gmdate(self::DB_DATETIME_FORMAT, time() + $seconds);
 
         try {
-            $row = Capsule::table('worker_housekeeping_locks')->where('id', self::SINGLETON_ID)->first();
+            $row = WorkerHousekeepingLock::find(WorkerHousekeepingLock::SINGLETON_ID);
             if ($row === null) {
                 return $this->insertInitialLock($until);
             }
@@ -46,22 +45,22 @@ final class HousekeepingLock
     private function insertInitialLock(string $until): bool
     {
         // caller_id not currently threaded through; placeholder for analytics.
-        Capsule::table('worker_housekeeping_locks')->insert([
-            'id'            => self::SINGLETON_ID,
+        WorkerHousekeepingLock::create([
+            'id'            => WorkerHousekeepingLock::SINGLETON_ID,
             'claimed_until' => $until,
             'claimed_by'    => 0,
         ]);
         return true;
     }
 
-    private function casUpdateLock(object $row, string $now, string $until): bool
+    private function casUpdateLock(WorkerHousekeepingLock $row, string $now, string $until): bool
     {
-        $existing = (string) $row->claimed_until;
+        $existing = $row->claimed_until->format(self::DB_DATETIME_FORMAT);
         if ($existing > $now) {
             return false;
         }
-        $affected = Capsule::table('worker_housekeeping_locks')
-            ->where('id', self::SINGLETON_ID)
+        $affected = WorkerHousekeepingLock::query()
+            ->where('id', WorkerHousekeepingLock::SINGLETON_ID)
             ->where('claimed_until', '<=', $now)
             ->update([
                 'claimed_until' => $until,
@@ -77,8 +76,8 @@ final class HousekeepingLock
     public function release(): void
     {
         try {
-            Capsule::table('worker_housekeeping_locks')
-                ->where('id', self::SINGLETON_ID)
+            WorkerHousekeepingLock::query()
+                ->where('id', WorkerHousekeepingLock::SINGLETON_ID)
                 ->update([
                     'claimed_until' => gmdate(self::DB_DATETIME_FORMAT, time() - 1),
                     'claimed_by'    => 0,
