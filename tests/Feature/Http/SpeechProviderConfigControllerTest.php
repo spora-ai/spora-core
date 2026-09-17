@@ -236,6 +236,69 @@ describe('SpeechProviderConfigController', function (): void {
         expect($delResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });
 
+    it('admin delete returns 404 when the config does not exist (no exception)', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_NOT_FOUND, ...)`
+        // branch in `destroy()` — exercised when the service returns `false`
+        // instead of throwing. Admin + non-existent id is the only call
+        // path that hits this branch; non-admin paths throw a
+        // `SpeechProviderConfigException` caught by `mapException`.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-delete-404@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $delResp = $controller->destroy(99999);
+        expect($delResp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+        $body = json_decode($delResp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_NOT_FOUND');
+    });
+
+    it('store with a malformed JSON body returns 422 SPEECH_PROVIDER_CONFIG_INVALID', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_INVALID, ...)`
+        // branch in `decodeBody()` — the path where the request body
+        // is not parseable as JSON. We construct the Request directly
+        // because `jsonSpcRequest()` always json_encodes its body.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-bad-json@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $req = Request::create(
+            '/api/v1/speech/provider-configs',
+            'POST',
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/json'],
+            'this is not json {{',
+        );
+
+        $resp = $controller->store($req);
+        expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_INVALID');
+    });
+
+    it('store with scope=group but missing/invalid group_id returns 403', function (): void {
+        // Covers the inlined `error(SPEECH_PROVIDER_CONFIG_FORBIDDEN, ...)`
+        // branch in `resolveGroupScopeBody()` for `$groupId <= 0`. The
+        // existing 'group non-member' test (line 419) covers the
+        // `$principalId === null` branch (line 487), but not the
+        // invalid-id branch above it.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-bad-groupid@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'group',
+            'group_id' => 0,
+            'settings' => fullSettings('sk-bad'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+        $body = json_decode($resp->getContent(), true);
+        expect($body['error']['code'])->toBe('SPEECH_PROVIDER_CONFIG_FORBIDDEN');
+    });
+
     it('non-admin: 403 for visible-but-not-owned (admin-only global config)', function (): void {
         // An admin creates a global config. A non-admin can SEE the
         // row (globals are visible to everyone) but cannot edit it
@@ -480,6 +543,105 @@ describe('SpeechProviderConfigController', function (): void {
 
         expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
         expect(SpeechProviderConfiguration::count())->toBe(0);
+    });
+
+    it('non-admin: silently rewrites a foreign principal_id on scope=user writes so the row is owned by the caller (no 500)', function (): void {
+        // Regression for the speech-cache security audit: the controller
+        // accepted a caller-supplied `principal_id` and forwarded it to
+        // the persistence layer, where `PrincipalNotAccessibleException`
+        // was thrown for foreign ids. That exception wasn't in the
+        // controller's `mapException()` or `Kernel::mapKnownExceptionToResponse()`
+        // → 500 INTERNAL_SERVER_ERROR instead of the documented
+        // 403/422 envelope. The controller now silently rewrites a
+        // foreign `principal_id` to the caller's user-principal
+        // (mirroring `LlmConfigValidator::prepareStoreData()`), so the
+        // row lands under the caller, the response is the normal 201
+        // `{data:{config:...}}` envelope, and the path is not an oracle
+        // for probing which principal ids exist.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $callerId = bootAuth($auth, 'spc-foreign-principal@example.com', SPC_TEST_PASSWORD);
+        $callerPrincipalId = createUserPrincipalPublic($callerId);
+
+        // A different user with their own user-principal — the foreign
+        // id we'll target. The user row exists only so the FK on
+        // `principals.user_id` is satisfied; we don't log in as them.
+        $foreignUserId = (int) Capsule::table('users')->insertGetId([
+            'email'      => 'spc-foreign-principal-b@example.com',
+            'username'   => 'spc_foreign_principal_b',
+            'password'   => str_repeat("\0", 60),
+            'status'     => 1,
+            'verified'   => 1,
+            'resettable' => 1,
+            'roles_mask' => 0,
+            'registered' => time(),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $foreignPrincipalId = createUserPrincipalPublic($foreignUserId, false);
+
+        $resp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+            'principal_id' => $foreignPrincipalId,
+            'settings' => fullSettings('sk-foreign'),
+        ]));
+
+        expect($resp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode($resp->getContent(), true);
+        expect($body)->toHaveKey('data');
+        expect($body['data']['config'])->toBeArray();
+        expect((int) $body['data']['config']['principal_id'])->toBe($callerPrincipalId);
+        expect((int) $body['data']['config']['principal_id'])->not->toBe($foreignPrincipalId);
+        expect($body)->not->toHaveKey('error');
+
+        $row = SpeechProviderConfiguration::find($body['data']['config']['id']);
+        expect($row->principal_id)->toBe($callerPrincipalId);
+    });
+
+    it('non-admin: scope=user wire shape is identical with or without a foreign principal_id (oracle-prevention)', function (): void {
+        // Pins response parity between a clean `scope=user` write and
+        // one with a foreign `principal_id`. A future change must not
+        // quietly introduce a distinguishable error envelope for the
+        // foreign-id case — that would re-open the oracle.
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $callerId = bootAuth($auth, 'spc-foreign-principal-shape@example.com', SPC_TEST_PASSWORD);
+
+        $cleanResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'settings' => fullSettings('sk-clean'),
+        ]));
+        expect($cleanResp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $cleanBody = json_decode($cleanResp->getContent(), true);
+
+        $foreignUserId = (int) Capsule::table('users')->insertGetId([
+            'email'      => 'spc-foreign-principal-shape-b@example.com',
+            'username'   => 'spc_foreign_principal_shape_b',
+            'password'   => str_repeat("\0", 60),
+            'status'     => 1,
+            'verified'   => 1,
+            'resettable' => 1,
+            'roles_mask' => 0,
+            'registered' => time(),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $foreignPrincipalId = createUserPrincipalPublic($foreignUserId, false);
+
+        $foreignResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'scope' => 'user',
+            'principal_id' => $foreignPrincipalId,
+            'settings' => fullSettings('sk-foreign'),
+        ]));
+
+        expect($foreignResp->getStatusCode())->toBe($cleanResp->getStatusCode());
+        $foreignBody = json_decode($foreignResp->getContent(), true);
+        expect(array_keys($foreignBody))->toBe(array_keys($cleanBody));
+        expect(array_keys($foreignBody['data']))->toBe(array_keys($cleanBody['data']));
+        expect(array_keys($foreignBody['data']['config']))->toBe(array_keys($cleanBody['data']['config']));
+        expect($foreignBody)->not->toHaveKey('error');
+        expect((int) $foreignBody['data']['config']['principal_id'])
+            ->toBe((int) $cleanBody['data']['config']['principal_id']);
     });
 
     it('schema() lists every registered STT class with its settings_schema', function (): void {

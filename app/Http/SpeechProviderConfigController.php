@@ -9,6 +9,8 @@ use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\SpeechProviderConfigException;
 use Spora\Services\AgentServiceInterface;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -59,12 +61,20 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class SpeechProviderConfigController
 {
+    private readonly PrincipalResolver $principalResolver;
+    private readonly PrincipalService $principalService;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly SpeechProviderConfigService $service,
         private readonly SpeechToTextRegistry $registry,
         private readonly AgentServiceInterface $agentService,
-    ) {}
+        ?PrincipalResolver $principalResolver = null,
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->principalService = $principalService ?? new PrincipalService($this->principalResolver);
+    }
 
     /**
      * GET /api/v1/speech/provider-configs/schema
@@ -151,7 +161,7 @@ final class SpeechProviderConfigController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->unauthenticated();
+            return $this->error('AUTH_REQUIRED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
         }
 
         // Precedence: `?agent_id=N` (per-agent scope) wins over `?group_id=N`
@@ -209,14 +219,6 @@ final class SpeechProviderConfigController
 
         $configs = $this->service->getConfigurationsForAgent($agentId);
         return new JsonResponse(['data' => ['configs' => $configs]]);
-    }
-
-    private function unauthenticated(): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'AUTH_REQUIRED', 'message' => 'Authentication required.']],
-            Response::HTTP_UNAUTHORIZED,
-        );
     }
 
     /**
@@ -352,7 +354,11 @@ final class SpeechProviderConfigController
         }
 
         if (!$deleted) {
-            return $this->notFound($id);
+            return $this->error(
+                'SPEECH_PROVIDER_CONFIG_NOT_FOUND',
+                "Speech provider configuration {$id} not found.",
+                Response::HTTP_NOT_FOUND,
+            );
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
@@ -403,7 +409,11 @@ final class SpeechProviderConfigController
         }
         $decoded = $this->decodeJsonBody($content);
         if (!is_array($decoded)) {
-            return $this->validationError('Request body must be valid JSON.');
+            return $this->error(
+                'SPEECH_PROVIDER_CONFIG_INVALID',
+                'Request body must be valid JSON.',
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
         }
         /** @var array<string, mixed> $decoded */
         return $decoded;
@@ -454,7 +464,7 @@ final class SpeechProviderConfigController
         }
         if ($scope !== 'group') {
             unset($body['scope'], $body['group_id']);
-            return $body;
+            return $this->normalizeUserPrincipalId($body, $userId, $isAdmin);
         }
         // Pull `group_id` off the body BEFORE stripping so the resolver
         // helper doesn't have to re-parse it from a now-empty field.
@@ -470,14 +480,56 @@ final class SpeechProviderConfigController
     private function resolveGroupScopeBody(array $body, int $userId, bool $isAdmin, int $groupId): array|JsonResponse
     {
         if ($groupId <= 0) {
-            return $this->forbidden();
+            return $this->error(
+                'SPEECH_PROVIDER_CONFIG_FORBIDDEN',
+                'Not authorised for this speech provider configuration.',
+                Response::HTTP_FORBIDDEN,
+            );
         }
         $principalId = $this->service->resolveGroupPrincipal($groupId, $userId, $isAdmin);
         if ($principalId === null) {
-            return $this->forbidden();
+            return $this->error(
+                'SPEECH_PROVIDER_CONFIG_FORBIDDEN',
+                'Not authorised for this speech provider configuration.',
+                Response::HTTP_FORBIDDEN,
+            );
         }
         $body['principal_id'] = $principalId;
         $body['is_global'] = false;
+        return $body;
+    }
+
+    /**
+     * Defensive normalisation for `scope=user` (and unscoped) writes:
+     * a foreign `principal_id` is silently rewritten to the caller's
+     * user-principal id instead of letting it reach the persistence
+     * layer. Mirrors {@see \Spora\Services\LlmConfigValidator::prepareStoreData()}
+     * so a request that supplies a foreign id produces the same wire
+     * response shape as one that omits `principal_id` — the caller
+     * can't distinguish "you can't target that principal" from "you
+     * didn't target a principal", so the path isn't an oracle for
+     * probing which principal ids exist. Admins short-circuit this
+     * gate (mirroring {@see \Spora\Services\LlmConfigValidator::callerMayTargetPrincipal()})
+     * so they keep targeting principals outside their own visible
+     * set; the persistence-layer gate at
+     * {@see \Spora\Services\SpeechProviderConfigPersistence::createConfiguration()}
+     * stays in place as a defence-in-depth backstop.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function normalizeUserPrincipalId(array $body, int $callerUserId, bool $isAdmin): array
+    {
+        if ($isAdmin || !isset($body['principal_id']) || !is_int($body['principal_id'])) {
+            return $body;
+        }
+
+        $visible = $this->principalResolver->visiblePrincipalIds($callerUserId);
+        if (in_array($body['principal_id'], $visible, true)) {
+            return $body;
+        }
+
+        $body['principal_id'] = $this->principalService->ensureUserPrincipal($callerUserId)->id;
         return $body;
     }
 
@@ -504,27 +556,18 @@ final class SpeechProviderConfigController
         );
     }
 
-    private function forbidden(): JsonResponse
+    /**
+     * Single error-envelope builder. Replaces the four fixed-shape
+     * helpers that previously lived on this class so the count stays
+     * under the SonarCloud S1448 20-method ceiling — the same
+     * rationale the class docblock (lines 40-43) cites for splitting
+     * the preference endpoints onto {@see SpeechPreferenceController}.
+     */
+    private function error(string $code, string $message, int $status): JsonResponse
     {
         return new JsonResponse(
-            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_FORBIDDEN', 'message' => 'Not authorised for this speech provider configuration.']],
-            Response::HTTP_FORBIDDEN,
-        );
-    }
-
-    private function notFound(int $id): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_NOT_FOUND', 'message' => "Speech provider configuration {$id} not found."]],
-            Response::HTTP_NOT_FOUND,
-        );
-    }
-
-    private function validationError(string $message): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'SPEECH_PROVIDER_CONFIG_INVALID', 'message' => $message]],
-            Response::HTTP_UNPROCESSABLE_ENTITY,
+            ['error' => ['code' => $code, 'message' => $message]],
+            $status,
         );
     }
 }
