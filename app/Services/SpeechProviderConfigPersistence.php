@@ -475,7 +475,20 @@ final class SpeechProviderConfigPersistence
 
         if (isset($data['settings']) && is_array($data['settings']) && !array_is_list($data['settings'])) {
             $existing = $this->decodeSettings($config->provider_class, $config->getRawOriginal('settings') ?? '');
-            $merged = array_merge($existing, $data['settings']);
+            $incoming = $data['settings'];
+            // The SPA masks password fields with `***` on GET; a PUT that
+            // re-sends `***` means "leave the stored value alone". Strip
+            // the sentinel so the merge keeps the existing key instead
+            // of re-encrypting the literal three-character placeholder,
+            // which would otherwise leave the provider unconfigured and
+            // 503 the next transcribe call. Mirrors the LLM-side pattern
+            // in {@see ToolConfigService::putGlobalSettings()}.
+            foreach ($incoming as $key => $value) {
+                if ($value === '***' && array_key_exists($key, $existing)) {
+                    $incoming[$key] = $existing[$key];
+                }
+            }
+            $merged = array_merge($existing, $incoming);
             $config->settings = $this->encodeSettingsString($config->provider_class, $merged);
         }
 
