@@ -123,10 +123,16 @@ final readonly class SpeechToTextCascadeResolver
     {
         $config = $this->loadAgentSpeechConfig($agentId);
         if ($config === null) {
-            return [null, 'fallback', null];
+            // The agent row exists but doesn't pin a `speech_driver_config_id`
+            // — distinct from the tier-5 fallback (no FK behind the choice).
+            // Use 'unconfigured' so any future caller that doesn't gate on
+            // `$class !== null` can disambiguate.
+            return [null, 'unconfigured', null];
         }
         if (!in_array($config->provider_class, $this->registeredSttClasses(), true)) {
-            return [null, 'fallback', null];
+            // FK points at an unregistered class (plugin removed) —
+            // treat as unconfigured rather than the registered fallback.
+            return [null, 'unconfigured', null];
         }
 
         return [$config->provider_class, 'agent', (int) $config->id];

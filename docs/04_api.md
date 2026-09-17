@@ -725,7 +725,7 @@ Returns the provider-class picker schema: every registered `SpeechToTextProvider
 
 ### `POST /api/v1/speech/provider-configs`
 
-Create or update a config (upsert by `(scope, provider_class, principal_id)`).
+Create a config. Use `PUT /api/v1/speech/provider-configs/{id}` to update an existing row. Re-posting the same `(scope, provider_class, principal_id)` creates a second row, not an update.
 
 Body:
 

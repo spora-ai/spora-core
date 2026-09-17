@@ -90,12 +90,12 @@ final class SpeechProviderConfigPersistence
      * @throws PrincipalNotAccessibleException when the caller cannot
      *         write under the requested principal.
      */
-    public function createConfiguration(int $principalId, int $callerUserId, array $data, bool $isAdmin): SpeechProviderConfiguration
+    public function createConfiguration(?int $principalId, int $callerUserId, array $data, bool $isAdmin): SpeechProviderConfiguration
     {
         $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
         $isGlobal = $validated['is_global'];
 
-        if (!$isGlobal && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
+        if (!$isGlobal && $principalId !== null && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
             throw new PrincipalNotAccessibleException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
         }
 

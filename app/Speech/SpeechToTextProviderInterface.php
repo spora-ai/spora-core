@@ -23,14 +23,16 @@ namespace Spora\Speech;
  *    (`audio/webm;codecs=opus`, `audio/ogg;codecs=opus`, `audio/mp4`,
  *    `audio/wav`, `audio/mpeg`) and reject unsupported MIME types via
  *    {@see InvalidAudioException}.
- *  - Configurable providers may OPTIONALLY expose a
- *    `bindLabel(string $label): void` method that the registry calls
- *    before reading {@see getName()} / {@see getDisplayName()} so the
+ *  - Configurable providers MUST implement
+ *    `bindLabel(string $label): void`. {@see SpeechToTextRegistry} calls
+ *    it before reading {@see getName()} / {@see getDisplayName()} so the
  *    operator's per-config `display_name` `#[ToolSetting]` overrides
- *    the class-level defaults. {@see SpeechToTextRegistry} gates the
- *    call with `method_exists` so providers without `bindLabel()` keep
- *    their static names. The label is rebound on every `describe()`
+ *    the class-level defaults. The label is rebound on every `describe()`
  *    call so multi-tenant requests don't bleed labels across calls.
+ *    `bindLabel()` is part of the interface contract (declared below) —
+ *    implementations that ignore it leave the provider class-level name
+ *    in place but the registry still calls the method unconditionally,
+ *    so a missing `bindLabel()` throws an "undefined method" fatal.
  *  - Providers MUST also implement `bindSettings(array $settings): void`.
  *    The registry decodes the resolved
  *    {@see \Spora\Models\SpeechProviderConfiguration::settings} blob and
