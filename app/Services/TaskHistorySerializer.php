@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Drivers\ValueObjects\Usage;
 use Spora\Models\TaskHistory;
+use Spora\Models\Usage as UsageModel;
 
 /**
  * Pure functions that turn a task's history rows (plus their usage
@@ -68,24 +68,24 @@ final class TaskHistorySerializer
             return [];
         }
 
-        $rawRows = Capsule::table('usage')
+        $rows = UsageModel::query()
             ->whereIn('task_history_id', $historyIds)
             ->get();
 
         $result = [];
-        foreach ($rawRows as $rawRow) {
+        foreach ($rows as $row) {
             $usage = new Usage(
-                inputTokens: (int) ($rawRow->input_tokens ?? 0),
-                outputTokens: (int) ($rawRow->output_tokens ?? 0),
-                reasoningTokens: (int) ($rawRow->reasoning_tokens ?? 0),
-                cachedTokens: (int) ($rawRow->cached_tokens ?? 0),
-                cacheCreationTokens: (int) ($rawRow->cache_creation_tokens ?? 0),
-                cacheReadTokens: (int) ($rawRow->cache_read_tokens ?? 0),
-                provider: (string) ($rawRow->provider ?? 'unknown'),
-                rawUsage: self::decodeJson($rawRow->raw_usage ?? null),
-                driverMetaInfo: self::decodeJson($rawRow->driver_meta_info ?? null),
+                inputTokens: (int) $row->input_tokens,
+                outputTokens: (int) $row->output_tokens,
+                reasoningTokens: (int) $row->reasoning_tokens,
+                cachedTokens: (int) $row->cached_tokens,
+                cacheCreationTokens: (int) $row->cache_creation_tokens,
+                cacheReadTokens: (int) $row->cache_read_tokens,
+                provider: (string) $row->provider,
+                rawUsage: $row->raw_usage,
+                driverMetaInfo: $row->driver_meta_info,
             );
-            $result[(int) $rawRow->task_history_id] = $usage;
+            $result[(int) $row->task_history_id] = $usage;
         }
 
         return $result;
@@ -228,18 +228,5 @@ final class TaskHistorySerializer
         }
 
         return $totals;
-    }
-
-    private static function decodeJson(mixed $value): ?array
-    {
-        if (is_array($value)) {
-            return $value;
-        }
-        if ($value === null || $value === '') {
-            return null;
-        }
-        $decoded = json_decode((string) $value, true);
-
-        return is_array($decoded) ? $decoded : null;
     }
 }

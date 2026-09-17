@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Models\TaskHistory;
+use Spora\Models\Usage;
 
 /**
  * SQL + row-shaping helpers for the task_history / usage writes that
@@ -77,7 +77,7 @@ final class HistoryRowWriter
             return;
         }
 
-        Capsule::table('usage')->insert([
+        (new Usage([
             'task_history_id' => $historyId,
             'input_tokens' => $usage->inputTokens,
             'output_tokens' => $usage->outputTokens,
@@ -86,13 +86,9 @@ final class HistoryRowWriter
             'cache_creation_tokens' => $usage->cacheCreationTokens,
             'cache_read_tokens' => $usage->cacheReadTokens,
             'provider' => $usage->provider,
-            'raw_usage' => $usage->rawUsage === null
-                ? null
-                : json_encode($usage->rawUsage, JSON_THROW_ON_ERROR),
-            'driver_meta_info' => $usage->driverMetaInfo === null
-                ? null
-                : json_encode($usage->driverMetaInfo, JSON_THROW_ON_ERROR),
+            'raw_usage' => $usage->rawUsage,
+            'driver_meta_info' => $usage->driverMetaInfo,
             'created_at' => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-        ]);
+        ]))->save();
     }
 }
