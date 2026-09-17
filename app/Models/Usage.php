@@ -9,18 +9,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Per-assistant-turn LLM token accounting + provider cache state.
- *
- * One row per {@see TaskHistory} entry that produced a usage payload.
- * The columns mirror {@see \Spora\Drivers\ValueObjects\Usage} (the VO is
- * the typed contract; this model is the persistence handle). `raw_usage`
- * and `driver_meta_info` are stored as JSON and exposed as arrays via
- * `$casts`. `provider` is a string tag — see the VO for the canonical
- * list of values.
- *
- * The table has no `updated_at` column (usage is append-only), so
- * {@see UPDATED_AT} is disabled while `created_at` is still
- * auto-stamped on save.
+ * Persists {@see \Spora\Drivers\ValueObjects\Usage} — the VO is the
+ * typed contract, this model is the persistence handle. Append-only:
+ * no `updated_at` column on the table.
  *
  * @property int                                 $id
  * @property int                                 $task_history_id

@@ -9,19 +9,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Join row that links a derivative `media_assets` row back to the
- * source asset it was produced from.
+ * Join row linking a derivative `media_assets` row to its source asset.
  *
- * The natural key on `(parent_id, format, producer_plugin, producer_operation)`
- * makes re-rendering the same source through the same producer idempotent
- * — {@see \Spora\Services\MediaArchive\MediaDerivativeService::create()}
- * refreshes the existing derivative's bytes rather than stacking a new
- * row. Both FKs cascade on delete so removing either side cleans the
- * join automatically.
- *
- * `principal_id` is intentionally not duplicated here: it lives on the
- * derivative's own `media_assets` row (inherited via
- * {@see MediaDerivativeService::createNew()}).
+ * Natural key `(parent_id, format, producer_plugin, producer_operation)`
+ * makes re-rendering idempotent — see
+ * {@see \Spora\Services\MediaArchive\MediaDerivativeService::create()}.
  *
  * @property string                           $id
  * @property string                           $parent_id

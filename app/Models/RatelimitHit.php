@@ -8,17 +8,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
 /**
- * Per-hit row for the DB-backed sliding-window rate limiter
- * ({@see \Spora\Services\DbRateLimiter}) used by `/tick` and
- * `/housekeeping`. The composite primary key `(key, hit_at)` keeps
- * inserts hot while allowing `DELETE … WHERE hit_at < ?` GC to drain
- * old rows without index churn.
+ * Hit row for the DB-backed sliding-window rate limiter used by `/tick`
+ * and `/housekeeping`. Composite PK `(key, hit_at)` keeps inserts hot
+ * while allowing `DELETE … WHERE hit_at < ?` GC.
  *
- * Eloquent can't model a true composite PK; we declare `key` as the
- * model's `$primaryKey` and let the DB enforce `(key, hit_at)`
- * uniqueness through the composite index. `save()` issues a plain
- * INSERT so two rows with the same `key` and different `hit_at`
- * coexist as the DB-side composite PK expects.
+ * Eloquent can't model a true composite PK; `key` is declared as the
+ * model's $primaryKey and the DB enforces the full uniqueness.
  *
  * @property string  $key
  * @property Carbon  $hit_at
