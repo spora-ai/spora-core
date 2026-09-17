@@ -170,16 +170,9 @@ final class SpeechPreferenceController
     private function persistPreference(?int $configId, ?int $groupId, string $scope): JsonResponse
     {
         $userId = $this->requireUserId();
-        if ($scope === 'group' && $groupId !== null) {
-            // Group-scope writes must pass the same `callerCanManage`
-            // gate as the LLM-side `GroupPreferencesController::update()`:
-            // any authenticated user knowing a `group_id` could otherwise
-            // null the group's `principal_preferences.preferred_speech_config_id`
-            // row. Mirrors `SpeechProviderConfigMutator::resolveGroupPrincipal()`
-            // which applies the same gate on the create / update paths.
-            if (!GroupService::callerCanManage($groupId, $userId, $this->authService->isAdmin())) {
-                return $this->forbiddenResponse();
-            }
+        $forbidden = $this->assertCanManageGroup($groupId, $scope, $userId);
+        if ($forbidden !== null) {
+            return $forbidden;
         }
         $principalId = $this->resolvePrincipalIdForScope($userId, $scope, $groupId);
         if ($principalId <= 0) {
@@ -187,6 +180,23 @@ final class SpeechPreferenceController
         }
         return $this->writePreferredConfig($principalId, $configId, $userId)
             ?? $this->buildPreferenceResponse($configId, $scope, $groupId);
+    }
+
+    /**
+     * Same gate as LLM-side `GroupPreferencesController::update()`:
+     * any authenticated user knowing a `group_id` could otherwise
+     * null the group's `principal_preferences.preferred_speech_config_id`
+     * row. Mirrors `SpeechProviderConfigMutator::resolveGroupPrincipal()`.
+     */
+    private function assertCanManageGroup(?int $groupId, string $scope, int $userId): ?JsonResponse
+    {
+        if ($scope !== 'group' || $groupId === null) {
+            return null;
+        }
+        if (!GroupService::callerCanManage($groupId, $userId, $this->authService->isAdmin())) {
+            return $this->forbiddenResponse();
+        }
+        return null;
     }
 
     private function buildPreferenceResponse(?int $configId, string $scope, ?int $groupId): JsonResponse
