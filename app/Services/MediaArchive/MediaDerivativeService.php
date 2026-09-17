@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 use Spora\Services\AssetStore;
 use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\PrincipalContext;
@@ -112,7 +113,7 @@ final class MediaDerivativeService
      */
     public function parentOf(string $derivativeId): ?string
     {
-        $parentId = Capsule::table('media_derivatives')
+        $parentId = MediaDerivative::query()
             ->where('derivative_id', $derivativeId)
             ->value('parent_id');
         return $parentId !== null ? (string) $parentId : null;
@@ -175,39 +176,24 @@ final class MediaDerivativeService
      */
     public function listFor(string $parentId): array
     {
-        $rows = Capsule::table('media_derivatives AS md')
-            ->join('media_assets AS ma', 'ma.id', '=', 'md.derivative_id')
-            ->where('md.parent_id', $parentId)
-            ->orderBy('md.created_at', 'asc')
-            ->select([
-                'ma.id',
-                'ma.principal_id',
-                'ma.mime_type',
-                'ma.media_type',
-                'ma.byte_size',
-                'ma.filename',
-                'ma.width',
-                'ma.height',
-                'ma.duration_seconds',
-                'ma.created_at',
-                'md.format',
-                'md.producer_plugin',
-                'md.producer_operation',
-            ])
+        $rows = MediaDerivative::query()
+            ->where('parent_id', $parentId)
+            ->with('derivative')
+            ->orderBy('created_at', 'asc')
             ->get();
 
         $out = [];
         foreach ($rows as $row) {
-            $derivative = MediaAsset::query()->find($row->id);
+            $derivative = $row->derivative;
             if ($derivative === null) {
                 continue;
             }
             $out[] = [
                 'derivative'         => $derivative,
-                'format'             => (string) $row->format,
-                'producer_plugin'    => $row->producer_plugin !== null ? (string) $row->producer_plugin : null,
-                'producer_operation' => $row->producer_operation !== null ? (string) $row->producer_operation : null,
-                'created_at'         => $row->created_at !== null ? (string) $row->created_at : null,
+                'format'             => $row->format,
+                'producer_plugin'    => $row->producer_plugin,
+                'producer_operation' => $row->producer_operation,
+                'created_at'         => $row->created_at?->format('Y-m-d H:i:s'),
             ];
         }
         return $out;
@@ -262,7 +248,7 @@ final class MediaDerivativeService
 
     private function findExisting(MediaAsset $parent, string $format, string $plugin, string $operation): ?MediaAsset
     {
-        $derivativeId = Capsule::table('media_derivatives')
+        $derivativeId = MediaDerivative::query()
             ->where('parent_id', $parent->id)
             ->where('format', $format)
             ->where('producer_plugin', $plugin)
@@ -328,7 +314,7 @@ final class MediaDerivativeService
                     $derivative->payload = $output->bytes;
                     $derivative->save();
                 }
-                Capsule::table('media_derivatives')->insert([
+                (new MediaDerivative([
                     'id'                 => self::generateUuid(),
                     'parent_id'          => $parent->id,
                     'derivative_id'      => $derivative->id,
@@ -337,7 +323,7 @@ final class MediaDerivativeService
                     'producer_operation' => $producerOperation,
                     'created_at'         => date('Y-m-d H:i:s'),
                     'updated_at'         => date('Y-m-d H:i:s'),
-                ]);
+                ]))->save();
             });
         } catch (Throwable $e) {
             $this->logger?->error('MediaDerivativeService: failed to insert derivative', [
