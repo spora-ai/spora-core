@@ -105,6 +105,9 @@ describe('SpeechPreferenceController', function (): void {
         Capsule::table('speech_provider_configurations')->delete();
         Capsule::table('principal_preferences')->delete();
         Capsule::table('agents')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+        Capsule::table('groups')->delete();
     });
 
     afterEach(function (): void {
@@ -112,6 +115,9 @@ describe('SpeechPreferenceController', function (): void {
         Capsule::table('speech_provider_configurations')->delete();
         Capsule::table('principal_preferences')->delete();
         Capsule::table('agents')->delete();
+        Capsule::table('group_memberships')->delete();
+        Capsule::table('principals')->where('type', 'group')->delete();
+        Capsule::table('groups')->delete();
     });
 
     it('preferred config: PUT /api/v1/speech/preference sets, GET reads', function (): void {
@@ -154,5 +160,103 @@ describe('SpeechPreferenceController', function (): void {
         ]));
         expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
         expect(json_decode($resp->getContent(), true)['data']['preference']['config_id'])->toBeNull();
+    });
+
+    it('non-member cannot clear a group\'s STT preference via PUT scope=group (403, row unchanged)', function (): void {
+        // Regression for the group-scope auth bypass: any authenticated user
+        // who knew a `group_id` could previously PUT
+        //   { scope: "group", group_id: X, config_id: null }
+        // and `unsetPrincipalPreferredConfig` would null the group's
+        // `principal_preferences.preferred_speech_config_id`. The LLM-side
+        // `GroupPreferencesController::update()` enforces
+        // `callerCanManageGroup()`; the speech side must mirror that.
+        [$pref, $auth] = makeSpeechPreferenceController();
+
+        // Owner creates the group + a global config + the owner-managed
+        // preference for that group.
+        $ownerId = bootAuth($auth, 'spref-group-owner@example.com', SPREF_TEST_PASSWORD);
+        makeAdmin($auth, $ownerId);
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $group = (new \Spora\Services\GroupService($principalService))->createGroup($ownerId, 'SprefGroupPrivate');
+
+        $configId = seedGlobalSpeechConfig($auth, [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => sprefFullSettings('sk-team'),
+        ]);
+
+        // Owner sets the group preference so the row exists for the
+        // regression to assert "unchanged" against.
+        $groupPrincipalId = (int) Capsule::table('principals')
+            ->where('type', 'group')
+            ->where('group_id', $group->id)
+            ->value('id');
+        Capsule::table('principal_preferences')->insert([
+            'principal_id' => $groupPrincipalId,
+            'preferred_speech_config_id' => $configId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // Switch to a non-member, non-admin caller.
+        clearSession();
+        $outsiderId = bootAuth($auth, 'spref-group-outsider@example.com', SPREF_TEST_PASSWORD);
+
+        $resp = $pref->setPreferred(jsonSprefRequest('PUT', '/api/v1/speech/preference', [
+            'scope' => 'group',
+            'group_id' => (int) $group->id,
+            'config_id' => null,
+        ]));
+        expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+
+        // The group's preference row must be untouched.
+        $row = Capsule::table('principal_preferences')->where('principal_id', $groupPrincipalId)->first();
+        expect((int) $row->preferred_speech_config_id)->toBe($configId);
+    });
+
+    it('group admin can clear their group\'s STT preference via PUT scope=group', function (): void {
+        // Positive control: the gate must not over-deny. A group admin
+        // (role=admin) can manage the group's preference.
+        [$pref, $auth] = makeSpeechPreferenceController();
+
+        $ownerId = bootAuth($auth, 'spref-group-admin2@example.com', SPREF_TEST_PASSWORD);
+        makeAdmin($auth, $ownerId);
+        $principalService = new PrincipalService(new PrincipalResolver());
+        $principalService->ensureUserPrincipal($ownerId);
+        $group = (new \Spora\Services\GroupService($principalService))->createGroup($ownerId, 'SprefGroupAdmin');
+
+        $configId = seedGlobalSpeechConfig($auth, [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => sprefFullSettings('sk-team-2'),
+        ]);
+
+        $groupPrincipalId = (int) Capsule::table('principals')
+            ->where('type', 'group')
+            ->where('group_id', $group->id)
+            ->value('id');
+        Capsule::table('principal_preferences')->insert([
+            'principal_id' => $groupPrincipalId,
+            'preferred_speech_config_id' => $configId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // Owner IS the principal row's caller in this test (role=owner),
+        // so the gate must let the clear land.
+        $resp = $pref->setPreferred(jsonSprefRequest('PUT', '/api/v1/speech/preference', [
+            'scope' => 'group',
+            'group_id' => (int) $group->id,
+            'config_id' => null,
+        ]));
+        expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $row = Capsule::table('principal_preferences')->where('principal_id', $groupPrincipalId)->first();
+        // After unset the row stays (it's the principal's slot) but the
+        // FK is nulled — `SpeechProviderConfigPreferences::unsetPrincipalPreferredConfig`
+        // runs `->update(['preferred_speech_config_id' => null])`.
+        expect($row)->not->toBeNull();
+        expect($row->preferred_speech_config_id)->toBeNull();
     });
 });

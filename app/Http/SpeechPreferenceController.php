@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Services\GroupService;
 use Spora\Services\PrincipalService;
 use Spora\Services\SpeechProviderConfigService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -169,6 +170,17 @@ final class SpeechPreferenceController
     private function persistPreference(?int $configId, ?int $groupId, string $scope): JsonResponse
     {
         $userId = $this->requireUserId();
+        if ($scope === 'group' && $groupId !== null) {
+            // Group-scope writes must pass the same `callerCanManage`
+            // gate as the LLM-side `GroupPreferencesController::update()`:
+            // any authenticated user knowing a `group_id` could otherwise
+            // null the group's `principal_preferences.preferred_speech_config_id`
+            // row. Mirrors `SpeechProviderConfigMutator::resolveGroupPrincipal()`
+            // which applies the same gate on the create / update paths.
+            if (!GroupService::callerCanManage($groupId, $userId, $this->authService->isAdmin())) {
+                return $this->forbiddenResponse();
+            }
+        }
         $principalId = $this->resolvePrincipalIdForScope($userId, $scope, $groupId);
         if ($principalId <= 0) {
             return $this->forbiddenResponse();

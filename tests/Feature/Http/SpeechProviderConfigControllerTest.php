@@ -55,6 +55,35 @@ function makeSpeechProviderConfigController(): array
     return [new SpeechProviderConfigController($auth, $service, $registry, $agentService), $auth];
 }
 
+/**
+ * Sentinel-test variant that also exposes the {@see SpeechToTextRegistry}
+ * so callers can drive {@see SpeechToTextRegistry::configuredProvider()}
+ * and assert the cascade-bound provider still self-reports `isConfigured()`
+ * after a PUT. Same wiring as {@see makeSpeechProviderConfigController()}
+ * but the third element is the live registry.
+ *
+ * @return array{0: SpeechProviderConfigController, 1: AuthService, 2: SpeechToTextRegistry}
+ */
+function makeSpeechProviderConfigControllerWithRegistry(): array
+{
+    $auth = bootAuthLayer();
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new ToolConfigService($security, new \Psr\Log\NullLogger(), []);
+    $principalService = new PrincipalService(new PrincipalResolver());
+
+    $registry = new SpeechToTextRegistry([
+        new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
+    ], $principalService);
+
+    $validator = new SpeechProviderConfigValidator($registry);
+    $persistence = new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
+    $preferences = new SpeechProviderConfigPreferences($principalService);
+    $service = new SpeechProviderConfigService($validator, $persistence, $preferences, $principalService);
+    $agentService = new AgentService();
+
+    return [new SpeechProviderConfigController($auth, $service, $registry, $agentService), $auth, $registry];
+}
+
 function jsonSpcRequest(string $method, string $uri, array $body = []): Request
 {
     $content = $body !== [] ? json_encode($body) : '';
@@ -83,6 +112,26 @@ function fullSettings(string $apiKey = 'sk-test'): array
         'base_url' => 'https://api.openai.com/v1',
         'model' => 'whisper-1',
     ];
+}
+
+/**
+ * Build a stand-alone {@see SpeechProviderConfigPersistence} bound to a
+ * fresh SecurityManager + validator so the sentinel round-trip tests can
+ * call {@see SpeechProviderConfigPersistence::decodeSettings()} on the
+ * raw stored blob without standing up the full controller graph per
+ * assertion.
+ */
+function makePersistenceForSentinel(): SpeechProviderConfigPersistence
+{
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new ToolConfigService($security, new \Psr\Log\NullLogger(), []);
+    $principalService = new PrincipalService(new PrincipalResolver());
+    $registry = new SpeechToTextRegistry([
+        new OpenAiCompatibleTranscriber(new \Symfony\Component\HttpClient\MockHttpClient(), $toolConfig),
+    ], $principalService);
+    $validator = new SpeechProviderConfigValidator($registry);
+
+    return new SpeechProviderConfigPersistence($security, $validator, static fn(): SpeechToTextRegistry => $registry);
 }
 
 describe('SpeechProviderConfigController', function (): void {
@@ -189,6 +238,113 @@ describe('SpeechProviderConfigController', function (): void {
 
         $config = SpeechProviderConfiguration::find($configId);
         expect($config->display_name)->toBe('Renamed');
+    });
+
+    it('PUT with settings.api_key="***" preserves the stored api_key (sentinel round-trip)', function (): void {
+        // Regression for the sentinel round-trip bug: the SPA masks password
+        // fields with `***` on GET; a PUT that re-sends `***` must keep the
+        // existing stored value instead of re-encrypting the literal three-
+        // character placeholder (which would 503 the next transcribe call).
+        // Mirrors `ToolConfigServiceSentinelTest::putGlobalSettings` on the
+        // LLM side.
+        [$controller, $auth, $registry] = makeSpeechProviderConfigControllerWithRegistry();
+        $userId = bootAuth($auth, 'spc-sentinel@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-original'),
+        ]));
+        expect($createResp->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'settings' => [
+                'api_key' => '***',
+                'display_name' => 'Sentinel',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ],
+        ]));
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        // Decrypt via the same persistence path the registry uses, then
+        // assert the api_key survives the round-trip.
+        $row = SpeechProviderConfiguration::find($configId);
+        $persistence = makePersistenceForSentinel();
+        $decoded = $persistence->decodeSettings($row->provider_class, $row->getRawOriginal('settings'));
+        expect($decoded['api_key'])->toBe('sk-original');
+
+        // The provider should still self-report `isConfigured()` after
+        // binding the (preserved) settings — without the fix the literal
+        // '***' would round-trip and `isConfigured()` would still pass
+        // `trim() !== ''`, but the next transcribe call would fail
+        // because the real upstream rejects the literal '***' as a key.
+        $provider = $registry->configuredProvider($userId, null);
+        expect($provider)->not->toBeNull();
+        expect($provider->isConfigured())->toBeTrue();
+    });
+
+    it('PUT with a real api_key replaces the stored value', function (): void {
+        // Sanity check that the sentinel-stripping path doesn't suppress
+        // the legitimate "rotate the key" flow.
+        [$controller, $auth, $registry] = makeSpeechProviderConfigControllerWithRegistry();
+        $userId = bootAuth($auth, 'spc-rotate@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-old'),
+        ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'settings' => [
+                'api_key' => 'sk-new-123',
+                'display_name' => 'Mistral Voxtral',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ],
+        ]));
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $row = SpeechProviderConfiguration::find($configId);
+        $persistence = makePersistenceForSentinel();
+        $decoded = $persistence->decodeSettings($row->provider_class, $row->getRawOriginal('settings'));
+        expect($decoded['api_key'])->toBe('sk-new-123');
+    });
+
+    it('PUT without api_key in settings preserves the stored api_key', function (): void {
+        // Omitting the field must keep the stored value — the sentinel
+        // strip must not regress the merge behaviour already pinned by
+        // "update merges existing settings so omitted-and-kept values survive".
+        [$controller, $auth] = makeSpeechProviderConfigController();
+        $userId = bootAuth($auth, 'spc-omit-key@example.com', SPC_TEST_PASSWORD);
+        makeAdmin($auth, $userId);
+
+        $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => fullSettings('sk-kept'),
+        ]));
+        $configId = json_decode($createResp->getContent(), true)['data']['config']['id'];
+
+        $updateResp = $controller->update($configId, jsonSpcRequest('PUT', '/api/v1/speech/provider-configs/x', [
+            'settings' => [
+                'base_url' => 'https://api.openai.com/v2',
+                'model' => 'whisper-2',
+            ],
+        ]));
+        expect($updateResp->getStatusCode())->toBe(Response::HTTP_OK);
+
+        $row = SpeechProviderConfiguration::find($configId);
+        $persistence = makePersistenceForSentinel();
+        $decoded = $persistence->decodeSettings($row->provider_class, $row->getRawOriginal('settings'));
+        expect($decoded['api_key'])->toBe('sk-kept');
+        expect($decoded['base_url'])->toBe('https://api.openai.com/v2');
+        expect($decoded['model'])->toBe('whisper-2');
     });
 
     it('delete returns 200 and removes the row', function (): void {
