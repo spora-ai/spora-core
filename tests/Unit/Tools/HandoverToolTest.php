@@ -414,4 +414,108 @@ describe('HandoverTool::isTargetAllowed (intra-principal defense in depth)', fun
             ->and($result->content)->toContain('not in the allowed_target_agents list');
         $handover->shouldNotHaveReceived('handover');
     });
+
+    test('succeeds when source and target share a group-principal', function (): void {
+        [$tool, $handover, , $config] = makeHandoverTool();
+
+        $groupPrincipalId = createGroupPrincipalPublicForHandover();
+        $now = date('Y-m-d H:i:s');
+        foreach ([HANDOVER_AGENT_ID, HANDOVER_TARGET_AGENT] as $i => $agentId) {
+            Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+                ['id' => $agentId],
+                [
+                    'principal_id' => $groupPrincipalId,
+                    'name'         => $i === 0 ? 'Group Source' : 'Group Target',
+                    'max_steps'    => $i === 0 ? 10 : 7,
+                    'is_active'    => 1,
+                    'created_at'   => $now,
+                    'updated_at'   => $now,
+                ],
+            );
+        }
+
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
+        $handover->shouldReceive('handover')->once()->andReturn(
+            new Task(['status' => 'RUNNING']),
+        );
+
+        $result = $tool->execute(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
+            HANDOVER_AGENT_ID,
+            HANDOVER_USER_ID,
+            HANDOVER_TASK_ID,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('rejects a user-principal target when the source is on a group-principal', function (): void {
+        [$tool, $handover, , $config] = makeHandoverTool();
+
+        $groupPrincipalId   = createGroupPrincipalPublicForHandover();
+        $userPrincipalId    = createUserPrincipalPublic(HANDOVER_USER_ID);
+        $now = date('Y-m-d H:i:s');
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => HANDOVER_AGENT_ID],
+            ['principal_id' => $groupPrincipalId, 'name' => 'Group Source', 'max_steps' => 10, 'is_active' => 1, 'created_at' => $now, 'updated_at' => $now],
+        );
+        Illuminate\Database\Capsule\Manager::table('agents')->updateOrInsert(
+            ['id' => HANDOVER_TARGET_AGENT],
+            ['principal_id' => $userPrincipalId, 'name' => 'User Target', 'max_steps' => 7, 'is_active' => 1, 'created_at' => $now, 'updated_at' => $now],
+        );
+
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [HANDOVER_TARGET_AGENT]]);
+
+        $result = $tool->execute(
+            ['target_agent_id' => HANDOVER_TARGET_AGENT, 'prompt' => 'ctx'],
+            HANDOVER_AGENT_ID,
+            HANDOVER_USER_ID,
+            HANDOVER_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not in the allowed_target_agents list');
+        $handover->shouldNotHaveReceived('handover');
+    });
 });
+
+/**
+ * Inline helper for the group-principal scenarios in
+ * {@see describe('HandoverTool::isTargetAllowed (intra-principal defense in depth)')}.
+ * Lives in this file (not the shared CrossFileTestHelpers) because no
+ * other test currently needs a group principal; promoting it to the
+ * shared helper would widen the test surface for one consumer.
+ *
+ * Calls {@see createUserPrincipalPublic()} first so the `groups.created_by_user_id`
+ * FK points at a real `users` row — the user-principal helper inserts a
+ * stub user with id `HANDOVER_USER_ID` when one isn't already there.
+ */
+function createGroupPrincipalPublicForHandover(): int
+{
+    createUserPrincipalPublic(HANDOVER_USER_ID);
+
+    $existing = Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'group')->where('group_id', 9001)->value('id');
+    if ($existing !== null) {
+        return (int) $existing;
+    }
+
+    Illuminate\Database\Capsule\Manager::table('groups')->updateOrInsert(
+        ['id' => 9001],
+        [
+            'name'                => 'Handover Test Group',
+            'created_by_user_id'  => HANDOVER_USER_ID,
+            'created_at'          => date('Y-m-d H:i:s'),
+            'updated_at'          => date('Y-m-d H:i:s'),
+        ],
+    );
+
+    return (int) Illuminate\Database\Capsule\Manager::table('principals')->insertGetId([
+        'type'       => 'group',
+        'group_id'   => 9001,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+}

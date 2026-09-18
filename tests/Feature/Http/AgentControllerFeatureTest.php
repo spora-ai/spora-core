@@ -154,4 +154,35 @@ describe('AgentController::index ?principal_id= scoping', function (): void {
             expect($agent)->not->toHaveKey('system_prompt');
         }
     });
+
+    it('with ?principal_id=<own group-principal> returns only that principal\'s agents', function (): void {
+        // Mirrors the user-principal case above but for the group picker
+        // path the GroupToolsPage uses when configuring a group's
+        // `allowed_target_agents`. The contract is identical: rows are
+        // scoped to the requested principal intersected with the caller's
+        // visible principals.
+        [$controller, $authService, $principalService] = buildIndexAgentController();
+        $userId = bootAuth($authService, 'idx-group@example.com');
+
+        $groupService  = new \Spora\Services\GroupService($principalService);
+        $group         = $groupService->createGroup($userId, 'idx-group');
+        $groupPrincipal = (int) $principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+        // Seed two agents in the group principal and one in the user's
+        // user-principal so the unfiltered list would contain all three.
+        $userPrincipal = (int) $principalService->ensureUserPrincipal($userId)->id;
+        seedAgentRow(70, $groupPrincipal, 'Group Pick A');
+        seedAgentRow(71, $groupPrincipal, 'Group Pick B');
+        seedAgentRow(72, $userPrincipal, 'User Pick');
+
+        $response = $controller->index(
+            Request::create('/api/v1/agents?principal_id=' . $groupPrincipal, 'GET'),
+        );
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['agents'])->toHaveCount(2);
+        foreach ($body['data']['agents'] as $agent) {
+            expect((int) $agent['principal_id'])->toBe($groupPrincipal);
+        }
+    });
 });

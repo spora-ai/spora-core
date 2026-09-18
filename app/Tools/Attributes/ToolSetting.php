@@ -38,10 +38,39 @@ use Attribute;
  *       exposeToLlm: true,
  *       resolveAs: 'skill',  // see `resolveAs` below
  *   )]
+ *
+ * Intra-principal allowlist (picker only exists where a principal
+ * context is available — operator-defaults hides it because no
+ * principal exists there):
+ *
+ *   #[ToolSetting(
+ *       key: 'allowed_target_agents',
+ *       label: 'Allowed target agents',
+ *       type: 'multi-select',
+ *       required: true,
+ *       scope: 'principal',  // see `scope` below
+ *       exposeToLlm: true,
+ *   )]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolSetting
 {
+    public const SCOPE_ANY       = 'any';
+    public const SCOPE_PRINCIPAL = 'principal';
+    public const SCOPE_AGENT     = 'agent';
+
+    /**
+     * @param  string $scope 'any' | 'principal' | 'agent' — where the
+     *         setting may be rendered in the UI. `'any'` (default) renders
+     *         in every context (admin defaults, user, group, agent override).
+     *         `'principal'` hides the setting at admin defaults where no
+     *         principal context exists; renders in user, group, and agent
+     *         override scopes. `'agent'` renders only in the per-agent
+     *         override modal. The runtime gates that protect intra-
+     *         principal semantics (e.g. {@see \Spora\Tools\HandoverTool::sharePrincipal()})
+     *         are independent of this UI hint — the picker is hidden so
+     *         operators don't write values the runtime would reject.
+     */
     public function __construct(
         public readonly string $key,
         public readonly string $label,
@@ -91,5 +120,6 @@ final class ToolSetting
          *   nor skill resolution fits the field's semantics.
          */
         public readonly string $resolveAs = 'agent',
+        public readonly string $scope = self::SCOPE_ANY,
     ) {}
 }

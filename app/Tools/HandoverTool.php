@@ -35,8 +35,16 @@ use Spora\Tools\ValueObjects\ToolResult;
  * (`HandoverService` / `SubAgentService`) enforces a final
  * `callerControlsPrincipal` check.
  *
+ * `allowed_target_agents` declares `scope: 'principal'` so the picker
+ * is hidden on the admin operator-defaults page where no principal
+ * context exists. Existing global rows still cascade down to users
+ * without overrides; the runtime LLM-side filter in
+ * {@see \Spora\Services\ToolConfigSchemaInspector::fetchAgentNameMap()}
+ * restricts the LLM-visible list to the source agent's principal, so
+ * any foreign ids in a stale global degrade to "#id" placeholders.
+ *
  * Example front-end usage (for the ToolSettingField "multi-select"):
- *   GET /api/v1/agents?select=id,name
+ *   GET /api/v1/agents?select=id,name&principal_id=<group-principal>
  *
  * Example LLM-facing schema (for the tool definition):
  *   handover tool
@@ -61,6 +69,11 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'multi-select',
     description: 'Agents this agent may hand over tasks to. The LLM sees this list and may only pick from it.',
     required: true,
+    // scope: 'principal' hides the picker on the admin operator-defaults
+    // page where no principal context exists. The same picker renders
+    // under Settings → Tools (user-principal), Groups → Tools (group-
+    // principal), and the agent's Tools tab (the agent's principal).
+    scope: 'principal',
     // exposeToLlm: the LLM is the consumer of this allowlist. The stored
     // int[] is resolved to "Name (#id)" strings by ToolConfigSchemaInspector
     // so the model can refer to agents by name when calling this tool.
