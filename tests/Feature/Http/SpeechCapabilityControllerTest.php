@@ -89,12 +89,8 @@ function buildSpeechCapabilityController(array $providers): array
 {
     $auth = Mockery::mock(AuthService::class);
 
-    // Set up the v2-cascade global default so the cascade's tier 3
-    // resolves to one of the registered providers. With the silent
-    // tier-5 fallback removed, the capability endpoint returns
-    // effective_class=null when no `speech_provider_configurations`
-    // row exists, so the fixture writes a global default. The
-    // settings blob is `{}` — the stubs ignore settings.
+    // Write a v2-cascade global default so tier 3 resolves to a
+    // registered provider; the silent tier-5 fallback is gone.
     if ($providers !== []) {
         \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
             'provider_class' => $providers[0]::class,
@@ -131,12 +127,9 @@ test('capability returns 200 with available=false and configured=false when no p
 });
 
 test('capability reports available=true and configured=true with effective_source=global_default when a configured provider is loaded', function (): void {
-    // With the tier-5 fallback removed, the cascade resolves the
-    // configured provider via the global-default row the fixture
-    // writes (tier 3), not via a "fallback" label. The label was
-    // misleading: it claimed "fallback" when there was in fact a
-    // configured row backing the class. The new tier-3 source string
-    // is honest about the resolution path.
+    // The tier-5 fallback is gone; the cascade now resolves via tier 3
+    // (the fixture's global default), so `effective_source` is
+    // `global_default`, not the misleading `fallback`.
     [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 
@@ -252,9 +245,8 @@ test('capability with ?agent_id forwards the agent id into the registry resoluti
 });
 
 test('capability ignores malformed ?agent_id values and falls back to caller-scoped resolution', function (): void {
-    // Same as above: tier 5 no longer bridges; with a global default
-    // configured the cascade resolves via tier 3 with
-    // `effective_source = 'global_default'`.
+    // Tier 5 no longer bridges — with a global default configured the
+    // cascade resolves via tier 3 with `effective_source = 'global_default'`.
     [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 

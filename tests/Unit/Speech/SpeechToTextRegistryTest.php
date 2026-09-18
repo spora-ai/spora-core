@@ -126,14 +126,8 @@ test('empty registry — all returns empty, configured returns null, describe re
 });
 
 test('configuredProvider() returns null when no tier matches — no auto-pick of registered class', function (): void {
-    // See "Tier 5: returns [null, null, null] …" below. The previous
-    // tier-5 fallback returned the first registered class even without
-    // an FK config; configuredProvider() then handed it to the
-    // transcribe call, which only failed further downstream because
-    // the OpenAI driver itself rejected the empty api_key. With the
-    // fallback gone, configuredProvider() short-circuits at null here
-    // so the controller surfaces SPEECH_PROVIDER_UNAVAILABLE (503)
-    // with an actionable "Add an API key in Settings → Tools" message.
+    // Tier 5 fallback is gone; configuredProvider() short-circuits
+    // to null and the controller surfaces SPEECH_PROVIDER_UNAVAILABLE.
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
@@ -143,11 +137,8 @@ test('configuredProvider() returns null when no tier matches — no auto-pick of
 });
 
 test('describe() returns [null, null] when no config exists — no "fallback" class leak', function (): void {
-    // The previous "first registered class" fallback masked the missing
-    // config in the SPA capability badge ("Using X (fallback)") — the
-    // tier now returns null so the cascade surfaces "No speech provider
-    // configured" instead. Transcribe requests get a clean
-    // SPEECH_PROVIDER_UNAVAILABLE 503 rather than a downstream 401.
+    // Tier 5 returns null so the cascade surfaces "No speech provider
+    // configured" instead of the misleading "Using X (fallback)".
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
@@ -327,12 +318,10 @@ test('Tier 4: global default fires when no agent / user / group preference is se
 });
 
 test('Tier 5: returns [null, null, null] when nothing else resolves — no silent fallback class leak', function (): void {
-    // The previous "first registered class is the fallback" tier made
-    // the SPA capability badge claim "Using X (fallback)" even when
-    // no FK config existed anywhere. Tier 5 now returns null so the
-    // SPA renders "No speech provider configured" and the transcribe
-    // endpoint throws SPEECH_PROVIDER_UNAVAILABLE (503) instead of
-    // letting an empty-key OpenAI driver fire upstream and 401.
+    // Tier 5 returns null so the SPA renders "No speech provider
+    // configured" and the transcribe endpoint throws
+    // SPEECH_PROVIDER_UNAVAILABLE (503) instead of letting an
+    // empty-key OpenAI driver fire upstream and 401.
     $first = new StubConfiguredProvider();
     $second = new StubUnconfiguredProvider();
 
@@ -610,12 +599,8 @@ test('configuredProvider() pushes decoded v2 settings into bindSettings() on tie
 });
 
 test('configuredProvider() returns null when no FK config exists', function (): void {
-    // With the tier-5 fallback removed, the cascade returns
-    // `[null, null, null]` when no agent FK / principal preference /
-    // global default exists. configuredProvider() short-circuits on the
-    // null class and the transcribe controller throws
-    // SPEECH_PROVIDER_UNAVAILABLE (503) so the operator sees a clear
-    // "no provider configured" error instead of a downstream 401.
+    // Tier 5 fallback is gone — cascade returns `[null, null, null]`
+    // and configuredProvider() short-circuits to null.
     $stub = new StubConfiguredProvider();
     $registry = buildRegistry([$stub]);
 

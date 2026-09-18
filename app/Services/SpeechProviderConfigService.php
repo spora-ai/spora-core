@@ -136,12 +136,10 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
      *  - Otherwise → `principal_id = agent.principal_id` ∪ `is_global = true`.
      *
      * The scope is the agent's own principal, NOT the caller's visible
-     * principals — a user-owned agent's dropdown stays scoped to that
-     * user's user-principal (no group-owned configs leak in), and a
-     * group-owned agent's dropdown stays scoped to that group's
-     * principal (no caller user-scoped configs leak in). The SPA's
-     * "Voice not configured" empty-state CTA renders correctly when
-     * the agent's principal has no matching config.
+     * principals — a user-owned agent's dropdown shows only that user's
+     * user-principal (no group-owned configs leak in), a group-owned
+     * agent's dropdown shows only that group's principal (no caller
+     * user-scoped configs leak in).
      *
      * Visibility is the controller's concern: callers must pre-check
      * that the user is allowed to view the agent (or is an admin)

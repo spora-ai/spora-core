@@ -135,10 +135,9 @@ describe('SpeechProviderConfigService', function (): void {
     });
 
     it('returns only globals (no per-principal leak) for a non-admin caller with no visible principals', function (): void {
-        // Walks the whereRaw(self::NO_MATCH) branch inside
-        // getConfigurationsForUser() — the equivalent of the line-257
-        // branch in applyVisibleScope(). Existing tests all materialise a
-        // user-principal before calling, which takes the `whereIn` path.
+        // Walks the `whereRaw(self::NO_MATCH)` branch in
+        // getConfigurationsForUser(); sibling tests all materialise a
+        // user-principal and take the `whereIn` path.
         $auth = bootAuthLayer();
         $admin = bootAuth($auth, 'spc-get-user-admin@example.com', SPC_TEST_PASSWORD);
         bootAdmin($admin, $auth);
@@ -325,20 +324,13 @@ describe('SpeechProviderConfigService', function (): void {
     });
 
     describe('getConfigurationsForAgent', function (): void {
-        // The dropdown is scoped to the agent's own principal — a
-        // user-owned agent shows configs owned by that user's user-
-        // principal (plus globals), a group-owned agent shows configs
-        // owned by that group's principal (plus globals). The caller's
-        // own `visiblePrincipalIds()` is deliberately NOT consulted so
-        // configs owned by other principals the caller happens to
-        // belong to can never leak in. Mirrors
+        // Dropdown is scoped to the agent's own principal — never to
+        // the caller's `visiblePrincipalIds()`. Mirrors
         // {@see LLMConfigService::getConfigurationsForAgent()}.
 
         it('returns the principal-scoped configs plus every global config (user-owned agent)', function (): void {
-            // Agent belongs to user A's user-principal. Result:
-            // A's config (same principal) + global config. B's
-            // user-scoped config (B's principal) is hidden because
-            // it does not match the agent's principal.
+            // A's user-principal config + global config; B's user-scope
+            // config is hidden because it does not match the agent's principal.
             $auth = bootAuthLayer();
             $userA = bootAuth($auth, 'spc-scope-a@example.com', SPC_TEST_PASSWORD);
             $userB = bootAuth($auth, 'spc-scope-b@example.com', SPC_TEST_PASSWORD);
@@ -372,10 +364,9 @@ describe('SpeechProviderConfigService', function (): void {
                 ],
             ], isAdmin: false);
 
-            // User B owns their own user-principal separately from
-            // user A. B's config must not leak into A's agent
-            // dropdown because the dropdown's principal scope is
-            // the agent's principal, not the caller's.
+            // B's config must not leak into A's agent dropdown — the
+            // dropdown's principal scope is the agent's principal,
+            // not the caller's.
             $userBConfig = $service->createConfiguration($userB, [
                 'provider_class' => OpenAiCompatibleTranscriber::class,
                 'is_global' => false,
@@ -403,9 +394,7 @@ describe('SpeechProviderConfigService', function (): void {
         });
 
         it('returns only the group-scoped configs plus globals (group-owned agent; caller\'s user-scoped config is hidden)', function (): void {
-            // The agent belongs to a group whose principal_id is
-            // different from the caller's own user-principal. The
-            // owner happens to belong to both principals, but their
+            // Owner happens to belong to both principals, but their
             // user-scoped config must NOT appear in the group agent's
             // dropdown — the scope is the agent's principal, not the
             // caller's visible principals.
@@ -457,11 +446,8 @@ describe('SpeechProviderConfigService', function (): void {
             $groupConfig->is_global = false;
             $groupConfig->save();
 
-            // User-scoped config (owned by the user's user-principal).
-            // Even though the owner happens to belong to that
-            // principal, the group agent's dropdown must NOT include
-            // it — the scope is the agent's principal, not the
-            // caller's visible principals.
+            // User-scoped config — must NOT appear in the group agent's
+            // dropdown even though the owner belongs to that principal.
             $userScoped = new SpeechProviderConfiguration();
             $userScoped->principal_id = $userPrincipalId;
             $userScoped->provider_class = OpenAiCompatibleTranscriber::class;
@@ -632,16 +618,9 @@ describe('SpeechProviderConfigService', function (): void {
     });
 
     describe('getConfiguration', function (): void {
-        // The single-row lookup goes through applyVisibleScope() when
-        // the caller is non-admin; the dedup commit rewrote the always-
-        // false fragment there to self::NO_MATCH, so coverage of this
-        // branch is what makes the visible-coverage metric happy. The
-        // four scenarios below exercise both halves of the visibility
-        // disjunction:
-        //  - caller-controlled config -> returned (principal_id branch);
-        //  - global config -> returned (is_global branch);
-        //  - foreign-principal config -> null (existence-hide);
-        //  - admin caller -> bypass (the !$isAdmin short-circuit).
+        // The four scenarios below exercise both halves of the
+        // visibility disjunction (principal_id ∪ is_global) and the
+        // admin short-circuit.
 
         it('returns the row when the non-admin caller owns the principal', function (): void {
             // Walks the principal_id branch of applyVisibleScope().
@@ -748,12 +727,9 @@ describe('SpeechProviderConfigService', function (): void {
         });
 
         it('hides per-principal configs from a non-admin caller with no visible principals (empty-principals branch)', function (): void {
-            // When visiblePrincipalIds() returns [], applyVisibleScope()
-            // emits the NO_MATCH fragment so per-principal rows collapse
-            // out of the result set (existence-hide). Global rows survive
-            // because the same disjunction OR's is_global = true.
-            // Exercises the `whereRaw(self::NO_MATCH)` branch (line 257)
-            // that the prior 4 tests never hit.
+            // Exercises the `whereRaw(self::NO_MATCH)` branch that the
+            // prior 4 tests never hit — global rows survive via the
+            // OR'd `is_global = true`.
             $auth = bootAuthLayer();
             $admin = bootAuth($auth, 'spc-get-config-admin4@example.com', SPC_TEST_PASSWORD);
             bootAdmin($admin, $auth);

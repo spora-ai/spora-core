@@ -22,13 +22,12 @@ use Throwable;
  *   2. Otherwise → use the global default LLMDriverConfiguration
  *   3. If neither exists → throw {@see LlmConfigurationMissingException}
  *
- * Step 3 is a hard stop: the previous "fall back to an empty-key
+ * Step 3 is a hard stop. The previous "fall back to an empty-key
  * OpenAI driver" silently punted the request to api.openai.com with
- * `apiKey: ''`, which surfaced as an upstream 401 instead of the
- * operator-visible "no LLM configured" error the operator actually
- * needs. TickPhaseRunner::prepareTickContext() catches the throw
- * and ErrorClassifier::markTaskNoLlmConfiguration() writes the
- * friendly NO_LLM_CONFIGURATION message to the task row.
+ * `apiKey: ''` and surfaced as an upstream 401, hiding the operator-
+ * visible "no LLM configured" error. ErrorClassifier's
+ * markTaskNoLlmConfiguration() writes the friendly
+ * NO_LLM_CONFIGURATION message to the task row.
  *
  * The `supports_image_input` toggle is read from the decoded settings blob.
  * The frontend round-trips booleans as the strings `"true"`/`"false"`,

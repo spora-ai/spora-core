@@ -180,14 +180,9 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
         agentService: $agentService,
     );
 
-    // Set up the v2-cascade global default so the cascade's tier 3
-    // resolves to the configured provider. With tier 5's silent
-    // fallback removed, configuredProvider() short-circuits without a
-    // `speech_provider_configurations` row, so the fixture writes one
-    // before each test. The settings blob is `{}` — the stubs ignore
-    // settings (the v2 cascade decodes it via
-    // `SpeechProviderConfigPersistence::decodeSettings`, but
-    // `TransStubConfigured::bindSettings()` is a no-op).
+    // Write a v2-cascade global default so tier 3 resolves to the
+    // configured provider; tier 5's silent fallback is gone, so
+    // without this row configuredProvider() short-circuits to null.
     \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
         'provider_class' => $provider::class,
         'display_name'   => 'Test Global Default',

@@ -35,17 +35,13 @@ use Throwable;
  *      `speech_provider_configurations WHERE is_global = true AND
  *      is_default = true`. First match wins, ordered `updated_at DESC,
  *      id DESC`.
- *   4. **No config → null** — if no tier above resolved a class,
- *      the cascade returns `[null, null, null]`. The previous
- *      "fallback to first registered class" tier surfaced the class
- *      in the SPA capability badge ("Using OpenAI Compatible
- *      (fallback)") even when no FK config existed, making the UI
- *      claim the operator had a working STT provider when they did
- *      not. SpeechToTextRegistry's `configuredProvider()` already
- *      gates on `isConfigured()` so transcribe calls didn't fail
- *      silently — but the badge did, and the operator couldn't tell.
- *      The SPA's `cascadeBadge` reads `effective_class === null` and
- *      shows "No speech provider configured" instead.
+*   4. **No config → null** — if no tier above resolved a class,
+*      the cascade returns `[null, null, null]`. The previous
+*      "fallback to first registered class" tier surfaced a class in
+*      the SPA capability badge even when no FK config existed,
+*      misleading the operator. The SPA's `cascadeBadge` reads
+*      `effective_class === null` and shows "No speech provider
+*      configured" instead.
  *
  * The cascade (caller-scoped path with `agentId <= 0`, e.g. the
  * composer recording button which has no agent context):
@@ -347,13 +343,9 @@ final readonly class SpeechToTextCascadeResolver
      */
     private function resolveFallbackClass(): array
     {
-        // No FK config exists at any tier — return null so the capability
+        // No FK config exists at any tier — null so the capability
         // badge reads "No speech provider configured" and
-        // configuredProvider() short-circuits to null. The previous
-        // "fallback to first registered class" tier masked the missing
-        // config in the UI; the transcribe HTTP layer was already gated
-        // on isConfigured() so calls didn't silently succeed, but the
-        // operator had no way to tell from the SPA badge.
+        // configuredProvider() short-circuits to null.
         return [null, null, null];
     }
 

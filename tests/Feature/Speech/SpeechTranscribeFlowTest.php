@@ -241,16 +241,8 @@ function putAgentOverride(ToolConfigService $toolConfig, int $agentId, array $se
 }
 
 test('no FK config returns 503 SPEECH_PROVIDER_UNAVAILABLE instead of running an empty-key driver', function (): void {
-    // Previously: tier 5 fallback returned OpenAiCompatibleTranscriber
-    // even without a config, configuredProvider() returned the provider
-    // (its isConfigured() returns true unconditionally, deferring the
-    // key check to the HTTP layer), and the controller mapped the
-    // downstream bad-JSON 502 to SPEECH_PROVIDER_FAILED.
-    //
-    // Now: tier 5 returns null, configuredProvider() short-circuits,
-    // and requireConfiguredProvider() throws providerUnavailable(),
-    // mapping to a clear 503 SPEECH_PROVIDER_UNAVAILABLE with the
-    // operator-facing "Add an API key in Settings → Tools …" message.
+    // Tier 5 returns null; configuredProvider() short-circuits and
+    // requireConfiguredProvider() throws providerUnavailable() → 503.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-1@example.com', 'Password1!');
 
@@ -271,16 +263,8 @@ test('no FK config returns 503 SPEECH_PROVIDER_UNAVAILABLE instead of running an
 });
 
 test('v1 tool_user_settings global: cascade no longer bridges to legacy storage (503)', function (): void {
-    // Previously the tier-5 fallback returned the first registered
-    // STT class, configuredProvider() then read settings from the
-    // legacy tool_user_settings table via ToolConfigService, and the
-    // controller returned 200 OK. Migration 0082 introduced the
-    // speech_provider_configurations table as the v2 path for STT;
-    // with the tier-5 fallback removed the cascade no longer falls
-    // through to v1 storage. Operators with v1 STT settings need to
-    // re-create the config in the operator UI; this test now asserts
-    // the clean 503 SPEECH_PROVIDER_UNAVAILABLE the operator sees
-    // until they migrate.
+    // Tier 5 fallback is gone — no `speech_provider_configurations`
+    // row → cascade returns null → 503 SPEECH_PROVIDER_UNAVAILABLE.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-2@example.com', 'Password1!');
 
@@ -308,9 +292,7 @@ test('v1 tool_user_settings global: cascade no longer bridges to legacy storage 
 });
 
 test('v1 tool_user_settings user + global: cascade no longer bridges to legacy storage (503)', function (): void {
-    // Same v1-removal story as the global-only test above — operator
-    // must re-create their STT configs in the v2 path
-    // (speech_provider_configurations) before the cascade sees them.
+    // See v1-tool_user_settings-global test above — same cascade-bridge removal.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-3@example.com', 'Password1!');
 
@@ -345,9 +327,7 @@ test('v1 tool_user_settings user + global: cascade no longer bridges to legacy s
 });
 
 test('v1 tool_user_settings group + global: cascade no longer bridges to legacy storage (503)', function (): void {
-    // v1-only group config used to cascade through the tier-5 fallback;
-    // operator must re-create their STT configs in
-    // speech_provider_configurations to use the v2 path.
+    // Same cascade-bridge removal — operator must re-create in v2.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-4@example.com', 'Password1!');
 
@@ -390,11 +370,8 @@ test('v1 tool_user_settings group + global: cascade no longer bridges to legacy 
 });
 
 test('v1 group + user + global: cascade no longer bridges to legacy storage (503)', function (): void {
-    // All three legacy settings exist in tool_user_settings, but the
-    // tier-5 fallback that previously bridged them into the cascade
-    // is gone. The cascade returns null and the controller surfaces
-    // SPEECH_PROVIDER_UNAVAILABLE. The legacy rows still exist (the
-    // v1 storage table isn't deleted) — only the cascade bridge is.
+    // All three legacy settings exist but tier-5 is gone. Legacy rows
+    // remain — only the cascade bridge is removed.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-5@example.com', 'Password1!');
 
@@ -441,9 +418,7 @@ test('v1 group + user + global: cascade no longer bridges to legacy storage (503
     expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
     expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 
-    // The v1 rows still exist on disk — the legacy table isn't
-    // dropped, only the cascade bridge is removed. Operators can use
-    // the operator UI to re-create configs in the v2 path.
+    // Legacy rows still exist; only the cascade bridge is removed.
     $rowCountForUser = Capsule::table('tool_user_settings')
         ->where('principal_id', $userPrincipalId)
         ->count();
