@@ -6,7 +6,7 @@ namespace Spora\Services;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Models\RatelimitHit;
 use Throwable;
 
 /**
@@ -35,20 +35,20 @@ final class DbRateLimiter
 
         try {
             // Prune hits older than the window to keep the table small.
-            Capsule::table('ratelimit_hits')
+            RatelimitHit::query()
                 ->where('key', $key)
                 ->where('hit_at', '<=', $cutoffString)
                 ->delete();
 
-            $count = Capsule::table('ratelimit_hits')->where('key', $key)->count();
+            $count = RatelimitHit::query()->where('key', $key)->count();
             if ($count >= $maxAttempts) {
                 return false;
             }
 
-            Capsule::table('ratelimit_hits')->insert([
+            (new RatelimitHit([
                 'key'    => $key,
                 'hit_at' => $nowString,
-            ]);
+            ]))->save();
             return true;
         } catch (Throwable) {
             // Fail open — a DB hiccup shouldn't lock the operator out of /tick.

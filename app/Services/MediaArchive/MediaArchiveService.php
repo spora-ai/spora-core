@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -178,7 +179,7 @@ final class MediaArchiveService
         // `media_derivatives_derivative_id_idx` index keeps the subquery
         // cheap. Reach a derivative through its parent's detail page →
         // `VersionsStrip` instead.
-        $builder->whereNotIn('id', Capsule::table('media_derivatives')->select('derivative_id'));
+        $builder->whereNotIn('id', MediaDerivative::query()->select('derivative_id'));
 
         if ($query->mediaTypes !== null && $query->mediaTypes !== []) {
             $builder->whereIn(
