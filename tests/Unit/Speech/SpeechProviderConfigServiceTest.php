@@ -134,6 +134,48 @@ describe('SpeechProviderConfigService', function (): void {
         expect($created->principal_id)->not->toBeNull();
     });
 
+    it('returns only globals (no per-principal leak) for a non-admin caller with no visible principals', function (): void {
+        // Walks the whereRaw(self::NO_MATCH) branch inside
+        // getConfigurationsForUser() — the equivalent of the line-257
+        // branch in applyVisibleScope(). Existing tests all materialise a
+        // user-principal before calling, which takes the `whereIn` path.
+        $auth = bootAuthLayer();
+        $admin = bootAuth($auth, 'spc-get-user-admin@example.com', SPC_TEST_PASSWORD);
+        bootAdmin($admin, $auth);
+        $isolated = bootAuth($auth, 'spc-get-user-isolated@example.com', SPC_TEST_PASSWORD);
+        // Note: no createUserPrincipalPublic($isolated); visiblePrincipalIds()
+        // must resolve to [] to exercise the empty-principals branch.
+
+        $service = makeSpeechConfigService();
+        $global = $service->createConfiguration($admin, [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => true,
+            'settings' => [
+                'api_key' => 'sk-g',
+                'display_name' => 'Global',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ],
+        ], isAdmin: true);
+        $foreign = $service->createConfiguration($admin, [
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'is_global' => false,
+            'display_name' => 'Admin-owned',
+            'settings' => [
+                'api_key' => 'sk-a',
+                'display_name' => 'Admin-owned',
+                'base_url' => 'https://api.openai.com/v1',
+                'model' => 'whisper-1',
+            ],
+        ], isAdmin: true);
+
+        $rows = $service->getConfigurationsForUser($isolated);
+        $ids = array_map(static fn(array $r): int => (int) $r['id'], $rows);
+
+        expect($ids)->toBe([(int) $global->id])
+            ->and($ids)->not->toContain((int) $foreign->id);
+    });
+
     it('update merges existing settings into the request so omitted-and-kept values survive', function (): void {
         $auth = bootAuthLayer();
         $userId = bootAuth($auth, 'spc-update-merge@example.com', SPC_TEST_PASSWORD);
@@ -703,6 +745,54 @@ describe('SpeechProviderConfigService', function (): void {
             $found = $service->getConfiguration((int) $userBConfig->id, $userA, isAdmin: true);
             expect($found)->not->toBeNull()
                 ->and((int) $found->id)->toBe((int) $userBConfig->id);
+        });
+
+        it('hides per-principal configs from a non-admin caller with no visible principals (empty-principals branch)', function (): void {
+            // When visiblePrincipalIds() returns [], applyVisibleScope()
+            // emits the NO_MATCH fragment so per-principal rows collapse
+            // out of the result set (existence-hide). Global rows survive
+            // because the same disjunction OR's is_global = true.
+            // Exercises the `whereRaw(self::NO_MATCH)` branch (line 257)
+            // that the prior 4 tests never hit.
+            $auth = bootAuthLayer();
+            $admin = bootAuth($auth, 'spc-get-config-admin4@example.com', SPC_TEST_PASSWORD);
+            bootAdmin($admin, $auth);
+            $userB = bootAuth($auth, 'spc-get-config-b4@example.com', SPC_TEST_PASSWORD);
+            createUserPrincipalPublic($userB);
+            $isolated = bootAuth($auth, 'spc-get-config-isolated@example.com', SPC_TEST_PASSWORD);
+            // Note: no createUserPrincipalPublic($isolated); we need
+            // visiblePrincipalIds() to resolve to [] for this test to
+            // exercise the empty-principals branch.
+
+            $service = makeSpeechConfigService();
+            $perPrincipal = $service->createConfiguration($userB, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => false,
+                'display_name' => 'B',
+                'settings' => [
+                    'api_key' => 'sk-b',
+                    'display_name' => 'B',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: false);
+            $global = $service->createConfiguration($admin, [
+                'provider_class' => OpenAiCompatibleTranscriber::class,
+                'is_global' => true,
+                'settings' => [
+                    'api_key' => 'sk-g',
+                    'display_name' => 'Global',
+                    'base_url' => 'https://api.openai.com/v1',
+                    'model' => 'whisper-1',
+                ],
+            ], isAdmin: true);
+
+            expect($service->getConfiguration((int) $perPrincipal->id, $isolated, isAdmin: false))
+                ->toBeNull();
+
+            $foundGlobal = $service->getConfiguration((int) $global->id, $isolated, isAdmin: false);
+            expect($foundGlobal)->not->toBeNull()
+                ->and((int) $foundGlobal->id)->toBe((int) $global->id);
         });
     });
 });
