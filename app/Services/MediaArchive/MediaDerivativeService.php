@@ -47,6 +47,8 @@ use Throwable;
  */
 final class MediaDerivativeService
 {
+    private const DB_DATETIME_FORMAT = 'Y-m-d H:i:s';
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly PrincipalService $principalService,
@@ -193,7 +195,7 @@ final class MediaDerivativeService
                 'format'             => $row->format,
                 'producer_plugin'    => $row->producer_plugin,
                 'producer_operation' => $row->producer_operation,
-                'created_at'         => $row->created_at?->format('Y-m-d H:i:s'),
+                'created_at'         => $row->created_at?->format(self::DB_DATETIME_FORMAT),
             ];
         }
         return $out;
@@ -321,8 +323,8 @@ final class MediaDerivativeService
                     'format'             => $format,
                     'producer_plugin'    => $producerPlugin,
                     'producer_operation' => $producerOperation,
-                    'created_at'         => date('Y-m-d H:i:s'),
-                    'updated_at'         => date('Y-m-d H:i:s'),
+                    'created_at'         => date(self::DB_DATETIME_FORMAT),
+                    'updated_at'         => date(self::DB_DATETIME_FORMAT),
                 ]))->save();
             });
         } catch (Throwable $e) {
