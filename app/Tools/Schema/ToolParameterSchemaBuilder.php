@@ -93,10 +93,10 @@ final class ToolParameterSchemaBuilder
         }
 
         // Validate `enumSource` references before emitting any property so a
-        // misconfigured tool fails fast with a single exception naming every
-        // offender — instead of silently emitting partial schemas where some
+        // misconfigured tool fails fast on the first offender with a named
+        // exception — instead of silently emitting partial schemas where some
         // params are augmented and others fall through to "static enum only".
-        self::validateEnumSources($ref, $enumSourceValues, $enumSourceLabels);
+        self::validateEnumSources($ref);
 
         foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
             /** @var ToolParameter $param */
@@ -160,20 +160,18 @@ final class ToolParameterSchemaBuilder
      * Validate every `enumSource: '…'` declared on a parameter of this tool
      * against the `#[ToolSetting]` schema on the same class.
      *
-     * Throws ToolParameterSchemaException if the named setting does not
-     * exist, is not `exposeToLlm: true`, is not `type: 'multi-select'`, or
-     * is not `resolveAs: 'agent'`. The shape constraints match what the
-     * LLM-facing schema actually consumes: the enum needs ints (from
-     * agent multi-selects) and the description suffix needs the resolved
-     * `"Name (#id)"` strings. Allowing `resolveAs: 'skill'` / `'raw'`
-     * here would silently produce an empty `enum` because the runtime
-     * source map only carries agent-typed settings.
+     * Throws ToolParameterSchemaException on the first offender if the
+     * named setting does not exist, is not `exposeToLlm: true`, is not
+     * `type: 'multi-select'`, or is not `resolveAs: 'agent'`. The shape
+     * constraints match what the LLM-facing schema actually consumes:
+     * the enum needs ints (from agent multi-selects) and the description
+     * suffix needs the resolved `"Name (#id)"` strings. Allowing
+     * `resolveAs: 'skill'` / `'raw'` here would silently produce an empty
+     * `enum` because the runtime source map only carries agent-typed
+     * settings.
      */
-    private static function validateEnumSources(
-        ReflectionClass $ref,
-        array $enumSourceValues,
-        array $enumSourceLabels,
-    ): void {
+    private static function validateEnumSources(ReflectionClass $ref): void
+    {
         $settingsByKey = [];
         foreach (ToolSettingSchema::collect($ref->getName()) as $setting) {
             $settingsByKey[$setting->key] = $setting;
@@ -230,11 +228,6 @@ final class ToolParameterSchemaBuilder
                     var_export($setting->resolveAs, true),
                 ));
             }
-
-            // Unused-suppression: keep the maps referenced so future fields
-            // (e.g. a stricter "must be present in both maps" check) have a
-            // single place to add the rule without re-passing the args.
-            unset($enumSourceValues, $enumSourceLabels);
         }
     }
 

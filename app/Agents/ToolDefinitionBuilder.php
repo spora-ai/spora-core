@@ -182,8 +182,9 @@ final class ToolDefinitionBuilder
      * {@see \Spora\Tools\Traits\HasParameterSchema::getLlmParametersSchema()}.
      *
      * Falls back to the plain {@see \Spora\Tools\ToolInterface::getParametersSchema()}
-     * for tools that don't compose the trait (theoretical future custom
-     * tools) so the rest of the pipeline keeps working.
+     * for tools that implement ToolInterface directly without composing
+     * HasParameterSchema — the escape hatch for plugin authors whose base
+     * class can't extend AbstractTool.
      *
      * @return array<string, mixed>
      */
