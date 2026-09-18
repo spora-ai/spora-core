@@ -7,6 +7,8 @@ namespace Tests\Unit\Tools;
 use InvalidArgumentException;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\Exceptions\ToolParameterSchemaException;
 use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use stdClass;
 
@@ -153,4 +155,102 @@ it('accepts a class-string in addition to an instance', function (): void {
     $schemaFromInstance = ToolParameterSchemaBuilder::build(new SchemaBuilderTestSubclass());
 
     expect($schema)->toBe($schemaFromInstance);
+});
+
+// `enumSource` is the LLM-side enrichment that lets a `#[ToolParameter]`
+// bind to a `#[ToolSetting(key: …)]` and pull resolved ids + labels into the
+// emitted schema. The fixtures below declare both a setting and a parameter
+// that references it; the cases pin each rule the builder enforces.
+
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed targets', type: 'multi-select', exposeToLlm: true)]
+#[ToolParameter(name: 'target_id', type: 'integer', description: 'Pick one.', required: true, enumSource: 'allowed_target_agents')]
+final class EnumSourceTool {}
+
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed targets', type: 'multi-select', exposeToLlm: false)]
+#[ToolParameter(name: 'target_id', type: 'integer', description: 'Pick one.', required: true, enumSource: 'allowed_target_agents')]
+final class EnumSourceToolNotExposed {}
+
+#[ToolSetting(key: 'api_key', label: 'API key', type: 'string')]
+#[ToolParameter(name: 'target_id', type: 'integer', description: 'Pick one.', required: true, enumSource: 'allowed_target_agents')]
+final class EnumSourceToolMissing {}
+
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed targets', type: 'multi-select', exposeToLlm: true, resolveAs: 'skill')]
+#[ToolParameter(name: 'target_id', type: 'integer', description: 'Pick one.', required: true, enumSource: 'allowed_target_agents')]
+final class EnumSourceToolSkill {}
+
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed targets', type: 'string', exposeToLlm: true)]
+#[ToolParameter(name: 'target_id', type: 'integer', description: 'Pick one.', required: true, enumSource: 'allowed_target_agents')]
+final class EnumSourceToolString {}
+
+#[ToolSetting(key: 'allowed_target_agents', label: 'Allowed targets', type: 'multi-select', exposeToLlm: true)]
+#[ToolParameter(name: 'level', type: 'string', description: 'Verbosity', required: true, enum: ['low', 'high'], enumSource: 'allowed_target_agents')]
+final class EnumSourceStaticEnumWinsTool {}
+
+it('enumSource populates enum from the values map and appends the label suffix to the description', function (): void {
+    $schema = ToolParameterSchemaBuilder::build(
+        EnumSourceTool::class,
+        ['allowed_target_agents' => [11, 4]],
+        ['allowed_target_agents' => ['Legal Agent (#11)', 'Sales Agent (#4)']],
+    );
+
+    expect($schema['properties']['target_id']['enum'])->toBe([11, 4])
+        ->and($schema['properties']['target_id']['description'])
+            ->toBe('Pick one. Allowed values: Legal Agent (#11), Sales Agent (#4)');
+});
+
+it('enumSource is ignored when the static enum is already populated', function (): void {
+    $schema = ToolParameterSchemaBuilder::build(
+        EnumSourceStaticEnumWinsTool::class,
+        ['allowed_target_agents' => [11, 4]],
+        ['allowed_target_agents' => ['Legal Agent (#11)', 'Sales Agent (#4)']],
+    );
+
+    // The developer pinned enum=['low','high']; the runtime enumSource
+    // would have populated [11,4] but the static constraint wins so the
+    // LLM sees exactly what the source code declares. The description
+    // suffix from enumSource is still applied — appending the resolved
+    // names is informational and never narrows the LLM's choice.
+    expect($schema['properties']['level']['enum'])->toBe(['low', 'high'])
+        ->and($schema['properties']['level']['description'])
+            ->toContain('Allowed values: Legal Agent (#11), Sales Agent (#4)');
+});
+
+it('enumSource is skipped when the values map is empty (no enum, no suffix)', function (): void {
+    $schema = ToolParameterSchemaBuilder::build(
+        EnumSourceTool::class,
+        ['allowed_target_agents' => []],
+        ['allowed_target_agents' => []],
+    );
+
+    expect($schema['properties']['target_id'])->not->toHaveKey('enum')
+        ->and($schema['properties']['target_id']['description'])->toBe('Pick one.');
+});
+
+it('enumSource is skipped when the keys are entirely absent from the maps', function (): void {
+    // Operator-default settings with no source agent produce no name
+    // resolution; the builder must not blow up on the missing key.
+    $schema = ToolParameterSchemaBuilder::build(EnumSourceTool::class);
+
+    expect($schema['properties']['target_id'])->not->toHaveKey('enum')
+        ->and($schema['properties']['target_id']['description'])->toBe('Pick one.');
+});
+
+it('enumSource throws when the named setting does not exist on the class', function (): void {
+    expect(fn() => ToolParameterSchemaBuilder::build(EnumSourceToolMissing::class))
+        ->toThrow(ToolParameterSchemaException::class, "no #[ToolSetting(key: 'allowed_target_agents')]");
+});
+
+it('enumSource throws when the named setting is not exposeToLlm', function (): void {
+    expect(fn() => ToolParameterSchemaBuilder::build(EnumSourceToolNotExposed::class))
+        ->toThrow(ToolParameterSchemaException::class, 'not exposeToLlm: true');
+});
+
+it('enumSource throws when the named setting is not type multi-select', function (): void {
+    expect(fn() => ToolParameterSchemaBuilder::build(EnumSourceToolString::class))
+        ->toThrow(ToolParameterSchemaException::class, "has type 'string'");
+});
+
+it('enumSource throws when the named setting is not resolveAs agent', function (): void {
+    expect(fn() => ToolParameterSchemaBuilder::build(EnumSourceToolSkill::class))
+        ->toThrow(ToolParameterSchemaException::class, "has resolveAs 'skill'");
 });

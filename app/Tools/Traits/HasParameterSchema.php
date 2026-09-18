@@ -31,4 +31,28 @@ trait HasParameterSchema
     {
         return ToolParameterSchemaBuilder::build($this);
     }
+
+    /**
+     * LLM-facing variant of {@see self::getParametersSchema()} that lets the
+     * schema builder populate `#[ToolParameter(enumSource: …)]` properties
+     * with runtime-resolved agent ids + description suffixes.
+     *
+     * Runtime validators (TickPhaseRunner, ToolCallExecutor,
+     * ToolCallSerializer) call {@see self::getParametersSchema()} directly —
+     * they don't need the LLM-side enrichment and shouldn't pay for it.
+     * Only ToolDefinitionBuilder threads these maps through, since it is the
+     * one consumer that builds the per-tick LLM payload.
+     *
+     * @param  array<string, list<int|string>> $enumSourceValues  setting key => resolved ids
+     * @param  array<string, list<string>>     $enumSourceLabels  setting key => resolved "Name (#id)" strings
+     * @return array{
+     *   type: "object",
+     *   properties: array<string, array<string, mixed>>|stdClass,
+     *   required: list<string>
+     * }
+     */
+    public function getLlmParametersSchema(array $enumSourceValues = [], array $enumSourceLabels = []): array
+    {
+        return ToolParameterSchemaBuilder::build($this, $enumSourceValues, $enumSourceLabels);
+    }
 }

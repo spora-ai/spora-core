@@ -25,6 +25,7 @@ use InvalidArgumentException;
  *   #[ToolParameter(name: 'date',      type: 'string',  description: 'Date filter', format: 'date')]
  *   #[ToolParameter(name: 'tags',      type: 'array',   description: 'Tag list', items: ['type' => 'string'])]
  *   #[ToolParameter(name: 'epoch',     type: 'integer', description: 'Unix ts',   required: ['format'])]
+ *   #[ToolParameter(name: 'target_id', type: 'integer', description: 'Target agent', enumSource: 'allowed_target_agents')]
  *
  * Per-op required: pass a list of operation names (`required: ['format']`) to
  * mark a parameter as required only when one of those operations is in the
@@ -59,6 +60,13 @@ final class ToolParameter
         public readonly ?string $format = null,
         /** @var array<string, mixed>|null */
         public readonly ?array $items = null,
+        // Optional LLM-side enrichment: when set, the LLM-facing schema
+        // builder populates this property's `enum` from the named
+        // `#[ToolSetting]`'s resolved agent IDs and appends the matching
+        // "Allowed values: …" list to the description. Static `enum`
+        // wins; an empty source is skipped (no enum, no suffix). See
+        // ToolParameterSchemaBuilder for the validation rules.
+        public readonly ?string $enumSource = null,
     ) {
         if (!in_array($this->type, self::ALLOWED_TYPES, true)) {
             throw new InvalidArgumentException(

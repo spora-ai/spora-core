@@ -9,6 +9,7 @@ use ReflectionClass;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Exceptions\ToolParameterSchemaException;
+use Spora\Tools\ToolSettingSchema;
 use stdClass;
 
 /**
@@ -29,6 +30,17 @@ use stdClass;
  * property name to a list of op names), used by OperationSchemaFilter to
  * narrow `required[]` per agent. The filter strips the key before the schema
  * reaches the LLM — providers never see it.
+ *
+ * LLM-side enrichment via `enumSource`: when a `#[ToolParameter]` declares
+ * `enumSource: 'setting_key'`, the builder pulls the named setting's
+ * resolved agent ids from `$enumSourceValues` and the matching human-
+ * readable labels from `$enumSourceLabels`, then (a) populates `enum` on
+ * the property (only when the parameter has no static `enum`) and (b)
+ * appends a `" Allowed values: …"` suffix to the description. An empty
+ * source is silently skipped (no enum, no suffix) — emitting an empty
+ * `enum` would be invalid JSON Schema, and an empty suffix would be
+ * misleading to the model. Static `enum` always wins; `enumSource` is
+ * only consulted when the parameter declares no static enum.
  */
 final class ToolParameterSchemaBuilder
 {
@@ -38,7 +50,14 @@ final class ToolParameterSchemaBuilder
     /**
      * Build the JSON Schema "parameters" object from a tool's attributes.
      *
-     * @param  object|class-string $target Tool instance or fully-qualified class name.
+     * @param  object|class-string $target           Tool instance or fully-qualified class name.
+     * @param  array<string, list<int|string>>       $enumSourceValues  setting key => resolved ids to populate `enum` from.
+     *                                                             Only consulted for parameters with `enumSource: '…'`
+     *                                                             and no static `enum`. Empty list = no injection.
+     * @param  array<string, list<string>>           $enumSourceLabels  setting key => resolved human-readable
+     *                                                             labels (e.g. `"Legal Agent (#11)"`) appended to
+     *                                                             the parameter description as
+     *                                                             `" Allowed values: …"`. Empty list = no suffix.
      * @return array{
      *   type: "object",
      *   properties: array<string, array<string, mixed>>|stdClass,
@@ -46,8 +65,11 @@ final class ToolParameterSchemaBuilder
      *   __required_when: array<string, list<string>>,
      * }
      */
-    public static function build(object|string $target): array
-    {
+    public static function build(
+        object|string $target,
+        array $enumSourceValues = [],
+        array $enumSourceLabels = [],
+    ): array {
         $ref              = new ReflectionClass($target);
         $properties       = [];
         $required         = [];
@@ -70,6 +92,12 @@ final class ToolParameterSchemaBuilder
             $required[] = $discriminatorKey;
         }
 
+        // Validate `enumSource` references before emitting any property so a
+        // misconfigured tool fails fast on the first offender with a named
+        // exception — instead of silently emitting partial schemas where some
+        // params are augmented and others fall through to "static enum only".
+        self::validateEnumSources($ref);
+
         foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
             /** @var ToolParameter $param */
             $param = $attr->newInstance();
@@ -84,7 +112,15 @@ final class ToolParameterSchemaBuilder
                 ));
             }
 
-            $properties[$param->name] = self::propertyJson($param);
+            $properties[$param->name] = self::propertyJson(
+                $param,
+                $param->enumSource !== null && isset($enumSourceValues[$param->enumSource])
+                    ? $enumSourceValues[$param->enumSource]
+                    : [],
+                $param->enumSource !== null && isset($enumSourceLabels[$param->enumSource])
+                    ? $enumSourceLabels[$param->enumSource]
+                    : [],
+            );
 
             if (is_array($param->required)) {
                 $requiredWhen[$param->name] = $param->required;
@@ -121,18 +157,110 @@ final class ToolParameterSchemaBuilder
     }
 
     /**
+     * Validate every `enumSource: '…'` declared on a parameter of this tool
+     * against the `#[ToolSetting]` schema on the same class.
+     *
+     * Throws ToolParameterSchemaException on the first offender if the
+     * named setting does not exist, is not `exposeToLlm: true`, is not
+     * `type: 'multi-select'`, or is not `resolveAs: 'agent'`. The shape
+     * constraints match what the LLM-facing schema actually consumes:
+     * the enum needs ints (from agent multi-selects) and the description
+     * suffix needs the resolved `"Name (#id)"` strings. Allowing
+     * `resolveAs: 'skill'` / `'raw'` here would silently produce an empty
+     * `enum` because the runtime source map only carries agent-typed
+     * settings.
+     */
+    private static function validateEnumSources(ReflectionClass $ref): void
+    {
+        $settingsByKey = [];
+        foreach (ToolSettingSchema::collect($ref->getName()) as $setting) {
+            $settingsByKey[$setting->key] = $setting;
+        }
+
+        foreach (self::collectInheritedAttributes($ref, ToolParameter::class) as $attr) {
+            /** @var ToolParameter $param */
+            $param = $attr->newInstance();
+            if ($param->enumSource === null) {
+                continue;
+            }
+
+            $setting = $settingsByKey[$param->enumSource] ?? null;
+            if ($setting === null) {
+                throw new ToolParameterSchemaException(sprintf(
+                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    . 'but no #[ToolSetting(key: %s)] exists on the class. '
+                    . 'Either add the setting or remove enumSource.',
+                    $ref->getName(),
+                    var_export($param->name, true),
+                    var_export($param->enumSource, true),
+                    var_export($param->enumSource, true),
+                ));
+            }
+            if (!$setting->exposeToLlm) {
+                throw new ToolParameterSchemaException(sprintf(
+                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    . 'but the named #[ToolSetting] is not exposeToLlm: true. '
+                    . 'The LLM-facing schema has no source values to inject.',
+                    $ref->getName(),
+                    var_export($param->name, true),
+                    var_export($param->enumSource, true),
+                ));
+            }
+            if ($setting->type !== 'multi-select') {
+                throw new ToolParameterSchemaException(sprintf(
+                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    . 'but the named #[ToolSetting] has type %s. enumSource only '
+                    . 'supports multi-select settings.',
+                    $ref->getName(),
+                    var_export($param->name, true),
+                    var_export($param->enumSource, true),
+                    var_export($setting->type, true),
+                ));
+            }
+            if ($setting->resolveAs !== 'agent') {
+                throw new ToolParameterSchemaException(sprintf(
+                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    . 'but the named #[ToolSetting] has resolveAs %s. enumSource '
+                    . 'only supports resolveAs: agent.',
+                    $ref->getName(),
+                    var_export($param->name, true),
+                    var_export($param->enumSource, true),
+                    var_export($setting->resolveAs, true),
+                ));
+            }
+        }
+    }
+
+    /**
+     * @param  list<int|string> $values  Resolved ids for the enum (e.g. `[11, 4]`). Ignored when the parameter has a static `enum`.
+     * @param  list<string>     $labels  Resolved human-readable labels for the description suffix (e.g. `['Legal Agent (#11)', 'Sales Agent (#4)']`).
      * @return array<string, mixed>
      */
-    private static function propertyJson(ToolParameter $param): array
-    {
+    private static function propertyJson(
+        ToolParameter $param,
+        array $values,
+        array $labels,
+    ): array {
         $json = [
             'type'        => $param->type,
             'description' => $param->description,
         ];
 
         if ($param->enum !== []) {
+            // Static enum is the developer-tight constraint; it always wins
+            // over enumSource. The runtime may want to inject enumSource but
+            // if the developer pinned values here the schema must reflect
+            // those — surprising the LLM with the runtime list while the
+            // source code says otherwise would be a footgun.
             $json['enum'] = $param->enum;
+        } elseif ($param->enumSource !== null && $values !== []) {
+            $json['enum'] = $values;
         }
+
+        if ($param->enumSource !== null && $labels !== []) {
+            $json['description'] .= ' Allowed values: ' . implode(', ', $labels);
+        }
+
         if ($param->minimum !== null) {
             $json['minimum'] = $param->minimum;
         }
