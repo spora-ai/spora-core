@@ -635,6 +635,13 @@ Returns the configs the caller can see.
 - admin: every global config (one per registered provider class that has a row in `tool_configurations`).
 - non-admin: only the caller's own user-scoped configs.
 
+When `?agent_id=N` is supplied:
+
+- the response is narrowed to configs whose `principal_id` matches the agent's owning principal, plus every global config.
+- The dropdown scope is the AGENT's principal, NOT the caller's `visiblePrincipalIds()` — a user-owned agent's dropdown stays scoped to that user's user-principal (no group-owned configs leak in) and a group-owned agent's dropdown stays scoped to that group's principal (no caller user-scoped configs leak in). Mirrors `LLMConfigService::getConfigurationsForAgent()`.
+- Visibility: the caller must own the agent (`AgentServiceInterface::getAgent()` returns non-null) OR be a global admin; otherwise the response is `[]` (existence-hide, not 404).
+- Combines with `?group_id=N` only when both apply; supplying neither falls back to caller-scoped (`getConfigurationsForUser`).
+
 When `?group_id=N` is supplied:
 
 - members of the group (any role) and global admins receive the group-scoped configs for that group
