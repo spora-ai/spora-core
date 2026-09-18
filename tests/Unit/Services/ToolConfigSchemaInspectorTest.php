@@ -367,11 +367,11 @@ test('inheritance: getSchemaDefaults uses child value when child redeclares a pa
 
 // resolveAs: 'skill' — new ToolSetting branch for Skills feature.
 
-test('normalizeMultiSelectValues with resolveAs=agent coerces to int[] (HandoverTool default)', function (): void {
+test('normalizeMultiSelectValues with resolveAs=agent coerces to int[] (SubAgentTool default)', function (): void {
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
 
     $normalized = $inspector->normalizeMultiSelectValues(
-        Spora\Tools\HandoverTool::class,
+        Spora\Tools\SubAgentTool::class,
         ['allowed_target_agents' => '["5", "1"]'],
     );
 
@@ -394,15 +394,15 @@ test('normalizeMultiSelectValues with resolveAs=skill coerces to string[] of val
     expect($normalized['allowed_skills'])->toBe(['git', '42', 'weather']);
 });
 
-test('normalizeMultiSelectValues with resolveAs=agent (HandoverTool default) coerces to int[]', function (): void {
+test('normalizeMultiSelectValues with resolveAs=agent (SubAgentTool default) coerces to int[]', function (): void {
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
 
-    // resolveAs defaults to 'agent' on HandoverTool; strings round-trip through
+    // resolveAs defaults to 'agent' on SubAgentTool; strings round-trip through
     // int casting. The `raw` branch is reserved for tools that explicitly
     // declare resolveAs='raw' — none currently do, so it is covered separately
     // by the SkillTool inspector tests below.
     $normalized = $inspector->normalizeMultiSelectValues(
-        Spora\Tools\HandoverTool::class,
+        Spora\Tools\SubAgentTool::class,
         ['allowed_target_agents' => ['5', '1']],
     );
 
@@ -457,7 +457,7 @@ test('getLlmToolSettings with resolveAs=agent still resolves to "Name (#id)" str
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
 
     $out = $inspector->getLlmToolSettings(
-        Spora\Tools\HandoverTool::class,
+        Spora\Tools\SubAgentTool::class,
         ['allowed_target_agents' => [1, 2]],
         userId: 1,
     );

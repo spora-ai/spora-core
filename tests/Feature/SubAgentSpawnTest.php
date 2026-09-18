@@ -26,14 +26,14 @@ use Spora\Services\AgentService;
 use Spora\Services\HandoverService;
 use Spora\Services\SubAgentService;
 use Spora\Services\ToolConfigServiceInterface;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 use Tests\Fixtures\StubInputTool;
 
 /**
- * End-to-end tests for the `sub_agent` op on HandoverTool.
+ * End-to-end tests for the `sub_agent` op on SubAgentTool.
  *
  * Topology: a parent agent on user A owns a child agent. The LLM emits
- * `handover(op: 'sub_agent', agent_id: child, prompt: '...')`. We
+ * `sub_agent(op: 'sub_agent', target_agent_id: child, prompt: '...')`. We
  * exercise the full orchestrator → tool → SubAgentService → child-task
  * chain with a real DB and a scripted LLM driver.
  */
@@ -92,9 +92,9 @@ function subAgentSeedAgents(): array
 }
 
 /**
- * Build an orchestrator with HandoverTool + SubAgentService wired up.
+ * Build an orchestrator with SubAgentTool + SubAgentService wired up.
  *
- * The HandoverTool is backed by a real HandoverService and a real
+ * The SubAgentTool is backed by a real HandoverService and a real
  * SubAgentService — only the LLM driver and the ToolConfigService
  * are scripted. The SubAgentService's orchestrator-factory closure
  * returns the SAME outer orchestrator so the child tick resolves
@@ -142,7 +142,7 @@ function subAgentBuildOrchestrator(
         null,
     );
 
-    $handoverTool = new HandoverTool($handoverService, $realSubAgent, $toolConfig);
+    $handoverTool = new SubAgentTool($handoverService, $realSubAgent, $toolConfig);
 
     $outer = new Orchestrator(
         $driverFactory,
@@ -192,8 +192,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -206,10 +206,10 @@ describe('SubAgentService::spawn', function (): void {
                     content: null,
                     toolCalls: [new DriverToolCall(
                         SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op'        => 'sub_agent',
-                            'agent_id'  => $childAgentId,
+                            'target_agent_id'  => $childAgentId,
                             'prompt'    => SUB_AGENT_PROMPT,
                         ],
                     )],
@@ -239,7 +239,7 @@ describe('SubAgentService::spawn', function (): void {
             'decision' => 'approve',
             'arguments' => [
                 'op'       => 'sub_agent',
-                'agent_id' => $childAgentId,
+                'target_agent_id' => $childAgentId,
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
@@ -294,15 +294,15 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
         AgentToolOperationOverride::create([
             'agent_id'                  => $parentAgentId,
-            'tool_class'                => HandoverTool::class,
+            'tool_class'                => SubAgentTool::class,
             'operation'                 => 'sub_agent',
             'enabled'                   => 1,
             'default_requires_approval' => 0,
@@ -315,10 +315,10 @@ describe('SubAgentService::spawn', function (): void {
                     content: null,
                     toolCalls: [new DriverToolCall(
                         SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op'       => 'sub_agent',
-                            'agent_id' => $childAgentId,
+                            'target_agent_id' => $childAgentId,
                             'prompt'   => SUB_AGENT_PROMPT,
                         ],
                     )],
@@ -371,8 +371,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -385,10 +385,10 @@ describe('SubAgentService::spawn', function (): void {
                     content: null,
                     toolCalls: [new DriverToolCall(
                         SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op'       => 'sub_agent',
-                            'agent_id' => $childAgentId, // NOT in empty allowlist
+                            'target_agent_id' => $childAgentId, // NOT in empty allowlist
                             'prompt'   => SUB_AGENT_PROMPT,
                         ],
                     )],
@@ -409,7 +409,7 @@ describe('SubAgentService::spawn', function (): void {
             'decision' => 'approve',
             'arguments' => [
                 'op'       => 'sub_agent',
-                'agent_id' => $childAgentId,
+                'target_agent_id' => $childAgentId,
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
@@ -419,7 +419,7 @@ describe('SubAgentService::spawn', function (): void {
         expect($childCount)->toBe(0);
 
         $toolCall = ToolCallModel::where('task_id', $parent->id)
-            ->where('tool_name', 'handover')
+            ->where('tool_name', 'sub_agent')
             ->first();
         expect($toolCall)->not->toBeNull();
         expect($toolCall->result_content)->toContain('not in the allowed_target_agents list');
@@ -432,8 +432,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -453,10 +453,10 @@ describe('SubAgentService::spawn', function (): void {
                         content: null,
                         toolCalls: [new DriverToolCall(
                             SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                            'handover',
+                            'sub_agent',
                             [
                                 'op'       => 'sub_agent',
-                                'agent_id' => $GLOBALS['__sub_agent_child_id'],
+                                'target_agent_id' => $GLOBALS['__sub_agent_child_id'],
                                 'prompt'   => SUB_AGENT_PROMPT,
                             ],
                         )],
@@ -507,7 +507,7 @@ describe('SubAgentService::spawn', function (): void {
             null,
         );
 
-        $handoverTool = new HandoverTool($handoverService, $realSubAgent, $toolConfig);
+        $handoverTool = new SubAgentTool($handoverService, $realSubAgent, $toolConfig);
 
         $outer = new Orchestrator(
             $driverFactory,
@@ -546,7 +546,7 @@ describe('SubAgentService::spawn', function (): void {
                 'decision' => 'approve',
                 'arguments' => [
                     'op'       => 'sub_agent',
-                    'agent_id' => $childAgentId,
+                    'target_agent_id' => $childAgentId,
                     'prompt'   => SUB_AGENT_PROMPT,
                 ],
             ]]);
@@ -587,8 +587,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -602,19 +602,19 @@ describe('SubAgentService::spawn', function (): void {
                     toolCalls: [
                         new DriverToolCall(
                             'pc_sub_agent_1',
-                            'handover',
+                            'sub_agent',
                             [
                                 'op'       => 'sub_agent',
-                                'agent_id' => $childAgentId,
+                                'target_agent_id' => $childAgentId,
                                 'prompt'   => 'first child task',
                             ],
                         ),
                         new DriverToolCall(
                             'pc_sub_agent_2',
-                            'handover',
+                            'sub_agent',
                             [
                                 'op'       => 'sub_agent',
-                                'agent_id' => $childAgentId,
+                                'target_agent_id' => $childAgentId,
                                 'prompt'   => 'second child task',
                             ],
                         ),
@@ -644,7 +644,7 @@ describe('SubAgentService::spawn', function (): void {
                 'decision'         => 'approve',
                 'arguments'        => [
                     'op'       => 'sub_agent',
-                    'agent_id' => $childAgentId,
+                    'target_agent_id' => $childAgentId,
                     'prompt'   => 'first child task',
                 ],
             ],
@@ -653,7 +653,7 @@ describe('SubAgentService::spawn', function (): void {
                 'decision'         => 'approve',
                 'arguments'        => [
                     'op'       => 'sub_agent',
-                    'agent_id' => $childAgentId,
+                    'target_agent_id' => $childAgentId,
                     'prompt'   => 'second child task',
                 ],
             ],
@@ -671,7 +671,7 @@ describe('SubAgentService::spawn', function (): void {
 
         // Each `sub_agent` tool call must produce exactly one `role:'tool'`
         // history row correlated with the originating tool_call_id. The
-        // immediate result from HandoverTool.executeSubAgent is overwritten
+        // immediate result from SubAgentTool.executeSubAgent is overwritten
         // in place by SubAgentService.resumeParent with the eventual child
         // output — the LLM only ever sees the resume content.
         $toolRows = TaskHistory::where('task_id', $parent->id)
@@ -715,8 +715,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -865,7 +865,7 @@ describe('SubAgentService::spawn', function (): void {
             content: "Sub-agent task #{$child->id} completed:\n\nChild result.",
             context: new \Spora\Agents\ValueObjects\HistoryMessageContext(
                 toolCallId: 'pc_test',
-                toolName: 'handover',
+                toolName: 'sub_agent',
             ),
         );
 
@@ -889,8 +889,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -933,7 +933,7 @@ describe('SubAgentService::spawn', function (): void {
             null,
         );
 
-        $handoverTool = new HandoverTool(
+        $handoverTool = new SubAgentTool(
             new HandoverService(static fn(): OrchestratorInterface => throw new LogicException('handover op should not be called')),
             $subAgent,
             $toolConfig,
@@ -967,19 +967,19 @@ describe('SubAgentService::spawn', function (): void {
             'task_id'          => $parent->id,
             'agent_id'         => $parentAgentId,
             'provider_call_id' => SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-            'tool_name'        => 'handover',
-            'tool_class'       => HandoverTool::class,
+            'tool_name'        => 'sub_agent',
+            'tool_class'       => SubAgentTool::class,
             'tool_type'        => 'output',
             'operation'        => 'sub_agent',
             'status'           => 'APPROVED',
             'proposed_arguments' => json_encode([
                 'op'       => 'sub_agent',
-                'agent_id' => $childAgentId,
+                'target_agent_id' => $childAgentId,
                 'prompt'   => SUB_AGENT_PROMPT,
             ], JSON_THROW_ON_ERROR),
             'approved_arguments' => json_encode([
                 'op'       => 'sub_agent',
-                'agent_id' => $childAgentId,
+                'target_agent_id' => $childAgentId,
                 'prompt'   => SUB_AGENT_PROMPT,
             ], JSON_THROW_ON_ERROR),
         ]);
@@ -997,7 +997,7 @@ describe('SubAgentService::spawn', function (): void {
 
     it('writes exactly one role=tool row per provider_call_id in the approval-required flow', function (): void {
         // Regression for the pre-fix double-write: the immediate sub_agent
-        // result from HandoverTool.executeSubAgent lands a role=tool row in
+        // result from SubAgentTool.executeSubAgent lands a role=tool row in
         // task_history, and SubAgentService::resumeParent then APPENDED
         // another row with the same provider_call_id. The serialized LLM
         // message list handed to the next provider call therefore had two
@@ -1010,8 +1010,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -1023,10 +1023,10 @@ describe('SubAgentService::spawn', function (): void {
                     content: null,
                     toolCalls: [new DriverToolCall(
                         SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op'       => 'sub_agent',
-                            'agent_id' => $childAgentId,
+                            'target_agent_id' => $childAgentId,
                             'prompt'   => SUB_AGENT_PROMPT,
                         ],
                     )],
@@ -1049,7 +1049,7 @@ describe('SubAgentService::spawn', function (): void {
             'decision'         => 'approve',
             'arguments'        => [
                 'op'       => 'sub_agent',
-                'agent_id' => $childAgentId,
+                'target_agent_id' => $childAgentId,
                 'prompt'   => SUB_AGENT_PROMPT,
             ],
         ]]);
@@ -1090,15 +1090,15 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
         AgentToolOperationOverride::create([
             'agent_id'                  => $parentAgentId,
-            'tool_class'                => HandoverTool::class,
+            'tool_class'                => SubAgentTool::class,
             'operation'                 => 'sub_agent',
             'enabled'                   => 1,
             'default_requires_approval' => 0,
@@ -1111,10 +1111,10 @@ describe('SubAgentService::spawn', function (): void {
                     content: null,
                     toolCalls: [new DriverToolCall(
                         SUB_AGENT_PARENT_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op'       => 'sub_agent',
-                            'agent_id' => $childAgentId,
+                            'target_agent_id' => $childAgentId,
                             'prompt'   => SUB_AGENT_PROMPT,
                         ],
                     )],
@@ -1164,8 +1164,8 @@ describe('SubAgentService::spawn', function (): void {
 
         AgentTool::insert([
             'agent_id'   => $parentAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -1178,13 +1178,13 @@ describe('SubAgentService::spawn', function (): void {
                     toolCalls: [
                         new DriverToolCall(
                             'pc_sub_agent_1',
-                            'handover',
-                            ['op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'first child task'],
+                            'sub_agent',
+                            ['op' => 'sub_agent', 'target_agent_id' => $childAgentId, 'prompt' => 'first child task'],
                         ),
                         new DriverToolCall(
                             'pc_sub_agent_2',
-                            'handover',
-                            ['op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'second child task'],
+                            'sub_agent',
+                            ['op' => 'sub_agent', 'target_agent_id' => $childAgentId, 'prompt' => 'second child task'],
                         ),
                     ],
                     inputTokens: 10,
@@ -1208,14 +1208,14 @@ describe('SubAgentService::spawn', function (): void {
                 'provider_call_id' => 'pc_sub_agent_1',
                 'decision'         => 'approve',
                 'arguments'        => [
-                    'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'first child task',
+                    'op' => 'sub_agent', 'target_agent_id' => $childAgentId, 'prompt' => 'first child task',
                 ],
             ],
             [
                 'provider_call_id' => 'pc_sub_agent_2',
                 'decision'         => 'approve',
                 'arguments'        => [
-                    'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => 'second child task',
+                    'op' => 'sub_agent', 'target_agent_id' => $childAgentId, 'prompt' => 'second child task',
                 ],
             ],
         ]);
@@ -1299,13 +1299,13 @@ describe('SubAgentService::spawn', function (): void {
             'task_id'          => $parent->id,
             'agent_id'         => $parentAgentId,
             'provider_call_id' => 'pc_dup',
-            'tool_name'        => 'handover',
-            'tool_class'       => HandoverTool::class,
+            'tool_name'        => 'sub_agent',
+            'tool_class'       => SubAgentTool::class,
             'tool_type'        => 'output',
             'operation'        => 'sub_agent',
             'status'           => 'APPROVED',
             'proposed_arguments' => [
-                'op' => 'sub_agent', 'agent_id' => $childAgentId, 'prompt' => SUB_AGENT_PROMPT,
+                'op' => 'sub_agent', 'target_agent_id' => $childAgentId, 'prompt' => SUB_AGENT_PROMPT,
             ],
             'result_data' => [
                 'op' => 'sub_agent', 'spawned_sub_task_ids' => [$child->id],
@@ -1314,7 +1314,7 @@ describe('SubAgentService::spawn', function (): void {
             'executed_at'    => date('Y-m-d H:i:s'),
         ]);
 
-        // Seed the immediate tool row that HandoverTool.executeSubAgent
+        // Seed the immediate tool row that SubAgentTool.executeSubAgent
         // would have written.
         $orch = new Orchestrator(
             Mockery::mock(DriverFactory::class),
@@ -1326,7 +1326,7 @@ describe('SubAgentService::spawn', function (): void {
             content: 'Sub-agent task #' . $child->id . ' starts on agent #' . $childAgentId . '.',
             context: new \Spora\Agents\ValueObjects\HistoryMessageContext(
                 toolCallId: 'pc_dup',
-                toolName: 'handover',
+                toolName: 'sub_agent',
             ),
         );
 

@@ -201,10 +201,10 @@ describe('HandoverService::handover', function (): void {
     });
 
     it('throws when the target agent is in the stored allowlist but owned by a different principal', function (): void {
-        // Defense in depth: the HandoverTool allowlist may be tampered with or
+        // Defense in depth: the SubAgentTool allowlist may be tampered with or
         // a foreign id slipped in via copy-paste. The service still refuses
         // via `callerControlsPrincipal` — the second layer behind the
-        // HandoverTool boundary.
+        // SubAgentTool boundary.
         [$service, $orchestrator] = makeHandoverService();
         [$userId, $sourceAgentId, $targetAgentId] = makeHandoverFixture();
 
@@ -253,7 +253,7 @@ describe('SubAgentService::spawn', function (): void {
         // Mirror of the HandoverService cross-principal test for the
         // `sub_agent` op. The service-level `callerControlsPrincipal`
         // check must reject a foreign target regardless of what the
-        // HandoverTool's stored allowlist says.
+        // SubAgentTool's stored allowlist says.
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
 
         $auth = bootAuthLayer();

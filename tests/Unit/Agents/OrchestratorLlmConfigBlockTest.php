@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Orchestrator;
 use Spora\Services\ToolConfigSchemaInspector;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 
 /**
  * The orchestrator injects the LLM-visible tool settings into the tool
@@ -82,7 +82,7 @@ it('returns an empty string for empty LLM settings', function (): void {
     expect($block)->toBe('');
 });
 
-it('renders a real HandoverTool LLM projection end-to-end', function (): void {
+it('renders a real SubAgentTool LLM projection end-to-end', function (): void {
     $auth = bootAuthLayer();
     $userId = $auth->register('orch-llm@example.com', 'Password1!', 'OrchLlm');
 
@@ -107,7 +107,7 @@ it('renders a real HandoverTool LLM projection end-to-end', function (): void {
 
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $llm = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => [$agent->id]],
         $userId,
     );

@@ -180,9 +180,9 @@ describe('ToolDefinitionBuilder missing #[ToolOperation] loud error', function (
 
 // `#[ToolParameter(enumSource: '…')]` LLM-side enrichment: the builder must
 // thread the runtime-resolved ids + labels from ToolConfigService through to
-// the per-property schema. The integration below uses a HandoverTool-shaped
-// stub so the test stays self-contained — exercising the real HandoverTool
-// would couple this test to the HandoverTool wiring and fail whenever the
+// the per-property schema. The integration below uses a SubAgentTool-shaped
+// stub so the test stays self-contained — exercising the real SubAgentTool
+// would couple this test to the SubAgentTool wiring and fail whenever the
 // service layer changes.
 #[Tool(
     name: 'enum_source_stub',

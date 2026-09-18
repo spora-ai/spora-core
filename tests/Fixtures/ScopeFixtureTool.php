@@ -12,7 +12,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 /**
  * Fixture used by ToolSettingScopeTest / ToolControllerScopeTest to
  * exercise the new `scope` parameter on `#[ToolSetting]`. Mirrors the
- * render matrix in `HandoverTool::allowed_target_agents` (scope:
+ * render matrix in `SubAgentTool::allowed_target_agents` (scope:
  * 'principal') alongside 'any' and 'agent' rows for full coverage.
  */
 #[Tool(name: 'scope_test_tool', description: 'Fixture for the scope parameter')]

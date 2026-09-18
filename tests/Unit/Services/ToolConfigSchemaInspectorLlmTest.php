@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
 use Spora\Services\ToolConfigSchemaInspector;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 
 const HANDOVER_LLM_TEST_PW = 'Password1!';
 
@@ -34,7 +34,7 @@ it('renders multi-select values as resolved "Name (#id)" strings for the LLM', f
 
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => [$agent->id]],
         $userId,
     );
@@ -50,7 +50,7 @@ it('falls back to "#id" when the agent name cannot be resolved', function (): vo
 
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => [9999]],
         $userId,
     );
@@ -63,7 +63,7 @@ it('falls back to "#id" when no userId is supplied (cannot prove ownership)', fu
     // No $userId — without it we can't scope the lookup, so we refuse to
     // resolve names to avoid a cross-tenant leak.
     $result = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => [1, 2]],
     );
 
@@ -88,7 +88,7 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
     // The owner is asking for the LLM projection, but the multi-select contains
     // an id belonging to a different user — that name must NOT leak through.
     $result = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => [$strangerAgent->id]],
         $ownerId,
     );
@@ -99,7 +99,7 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
 it('handles an empty multi-select value', function (): void {
     $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
     $result = $inspector->getLlmToolSettings(
-        HandoverTool::class,
+        SubAgentTool::class,
         ['allowed_target_agents' => []],
     );
 

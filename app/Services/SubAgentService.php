@@ -17,7 +17,7 @@ use Spora\Services\Text\Utf8Sanitizer;
 use Throwable;
 
 /**
- * Spawns child tasks from a `HandoverTool` `sub_agent` invocation and
+ * Spawns child tasks from a `SubAgentTool` `sub_agent` invocation and
  * resumes the parent once every child reaches a terminal state.
  *
  * Authorization mirrors {@see HandoverService::handover()}: the caller
@@ -51,7 +51,7 @@ final class SubAgentService implements SubAgentServiceInterface
     /**
      * @param Closure(): OrchestratorInterface $orchestratorFactory
      *   Lazy factory — the Orchestrator's constructor takes the tool
-     *   instance list (which includes `HandoverTool`), so direct injection
+     *   instance list (which includes `SubAgentTool`), so direct injection
      *   creates a circular dependency. Mirrors the pattern in {@see HandoverService}.
      */
     public function __construct(
@@ -447,7 +447,7 @@ final class SubAgentService implements SubAgentServiceInterface
     private function findToolCallIdForChild(int $parentTaskId, int $childId): ?string
     {
         $rows = ToolCallModel::where('task_id', $parentTaskId)
-            ->where('tool_name', 'handover')
+            ->where('tool_name', 'sub_agent')
             ->where('operation', 'sub_agent')
             ->get();
 
@@ -483,7 +483,7 @@ final class SubAgentService implements SubAgentServiceInterface
         if ($existing !== null) {
             $existing->update([
                 'content'   => $content,
-                'tool_name' => 'handover',
+                'tool_name' => 'sub_agent',
             ]);
             return;
         }
@@ -494,7 +494,7 @@ final class SubAgentService implements SubAgentServiceInterface
             content: $content,
             context: new HistoryMessageContext(
                 toolCallId: $toolCallId,
-                toolName: 'handover',
+                toolName: 'sub_agent',
             ),
         );
     }

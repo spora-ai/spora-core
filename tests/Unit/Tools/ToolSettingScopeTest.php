@@ -43,8 +43,8 @@ test('ToolSettingSchema::collect preserves the declared scope on each setting', 
     expect($byKey['agent_only']->scope)->toBe(ToolSetting::SCOPE_AGENT);
 });
 
-test('HandoverTool::allowed_target_agents declares scope: principal (locks intra-principal UX)', function (): void {
-    $collected = ToolSettingSchema::collect(Spora\Tools\HandoverTool::class);
+test('SubAgentTool::allowed_target_agents declares scope: principal (locks intra-principal UX)', function (): void {
+    $collected = ToolSettingSchema::collect(Spora\Tools\SubAgentTool::class);
 
     $allowlist = null;
     foreach ($collected as $setting) {

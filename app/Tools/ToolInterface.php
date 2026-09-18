@@ -43,7 +43,7 @@ interface ToolInterface
      * @param  int                    $agentId    The agent executing this tool.
      * @param  int|null               $userId     Legacy user context (from task->user_id).
      * @param  int|null               $taskId     The current tick's task id. Available so chat-level
-     *                                            tools (handover, summarize, archive) can reference
+     *                                            tools (sub_agent, summarize, archive) can reference
      *                                            the source Task without re-querying by user_id.
      * @param  PrincipalContext|null  $context    Principal context — owner/runner separation.
      */

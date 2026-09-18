@@ -7,14 +7,14 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 
 /**
  * End-to-end check that the real storage path doesn't lose multi-select shape.
  *
  * The frontend sends a multi-select value as a JSON-encoded string (the form
  * is `Record<string, string>`). The backend must decode it back to int[] so
- * `HandoverTool::execute()` can do its allowlist check. This test bypasses
+ * `SubAgentTool::execute()` can do its allowlist check. This test bypasses
  * the LLM and the orchestrator — it saves a setting through
  * `ToolConfigService::putAgentOverride` and reads it back through
  * `getEffectiveSettings`, then runs the tool's `execute()` directly.
@@ -25,7 +25,7 @@ function makeFreshToolConfigService(): ToolConfigService
     return new ToolConfigService(
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Monolog\Logger('handover-realcfg'),
-        [HandoverTool::class],
+        [SubAgentTool::class],
     );
 }
 
@@ -54,13 +54,13 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     // `Record<string, string>`). Persist it the same way the controller would.
     $configService = makeFreshToolConfigService();
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $sourceAgent->id,
         ['allowed_target_agents' => json_encode([$targetAgent->id])],
     );
 
-    // Re-read through the same path the HandoverTool uses.
-    $effective = $configService->getEffectiveSettings(HandoverTool::class, $sourceAgent->id, $userId);
+    // Re-read through the same path the SubAgentTool uses.
+    $effective = $configService->getEffectiveSettings(SubAgentTool::class, $sourceAgent->id, $userId);
     expect($effective['allowed_target_agents'])->toBe([$targetAgent->id]);
 
     $handoverService = Mockery::mock(HandoverServiceInterface::class);
@@ -70,7 +70,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
 
     $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
 
-    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
+    $tool = new SubAgentTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
@@ -123,7 +123,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
 
     $configService = makeFreshToolConfigService();
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $sourceAgent->id,
         ['allowed_target_agents' => json_encode([$allowedAgent->id])],
     );
@@ -134,7 +134,7 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
     $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
     $subAgentService->shouldNotReceive('spawn');
 
-    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
+    $tool = new SubAgentTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),

@@ -23,7 +23,7 @@ final class HandoverService implements HandoverServiceInterface
     /**
      * @param Closure(): OrchestratorInterface $orchestratorFactory
      *   Lazy factory — the Orchestrator is constructed with the tool instance
-     *   list (which includes this HandoverTool), so injecting OrchestratorInterface
+     *   list (which includes SubAgentTool), so injecting OrchestratorInterface
      *   directly creates a circular dependency. The closure defers resolution
      *   to the moment {@see handover()} is actually called.
      */
