@@ -49,6 +49,16 @@ use Spora\Speech\SpeechToTextRegistry;
  */
 final class SpeechProviderConfigService implements SpeechProviderConfigServiceInterface
 {
+    /**
+     * Eloquent raw fragment that resolves to an always-false WHERE
+     * clause. Used by visibility scopes when the caller has no
+     * accessible principals — combined with the OR'd `is_global = true`
+     * filter the result set collapses to empty. Two callers (one
+     * inline, one via {@see applyVisibleScope()}) share this fragment;
+     * promoted to a constant by SonarCloud S1192.
+     */
+    private const NO_MATCH = '1 = 0';
+
     private readonly SpeechProviderConfigValidator $validator;
     private readonly SpeechProviderConfigPersistence $persistence;
     private readonly SpeechProviderConfigPreferences $preferences;
@@ -109,7 +119,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             if ($principalIds !== []) {
                 $q->whereIn('principal_id', $principalIds);
             } else {
-                $q->whereRaw('1 = 0');
+                $q->whereRaw(self::NO_MATCH);
             }
             $q->orWhere('is_global', true);
         });
@@ -123,16 +133,19 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
      *
      * Behaviour:
      *  - Agent row missing → `[]`.
-     *  - Agent has no resolvable principal (data corruption) → `[]`.
      *  - Otherwise → `principal_id = agent.principal_id` ∪ `is_global = true`.
+     *
+     * The scope is the agent's own principal, NOT the caller's visible
+     * principals — a user-owned agent's dropdown stays scoped to that
+     * user's user-principal (no group-owned configs leak in), and a
+     * group-owned agent's dropdown stays scoped to that group's
+     * principal (no caller user-scoped configs leak in). The SPA's
+     * "Voice not configured" empty-state CTA renders correctly when
+     * the agent's principal has no matching config.
      *
      * Visibility is the controller's concern: callers must pre-check
      * that the user is allowed to view the agent (or is an admin)
-     * before invoking this method. The list endpoint takes
-     * `?agent_id=N` and uses this method so a user-owned agent's
-     * dropdown shows only configs valid for its principal scope
-     * instead of leaking config rows owned by groups the caller
-     * happens to belong to.
+     * before invoking this method.
      *
      * @return list<array<string, mixed>>
      */
@@ -241,7 +254,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         $principalIds = $this->principalResolver->visiblePrincipalIds($userId);
         $query->where(static function ($q) use ($principalIds): void {
             if ($principalIds === []) {
-                $q->whereRaw('1 = 0');
+                $q->whereRaw(self::NO_MATCH);
             } else {
                 $q->whereIn('principal_id', $principalIds);
             }

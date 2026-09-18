@@ -283,7 +283,20 @@ describe('SpeechProviderConfigService', function (): void {
     });
 
     describe('getConfigurationsForAgent', function (): void {
-        it('returns the agent-principal configs plus every global config (user-owned agent)', function (): void {
+        // The dropdown is scoped to the agent's own principal — a
+        // user-owned agent shows configs owned by that user's user-
+        // principal (plus globals), a group-owned agent shows configs
+        // owned by that group's principal (plus globals). The caller's
+        // own `visiblePrincipalIds()` is deliberately NOT consulted so
+        // configs owned by other principals the caller happens to
+        // belong to can never leak in. Mirrors
+        // {@see LLMConfigService::getConfigurationsForAgent()}.
+
+        it('returns the principal-scoped configs plus every global config (user-owned agent)', function (): void {
+            // Agent belongs to user A's user-principal. Result:
+            // A's config (same principal) + global config. B's
+            // user-scoped config (B's principal) is hidden because
+            // it does not match the agent's principal.
             $auth = bootAuthLayer();
             $userA = bootAuth($auth, 'spc-scope-a@example.com', SPC_TEST_PASSWORD);
             $userB = bootAuth($auth, 'spc-scope-b@example.com', SPC_TEST_PASSWORD);
@@ -291,7 +304,6 @@ describe('SpeechProviderConfigService', function (): void {
 
             $service = makeSpeechConfigService();
 
-            // Global config (visible to every agent).
             $global = $service->createConfiguration($userA, [
                 'provider_class' => OpenAiCompatibleTranscriber::class,
                 'is_global' => true,
@@ -306,7 +318,6 @@ describe('SpeechProviderConfigService', function (): void {
             $userAPrincipalId = createUserPrincipalPublic($userA);
             $userBPrincipalId = createUserPrincipalPublic($userB);
 
-            // User A's own config.
             $userAConfig = $service->createConfiguration($userA, [
                 'provider_class' => OpenAiCompatibleTranscriber::class,
                 'is_global' => false,
@@ -319,9 +330,11 @@ describe('SpeechProviderConfigService', function (): void {
                 ],
             ], isAdmin: false);
 
-            // User B has their own config — must not leak into user A's
-            // agent dropdown.
-            $service->createConfiguration($userB, [
+            // User B owns their own user-principal separately from
+            // user A. B's config must not leak into A's agent
+            // dropdown because the dropdown's principal scope is
+            // the agent's principal, not the caller's.
+            $userBConfig = $service->createConfiguration($userB, [
                 'provider_class' => OpenAiCompatibleTranscriber::class,
                 'is_global' => false,
                 'display_name' => 'B-User',
@@ -347,7 +360,13 @@ describe('SpeechProviderConfigService', function (): void {
             expect($ids)->toBe([(int) $global->id, (int) $userAConfig->id]);
         });
 
-        it('returns only the group-scope configs when the agent is owned by a group, plus global', function (): void {
+        it('returns only the group-scoped configs plus globals (group-owned agent; caller\'s user-scoped config is hidden)', function (): void {
+            // The agent belongs to a group whose principal_id is
+            // different from the caller's own user-principal. The
+            // owner happens to belong to both principals, but their
+            // user-scoped config must NOT appear in the group agent's
+            // dropdown — the scope is the agent's principal, not the
+            // caller's visible principals.
             $auth = bootAuthLayer();
             $ownerId = bootAuth($auth, 'spc-group-owner@example.com', SPC_TEST_PASSWORD);
             bootAdmin($ownerId, $auth);
@@ -396,7 +415,11 @@ describe('SpeechProviderConfigService', function (): void {
             $groupConfig->is_global = false;
             $groupConfig->save();
 
-            // User-scoped config must NOT leak into a group-owned agent.
+            // User-scoped config (owned by the user's user-principal).
+            // Even though the owner happens to belong to that
+            // principal, the group agent's dropdown must NOT include
+            // it — the scope is the agent's principal, not the
+            // caller's visible principals.
             $userScoped = new SpeechProviderConfiguration();
             $userScoped->principal_id = $userPrincipalId;
             $userScoped->provider_class = OpenAiCompatibleTranscriber::class;
