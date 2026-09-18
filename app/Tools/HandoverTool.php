@@ -50,9 +50,19 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   handover tool
  *     Allowed target agents: ["Legal Agent (#1)", "Sales Agent (#5)"]
  *     parameters: { op: 'handover' | 'sub_agent',
- *                   target_agent_id?: int (handover only),
- *                   agent_id?: int (sub_agent only),
+ *                   target_agent_id?: int (handover only, enum=[1,5],
+ *                     description suffix: "Allowed values: Legal Agent (#1), Sales Agent (#5)"),
+ *                   agent_id?: int (sub_agent only, same enum + suffix),
  *                   prompt: string }
+ *
+ * `enumSource: 'allowed_target_agents'` on `target_agent_id` and `agent_id`
+ * ties the parameter's LLM-side `enum` and description suffix to the
+ * allowlist setting at schema-build time (see
+ * {@see \Spora\Tools\Schema\ToolParameterSchemaBuilder}). The names flow
+ * through the same `ToolConfigSchemaInspector::fetchAgentNameMap()` path
+ * as the `[Effective Configuration]` block, so foreign ids still degrade
+ * to "#id" placeholders — the cross-tenant guard added for the block
+ * covers the parameter suffix too.
  */
 #[Tool(
     name: 'handover',
@@ -99,12 +109,14 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'integer',
     description: 'ID of the agent for the `handover` op. Must be in the configured allowed_target_agents list.',
     required: ['handover'],
+    enumSource: 'allowed_target_agents',
 )]
 #[ToolParameter(
     name: 'agent_id',
     type: 'integer',
     description: 'ID of the agent for the `sub_agent` op. Must be in the configured allowed_target_agents list.',
     required: ['sub_agent'],
+    enumSource: 'allowed_target_agents',
 )]
 #[ToolParameter(
     name: 'prompt',

@@ -302,6 +302,57 @@ describe('HandoverTool::getParametersSchema', function (): void {
             ->and($schema['properties']['agent_id'])->toBeArray()
             ->and($schema['properties']['prompt'])->toBeArray();
     });
+
+    test('target_agent_id and agent_id declare enumSource pointing at allowed_target_agents', function (): void {
+        // The static schema (used by runtime validation) carries no enum
+        // and no description suffix — the LLM-side enrichment only kicks
+        // in via getLlmParametersSchema() with the runtime maps threaded.
+        [$tool] = makeHandoverTool();
+
+        $schema = $tool->getParametersSchema();
+
+        expect($schema['properties']['target_agent_id'])->not->toHaveKey('enum')
+            ->and($schema['properties']['agent_id'])->not->toHaveKey('enum')
+            ->and($schema['properties']['target_agent_id']['description'])
+                ->not->toContain('Allowed values:')
+            ->and($schema['properties']['agent_id']['description'])
+                ->not->toContain('Allowed values:');
+    });
+
+    test('getLlmParametersSchema populates enum and appends the Allowed values suffix on both target_agent_id and agent_id', function (): void {
+        [$tool] = makeHandoverTool();
+
+        $schema = $tool->getLlmParametersSchema(
+            ['allowed_target_agents' => [11, 4]],
+            ['allowed_target_agents' => ['Legal Agent (#11)', 'Sales Agent (#4)']],
+        );
+
+        // Same ids go into both properties because both reference the same
+        // setting — the LLM only ever sees the allowlist once, but two
+        // distinct fields consume it.
+        expect($schema['properties']['target_agent_id']['enum'])->toBe([11, 4])
+            ->and($schema['properties']['agent_id']['enum'])->toBe([11, 4])
+            ->and($schema['properties']['target_agent_id']['description'])
+                ->toBe('ID of the agent for the `handover` op. Must be in the configured allowed_target_agents list. Allowed values: Legal Agent (#11), Sales Agent (#4)')
+            ->and($schema['properties']['agent_id']['description'])
+                ->toBe('ID of the agent for the `sub_agent` op. Must be in the configured allowed_target_agents list. Allowed values: Legal Agent (#11), Sales Agent (#4)');
+    });
+
+    test('getLlmParametersSchema with an empty allowlist emits no enum and no suffix (safe-by-default)', function (): void {
+        [$tool] = makeHandoverTool();
+
+        $schema = $tool->getLlmParametersSchema([], []);
+
+        // Empty list -> no enum (would be invalid JSON Schema) and no
+        // suffix ("Allowed values: " would mislead the model into
+        // thinking there is something to pick). Static description stands.
+        expect($schema['properties']['target_agent_id'])->not->toHaveKey('enum')
+            ->and($schema['properties']['agent_id'])->not->toHaveKey('enum')
+            ->and($schema['properties']['target_agent_id']['description'])
+                ->not->toContain('Allowed values:')
+            ->and($schema['properties']['agent_id']['description'])
+                ->not->toContain('Allowed values:');
+    });
 });
 
 describe('HandoverTool back-compat: single-op agents may omit `op`', function (): void {

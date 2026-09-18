@@ -13,6 +13,7 @@ use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Schema\OperationSchemaFilter;
+use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\Traits\HasOperations;
 
 /**
@@ -137,7 +138,7 @@ final class ToolDefinitionBuilder
             return null;
         }
 
-        $schema = $instance->getParametersSchema();
+        $schema = $this->loadSchemaForLlm($instance, $toolClass, $agentId, $context);
         $operations = $instance->getOperations();
         $discriminatorKey = $operations[0]->discriminatorKey ?? 'action';
         $filteredSchema = OperationSchemaFilter::filter($schema, $allowedOps, $discriminatorKey);
@@ -159,7 +160,7 @@ final class ToolDefinitionBuilder
         int $agentId,
         ?PrincipalContext $context,
     ): array {
-        $schema = $instance->getParametersSchema();
+        $schema = $this->loadSchemaForLlm($instance, $toolClass, $agentId, $context);
 
         if (isset($schema['properties']) && $schema['properties'] === []) {
             $schema['properties'] = (object) [];
@@ -173,6 +174,91 @@ final class ToolDefinitionBuilder
                 'parameters'  => $schema,
             ],
         ];
+    }
+
+    /**
+     * Load the LLM-facing parameter schema, threading the runtime-resolved
+     * `enumSource` values + labels through when the tool opts in via
+     * {@see \Spora\Tools\Traits\HasParameterSchema::getLlmParametersSchema()}.
+     *
+     * Falls back to the plain {@see \Spora\Tools\ToolInterface::getParametersSchema()}
+     * for tools that don't compose the trait (theoretical future custom
+     * tools) so the rest of the pipeline keeps working.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadSchemaForLlm(
+        object $instance,
+        string $toolClass,
+        int $agentId,
+        ?PrincipalContext $context,
+    ): array {
+        if (!method_exists($instance, 'getLlmParametersSchema')) {
+            return $instance->getParametersSchema();
+        }
+
+        [$enumSourceValues, $enumSourceLabels] = $this->resolveEnumSources($toolClass, $agentId, $context);
+
+        return $instance->getLlmParametersSchema($enumSourceValues, $enumSourceLabels);
+    }
+
+    /**
+     * Build the per-setting maps consumed by
+     * `#[ToolParameter(enumSource: '…')]`:
+     *
+     * - `$enumSourceValues` is keyed by setting key and holds the raw
+     *   `list<int>` of agent ids. These populate the property's `enum`
+     *   so strict-mode providers reject out-of-list ids.
+     * - `$enumSourceLabels` is the same map but holds the resolved
+     *   `"Name (#id)"` strings used for the description suffix.
+     *
+     * Only LLM-visible agent-typed multi-select settings contribute;
+     * password / skill / raw settings are skipped — the runtime would
+     * never have a matching `int[]` to inject.
+     *
+     * @return array{0: array<string, list<int>>, 1: array<string, list<string>>}
+     */
+    private function resolveEnumSources(string $toolClass, int $agentId, ?PrincipalContext $context): array
+    {
+        $values = [];
+        $labels = [];
+
+        if ($this->toolConfigService === null) {
+            return [$values, $labels];
+        }
+
+        $effective = $this->toolConfigService->getEffectiveSettings(
+            $toolClass,
+            $agentId,
+            $context?->ownerUserId,
+            $context,
+        );
+        $llmSettings = $this->toolConfigService->getLlmToolSettings(
+            $toolClass,
+            $agentId,
+            $context?->ownerUserId,
+            $context,
+        );
+
+        foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            if (!$setting->exposeToLlm || $setting->type !== 'multi-select' || $setting->resolveAs !== 'agent') {
+                continue;
+            }
+            $raw = $effective[$setting->key] ?? null;
+            if (!is_array($raw)) {
+                continue;
+            }
+            $ints = array_values(array_filter(array_map('intval', $raw), static fn(int $i) => $i > 0));
+            if ($ints !== []) {
+                $values[$setting->key] = $ints;
+            }
+            $labelValue = $llmSettings[$setting->key]['value'] ?? null;
+            if (is_array($labelValue) && $labelValue !== []) {
+                $labels[$setting->key] = array_values(array_map(static fn($v) => (string) $v, $labelValue));
+            }
+        }
+
+        return [$values, $labels];
     }
 
     /**
