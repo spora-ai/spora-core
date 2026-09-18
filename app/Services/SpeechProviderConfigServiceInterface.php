@@ -28,9 +28,9 @@ interface SpeechProviderConfigServiceInterface
     public function getConfigurationsForUser(int $userId): array;
 
     /**
-     * Configs valid for a specific agent's principal scope, plus every
-     * global config. Used by the SPA's agent-settings page so that a
-     * user-owned agent doesn't show configs owned by groups the caller
+     * Configs valid for one agent's principal scope, plus every global
+     * config. Used by the SPA's agent-settings page so that a user-owned
+     * agent's dropdown doesn't show configs owned by groups the caller
      * happens to belong to (and vice versa).
      *
      * Visibility is the controller's concern; callers must pre-check

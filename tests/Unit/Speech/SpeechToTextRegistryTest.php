@@ -125,24 +125,28 @@ test('empty registry — all returns empty, configured returns null, describe re
         ->and($registry->describe())->toBe([null, null, null]);
 });
 
-test('configuredProvider() returns the first registered class when no other tier matches', function (): void {
+test('configuredProvider() returns null when no tier matches — no auto-pick of registered class', function (): void {
+    // Tier 5 fallback is gone; configuredProvider() short-circuits
+    // to null and the controller surfaces SPEECH_PROVIDER_UNAVAILABLE.
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
     ]);
 
-    expect($registry->configuredProvider(7))->toBeInstanceOf(StubConfiguredProvider::class);
+    expect($registry->configuredProvider(7))->toBeNull();
 });
 
-test('describe() returns the registered-class fallback labelled "fallback" when nothing else matches', function (): void {
+test('describe() returns [null, null] when no config exists — no "fallback" class leak', function (): void {
+    // Tier 5 returns null so the cascade surfaces "No speech provider
+    // configured" instead of the misleading "Using X (fallback)".
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
     ]);
 
     [$class, $source] = $registry->describe(99);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('all() returns the providers in their constructor order', function (): void {
@@ -313,15 +317,19 @@ test('Tier 4: global default fires when no agent / user / group preference is se
         ->and($source)->toBe('global_default');
 });
 
-test('Tier 5: first registered class is the fallback when nothing else resolves', function (): void {
+test('Tier 5: returns [null, null, null] when nothing else resolves — no silent fallback class leak', function (): void {
+    // Tier 5 returns null so the SPA renders "No speech provider
+    // configured" and the transcribe endpoint throws
+    // SPEECH_PROVIDER_UNAVAILABLE (503) instead of letting an
+    // empty-key OpenAI driver fire upstream and 401.
     $first = new StubConfiguredProvider();
     $second = new StubUnconfiguredProvider();
 
     $registry = buildRegistry([$first, $second]);
 
     [$class, $source] = $registry->describe(99, null);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)', function (): void {
@@ -350,8 +358,8 @@ test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)',
     $registry = buildRegistry([new StubConfiguredProvider()]);
 
     [$class, $source] = $registry->describe($userId, null);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('Per-agent cascade: a group-owned agent picks the GROUP preference, not the caller\'s user preference', function (): void {
@@ -590,17 +598,13 @@ test('configuredProvider() pushes decoded v2 settings into bindSettings() on tie
     expect($configured->boundSettings())->toBe(['api_key' => 'sk-from-v2']);
 });
 
-test('configuredProvider() does not push settings on tier 5 fallback (no FK)', function (): void {
+test('configuredProvider() returns null when no FK config exists', function (): void {
+    // Tier 5 fallback is gone — cascade returns `[null, null, null]`
+    // and configuredProvider() short-circuits to null.
     $stub = new StubConfiguredProvider();
     $registry = buildRegistry([$stub]);
 
-    $configured = $registry->configuredProvider(99, null);
-    expect($configured)->toBeInstanceOf(StubConfiguredProvider::class);
-    // Tier 5 has no SpeechProviderConfiguration row to decode; the
-    // provider's bound settings stay at the default (empty array)
-    // and falls through to ToolConfigService in transcribe().
-    /** @var StubConfiguredProvider $configured */
-    expect($configured->boundSettings)->toBe([]);
+    expect($registry->configuredProvider(99, null))->toBeNull();
 });
 
 test('DI bindings resolve Registry + Persistence + Validator without a cycle', function (): void {

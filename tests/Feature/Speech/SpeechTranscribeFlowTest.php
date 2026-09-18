@@ -240,12 +240,9 @@ function putAgentOverride(ToolConfigService $toolConfig, int $agentId, array $se
     $toolConfig->putAgentOverride(OpenAiCompatibleTranscriber::class, $agentId, $settings);
 }
 
-test('cascade finds a configured provider even when no preferences/defaults are set; provider-level failure surfaces as 502', function (): void {
-    // OpenAiCompatibleTranscriber's isConfigured() returns true unconditionally
-    // (it defers the real key check to transcribe() per its docstring).
-    // The cascade's fallback tier therefore picks it; with no api_key
-    // present anywhere, the HTTP layer returns bad JSON and the
-    // controller maps that to 502 SPEECH_PROVIDER_FAILED — NOT 503.
+test('no FK config returns 503 SPEECH_PROVIDER_UNAVAILABLE instead of running an empty-key driver', function (): void {
+    // Tier 5 returns null; configuredProvider() short-circuits and
+    // requireConfiguredProvider() throws providerUnavailable() → 503.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-1@example.com', 'Password1!');
 
@@ -261,11 +258,13 @@ test('cascade finds a configured provider even when no preferences/defaults are 
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_BAD_GATEWAY);
-    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_FAILED');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 });
 
-test('global-only: cascade resolves to a global default; provider gets global settings', function (): void {
+test('v1 tool_user_settings global: cascade no longer bridges to legacy storage (503)', function (): void {
+    // Tier 5 fallback is gone — no `speech_provider_configurations`
+    // row → cascade returns null → 503 SPEECH_PROVIDER_UNAVAILABLE.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-2@example.com', 'Password1!');
 
@@ -288,11 +287,12 @@ test('global-only: cascade resolves to a global default; provider gets global se
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('global-transcript');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 });
 
-test('user-only: user override wins over global', function (): void {
+test('v1 tool_user_settings user + global: cascade no longer bridges to legacy storage (503)', function (): void {
+    // See v1-tool_user_settings-global test above — same cascade-bridge removal.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-3@example.com', 'Password1!');
 
@@ -322,11 +322,12 @@ test('user-only: user override wins over global', function (): void {
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('user-transcript');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 });
 
-test('group-only: group config is honoured for a member with no personal override', function (): void {
+test('v1 tool_user_settings group + global: cascade no longer bridges to legacy storage (503)', function (): void {
+    // Same cascade-bridge removal — operator must re-create in v2.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-4@example.com', 'Password1!');
 
@@ -364,11 +365,13 @@ test('group-only: group config is honoured for a member with no personal overrid
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_OK)
-        ->and(json_decode($resp->getContent(), true)['data']['text'])->toBe('group-transcript');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 });
 
-test('group + user: user override beats group override; group still beats global', function (): void {
+test('v1 group + user + global: cascade no longer bridges to legacy storage (503)', function (): void {
+    // All three legacy settings exist but tier-5 is gone. Legacy rows
+    // remain — only the cascade bridge is removed.
     $fx = buildFlowFixtures();
     $userId = bootAuth($fx['auth'], 'flow-5@example.com', 'Password1!');
 
@@ -401,8 +404,6 @@ test('group + user: user override beats group override; group still beats global
 
     $asset = ingestSpeechAsset($fx['mediaArchive'], $userId);
 
-    // Use a 2-mock MockHttpClient so the controller talks to the
-    // upstream; the provider transcribe() is invoked exactly once.
     $controller = buildFlowController(
         $fx['auth'],
         $fx['principalService'],
@@ -414,12 +415,10 @@ test('group + user: user override beats group override; group still beats global
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('user-over-group');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 
-    // Assert cascade outcome: confirm the tool_user_settings rows
-    // exist for both principals (we don't read the upstream
-    // capture body — we just verify the state we set up survives).
+    // Legacy rows still exist; only the cascade bridge is removed.
     $rowCountForUser = Capsule::table('tool_user_settings')
         ->where('principal_id', $userPrincipalId)
         ->count();
@@ -430,7 +429,7 @@ test('group + user: user override beats group override; group still beats global
     expect($rowCountForGroup)->toBe(1);
 });
 
-test('user preference beats agent override + group + global when agent_id is supplied', function (): void {
+test('v1 user + group + global with agent_id: cascade no longer bridges to legacy storage (503)', function (): void {
     // The agent override row is left in place to prove that the speech
     // cascade no longer consults `agent_tool_overrides` — user preference
     // wins regardless of the request body's `agent_id` (which is only
@@ -485,8 +484,8 @@ test('user preference beats agent override + group + global when agent_id is sup
     );
 
     $resp = $controller->transcribe(jsonPost(['media_id' => $asset->id, 'agent_id' => $agentId]));
-    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
-    expect(json_decode($resp->getContent(), true)['data']['text'])->toBe('user-wins');
+    expect($resp->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('SPEECH_PROVIDER_UNAVAILABLE');
 
     // Sanity: the agent_tool_overrides row is still in the table but the
     // speech cascade bypasses it — orphan rows are intentional and out

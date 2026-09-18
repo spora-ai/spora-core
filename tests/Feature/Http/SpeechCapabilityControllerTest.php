@@ -88,6 +88,22 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
 function buildSpeechCapabilityController(array $providers): array
 {
     $auth = Mockery::mock(AuthService::class);
+
+    // Write a v2-cascade global default so tier 3 resolves to a
+    // registered provider; the silent tier-5 fallback is gone.
+    if ($providers !== []) {
+        \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
+            'provider_class' => $providers[0]::class,
+            'display_name'   => 'Test Global Default',
+            'principal_id'   => null,
+            'settings'       => '{}',
+            'is_default'     => true,
+            'is_global'      => true,
+            'created_at'     => date('Y-m-d H:i:s'),
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+    }
+
     return [
         new SpeechCapabilityController(
             new SpeechToTextRegistry($providers, new PrincipalService(new PrincipalResolver())),
@@ -110,7 +126,10 @@ test('capability returns 200 with available=false and configured=false when no p
         ->and($body['data']['providers'])->toBe([]);
 });
 
-test('capability reports available=true and configured=true with effective_class=fallback when a configured provider is loaded', function (): void {
+test('capability reports available=true and configured=true with effective_source=global_default when a configured provider is loaded', function (): void {
+    // The tier-5 fallback is gone; the cascade now resolves via tier 3
+    // (the fixture's global default), so `effective_source` is
+    // `global_default`, not the misleading `fallback`.
     [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 
@@ -127,8 +146,8 @@ test('capability reports available=true and configured=true with effective_class
                 'display_name' => 'Cap Configured',
                 'configured' => true,
                 'effective_class' => CapConfiguredProvider::class,
-                'effective_source' => 'fallback',
-                'effective_config_id' => null,
+                'effective_source' => 'global_default',
+                'effective_config_id' => 1,
                 'preferred_audio_mimes' => [
                     'audio/webm;codecs=opus',
                     'audio/ogg;codecs=opus',
@@ -226,6 +245,8 @@ test('capability with ?agent_id forwards the agent id into the registry resoluti
 });
 
 test('capability ignores malformed ?agent_id values and falls back to caller-scoped resolution', function (): void {
+    // Tier 5 no longer bridges — with a global default configured the
+    // cascade resolves via tier 3 with `effective_source = 'global_default'`.
     [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 
@@ -233,6 +254,6 @@ test('capability ignores malformed ?agent_id values and falls back to caller-sco
         $resp = $controller->index(Request::create('/api/v1/speech/capability?' . $query, 'GET'));
         expect($resp->getStatusCode())->toBe(Response::HTTP_OK)
             ->and(json_decode($resp->getContent(), true)['data']['providers'][0]['effective_source'])
-                ->toBe('fallback');
+                ->toBe('global_default');
     }
 });

@@ -35,8 +35,13 @@ use Throwable;
  *      `speech_provider_configurations WHERE is_global = true AND
  *      is_default = true`. First match wins, ordered `updated_at DESC,
  *      id DESC`.
- *   4. **First-registered-wins fallback** — the first provider in the
- *      constructor list, regardless of configuration state.
+*   4. **No config → null** — if no tier above resolved a class,
+*      the cascade returns `[null, null, null]`. The previous
+*      "fallback to first registered class" tier surfaced a class in
+*      the SPA capability badge even when no FK config existed,
+*      misleading the operator. The SPA's `cascadeBadge` reads
+*      `effective_class === null` and shows "No speech provider
+*      configured" instead.
  *
  * The cascade (caller-scoped path with `agentId <= 0`, e.g. the
  * composer recording button which has no agent context):
@@ -44,7 +49,7 @@ use Throwable;
  *   2. **Group preference** — every group the caller belongs to, in
  *      `group_memberships.joined_at ASC` order; first match wins.
  *   3. **Global default** — same as above.
- *   4. **First-registered-wins fallback** — same as above.
+ *   4. **No config → null** — same as above.
  *
  * Every tier validates that the resolved class is registered; an
  * unregistered class (e.g. the operator removed a plugin) is treated
@@ -334,16 +339,14 @@ final readonly class SpeechToTextCascadeResolver
     }
 
     /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
+     * @return array{0: null, 1: null, 2: null}
      */
     private function resolveFallbackClass(): array
     {
-        if ($this->providers === []) {
-            return [null, null, null];
-        }
-        $first = $this->providers[0];
-
-        return [$first::class, 'fallback', null];
+        // No FK config exists at any tier — null so the capability
+        // badge reads "No speech provider configured" and
+        // configuredProvider() short-circuits to null.
+        return [null, null, null];
     }
 
     /**

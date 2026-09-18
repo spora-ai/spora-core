@@ -254,6 +254,7 @@ describe('SpeechProviderConfigController', function (): void {
         $createResp = $controller->store(jsonSpcRequest('POST', '/api/v1/speech/provider-configs', [
             'provider_class' => OpenAiCompatibleTranscriber::class,
             'is_global' => true,
+            'is_default' => true,
             'settings' => fullSettings('sk-original'),
         ]));
         expect($createResp->getStatusCode())->toBe(Response::HTTP_CREATED);
