@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Drivers;
 
 use Psr\Log\LoggerInterface;
+use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
 use Spora\Models\Agent;
@@ -19,7 +20,15 @@ use Throwable;
  * Resolution order:
  *   1. Agent has llm_driver_config_id → use that config
  *   2. Otherwise → use the global default LLMDriverConfiguration
- *   3. If neither exists → fall back to OpenAICompatibleDriver with minimal defaults
+ *   3. If neither exists → throw {@see LlmConfigurationMissingException}
+ *
+ * Step 3 is a hard stop: the previous "fall back to an empty-key
+ * OpenAI driver" silently punted the request to api.openai.com with
+ * `apiKey: ''`, which surfaced as an upstream 401 instead of the
+ * operator-visible "no LLM configured" error the operator actually
+ * needs. TickPhaseRunner::prepareTickContext() catches the throw
+ * and ErrorClassifier::markTaskNoLlmConfiguration() writes the
+ * friendly NO_LLM_CONFIGURATION message to the task row.
  *
  * The `supports_image_input` toggle is read from the decoded settings blob.
  * The frontend round-trips booleans as the strings `"true"`/`"false"`,
@@ -48,17 +57,8 @@ class DriverFactory
             return $this->makeDriverFromConfig($config);
         }
 
-        // Ultimate fallback: OpenAICompatibleDriver with empty settings.
-        $this->logger->warning('No LLMDriverConfiguration found, using fallback OpenAI driver.');
-
-        return new OpenAICompatibleDriver(
-            apiKey: '',
-            model: 'gpt-4o',
-            baseUrl: 'https://api.openai.com/v1',
-            httpClient: \Symfony\Component\HttpClient\HttpClient::create(),
-            logger: $this->logger,
-            timeout: $this->llmTimeout,
-            supportsImageInput: null,
+        throw new LlmConfigurationMissingException(
+            'No LLM configuration found for this agent. Set a preferred config or ensure a global default exists.',
         );
     }
 

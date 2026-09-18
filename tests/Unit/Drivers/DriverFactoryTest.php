@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Psr\Log\NullLogger;
+use Spora\Agents\Exceptions\LlmConfigurationMissingException;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
@@ -97,7 +98,7 @@ test('makeFromAgent falls back to global default when agent has no config', func
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
-test('makeFromAgent falls back to OpenAI driver when no config exists', function (): void {
+test('makeFromAgent throws LlmConfigurationMissingException when no config exists', function (): void {
     $service = makeSecureLLMConfigService();
 
     $agent = new Agent();
@@ -107,11 +108,9 @@ test('makeFromAgent falls back to OpenAI driver when no config exists', function
     $agent->llm_driver_config_id = null;
 
     $factory = new DriverFactory(new NullLogger(), $service, 300);
-    $driver = $factory->makeFromAgent($agent);
 
-    expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class)
-        ->and($driver->getProviderName())->toBe('openai_compatible')
-        ->and($driver->getModelName())->toBe('gpt-4o');
+    expect(fn() => $factory->makeFromAgent($agent))
+        ->toThrow(LlmConfigurationMissingException::class);
 });
 
 test('makeFromAgent returns Anthropic driver when that config is set on agent', function (): void {
