@@ -125,24 +125,37 @@ test('empty registry — all returns empty, configured returns null, describe re
         ->and($registry->describe())->toBe([null, null, null]);
 });
 
-test('configuredProvider() returns the first registered class when no other tier matches', function (): void {
+test('configuredProvider() returns null when no tier matches — no auto-pick of registered class', function (): void {
+    // See "Tier 5: returns [null, null, null] …" below. The previous
+    // tier-5 fallback returned the first registered class even without
+    // an FK config; configuredProvider() then handed it to the
+    // transcribe call, which only failed further downstream because
+    // the OpenAI driver itself rejected the empty api_key. With the
+    // fallback gone, configuredProvider() short-circuits at null here
+    // so the controller surfaces SPEECH_PROVIDER_UNAVAILABLE (503)
+    // with an actionable "Add an API key in Settings → Tools" message.
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
     ]);
 
-    expect($registry->configuredProvider(7))->toBeInstanceOf(StubConfiguredProvider::class);
+    expect($registry->configuredProvider(7))->toBeNull();
 });
 
-test('describe() returns the registered-class fallback labelled "fallback" when nothing else matches', function (): void {
+test('describe() returns [null, null] when no config exists — no "fallback" class leak', function (): void {
+    // The previous "first registered class" fallback masked the missing
+    // config in the SPA capability badge ("Using X (fallback)") — the
+    // tier now returns null so the cascade surfaces "No speech provider
+    // configured" instead. Transcribe requests get a clean
+    // SPEECH_PROVIDER_UNAVAILABLE 503 rather than a downstream 401.
     $registry = buildRegistry([
         new StubConfiguredProvider(),
         new StubUnconfiguredProvider(),
     ]);
 
     [$class, $source] = $registry->describe(99);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('all() returns the providers in their constructor order', function (): void {
@@ -313,15 +326,21 @@ test('Tier 4: global default fires when no agent / user / group preference is se
         ->and($source)->toBe('global_default');
 });
 
-test('Tier 5: first registered class is the fallback when nothing else resolves', function (): void {
+test('Tier 5: returns [null, null, null] when nothing else resolves — no silent fallback class leak', function (): void {
+    // The previous "first registered class is the fallback" tier made
+    // the SPA capability badge claim "Using X (fallback)" even when
+    // no FK config existed anywhere. Tier 5 now returns null so the
+    // SPA renders "No speech provider configured" and the transcribe
+    // endpoint throws SPEECH_PROVIDER_UNAVAILABLE (503) instead of
+    // letting an empty-key OpenAI driver fire upstream and 401.
     $first = new StubConfiguredProvider();
     $second = new StubUnconfiguredProvider();
 
     $registry = buildRegistry([$first, $second]);
 
     [$class, $source] = $registry->describe(99, null);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)', function (): void {
@@ -350,8 +369,8 @@ test('Unregistered class on tier 2 falls through (plugin uninstalled mid-life)',
     $registry = buildRegistry([new StubConfiguredProvider()]);
 
     [$class, $source] = $registry->describe($userId, null);
-    expect($class)->toBe(StubConfiguredProvider::class)
-        ->and($source)->toBe('fallback');
+    expect($class)->toBeNull()
+        ->and($source)->toBeNull();
 });
 
 test('Per-agent cascade: a group-owned agent picks the GROUP preference, not the caller\'s user preference', function (): void {
@@ -590,17 +609,17 @@ test('configuredProvider() pushes decoded v2 settings into bindSettings() on tie
     expect($configured->boundSettings())->toBe(['api_key' => 'sk-from-v2']);
 });
 
-test('configuredProvider() does not push settings on tier 5 fallback (no FK)', function (): void {
+test('configuredProvider() returns null when no FK config exists', function (): void {
+    // With the tier-5 fallback removed, the cascade returns
+    // `[null, null, null]` when no agent FK / principal preference /
+    // global default exists. configuredProvider() short-circuits on the
+    // null class and the transcribe controller throws
+    // SPEECH_PROVIDER_UNAVAILABLE (503) so the operator sees a clear
+    // "no provider configured" error instead of a downstream 401.
     $stub = new StubConfiguredProvider();
     $registry = buildRegistry([$stub]);
 
-    $configured = $registry->configuredProvider(99, null);
-    expect($configured)->toBeInstanceOf(StubConfiguredProvider::class);
-    // Tier 5 has no SpeechProviderConfiguration row to decode; the
-    // provider's bound settings stay at the default (empty array)
-    // and falls through to ToolConfigService in transcribe().
-    /** @var StubConfiguredProvider $configured */
-    expect($configured->boundSettings)->toBe([]);
+    expect($registry->configuredProvider(99, null))->toBeNull();
 });
 
 test('DI bindings resolve Registry + Persistence + Validator without a cycle', function (): void {
