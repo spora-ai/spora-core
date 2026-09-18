@@ -178,6 +178,63 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
     ]);
 });
 
+test('multi-select: getLlmToolSettings scopes names to the source agent\'s group-principal', function (): void {
+    // Mirrors the user-principal case above but with the source agent
+    // on a group-principal. Locks the intra-group name resolution path
+    // the GroupToolsPage relies on after the `scope: principal` filter
+    // hides the picker at admin scope and only the group picker can write
+    // values that reach this code path.
+    $authService = bootAuthLayer();
+    $userId = $authService->register('inspector-group-multiselect@example.com', 'Password1!', 'Group Inspector');
+
+    $groupPrincipal = $this->makeGroupPrincipal($userId, 'inspector-group-scope');
+    $userPrincipal  = $this->createUserPrincipal($userId);
+
+    $groupAgentA = Spora\Models\Agent::create([
+        'principal_id' => $groupPrincipal,
+        'name'           => 'Group Agent A',
+        'llm_provider'   => 'mock',
+        'llm_model'      => 'mock',
+        'max_steps'      => 5,
+        'is_active'      => true,
+    ]);
+    $groupAgentB = Spora\Models\Agent::create([
+        'principal_id' => $groupPrincipal,
+        'name'           => 'Group Agent B',
+        'llm_provider'   => 'mock',
+        'llm_model'      => 'mock',
+        'max_steps'      => 5,
+        'is_active'      => true,
+    ]);
+    $userAgent = Spora\Models\Agent::create([
+        'principal_id' => $userPrincipal,
+        'name'           => 'User Agent',
+        'llm_provider'   => 'mock',
+        'llm_model'      => 'mock',
+        'max_steps'      => 5,
+        'is_active'      => true,
+    ]);
+
+    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+
+    // Pass the user-principal agent AND a foreign agent through the
+    // allowlist. Only the same-group agents should resolve to a name;
+    // the user-principal agent falls back to "#id" because it doesn't
+    // share the source agent's group principal.
+    $result = $inspector->getLlmToolSettings(
+        TestTool::class,
+        ['allowed_target_agents' => [$groupAgentA->id, $groupAgentB->id, $userAgent->id]],
+        $userId,
+        agentId: $groupAgentA->id,
+    );
+
+    expect($result['allowed_target_agents']['value'])->toBe([
+        "Group Agent A (#{$groupAgentA->id})",
+        "Group Agent B (#{$groupAgentB->id})",
+        "#{$userAgent->id}",
+    ]);
+});
+
 test('multi-select: getLlmToolSettings returns [] for an empty multi-select value', function (): void {
     $authService = bootAuthLayer();
     $authService->register('inspector-empty@example.com', 'Password1!', 'Empty');

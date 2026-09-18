@@ -88,6 +88,24 @@ test('index returns correct schema field structure', function (): void {
     expect($maxResultsField['type'])->toBe('text');
 });
 
+test('index emits scope: "any" on schema rows for legacy settings (default)', function (): void {
+    clearSession();
+    [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([TestTool::class]);
+    $userId = $authService->register(TC_USER_EMAIL, TC_USER_PASSWORD, TC_USER_NAME);
+    simulateLoggedInSession($userId, TC_USER_EMAIL);
+
+    $response = callController($controller, 'index', jsonRequest('GET', TC_API_TOOLS), [$authMiddleware, $csrfMiddleware]);
+    $schema   = json_decode($response->getContent(), true)['data']['tools'][0]['settings_schema'];
+
+    foreach ($schema as $row) {
+        // TestTool's #[ToolSetting] declarations omit scope; the wire
+        // payload surfaces the attribute's default so the SPA can read
+        // every row uniformly.
+        expect($row)->toHaveKey('scope');
+        expect($row['scope'])->toBe('any');
+    }
+});
+
 test('index returns empty tools list when no classes registered', function (): void {
     clearSession();
     [$controller, $authService, , $authMiddleware, $csrfMiddleware] = makeToolController([]);

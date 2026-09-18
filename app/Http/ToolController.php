@@ -182,9 +182,9 @@ final class ToolController
         );
 
         $schema = [];
-        // Schema rows for the form; `expose_to_llm` and `data_source` are
-        // the only fields the controller needs that the inspectors don't
-        // produce.
+        // Schema rows for the form; `expose_to_llm`, `data_source`, and
+        // `scope` are the only fields the controller needs that the
+        // inspectors don't produce.
         foreach (ToolSettingSchema::collect($toolClass) as $setting) {
             $schema[] = [
                 'key'           => $setting->key,
@@ -196,6 +196,7 @@ final class ToolController
                 'options'       => $setting->options,
                 'expose_to_llm' => $setting->exposeToLlm,
                 'data_source'   => $setting->dataSource,
+                'scope'         => $setting->scope,
             ];
         }
 
