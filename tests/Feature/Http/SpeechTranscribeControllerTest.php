@@ -180,6 +180,25 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
         agentService: $agentService,
     );
 
+    // Set up the v2-cascade global default so the cascade's tier 3
+    // resolves to the configured provider. With tier 5's silent
+    // fallback removed, configuredProvider() short-circuits without a
+    // `speech_provider_configurations` row, so the fixture writes one
+    // before each test. The settings blob is `{}` — the stubs ignore
+    // settings (the v2 cascade decodes it via
+    // `SpeechProviderConfigPersistence::decodeSettings`, but
+    // `TransStubConfigured::bindSettings()` is a no-op).
+    \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
+        'provider_class' => $provider::class,
+        'display_name'   => 'Test Global Default',
+        'principal_id'   => null,
+        'settings'       => '{}',
+        'is_default'     => true,
+        'is_global'      => true,
+        'created_at'     => date('Y-m-d H:i:s'),
+        'updated_at'     => date('Y-m-d H:i:s'),
+    ]);
+
     $asset = $service->ingest(new MediaIngestRequest(
         // WebM EBML magic (\x1A\x45\xDF\xA3) + padding so the MIME sniffer
         // keeps it as audio/webm end-to-end. RIFF…WAVE would be sniffed

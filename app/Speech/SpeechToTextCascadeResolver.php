@@ -35,8 +35,17 @@ use Throwable;
  *      `speech_provider_configurations WHERE is_global = true AND
  *      is_default = true`. First match wins, ordered `updated_at DESC,
  *      id DESC`.
- *   4. **First-registered-wins fallback** — the first provider in the
- *      constructor list, regardless of configuration state.
+ *   4. **No config → null** — if no tier above resolved a class,
+ *      the cascade returns `[null, null, null]`. The previous
+ *      "fallback to first registered class" tier surfaced the class
+ *      in the SPA capability badge ("Using OpenAI Compatible
+ *      (fallback)") even when no FK config existed, making the UI
+ *      claim the operator had a working STT provider when they did
+ *      not. SpeechToTextRegistry's `configuredProvider()` already
+ *      gates on `isConfigured()` so transcribe calls didn't fail
+ *      silently — but the badge did, and the operator couldn't tell.
+ *      The SPA's `cascadeBadge` reads `effective_class === null` and
+ *      shows "No speech provider configured" instead.
  *
  * The cascade (caller-scoped path with `agentId <= 0`, e.g. the
  * composer recording button which has no agent context):
@@ -44,7 +53,7 @@ use Throwable;
  *   2. **Group preference** — every group the caller belongs to, in
  *      `group_memberships.joined_at ASC` order; first match wins.
  *   3. **Global default** — same as above.
- *   4. **First-registered-wins fallback** — same as above.
+ *   4. **No config → null** — same as above.
  *
  * Every tier validates that the resolved class is registered; an
  * unregistered class (e.g. the operator removed a plugin) is treated
@@ -334,16 +343,18 @@ final readonly class SpeechToTextCascadeResolver
     }
 
     /**
-     * @return array{0: string|null, 1: string|null, 2: int|null}
+     * @return array{0: null, 1: null, 2: null}
      */
     private function resolveFallbackClass(): array
     {
-        if ($this->providers === []) {
-            return [null, null, null];
-        }
-        $first = $this->providers[0];
-
-        return [$first::class, 'fallback', null];
+        // No FK config exists at any tier — return null so the capability
+        // badge reads "No speech provider configured" and
+        // configuredProvider() short-circuits to null. The previous
+        // "fallback to first registered class" tier masked the missing
+        // config in the UI; the transcribe HTTP layer was already gated
+        // on isConfigured() so calls didn't silently succeed, but the
+        // operator had no way to tell from the SPA badge.
+        return [null, null, null];
     }
 
     /**
