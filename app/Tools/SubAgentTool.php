@@ -264,17 +264,12 @@ final class SubAgentTool extends AbstractTool
         if (is_int($raw)) {
             return $raw;
         }
-        if (!is_string($raw) || $raw === '') {
-            return 0;
-        }
-        if (preg_match('/\(#(\d+)\)\s*$/', $raw, $m)) {
-            return (int) $m[1];
-        }
-        if (preg_match('/^#(\d+)\s*$/', $raw, $m)) {
-            return (int) $m[1];
-        }
-        if (ctype_digit($raw)) {
-            return (int) $raw;
+        if (is_string($raw) && $raw !== ''
+            && (preg_match('/.*\(#(\d+)\)\s*$/', $raw, $m)
+                || preg_match('/^#(\d+)\s*$/', $raw, $m)
+                || ctype_digit($raw))
+        ) {
+            return (int) ($m[1] ?? $raw);
         }
         return 0;
     }
