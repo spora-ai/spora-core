@@ -315,7 +315,7 @@ describe('SubAgentTool::getParametersSchema', function (): void {
                 ->not->toContain('Allowed values:');
     });
 
-    test('getLlmParametersSchema populates enum and appends the Allowed values suffix on target_agent_id', function (): void {
+    test('getLlmParametersSchema populates enum from the resolved labels so the LLM picks by name', function (): void {
         [$tool] = makeSubAgentTool();
 
         $schema = $tool->getLlmParametersSchema(
@@ -325,10 +325,15 @@ describe('SubAgentTool::getParametersSchema', function (): void {
 
         // The single target_agent_id param is what the LLM fills for both
         // ops — the same enum + suffix drives both. No more separate
-        // agent_id param next to target_agent_id.
-        expect($schema['properties']['target_agent_id']['enum'])->toBe([11, 4])
+        // agent_id param next to target_agent_id. The enum is now the
+        // "Name (#id)" labels, not raw ids, so the model can refer to
+        // agents by name in its reasoning; the tool parses the label
+        // back to an int at execute time.
+        expect($schema['properties']['target_agent_id']['enum'])->toBe(['Legal Agent (#11)', 'Sales Agent (#4)'])
+            ->and($schema['properties']['target_agent_id']['type'])->toBe('string')
             ->and($schema['properties']['target_agent_id']['description'])
-                ->toBe('ID of the target agent. Must be in the configured allowed_target_agents list. Allowed values: Legal Agent (#11), Sales Agent (#4)');
+                ->toContain('Legal Agent (#11)')
+                ->toContain('Sales Agent (#4)');
     });
 
     test('getLlmParametersSchema with an empty allowlist emits no enum and no suffix (safe-by-default)', function (): void {
@@ -392,6 +397,83 @@ describe('SubAgentTool back-compat: single-op agents may omit `op`', function ()
             $schema,
             'sub_agent',
         ))->toThrow(InvalidArgumentException::class, "Required argument 'target_agent_id'");
+    });
+});
+
+describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', function (): void {
+
+    test('parses the resolved "Name (#id)" label back to the int id', function (): void {
+        [$tool, $handover, , $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+        $handover->allows('handover')
+            ->with(SUB_AGENT_TASK_ID, SUB_AGENT_TARGET_AGENT, 'ctx', SUB_AGENT_USER_ID)
+            ->andReturn(new Task(['id' => SUB_AGENT_NEW_TASK_ID]));
+
+        // The schema's enum is the resolved label "SubAgent Target Agent (#5)";
+        // that's the wire format an LLM would send.
+        $result = $tool->execute(
+            ['target_agent_id' => 'SubAgent Target Agent (#' . SUB_AGENT_TARGET_AGENT . ')', 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_USER_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['target_agent_id'])->toBe(SUB_AGENT_TARGET_AGENT);
+    });
+
+    test('parses the unresolved "#id" placeholder back to the int id', function (): void {
+        // Foreign ids in a stale global row degrade to "#id" labels. The
+        // tool still has to extract the id so the allowlist check works.
+        [$tool, $handover, , $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+        $handover->allows('handover')
+            ->with(SUB_AGENT_TASK_ID, SUB_AGENT_TARGET_AGENT, 'ctx', SUB_AGENT_USER_ID)
+            ->andReturn(new Task(['id' => SUB_AGENT_NEW_TASK_ID]));
+
+        $result = $tool->execute(
+            ['target_agent_id' => '#' . SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_USER_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['target_agent_id'])->toBe(SUB_AGENT_TARGET_AGENT);
+    });
+
+    test('rejects a malformed label as missing', function (): void {
+        [$tool, $handover] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['target_agent_id' => 'not a label', 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_USER_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe('target_agent_id is required.');
+        $handover->shouldNotHaveReceived('handover');
+    });
+
+    test('rejects an empty-string label as missing', function (): void {
+        [$tool, $handover] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['target_agent_id' => '', 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_USER_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe('target_agent_id is required.');
+        $handover->shouldNotHaveReceived('handover');
     });
 });
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
@@ -93,4 +94,94 @@ test('getLlmToolSettings respects user-specific settings cascade', function (): 
     // Agent row the value is an empty list. The test just checks the
     // method runs and returns the structure.
     expect($result)->toHaveKey('allowed_target_agents');
+})->afterEach(fn() => Database::resetBootState());
+
+test('getLlmToolSettings resolves agent names when a PrincipalResolver is wired', function (): void {
+    // Regression for the LLM seeing only "#id" placeholders: when
+    // ToolConfigService is constructed without a PrincipalResolver, the
+    // internal inspector falls back to "#{$id}" strings for every
+    // resolveAs:'agent' multi-select. With the resolver wired (the DI
+    // runtime path), same-principal agent ids get "Name (#id)" labels.
+    $authService = bootAuthLayer();
+    $userId = $authService->register('agent-name-resolve@example.com', 'Password1!', 'Resolve');
+    $principalId = createUserPrincipalPublic($userId);
+
+    $source = Agent::create([
+        'principal_id' => $principalId,
+        'name'         => 'Source',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    $target = Agent::create([
+        'principal_id' => $principalId,
+        'name'         => 'My Target Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+
+    $key      = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $resolver = new PrincipalResolver();
+    $service  = new ToolConfigService(
+        new SecurityManager($key),
+        new Monolog\Logger('test'),
+        [TestTool::class],
+        null,
+        null,
+        false,
+        $resolver,
+    );
+    $service->putAgentOverride(TestTool::class, $source->id, [
+        'allowed_target_agents' => [$target->id],
+    ]);
+
+    $result = $service->getLlmToolSettings(TestTool::class, $source->id, $userId);
+
+    expect($result['allowed_target_agents']['value'])
+        ->toBe(["My Target Agent (#{$target->id})"]);
+})->afterEach(fn() => Database::resetBootState());
+
+test('getLlmToolSettings falls back to "#id" placeholders when no PrincipalResolver is wired', function (): void {
+    // Documents the legacy behaviour preserved for test stubs: without
+    // the resolver, the inspector cannot look up names and emits "#{$id}"
+    // placeholders. The runtime always wires the resolver via the DI
+    // container — this is the test-only branch.
+    $authService = bootAuthLayer();
+    $userId = $authService->register('agent-name-noop@example.com', 'Password1!', 'Noop');
+    $principalId = createUserPrincipalPublic($userId);
+
+    $source = Agent::create([
+        'principal_id' => $principalId,
+        'name'         => 'Source Noop',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    $target = Agent::create([
+        'principal_id' => $principalId,
+        'name'         => 'Target Noop',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+
+    $key     = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+    $service = new ToolConfigService(
+        new SecurityManager($key),
+        new Monolog\Logger('test'),
+        [TestTool::class],
+        // no PrincipalResolver — fallback path
+    );
+    $service->putAgentOverride(TestTool::class, $source->id, [
+        'allowed_target_agents' => [$target->id],
+    ]);
+
+    $result = $service->getLlmToolSettings(TestTool::class, $source->id, $userId);
+
+    expect($result['allowed_target_agents']['value'])->toBe(["#{$target->id}"]);
 })->afterEach(fn() => Database::resetBootState());

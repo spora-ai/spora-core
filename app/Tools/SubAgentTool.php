@@ -18,7 +18,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 /**
  * Two operations on the same `sub_agent` tool:
  *   - `handover`   — Close the source task and start a new task on the
- *                    target agent. The source `final_response` becomes
+ *                    target agent. Source `final_response` becomes
  *                    "Handed off to …" and the source chat ends.
  *   - `sub_agent`  — Spawn a child task on the target agent while the
  *                    parent task suspends (`status = AWAITING_SUB_AGENTS`).
@@ -26,42 +26,14 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                    with each child's output appended as a `role:'tool'`
  *                    history row so the next LLM tick sees the results.
  *
- * Both ops share a single `target_agent_id: integer` parameter so the
- * LLM-facing schema reads as one consistent field — no duplicate
- * "handover vs sub_agent" id params for the model to keep straight. The
- * `allowed_target_agents` multi-select (operator-approved allowlist) is
- * intra-principal: the LLM may only target agents owned by the same
- * `principal_id` as the source. The picker surfaces only same-principal
- * agents, the tool re-validates the principal match at runtime
- * (`isTargetAllowed()`), and the service layer
- * (`HandoverService` / `SubAgentService`) enforces a final
+ * Both ops share a single `target_agent_id` parameter. The schema's
+ * `enum` is populated from `allowed_target_agents` using "Name (#id)"
+ * labels so the LLM picks agents by name; the tool parses the label
+ * back to an int at execute time. `allowed_target_agents` is intra-
+ * principal — the picker surfaces only same-principal agents, the
+ * tool re-validates the principal match at runtime
+ * (`isTargetAllowed()`), and the service layer enforces a final
  * `callerControlsPrincipal` check.
- *
- * `allowed_target_agents` declares `scope: 'principal'` so the picker
- * is hidden on the admin operator-defaults page where no principal
- * context exists. Existing global rows still cascade down to users
- * without overrides; the runtime LLM-side filter in
- * {@see \Spora\Services\ToolConfigSchemaInspector::fetchAgentNameMap()}
- * restricts the LLM-visible list to the source agent's principal, so
- * any foreign ids in a stale global degrade to "#id" placeholders.
- *
- * Example LLM-facing schema (for the tool definition):
- *   sub_agent tool
- *     Allowed target agents: ["Legal Agent (#11)", "Sales Agent (#4)"]
- *     parameters: { op: 'handover' | 'sub_agent',
- *                   target_agent_id: int (enum=[11,4], description
- *                     suffix: "Allowed values: Legal Agent (#11),
- *                     Sales Agent (#4)"),
- *                   prompt: string }
- *
- * `enumSource: 'allowed_target_agents'` on `target_agent_id` ties the
- * parameter's LLM-side `enum` and description suffix to the allowlist
- * setting at schema-build time (see
- * {@see \Spora\Tools\Schema\ToolParameterSchemaBuilder}). The names flow
- * through the same `ToolConfigSchemaInspector::fetchAgentNameMap()` path
- * as the `[Effective Configuration]` block, so foreign ids still degrade
- * to "#id" placeholders — the cross-tenant guard added for the block
- * covers the parameter suffix too.
  */
 #[Tool(
     name: 'sub_agent',
@@ -80,20 +52,17 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Agents this agent may hand over tasks to. The LLM sees this list and may only pick from it.',
     required: true,
     // scope: 'principal' hides the picker on the admin operator-defaults
-    // page where no principal context exists. The same picker renders
-    // under Settings → Tools (user-principal), Groups → Tools (group-
-    // principal), and the agent's Tools tab (the agent's principal).
+    // page where no principal context doesn't exist.
     scope: 'principal',
-    // exposeToLlm: the LLM is the consumer of this allowlist. The stored
-    // int[] is resolved to "Name (#id)" strings by ToolConfigSchemaInspector
-    // so the model can refer to agents by name when calling this tool.
+    // Stored int[] is resolved to "Name (#id)" strings by ToolConfigSchemaInspector
+    // so the LLM can refer to agents by name when calling this tool.
     exposeToLlm: true,
 )]
 #[ToolOperation(
     name: 'handover',
     description: 'Hand over the source task to the target agent (closes the source chat).',
     enabledByDefault: true,
-    // Requires approval: the source task is closed as a side-effect.
+    // Source task is closed as a side-effect, hence the approval gate.
     requiresApprovalByDefault: true,
     discriminatorKey: 'op',
 )]
@@ -106,8 +75,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolParameter(
     name: 'target_agent_id',
-    type: 'integer',
-    description: 'ID of the target agent. Must be in the configured allowed_target_agents list.',
+    type: 'string',
+    description: 'Label of the target agent. Must be in the configured allowed_target_agents list. '
+               . 'Format: "Name (#id)" — e.g. "Legal Agent (#11)".',
     required: ['handover', 'sub_agent'],
     enumSource: 'allowed_target_agents',
 )]
@@ -144,7 +114,7 @@ final class SubAgentTool extends AbstractTool
 
     private function executeHandover(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
     {
-        $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
+        $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateHandoverInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
@@ -181,7 +151,7 @@ final class SubAgentTool extends AbstractTool
 
     private function executeSubAgent(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
     {
-        $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
+        $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateSubAgentInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
@@ -242,6 +212,29 @@ final class SubAgentTool extends AbstractTool
                 => 'Target agent is not in the allowed_target_agents list.',
             default => null,
         };
+    }
+
+    /**
+     * Parse the LLM-facing `target_agent_id` value back to an int.
+     *
+     * The schema's `enum` is the resolved "Name (#id)" label so the
+     * wire format is the label string. Accepts ints too as a back-compat
+     * for legacy callers/tests. Unparseable input returns `0`, which
+     * the validators report as `target_agent_id is required.`
+     */
+    private function resolveTargetAgentId(mixed $raw): int
+    {
+        if (is_int($raw)) {
+            return $raw;
+        }
+        if (is_string($raw) && $raw !== ''
+            && (preg_match('/.*\(#(\d+)\)\s*$/', $raw, $m)
+                || preg_match('/^#(\d+)\s*$/', $raw, $m)
+                || ctype_digit($raw))
+        ) {
+            return (int) ($m[1] ?? $raw);
+        }
+        return 0;
     }
 
     /**

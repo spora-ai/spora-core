@@ -567,6 +567,7 @@ final class ContainerDefinitions
                     $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
                     $c->get(PrincipalService::class),
                     (bool) ($config['tools_group_cascade_enabled'] ?? false),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 

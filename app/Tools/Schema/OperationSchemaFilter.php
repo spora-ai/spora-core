@@ -51,6 +51,11 @@ final class OperationSchemaFilter
 
         $properties = self::normaliseProperties($schema['properties'] ?? []);
         $properties = self::narrowDiscriminatorEnum($properties, $discriminatorKey, $allowedOpsSet);
+        $properties = self::narrowDiscriminatorDescription(
+            $properties,
+            $discriminatorKey,
+            $properties[$discriminatorKey]['enum'] ?? [],
+        );
 
         $requiredWhen = $schema[ToolParameterSchemaBuilder::REQUIRED_WHEN_KEY] ?? [];
         if ($requiredWhen !== []) {
@@ -285,6 +290,32 @@ final class OperationSchemaFilter
             $properties[$discriminatorKey]['enum'],
             static fn($op) => isset($allowedOpsSet[$op]),
         ));
+        return $properties;
+    }
+
+    /**
+     * Rewrite the synthesized discriminator's description so its prose op
+     * list matches the narrowed enum — otherwise the LLM reads "you can
+     * perform handover or sub_agent" against an enum that only has
+     * `sub_agent` and burns a tool call on a bad op. The runtime
+     * SchemaValidator still rejects as defence in depth. Only rewrites
+     * the auto-generated `"The operation to perform: …"` format; user-
+     * supplied discriminator descriptions are left alone.
+     *
+     * @param  array<string, mixed>   $properties
+     * @param  list<string>           $narrowedEnum  Already-filtered enum values
+     * @return array<string, mixed>
+     */
+    private static function narrowDiscriminatorDescription(array $properties, string $discriminatorKey, array $narrowedEnum): array
+    {
+        if ($narrowedEnum === [] || !isset($properties[$discriminatorKey]['description'])) {
+            return $properties;
+        }
+        $current = $properties[$discriminatorKey]['description'];
+        if (!is_string($current) || preg_match('/^The operation to perform:\s*/', $current) !== 1) {
+            return $properties;
+        }
+        $properties[$discriminatorKey]['description'] = 'The operation to perform: ' . implode(', ', $narrowedEnum);
         return $properties;
     }
 
