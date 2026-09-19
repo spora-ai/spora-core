@@ -295,19 +295,12 @@ final class OperationSchemaFilter
 
     /**
      * Rewrite the synthesized discriminator's description so its prose op
-     * list matches the narrowed enum.
-     *
-     * The build-time format from
-     * {@see \Spora\Tools\Schema\ToolParameterSchemaBuilder::buildDiscriminatorDescription()}
-     * is `"The operation to perform: op1, op2, op3"`. The LLM-facing
-     * schema needs the prose and the enum to agree — otherwise the model
-     * reads "you can perform handover or sub_agent" and tries to call
-     * `handover` against an enum that only has `sub_agent`. The runtime
-     * SchemaValidator still rejects (defence in depth) but the bad call
-     * burns tokens and confuses the conversation.
-     *
-     * Only rewrites when the description matches the auto-generated
-     * format; user-supplied discriminator descriptions are left alone.
+     * list matches the narrowed enum — otherwise the LLM reads "you can
+     * perform handover or sub_agent" against an enum that only has
+     * `sub_agent` and burns a tool call on a bad op. The runtime
+     * SchemaValidator still rejects as defence in depth. Only rewrites
+     * the auto-generated `"The operation to perform: …"` format; user-
+     * supplied discriminator descriptions are left alone.
      *
      * @param  array<string, mixed>   $properties
      * @param  list<string>           $narrowedEnum  Already-filtered enum values

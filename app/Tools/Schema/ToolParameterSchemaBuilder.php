@@ -260,12 +260,9 @@ final class ToolParameterSchemaBuilder
             // source code says otherwise would be a footgun.
             $json['enum'] = $param->enum;
         } elseif ($param->enumSource !== null) {
-            // Prefer labels so the LLM picks agents by name (e.g.
-            // "Legal Agent (#11)") instead of guessing which integer id
-            // means what. Fall back to raw values when labels couldn't be
-            // resolved (foreign ids, missing principalResolver) — strict-
-            // mode providers still get a usable enum, just one without
-            // names. Empty list = no injection (preserves safe-by-default).
+            // Labels win over raw values so the LLM picks agents by name;
+            // fall back to raw values when the resolver couldn't resolve
+            // names (foreign ids, missing principalResolver).
             if ($labels !== []) {
                 $json['enum'] = $labels;
             } elseif ($values !== []) {

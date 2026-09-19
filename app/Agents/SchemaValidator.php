@@ -63,13 +63,11 @@ final class SchemaValidator
 
             $value      = $arguments[$key];
             $compatible = match ($expectedType) {
-                // `string` accepts ints too: the LLM-facing enum for
-                // SubAgentTool's `target_agent_id` is the resolved
-                // "Name (#id)" labels but the runtime parser accepts ints
-                // as a back-compat / fallback (legacy callers, tests).
-                // Strict-mode providers still get the schema's intent via
-                // `type: 'string'`; this leniency just keeps the local
-                // admin/test path permissive.
+                // Accept ints for `string`: SubAgentTool's wire format is the
+                // resolved "Name (#id)" label, but legacy callers/tests still
+                // pass ints. Strict-mode providers see `type: 'string'` and
+                // reject ints themselves; this leniency only affects local
+                // validation.
                 'string'           => is_string($value) || is_int($value),
                 'integer'          => is_int($value),
                 'number'           => is_int($value) || is_float($value),
