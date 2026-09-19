@@ -567,6 +567,10 @@ final class ContainerDefinitions
                     $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
                     $c->get(PrincipalService::class),
                     (bool) ($config['tools_group_cascade_enabled'] ?? false),
+                    // Wire the resolver so the inspector's LLM-facing agent
+                    // multi-select settings resolve "Name (#id)" labels.
+                    // Without it the LLM sees only "#id" placeholders.
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
