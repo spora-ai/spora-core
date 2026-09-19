@@ -165,12 +165,12 @@ use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\HandoverTool;
 use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SkillTool;
+use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
@@ -832,7 +832,7 @@ final class ContainerDefinitions
                 CalculatorTool::class,
                 ReadUrlTool::class,
                 UserInfoTool::class,
-                HandoverTool::class,
+                SubAgentTool::class,
                 AgentTool::class,
                 SkillTool::class,
                 MediaTool::class,
@@ -1463,8 +1463,8 @@ final class ContainerDefinitions
 
             UserInfoTool::class => static fn(): UserInfoTool => new UserInfoTool(),
 
-            HandoverTool::class => static function (ContainerInterface $c): HandoverTool {
-                return new HandoverTool(
+            SubAgentTool::class => static function (ContainerInterface $c): SubAgentTool {
+                return new SubAgentTool(
                     $c->get(HandoverServiceInterface::class),
                     $c->get(SubAgentServiceInterface::class),
                     $c->get(ToolConfigService::class),
@@ -1510,7 +1510,7 @@ final class ContainerDefinitions
             HandoverServiceInterface::class => static function (ContainerInterface $c): HandoverServiceInterface {
                 // Closure defers OrchestratorInterface resolution until HandoverService::handover()
                 // is called. Direct injection would create a cycle: Orchestrator → tool_instances
-                // → HandoverTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
+                // → SubAgentTool → HandoverService → Orchestrator. Same pattern as SeedCommand.
                 return new HandoverService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
@@ -1521,7 +1521,7 @@ final class ContainerDefinitions
             SubAgentServiceInterface::class => static function (ContainerInterface $c): SubAgentServiceInterface {
                 // Same circular-dependency avoidance as HandoverService: the
                 // Orchestrator takes the tool instance list (which includes
-                // HandoverTool), so we resolve it lazily when spawn() is called.
+                // SubAgentTool), so we resolve it lazily when spawn() is called.
                 return new SubAgentService(
                     static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->has(MercurePublisherInterface::class) ? $c->get(MercurePublisherInterface::class) : null,

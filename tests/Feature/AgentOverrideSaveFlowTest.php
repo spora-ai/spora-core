@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 
 /**
  * Pin the agent-override save flow's behavior.
@@ -41,17 +41,17 @@ it('clears the agent override when the form is saved with an empty multi-select'
     $configService = new ToolConfigService(
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Monolog\Logger('clear-test'),
-        [HandoverTool::class],
+        [SubAgentTool::class],
     );
 
     // Step 1: configure the override with an agent
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $agent->id,
         ['allowed_target_agents' => json_encode([$allowed->id])],
     );
     $row = Spora\Models\AgentToolOverride::where('agent_id', $agent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->first();
     expect($row)->not->toBeNull();
 
@@ -60,14 +60,14 @@ it('clears the agent override when the form is saved with an empty multi-select'
     // it's a bug), then clicks Save with no selections". The frontend
     // sends `null` for the field, the backend filters it out.
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $agent->id,
         ['allowed_target_agents' => null],
     );
 
     // The override row is gone (or has no remaining fields).
     $row = Spora\Models\AgentToolOverride::where('agent_id', $agent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->first();
     if ($row !== null) {
         $decoded = json_decode($row->getRawOriginal('settings'), true) ?? [];
@@ -76,6 +76,6 @@ it('clears the agent override when the form is saved with an empty multi-select'
         expect($decoded)->not->toHaveKey('allowed_target_agents');
     }
     // The effective setting is the default (empty array), not the prior override.
-    $effective = $configService->getEffectiveSettings(HandoverTool::class, $agent->id, $userId);
+    $effective = $configService->getEffectiveSettings(SubAgentTool::class, $agent->id, $userId);
     expect($effective['allowed_target_agents'])->toBe([]);
 });

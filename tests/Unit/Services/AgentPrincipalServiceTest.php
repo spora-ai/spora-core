@@ -11,7 +11,7 @@ use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 use Tests\Fixtures\TestTool;
 
 defined('PRINC_TEST_PASSWORD') || define('PRINC_TEST_PASSWORD', 'Password1!');
@@ -77,7 +77,7 @@ describe('AgentPrincipalService::transferAgent handover-allowlist prune', functi
 
         // Operator's pre-transfer config: in-A targets AND a cross-A
         // target. After transfer to B, only $inB is valid.
-        $toolConfig->putAgentOverride(HandoverTool::class, $sourceAgent, [
+        $toolConfig->putAgentOverride(SubAgentTool::class, $sourceAgent, [
             'allowed_target_agents' => [$inA1, $inA2, $inB],
         ]);
 
@@ -87,7 +87,7 @@ describe('AgentPrincipalService::transferAgent handover-allowlist prune', functi
             $callerId,
         );
 
-        $stored = $toolConfig->getRawAgentOverride(HandoverTool::class, $sourceAgent);
+        $stored = $toolConfig->getRawAgentOverride(SubAgentTool::class, $sourceAgent);
         expect($stored['allowed_target_agents'])->toBe([$inB]);
     })->afterEach(fn() => Database::resetBootState());
 
@@ -160,7 +160,7 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
             'is_active'    => true,
         ])->id;
 
-        $toolConfig->putAgentOverride(HandoverTool::class, $sourceAgent, [
+        $toolConfig->putAgentOverride(SubAgentTool::class, $sourceAgent, [
             'allowed_target_agents' => [$targetInA, $targetInB, 999_999],
             'max_results'           => '20',
         ]);
@@ -168,7 +168,7 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         $removed = $service->pruneHandoverAllowlist($sourceAgent, $principalB);
 
         expect($removed)->toBe(2);
-        $stored = $toolConfig->getRawAgentOverride(HandoverTool::class, $sourceAgent);
+        $stored = $toolConfig->getRawAgentOverride(SubAgentTool::class, $sourceAgent);
         expect($stored['allowed_target_agents'])->toBe([$targetInB]);
         // Non-agent-id settings are untouched.
         expect($stored['max_results'])->toBe('20');
@@ -195,12 +195,12 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         $t1 = Agent::create(['principal_id' => $principal, 'name' => 'T1', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
         $t2 = Agent::create(['principal_id' => $principal, 'name' => 'T2', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
 
-        $toolConfig->putAgentOverride(HandoverTool::class, $source, [
+        $toolConfig->putAgentOverride(SubAgentTool::class, $source, [
             'allowed_target_agents' => [$t1, $t2],
         ]);
 
         expect($service->pruneHandoverAllowlist($source, $principal))->toBe(0);
-        expect($toolConfig->getRawAgentOverride(HandoverTool::class, $source)['allowed_target_agents'])
+        expect($toolConfig->getRawAgentOverride(SubAgentTool::class, $source)['allowed_target_agents'])
             ->toBe([$t1, $t2]);
     })->afterEach(fn() => Database::resetBootState());
 
@@ -219,12 +219,12 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         ])->id;
 
         // Override without any multi-select `resolveAs=agent` keys.
-        $toolConfig->putAgentOverride(HandoverTool::class, $agentId, [
+        $toolConfig->putAgentOverride(SubAgentTool::class, $agentId, [
             'max_results' => '15',
         ]);
 
         expect($service->pruneHandoverAllowlist($agentId, $principal))->toBe(0);
-        expect($toolConfig->getRawAgentOverride(HandoverTool::class, $agentId)['max_results'])->toBe('15');
+        expect($toolConfig->getRawAgentOverride(SubAgentTool::class, $agentId)['max_results'])->toBe('15');
     })->afterEach(fn() => Database::resetBootState());
 });
 

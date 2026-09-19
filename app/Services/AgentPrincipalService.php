@@ -9,7 +9,7 @@ use PDOException;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Services\Exceptions\DependencyNotWiredException;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 use Spora\Tools\ToolSettingSchema;
 
 /**
@@ -64,10 +64,10 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
                 ->update(['principal_id' => $targetPrincipalId]);
 
             // After a successful transfer the agent's principal_id may
-            // have changed; any per-agent override on HandoverTool holds
+            // have changed; any per-agent override on SubAgentTool holds
             // a `allowed_target_agents` list that the operator picked
             // before the transfer — those ids now belong to the OLD
-            // principal and would be rejected by HandoverTool::
+            // principal and would be rejected by SubAgentTool::
             // sharePrincipal() at runtime. Prune them up-front so the
             // LLM-facing tool definition reflects the new principal
             // scope immediately, instead of silently failing every
@@ -83,7 +83,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
     }
 
     /**
-     * Prune the per-agent HandoverTool override so the
+     * Prune the per-agent SubAgentTool override so the
      * `allowed_target_agents` list no longer references agents in a
      * principal other than `$newPrincipalId`. Public so the behaviour
      * is unit-testable in isolation; the runtime entry point is
@@ -100,7 +100,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
             return 0;
         }
 
-        $agentIdKeys = $this->collectAgentIdSettingKeys(HandoverTool::class);
+        $agentIdKeys = $this->collectAgentIdSettingKeys(SubAgentTool::class);
         if ($agentIdKeys === []) {
             return 0;
         }
@@ -108,7 +108,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
         $removed = $this->filterOutCrossPrincipalTargets($existing, $agentIdKeys, $newPrincipalId);
         if ($removed > 0 && $this->toolConfigService !== null) {
             $this->toolConfigService->putAgentOverride(
-                HandoverTool::class,
+                SubAgentTool::class,
                 $agentId,
                 $existing,
             );
@@ -117,7 +117,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
     }
 
     /**
-     * Returns the decrypted override row for HandoverTool, or null
+     * Returns the decrypted override row for SubAgentTool, or null
      * when there's nothing to prune: no `ToolConfigService` wired
      * (test stubs), no row at all, or a row that decodes to an empty
      * array. Folding all three into a single null sentinel lets
@@ -130,14 +130,14 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
         if ($this->toolConfigService === null) {
             return null;
         }
-        $existing = $this->toolConfigService->getRawAgentOverride(HandoverTool::class, $agentId);
+        $existing = $this->toolConfigService->getRawAgentOverride(SubAgentTool::class, $agentId);
         return $existing === [] ? null : $existing;
     }
 
     /**
      * Walk the tool's `#[ToolSetting]` schema and return the keys of
      * every multi-select setting with `resolveAs === 'agent'` (today
-     * that's just HandoverTool's `allowed_target_agents`, but new tools
+     * that's just SubAgentTool's `allowed_target_agents`, but new tools
      * can declare the same shape without touching this method).
      *
      * @return list<string>

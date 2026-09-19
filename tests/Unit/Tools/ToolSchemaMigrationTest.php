@@ -13,8 +13,8 @@ use Spora\Tools\AbstractTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
-use Spora\Tools\HandoverTool;
 use Spora\Tools\ReadUrlTool;
+use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\UserInfoTool;
@@ -51,7 +51,7 @@ function instantiateAllTools(): array
         TimeTool::class      => new TimeTool(),
         ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService),
         UserInfoTool::class         => new UserInfoTool(),
-        HandoverTool::class         => new HandoverTool(
+        SubAgentTool::class         => new SubAgentTool(
             Mockery::mock(HandoverServiceInterface::class),
             Mockery::mock(SubAgentServiceInterface::class),
             $configService,

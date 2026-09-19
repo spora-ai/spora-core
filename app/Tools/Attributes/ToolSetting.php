@@ -27,7 +27,7 @@ use Attribute;
  *       required: true,
  *   )]
  *
- * Allowlist the LLM is the consumer of (mirrors HandoverTool's
+ * Allowlist the LLM is the consumer of (mirrors SubAgentTool's
  * `allowed_target_agents`):
  *
  *   #[ToolSetting(
@@ -67,7 +67,7 @@ final class ToolSetting
      *         principal context exists; renders in user, group, and agent
      *         override scopes. `'agent'` renders only in the per-agent
      *         override modal. The runtime gates that protect intra-
-     *         principal semantics (e.g. {@see \Spora\Tools\HandoverTool::sharePrincipal()})
+     *         principal semantics (e.g. {@see \Spora\Tools\SubAgentTool::sharePrincipal()})
      *         are independent of this UI hint — the picker is hidden so
      *         operators don't write values the runtime would reject.
      */
@@ -109,7 +109,7 @@ final class ToolSetting
         /**
          * How the multi-select value is stored and resolved for LLM exposure.
          * Only meaningful when `type === 'multi-select'`. Defaults to
-         * `'agent'` for backwards compatibility with HandoverTool.
+         * `'agent'` for backwards compatibility with SubAgentTool.
          *
          * - 'agent' — stored as `int[]`; LLM-facing values are resolved
          *   against the `Agent` Eloquent model to `"Name (#id)"` strings.

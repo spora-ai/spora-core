@@ -7,14 +7,14 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\ToolConfigService;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 
 /**
- * Pin the invariant: invoking the HandoverTool must not modify the agent's
+ * Pin the invariant: invoking the SubAgentTool must not modify the agent's
  * tool override row. The DB row is read both before and after the call, and
  * the cryptographic blob must be byte-identical.
  */
-it('does not modify the agent_tool_overrides row when the HandoverTool is invoked', function (): void {
+it('does not modify the agent_tool_overrides row when the SubAgentTool is invoked', function (): void {
     $auth = bootAuthLayer();
     $userId = $auth->register('preserve@example.com', 'Password1!', 'Preserve');
 
@@ -38,16 +38,16 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     $configService = new ToolConfigService(
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Monolog\Logger('handover-preserve'),
-        [HandoverTool::class],
+        [SubAgentTool::class],
     );
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $sourceAgent->id,
         ['allowed_target_agents' => json_encode([$targetAgent->id])],
     );
 
     $rowBefore = Spora\Models\AgentToolOverride::where('agent_id', $sourceAgent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->firstOrFail();
     $blobBefore = $rowBefore->getRawOriginal('settings');
     expect($blobBefore)->not->toBe('');
@@ -60,7 +60,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
     $subAgentService->shouldNotReceive('spawn');
 
-    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
+    $tool = new SubAgentTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
@@ -80,7 +80,7 @@ it('does not modify the agent_tool_overrides row when the HandoverTool is invoke
     expect($result->success)->toBeTrue("Tool rejected valid target: {$result->content}");
 
     $rowAfter = Spora\Models\AgentToolOverride::where('agent_id', $sourceAgent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->firstOrFail();
     expect($rowAfter->getRawOriginal('settings'))->toBe($blobBefore);
 });
@@ -109,15 +109,15 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $configService = new ToolConfigService(
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Monolog\Logger('handover-preserve'),
-        [HandoverTool::class],
+        [SubAgentTool::class],
     );
     $configService->putAgentOverride(
-        HandoverTool::class,
+        SubAgentTool::class,
         $sourceAgent->id,
         ['allowed_target_agents' => json_encode([$allowedAgent->id])],
     );
     $blobBefore = Spora\Models\AgentToolOverride::where('agent_id', $sourceAgent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->firstOrFail()
         ->getRawOriginal('settings');
 
@@ -127,7 +127,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $subAgentService = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
     $subAgentService->shouldNotReceive('spawn');
 
-    $tool = new HandoverTool($handoverService, $subAgentService, $configService);
+    $tool = new SubAgentTool($handoverService, $subAgentService, $configService);
 
     $source = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
@@ -148,7 +148,7 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     expect($result->success)->toBeFalse();
 
     $blobAfter = Spora\Models\AgentToolOverride::where('agent_id', $sourceAgent->id)
-        ->where('tool_class', HandoverTool::class)
+        ->where('tool_class', SubAgentTool::class)
         ->firstOrFail()
         ->getRawOriginal('settings');
     expect($blobAfter)->toBe($blobBefore);

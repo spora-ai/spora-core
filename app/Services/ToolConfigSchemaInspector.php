@@ -492,7 +492,7 @@ final class ToolConfigSchemaInspector
 
     /**
      * Coerce a value to `int[]` — the historical multi-select format
-     * used by HandoverTool's `allowed_target_agents`.
+     * used by SubAgentTool's `allowed_target_agents`.
      *
      * @param  mixed $value
      * @return list<int>

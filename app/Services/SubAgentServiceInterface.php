@@ -7,7 +7,7 @@ namespace Spora\Services;
 use Spora\Models\Task;
 
 /**
- * Spawns child tasks from a `HandoverTool` `sub_agent` invocation and resumes
+ * Spawns child tasks from a `SubAgentTool` `sub_agent` invocation and resumes
  * the parent once every child reaches a terminal state.
  *
  * Contract for the `sub_agent` op:

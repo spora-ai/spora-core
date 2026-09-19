@@ -31,7 +31,7 @@ function makeSeeder(): DatabaseSeeder
         Spora\Tools\CalculatorTool::class,
         Spora\Tools\ReadUrlTool::class,
         Spora\Tools\UserInfoTool::class,
-        Spora\Tools\HandoverTool::class,
+        Spora\Tools\SubAgentTool::class,
     ]);
     $importer = new AgentTemplateImporter(
         $toolConfig,

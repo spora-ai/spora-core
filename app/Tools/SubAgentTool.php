@@ -16,7 +16,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Two operations on the same tool:
+ * Two operations on the same `sub_agent` tool:
  *   - `handover`   — Close the source task and start a new task on the
  *                    target agent. The source `final_response` becomes
  *                    "Handed off to …" and the source chat ends.
@@ -26,12 +26,14 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                    with each child's output appended as a `role:'tool'`
  *                    history row so the next LLM tick sees the results.
  *
- * Both share the `allowed_target_agents` multi-select so the operator
- * explicitly approves which delegated agents the LLM may pick. The
- * allowlist is **intra-principal**: the LLM may only target agents owned
- * by the same `principal_id` as the source. The picker surfaces only
- * same-principal agents, the tool re-validates the principal match at
- * runtime (`isTargetAllowed()`), and the service layer
+ * Both ops share a single `target_agent_id: integer` parameter so the
+ * LLM-facing schema reads as one consistent field — no duplicate
+ * "handover vs sub_agent" id params for the model to keep straight. The
+ * `allowed_target_agents` multi-select (operator-approved allowlist) is
+ * intra-principal: the LLM may only target agents owned by the same
+ * `principal_id` as the source. The picker surfaces only same-principal
+ * agents, the tool re-validates the principal match at runtime
+ * (`isTargetAllowed()`), and the service layer
  * (`HandoverService` / `SubAgentService`) enforces a final
  * `callerControlsPrincipal` check.
  *
@@ -43,21 +45,18 @@ use Spora\Tools\ValueObjects\ToolResult;
  * restricts the LLM-visible list to the source agent's principal, so
  * any foreign ids in a stale global degrade to "#id" placeholders.
  *
- * Example front-end usage (for the ToolSettingField "multi-select"):
- *   GET /api/v1/agents?select=id,name&principal_id=<group-principal>
- *
  * Example LLM-facing schema (for the tool definition):
- *   handover tool
- *     Allowed target agents: ["Legal Agent (#1)", "Sales Agent (#5)"]
+ *   sub_agent tool
+ *     Allowed target agents: ["Legal Agent (#11)", "Sales Agent (#4)"]
  *     parameters: { op: 'handover' | 'sub_agent',
- *                   target_agent_id?: int (handover only, enum=[1,5],
- *                     description suffix: "Allowed values: Legal Agent (#1), Sales Agent (#5)"),
- *                   agent_id?: int (sub_agent only, same enum + suffix),
+ *                   target_agent_id: int (enum=[11,4], description
+ *                     suffix: "Allowed values: Legal Agent (#11),
+ *                     Sales Agent (#4)"),
  *                   prompt: string }
  *
- * `enumSource: 'allowed_target_agents'` on `target_agent_id` and `agent_id`
- * ties the parameter's LLM-side `enum` and description suffix to the
- * allowlist setting at schema-build time (see
+ * `enumSource: 'allowed_target_agents'` on `target_agent_id` ties the
+ * parameter's LLM-side `enum` and description suffix to the allowlist
+ * setting at schema-build time (see
  * {@see \Spora\Tools\Schema\ToolParameterSchemaBuilder}). The names flow
  * through the same `ToolConfigSchemaInspector::fetchAgentNameMap()` path
  * as the `[Effective Configuration]` block, so foreign ids still degrade
@@ -65,12 +64,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  * covers the parameter suffix too.
  */
 #[Tool(
-    name: 'handover',
-    displayName: 'Handover',
+    name: 'sub_agent',
+    displayName: 'Sub-Agent',
     category: 'agent',
-    description: 'Hand over a task to a pre-approved agent. '
-               . '`handover` closes the source chat; `sub_agent` spawns a child task, '
-               . 'waits for it to finish, then returns its output to the parent.',
+    description: 'Hand off a task or spawn a sub-agent. '
+               . '`handover` closes the source chat and starts a new task on the target agent; '
+               . '`sub_agent` spawns a child task on the target agent, waits for it to finish, '
+               . 'then returns its output to the parent.',
     icon: 'arrow-right',
 )]
 #[ToolSetting(
@@ -107,15 +107,8 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'target_agent_id',
     type: 'integer',
-    description: 'ID of the agent for the `handover` op. Must be in the configured allowed_target_agents list.',
-    required: ['handover'],
-    enumSource: 'allowed_target_agents',
-)]
-#[ToolParameter(
-    name: 'agent_id',
-    type: 'integer',
-    description: 'ID of the agent for the `sub_agent` op. Must be in the configured allowed_target_agents list.',
-    required: ['sub_agent'],
+    description: 'ID of the target agent. Must be in the configured allowed_target_agents list.',
+    required: ['handover', 'sub_agent'],
     enumSource: 'allowed_target_agents',
 )]
 #[ToolParameter(
@@ -126,7 +119,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'verbatim quotes to preserve. Anything not in this message is lost.',
     required: true,
 )]
-final class HandoverTool extends AbstractTool
+final class SubAgentTool extends AbstractTool
 {
     public function __construct(
         private readonly HandoverServiceInterface $handover,
@@ -188,7 +181,7 @@ final class HandoverTool extends AbstractTool
 
     private function executeSubAgent(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
     {
-        $targetAgentId = (int) ($arguments['agent_id'] ?? 0);
+        $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateSubAgentInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
@@ -241,7 +234,7 @@ final class HandoverTool extends AbstractTool
     private function validateSubAgentInputs(int $targetAgentId, string $prompt, int $agentId, ?int $userId, ?int $taskId): ?string
     {
         return match (true) {
-            $targetAgentId <= 0 => 'agent_id is required.',
+            $targetAgentId <= 0 => 'target_agent_id is required.',
             $prompt === ''      => 'prompt is required.',
             $userId === null    => 'Sub-agent requires an authenticated user.',
             $taskId === null    => 'Sub-agent requires a current task context.',
@@ -299,7 +292,7 @@ final class HandoverTool extends AbstractTool
         return match ($op) {
             'sub_agent' => sprintf(
                 'Spawn a sub-agent on agent #%s and wait for its result.',
-                $arguments['agent_id'] ?? '?',
+                $arguments['target_agent_id'] ?? '?',
             ),
             default => sprintf(
                 'Hand over the task to agent #%s.',

@@ -23,11 +23,11 @@ use Spora\Services\HandoverService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolConfigServiceInterface;
-use Spora\Tools\HandoverTool;
+use Spora\Tools\SubAgentTool;
 use Tests\Fixtures\StubInputTool;
 
 /**
- * End-to-end smoke test for the HandoverTool feature, per the manual
+ * End-to-end smoke test for the SubAgentTool feature, per the manual
  * checklist in the plan. Drives the real Orchestrator + real DB, with a
  * Mockery-stubbed LLM driver and a real HandoverService. The
  * ToolConfigService is stubbed to return the configured allowlist so we
@@ -96,10 +96,10 @@ function handoverE2eSeedAgents(): array
 
 /**
  * Build an Orchestrator configured with:
- *   - the HandoverTool (real, with allowlist set to [$targetAgentId])
+ *   - the SubAgentTool (real, with allowlist set to [$targetAgentId])
  *   - a StubInputTool (so tool-class resolution works)
  *   - scripted LLM drivers (real implementations, not Mockery, so PHPStan is happy)
- * The HandoverTool is backed by a real HandoverService, which is in turn
+ * The SubAgentTool is backed by a real HandoverService, which is in turn
  * backed by an INNER Orchestrator that drives the new task created on
  * the target agent.
  *
@@ -147,7 +147,7 @@ function handoverE2eBuildOrchestrator(
     $subAgentService = Mockery::mock(\Spora\Services\SubAgentServiceInterface::class);
     $subAgentService->shouldNotReceive('spawn');
 
-    $handoverTool = new HandoverTool($handoverService, $subAgentService, $toolConfig);
+    $handoverTool = new SubAgentTool($handoverService, $subAgentService, $toolConfig);
 
     $outer = new Orchestrator(
         $driverFactory,
@@ -160,7 +160,7 @@ function handoverE2eBuildOrchestrator(
     return ['outer' => $outer, 'llm' => $llm, 'llmInner' => $llmInner];
 }
 
-describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): void {
+describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): void {
 
     it('full happy-path: handover tool call creates a new task, source is closed with breadcrumb', function (): void {
         $seed   = handoverE2eSeedAgents();
@@ -168,11 +168,11 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         $sourceAgentId = $seed['sourceAgentId'];
         $targetAgentId = $seed['targetAgentId'];
 
-        // Enable the HandoverTool on the source agent.
+        // Enable the SubAgentTool on the source agent.
         AgentTool::insert([
             'agent_id'   => $sourceAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -185,7 +185,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                     content: null,
                     toolCalls: [new DriverToolCall(
                         HANDOVER_E2E_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op' => 'handover',
                             'target_agent_id' => $targetAgentId,
@@ -213,13 +213,13 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         claimAndTick($orch, $source->id);
         $source->refresh();
 
-        // Step 4: HandoverTool requires approval, so the task is paused.
+        // Step 4: SubAgentTool requires approval, so the task is paused.
         expect($source->status)->toBe('PENDING_APPROVAL');
         $pendingToolCall = ToolCallModel::where('task_id', $source->id)
             ->where('status', 'PENDING_APPROVAL')
             ->first();
         expect($pendingToolCall)->not->toBeNull();
-        expect($pendingToolCall->tool_name)->toBe('handover');
+        expect($pendingToolCall->tool_name)->toBe('sub_agent');
 
         // Step 4 (cont'd): Approve the tool call.
         $orch->resume($source->id, [[
@@ -263,7 +263,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         expect($detail)->not->toBeNull();
 
         $handoverCall = collect($detail['tool_calls'])
-            ->first(fn($tc) => $tc['tool_name'] === 'handover');
+            ->first(fn($tc) => $tc['tool_name'] === 'sub_agent');
         expect($handoverCall)->not->toBeNull();
         expect($handoverCall['result_data'])->toBeArray();
         expect($handoverCall['result_data']['handover'])->toBeTrue();
@@ -278,8 +278,8 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
 
         AgentTool::insert([
             'agent_id'   => $sourceAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -294,7 +294,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                     content: null,
                     toolCalls: [new DriverToolCall(
                         HANDOVER_E2E_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op' => 'handover',
                             'target_agent_id' => $targetAgentId, // NOT in allowlist (it's empty)
@@ -332,7 +332,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
         expect($newTaskCount)->toBe(0);
 
         $toolCall = ToolCallModel::where('task_id', $source->id)
-            ->where('tool_name', 'handover')
+            ->where('tool_name', 'sub_agent')
             ->first();
         expect($toolCall)->not->toBeNull();
         expect($toolCall->result_content)->toContain('not in the allowed_target_agents list');
@@ -345,8 +345,8 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
 
         AgentTool::insert([
             'agent_id'   => $sourceAgentId,
-            'tool_class' => HandoverTool::class,
-            'tool_name'  => 'handover',
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -358,7 +358,7 @@ describe('HandoverTool end-to-end (orchestrator + service + DB)', function (): v
                     content: null,
                     toolCalls: [new DriverToolCall(
                         HANDOVER_E2E_PROVIDER_CALL_ID,
-                        'handover',
+                        'sub_agent',
                         [
                             'op' => 'handover',
                             'target_agent_id' => $targetAgentId,
