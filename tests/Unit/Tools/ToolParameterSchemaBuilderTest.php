@@ -186,16 +186,30 @@ final class EnumSourceToolString {}
 #[ToolParameter(name: 'level', type: 'string', description: 'Verbosity', required: true, enum: ['low', 'high'], enumSource: 'allowed_target_agents')]
 final class EnumSourceStaticEnumWinsTool {}
 
-it('enumSource populates enum from the values map and appends the label suffix to the description', function (): void {
+it('enumSource populates enum from the labels map (LLM picks by name) and appends the suffix', function (): void {
     $schema = ToolParameterSchemaBuilder::build(
         EnumSourceTool::class,
         ['allowed_target_agents' => [11, 4]],
         ['allowed_target_agents' => ['Legal Agent (#11)', 'Sales Agent (#4)']],
     );
 
-    expect($schema['properties']['target_id']['enum'])->toBe([11, 4])
+    expect($schema['properties']['target_id']['enum'])->toBe(['Legal Agent (#11)', 'Sales Agent (#4)'])
         ->and($schema['properties']['target_id']['description'])
             ->toBe('Pick one. Allowed values: Legal Agent (#11), Sales Agent (#4)');
+});
+
+it('enumSource falls back to raw values when the labels map is empty (no name resolution)', function (): void {
+    // Foreign ids or a missing principalResolver degrade labels to []. The
+    // builder must still emit a usable enum so strict-mode providers have
+    // something to validate against — just one without names.
+    $schema = ToolParameterSchemaBuilder::build(
+        EnumSourceTool::class,
+        ['allowed_target_agents' => [11, 4]],
+        ['allowed_target_agents' => []],
+    );
+
+    expect($schema['properties']['target_id']['enum'])->toBe([11, 4])
+        ->and($schema['properties']['target_id']['description'])->toBe('Pick one.');
 });
 
 it('enumSource is ignored when the static enum is already populated', function (): void {

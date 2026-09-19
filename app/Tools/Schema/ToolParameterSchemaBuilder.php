@@ -35,8 +35,11 @@ use stdClass;
  * `enumSource: 'setting_key'`, the builder pulls the named setting's
  * resolved agent ids from `$enumSourceValues` and the matching human-
  * readable labels from `$enumSourceLabels`, then (a) populates `enum` on
- * the property (only when the parameter has no static `enum`) and (b)
- * appends a `" Allowed values: …"` suffix to the description. An empty
+ * the property (only when the parameter has no static `enum`) using the
+ * LABELS so the LLM can refer to agents by name and (b) appends a
+ * `" Allowed values: …"` suffix to the description. Labels win over
+ * values because the enum is what strict-mode providers validate against;
+ * a model that picks by name survives a JSON-Schema round-trip. An empty
  * source is silently skipped (no enum, no suffix) — emitting an empty
  * `enum` would be invalid JSON Schema, and an empty suffix would be
  * misleading to the model. Static `enum` always wins; `enumSource` is
@@ -51,13 +54,16 @@ final class ToolParameterSchemaBuilder
      * Build the JSON Schema "parameters" object from a tool's attributes.
      *
      * @param  object|class-string $target           Tool instance or fully-qualified class name.
-     * @param  array<string, list<int|string>>       $enumSourceValues  setting key => resolved ids to populate `enum` from.
-     *                                                             Only consulted for parameters with `enumSource: '…'`
-     *                                                             and no static `enum`. Empty list = no injection.
+     * @param  array<string, list<int|string>>       $enumSourceValues  setting key => resolved ids to fall back on
+     *                                                             when `enumSourceLabels` is empty for the same key
+     *                                                             (e.g. resolver unavailable → labels degrade to
+     *                                                             `"#id"` placeholders). Empty list = no injection.
      * @param  array<string, list<string>>           $enumSourceLabels  setting key => resolved human-readable
-     *                                                             labels (e.g. `"Legal Agent (#11)"`) appended to
-     *                                                             the parameter description as
-     *                                                             `" Allowed values: …"`. Empty list = no suffix.
+     *                                                             labels (e.g. `"Legal Agent (#11)"`). When
+     *                                                             non-empty, the labels populate the LLM-facing
+     *                                                             `enum` and are also appended to the description
+     *                                                             as `" Allowed values: …"`. Empty list = no enum,
+     *                                                             no suffix.
      * @return array{
      *   type: "object",
      *   properties: array<string, array<string, mixed>>|stdClass,
@@ -232,8 +238,8 @@ final class ToolParameterSchemaBuilder
     }
 
     /**
-     * @param  list<int|string> $values  Resolved ids for the enum (e.g. `[11, 4]`). Ignored when the parameter has a static `enum`.
-     * @param  list<string>     $labels  Resolved human-readable labels for the description suffix (e.g. `['Legal Agent (#11)', 'Sales Agent (#4)']`).
+     * @param  list<int|string> $values  Resolved ids for the enum (e.g. `[11, 4]`). Used as a fallback when `$labels` is empty (resolver returned no names). Ignored when the parameter has a static `enum`.
+     * @param  list<string>     $labels  Resolved human-readable labels (e.g. `['Legal Agent (#11)', 'Sales Agent (#4)']`). Populate the LLM-facing `enum` when non-empty so the model picks by name.
      * @return array<string, mixed>
      */
     private static function propertyJson(
@@ -253,8 +259,18 @@ final class ToolParameterSchemaBuilder
             // those — surprising the LLM with the runtime list while the
             // source code says otherwise would be a footgun.
             $json['enum'] = $param->enum;
-        } elseif ($param->enumSource !== null && $values !== []) {
-            $json['enum'] = $values;
+        } elseif ($param->enumSource !== null) {
+            // Prefer labels so the LLM picks agents by name (e.g.
+            // "Legal Agent (#11)") instead of guessing which integer id
+            // means what. Fall back to raw values when labels couldn't be
+            // resolved (foreign ids, missing principalResolver) — strict-
+            // mode providers still get a usable enum, just one without
+            // names. Empty list = no injection (preserves safe-by-default).
+            if ($labels !== []) {
+                $json['enum'] = $labels;
+            } elseif ($values !== []) {
+                $json['enum'] = $values;
+            }
         }
 
         if ($param->enumSource !== null && $labels !== []) {

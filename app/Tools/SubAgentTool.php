@@ -26,15 +26,19 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                    with each child's output appended as a `role:'tool'`
  *                    history row so the next LLM tick sees the results.
  *
- * Both ops share a single `target_agent_id: integer` parameter so the
+ * Both ops share a single `target_agent_id: string` parameter so the
  * LLM-facing schema reads as one consistent field — no duplicate
  * "handover vs sub_agent" id params for the model to keep straight. The
- * `allowed_target_agents` multi-select (operator-approved allowlist) is
- * intra-principal: the LLM may only target agents owned by the same
- * `principal_id` as the source. The picker surfaces only same-principal
- * agents, the tool re-validates the principal match at runtime
- * (`isTargetAllowed()`), and the service layer
- * (`HandoverService` / `SubAgentService`) enforces a final
+ * parameter's `enum` is populated from the `allowed_target_agents`
+ * allowlist using the `"Name (#id)"` labels (not raw ids) so the model
+ * can refer to agents by name in its reasoning — strict-mode providers
+ * still get a usable enum and the tool parses the label back to an int
+ * at execute time. The `allowed_target_agents` multi-select (operator-
+ * approved allowlist) is intra-principal: the LLM may only target
+ * agents owned by the same `principal_id` as the source. The picker
+ * surfaces only same-principal agents, the tool re-validates the
+ * principal match at runtime (`isTargetAllowed()`), and the service
+ * layer (`HandoverService` / `SubAgentService`) enforces a final
  * `callerControlsPrincipal` check.
  *
  * `allowed_target_agents` declares `scope: 'principal'` so the picker
@@ -49,9 +53,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   sub_agent tool
  *     Allowed target agents: ["Legal Agent (#11)", "Sales Agent (#4)"]
  *     parameters: { op: 'handover' | 'sub_agent',
- *                   target_agent_id: int (enum=[11,4], description
- *                     suffix: "Allowed values: Legal Agent (#11),
- *                     Sales Agent (#4)"),
+ *                   target_agent_id: string (enum=["Legal Agent (#11)",
+ *                     "Sales Agent (#4)"], description suffix: "Allowed
+ *                     values: Legal Agent (#11), Sales Agent (#4)"),
  *                   prompt: string }
  *
  * `enumSource: 'allowed_target_agents'` on `target_agent_id` ties the
@@ -106,8 +110,9 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolParameter(
     name: 'target_agent_id',
-    type: 'integer',
-    description: 'ID of the target agent. Must be in the configured allowed_target_agents list.',
+    type: 'string',
+    description: 'Label of the target agent. Must be in the configured allowed_target_agents list. '
+               . 'Format: "Name (#id)" — e.g. "Legal Agent (#11)".',
     required: ['handover', 'sub_agent'],
     enumSource: 'allowed_target_agents',
 )]
@@ -144,7 +149,7 @@ final class SubAgentTool extends AbstractTool
 
     private function executeHandover(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
     {
-        $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
+        $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateHandoverInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
@@ -181,7 +186,7 @@ final class SubAgentTool extends AbstractTool
 
     private function executeSubAgent(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
     {
-        $targetAgentId = (int) ($arguments['target_agent_id'] ?? 0);
+        $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
         $error = $this->validateSubAgentInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
@@ -242,6 +247,36 @@ final class SubAgentTool extends AbstractTool
                 => 'Target agent is not in the allowed_target_agents list.',
             default => null,
         };
+    }
+
+    /**
+     * Parse the LLM-facing `target_agent_id` value back to an int.
+     *
+     * The schema's `enum` is populated from the resolved labels (e.g.
+     * `"Legal Agent (#11)"`); strict-mode providers validate against
+     * that enum, so the wire format is the label string. Accepts ints
+     * too as a back-compat / fallback (legacy callers, tests). Anything
+     * else returns `0`, which the validators report as
+     * `target_agent_id is required.`
+     */
+    private function resolveTargetAgentId(mixed $raw): int
+    {
+        if (is_int($raw)) {
+            return $raw;
+        }
+        if (!is_string($raw) || $raw === '') {
+            return 0;
+        }
+        if (preg_match('/\(#(\d+)\)\s*$/', $raw, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/^#(\d+)\s*$/', $raw, $m)) {
+            return (int) $m[1];
+        }
+        if (ctype_digit($raw)) {
+            return (int) $raw;
+        }
+        return 0;
     }
 
     /**

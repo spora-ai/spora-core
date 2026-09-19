@@ -246,9 +246,14 @@ describe('ToolDefinitionBuilder wires #[ToolParameter(enumSource)] into the LLM-
 
         expect($defs)->toHaveCount(1);
         $param = $defs[0]['function']['parameters']['properties']['target_agent_id'];
-        expect($param['enum'])->toBe([11, 4])
+        // The runtime-resolved labels win over the raw id values so the
+        // LLM can refer to agents by name; the stub fixture still uses
+        // `type: integer` for its own contract — enumSource controls the
+        // `enum` shape, not the parameter's static type.
+        expect($param['enum'])->toBe(['Legal Agent (#11)', 'Sales Agent (#4)'])
             ->and($param['description'])
-                ->toBe('ID of the target agent. Must be in the configured allowed_target_agents list. Allowed values: Legal Agent (#11), Sales Agent (#4)');
+                ->toContain('Legal Agent (#11)')
+                ->toContain('Sales Agent (#4)');
     });
 
     it('emits no enum and no suffix when the runtime-resolved allowlist is empty', function (): void {
