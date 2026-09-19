@@ -65,6 +65,7 @@ class ToolConfigService implements ToolConfigServiceInterface
         ?SkillScanner $skillScanner = null,
         ?PrincipalService $principalService = null,
         bool $groupCascadeEnabled = false,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $skillsByName = [];
         if ($skillScanner !== null) {
@@ -75,11 +76,14 @@ class ToolConfigService implements ToolConfigServiceInterface
                 $skillsByName[$skill->name()] = $skill;
             }
         }
-        $this->schema = new ToolConfigSchemaInspector($skillsByName);
+        // Without the resolver the inspector's LLM-facing `allowed_target_agents`
+        // enumerates "#id" placeholders; null is fine for tests, the DI runtime
+        // always passes the resolver.
+        $this->schema = new ToolConfigSchemaInspector($skillsByName, $principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
         $this->cascade = new ToolConfigPrincipalCascade(
-            $principalService ?? new PrincipalService(new PrincipalResolver()),
+            $principalService ?? new PrincipalService($principalResolver ?? new PrincipalResolver()),
             $groupCascadeEnabled,
         );
     }

@@ -76,6 +76,52 @@ it('returns an empty enum when allowedOps is empty', function (): void {
     expect($filtered['properties']['action']['enum'])->toBe([]);
 });
 
+it('narrows the discriminator description to match the narrowed enum', function (): void {
+    // Build-time format from ToolParameterSchemaBuilder:
+    // "The operation to perform: handover, sub_agent". After filtering
+    // to `sub_agent` only, the prose must drop `handover` or the LLM
+    // will try to call an op it cannot actually run.
+    $schema = [
+        'type' => 'object',
+        'properties' => [
+            'op' => [
+                'type'        => 'string',
+                'description' => 'The operation to perform: handover, sub_agent',
+                'enum'        => ['handover', 'sub_agent'],
+            ],
+        ],
+        'required' => ['op'],
+    ];
+
+    $filtered = OperationSchemaFilter::filter($schema, ['sub_agent'], 'op');
+
+    expect($filtered['properties']['op']['description'])
+        ->toBe('The operation to perform: sub_agent')
+        ->and($filtered['properties']['op']['enum'])->toBe(['sub_agent']);
+});
+
+it('leaves a user-supplied discriminator description untouched', function (): void {
+    // Discriminator descriptions that don't match the auto-generated
+    // "The operation to perform: …" format are preserved verbatim —
+    // the filter must not rewrite prose the tool author hand-rolled.
+    $schema = [
+        'type' => 'object',
+        'properties' => [
+            'op' => [
+                'type'        => 'string',
+                'description' => 'Pick which action to run',
+                'enum'        => ['handover', 'sub_agent'],
+            ],
+        ],
+        'required' => ['op'],
+    ];
+
+    $filtered = OperationSchemaFilter::filter($schema, ['sub_agent'], 'op');
+
+    expect($filtered['properties']['op']['description'])->toBe('Pick which action to run')
+        ->and($filtered['properties']['op']['enum'])->toBe(['sub_agent']);
+});
+
 it('coerces stdClass properties to a typed array for filtering and back to stdClass when empty', function (): void {
     $schema = [
         'type' => 'object',

@@ -63,7 +63,12 @@ final class SchemaValidator
 
             $value      = $arguments[$key];
             $compatible = match ($expectedType) {
-                'string'           => is_string($value),
+                // Accept ints for `string`: SubAgentTool's wire format is the
+                // resolved "Name (#id)" label, but legacy callers/tests still
+                // pass ints. Strict-mode providers see `type: 'string'` and
+                // reject ints themselves; this leniency only affects local
+                // validation.
+                'string'           => is_string($value) || is_int($value),
                 'integer'          => is_int($value),
                 'number'           => is_int($value) || is_float($value),
                 'boolean'          => is_bool($value),
