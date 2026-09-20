@@ -49,6 +49,62 @@ final class TodoStore
 
     public function replace(TodoState $next): void
     {
+        $this->writeState($next);
+    }
+
+    public function append(TodoItem $item): TodoState
+    {
+        $current = $this->read();
+        $items = $current->items;
+        $items[] = $item;
+        $next = new TodoState(
+            version: TodoState::SCHEMA_VERSION,
+            items: $items,
+            updatedAt: CarbonImmutable::now('UTC'),
+        );
+        $this->writeState($next);
+        return $next;
+    }
+
+    public function updateStatus(string $id, TodoItemStatus $status): TodoState
+    {
+        $current = $this->read();
+        $changed = false;
+        $items = [];
+        foreach ($current->items as $existing) {
+            if ($existing->id === $id) {
+                if ($existing->status !== $status) {
+                    $changed = true;
+                    $items[] = new TodoItem(
+                        id: $existing->id,
+                        content: $existing->content,
+                        activeForm: $existing->activeForm,
+                        status: $status,
+                        order: $existing->order,
+                    );
+                    continue;
+                }
+                $items[] = $existing;
+                continue;
+            }
+            $items[] = $existing;
+        }
+
+        if (!$changed) {
+            return $current;
+        }
+
+        $next = new TodoState(
+            version: TodoState::SCHEMA_VERSION,
+            items: $items,
+            updatedAt: CarbonImmutable::now('UTC'),
+        );
+        $this->writeState($next);
+        return $next;
+    }
+
+    private function writeState(TodoState $next): void
+    {
         $now = CarbonImmutable::now('UTC')->toIso8601String();
         $payload = ['todos' => array_merge($next->toArray(), ['updated_at' => $now])];
 

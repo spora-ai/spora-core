@@ -10,6 +10,8 @@ final readonly class TodoItem
 
     public const ACTIVE_FORM_MAX = 200;
 
+    public const SLUG_MAX = 80;
+
     public function __construct(
         public ?string $id,
         public string $content,
@@ -57,6 +59,25 @@ final readonly class TodoItem
             'status'     => $this->status->value,
             'order'      => $this->order,
         ];
+    }
+
+    /**
+     * Derive a deterministic ASCII slug from the item's content. Used as
+     * the default `id` when the model does not supply one on `add`, so the
+     * tool produces stable, model-readable handles ("run-the-migration")
+     * instead of opaque hex tokens the model can't easily reference.
+     */
+    public static function slug(string $content): string
+    {
+        $stripped = preg_replace('/[^a-z0-9]+/', '-', strtolower(trim($content))) ?? '';
+        $stripped = trim($stripped, '-');
+        if ($stripped === '') {
+            return 'item';
+        }
+        if (strlen($stripped) > self::SLUG_MAX) {
+            $stripped = rtrim(substr($stripped, 0, self::SLUG_MAX), '-');
+        }
+        return $stripped === '' ? 'item' : $stripped;
     }
 
     private static function cap(string $value, int $max): string

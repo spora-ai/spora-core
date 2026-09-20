@@ -140,3 +140,88 @@ it('survives a task_history row deletion (mirrors compaction)', function (): voi
     expect($stored->items)->toHaveCount(1)
         ->and($stored->items[0]->content)->toBe('survive');
 });
+
+it('TodoTool persists op=add end-to-end', function (): void {
+    $task = newTodoTestTask();
+    $tool = new TodoTool(new TodoStoreRegistry());
+
+    $tool->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'First',  'status' => 'pending', 'id' => 'first'],
+        ],
+    ], 1, null, $task->id);
+
+    $tool->execute([
+        'op'   => 'add',
+        'item' => ['content' => 'Second', 'status' => 'in_progress'],
+    ], 1, null, $task->id);
+
+    $stored = (new TodoStore($task->id))->read();
+    expect($stored->items)->toHaveCount(2)
+        ->and($stored->items[0]->id)->toBe('first')
+        ->and($stored->items[0]->content)->toBe('First')
+        ->and($stored->items[1]->content)->toBe('Second')
+        ->and($stored->items[1]->status)->toBe(TodoItemStatus::InProgress)
+        ->and($stored->items[1]->order)->toBe(1);
+
+    $taskRow = Task::find($task->id);
+    expect($taskRow->data['todos']['items'])->toHaveCount(2)
+        ->and($taskRow->data['todos']['items'][1]['content'])->toBe('Second');
+});
+
+it('TodoTool persists op=set_status end-to-end', function (): void {
+    $task = newTodoTestTask();
+    $tool = new TodoTool(new TodoStoreRegistry());
+
+    $tool->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'One', 'status' => 'pending', 'id' => 'one'],
+            ['content' => 'Two', 'status' => 'pending', 'id' => 'two'],
+        ],
+    ], 1, null, $task->id);
+
+    $tool->execute([
+        'op'     => 'set_status',
+        'id'     => 'one',
+        'status' => 'completed',
+    ], 1, null, $task->id);
+
+    $stored = (new TodoStore($task->id))->read();
+    expect($stored->items)->toHaveCount(2)
+        ->and($stored->items[0]->id)->toBe('one')
+        ->and($stored->items[0]->status)->toBe(TodoItemStatus::Completed)
+        ->and($stored->items[0]->order)->toBe(0)
+        ->and($stored->items[1]->id)->toBe('two')
+        ->and($stored->items[1]->status)->toBe(TodoItemStatus::Pending);
+
+    $taskRow = Task::find($task->id);
+    expect($taskRow->data['todos']['items'][0]['status'])->toBe('completed')
+        ->and($taskRow->data['todos']['items'][1]['status'])->toBe('pending');
+});
+
+it('op=set_status on a missing id does not mutate the persisted state', function (): void {
+    $task = newTodoTestTask();
+    $tool = new TodoTool(new TodoStoreRegistry());
+
+    $tool->execute([
+        'op'    => 'write',
+        'todos' => [['content' => 'Only', 'status' => 'pending', 'id' => 'only']],
+    ], 1, null, $task->id);
+
+    $before = (new TodoStore($task->id))->read();
+
+    $result = $tool->execute([
+        'op'     => 'set_status',
+        'id'     => 'ghost',
+        'status' => 'completed',
+    ], 1, null, $task->id);
+
+    expect($result->success)->toBeFalse();
+
+    $after = (new TodoStore($task->id))->read();
+    expect($after->items[0]->status)->toBe(TodoItemStatus::Pending)
+        ->and($after->items[0]->id)->toBe('only')
+        ->and($after->updatedAt?->toIso8601String())->toBe($before->updatedAt?->toIso8601String());
+});

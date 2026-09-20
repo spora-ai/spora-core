@@ -73,4 +73,14 @@ final readonly class TodoState
         }
         return null;
     }
+
+    public function find(string $id): ?TodoItem
+    {
+        foreach ($this->items as $item) {
+            if ($item->id === $id) {
+                return $item;
+            }
+        }
+        return null;
+    }
 }
