@@ -201,6 +201,24 @@ class StubTaskService implements TaskServiceInterface
         ];
     }
 
+    public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
+    {
+        if ($taskId === 999999) {
+            throw new InvalidArgumentException('Task not found.');
+        }
+        return [
+            'id' => $taskId,
+            'agent_id' => 10,
+            'status' => 'QUEUED',
+            'user_prompt' => 'p',
+            'final_response' => null,
+            'step_count' => 0,
+            'max_steps' => 10,
+            'created_at' => null,
+            'updated_at' => null,
+        ];
+    }
+
     public function deleteTask(int $taskId, int $userId): bool
     {
         return $taskId !== 999999;

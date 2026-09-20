@@ -289,6 +289,48 @@ interface TaskServiceInterface
      */
     public function abortSubAgentAndCascade(int $childTaskId, int $userId): array;
 
+    /**
+     * Apply the operator's answers to a pending question batch parked on
+     * a task in `AWAITING_INPUT` status. The validator has already
+     * confirmed the batch + answers match (selection labels, free-text
+     * rules, header alignment). This method owns the row-level
+     * state transition: removes the answered batch from `pending_state`,
+     * flips `status` to `QUEUED` (or keeps `AWAITING_INPUT` if more
+     * batches are pending), appends one tool history row per batch,
+     * and publishes the new state on Mercure.
+     *
+     * The controller is expected to call {@see
+     * \Spora\Http\AnswerQuestionRequestValidator::parseAndValidate()}
+     * first and only invoke this method on a non-error result.
+     *
+     * @return array{
+     *     id: int,
+     *     agent_id: int,
+     *     status: string,
+     *     user_prompt: string,
+     *     final_response: string|null,
+     *     step_count: int,
+     *     max_steps: int,
+     *     created_at: string|null,
+     *     updated_at: string|null,
+     *     parent_task_id?: int,
+     *     error_code?: string,
+     *     error_message?: string,
+     *     retry_of_task_id?: int,
+     *     retry_count?: int,
+     *     max_retries?: int,
+     *     retry_after_minutes?: int,
+     *     retry_after?: string,
+     *     aborted_at?: string|null
+     * }
+     */
+    public function answerTask(
+        int $taskId,
+        int $userId,
+        string $toolCallId,
+        string $formattedContent,
+    ): array;
+
     public function deleteTask(int $taskId, int $userId): bool;
 
     public function cancelRetryChain(int $taskId, int $userId): bool;

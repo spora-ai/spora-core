@@ -48,6 +48,7 @@ use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
 use Spora\Http\AgentToolController;
 use Spora\Http\AgentTransferController;
+use Spora\Http\AnswerQuestionRequestValidator;
 use Spora\Http\AppsController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
@@ -163,7 +164,9 @@ use Spora\Skills\SkillScanner;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
+use Spora\Todo\TodoStoreRegistry;
 use Spora\Tools\AgentTool;
+use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaSourceReader;
@@ -172,6 +175,7 @@ use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
+use Spora\Tools\TodoTool;
 use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
@@ -837,6 +841,8 @@ final class ContainerDefinitions
                 AgentTool::class,
                 SkillTool::class,
                 MediaTool::class,
+                TodoTool::class,
+                AskUserQuestionTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -1262,6 +1268,7 @@ final class ContainerDefinitions
                     $c->get(TaskMediaCapabilityService::class),
                     $c->get(ContinueTaskDispatcher::class),
                     $c->get(DecisionsRequestValidator::class),
+                    $c->get(AnswerQuestionRequestValidator::class),
                 );
             },
 
@@ -1292,6 +1299,12 @@ final class ContainerDefinitions
             DecisionsRequestValidator::class => static function (ContainerInterface $c): DecisionsRequestValidator {
                 return new DecisionsRequestValidator(
                     $c->get(TaskServiceInterface::class),
+                );
+            },
+
+            AnswerQuestionRequestValidator::class => static function (ContainerInterface $c): AnswerQuestionRequestValidator {
+                return new AnswerQuestionRequestValidator(
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1428,6 +1441,14 @@ final class ContainerDefinitions
 
             TimeTool::class => static fn(): TimeTool => new TimeTool(),
             CalculatorTool::class => static fn(): CalculatorTool => new CalculatorTool(),
+
+            TodoStoreRegistry::class => static fn(): TodoStoreRegistry => new TodoStoreRegistry(),
+
+            TodoTool::class => static function (ContainerInterface $c): TodoTool {
+                return new TodoTool($c->get(TodoStoreRegistry::class));
+            },
+
+            AskUserQuestionTool::class => static fn(): AskUserQuestionTool => new AskUserQuestionTool(),
 
             // AgentTool.create_agent now uses AgentService::createAgent
             // (slim payload) and AgentManifest for output; the

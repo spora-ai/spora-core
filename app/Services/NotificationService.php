@@ -96,6 +96,28 @@ class NotificationService implements NotificationServiceInterface
         ]);
     }
 
+    public function notifyAwaitingInput(Task $task): void
+    {
+        $rows = $this->fanOutForTask($task, [
+            'type'  => 'awaiting_input',
+            'title' => 'Task awaiting your answer',
+            'body'  => $task->user_prompt,
+            'data'  => ['task_id' => $task->id, 'agent_id' => $task->agent_id],
+        ]);
+
+        foreach ($rows as $userId => $notification) {
+            $this->mercure->publishToUser(
+                $userId,
+                ['event' => 'notification', 'type' => 'awaiting_input', 'notification' => $this->toResource($notification)],
+            );
+        }
+
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), [
+            'event'   => 'awaiting_input',
+            'task_id' => $task->id,
+        ]);
+    }
+
     public function notifyScheduledRunCompleted(int $runId, Task $task): void
     {
         $rows = $this->fanOutForTask($task, [

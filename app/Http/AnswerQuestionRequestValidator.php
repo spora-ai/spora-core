@@ -1,0 +1,190 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Http;
+
+use Illuminate\Database\Capsule\Manager as Capsule;
+use InvalidArgumentException;
+use Spora\Agents\ValueObjects\AgentState;
+use Spora\Services\PrincipalResolver;
+use Spora\Tools\PendingQuestion;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
+
+/**
+ * Parses and validates the `{tool_call_id, answers: [...]}` payload for
+ * `POST /api/v1/tasks/{taskId}/answer`.
+ *
+ * Each `answers[]` entry is shaped as `{header, selections: string[], free_text?: string|null}`.
+ * The headers must match every pending question in the batch referenced
+ * by `tool_call_id`; selections must be a subset of the question's
+ * `options[].label`; `free_text` is rejected when the question has
+ * `allowFreeText=false`.
+ *
+ * Returns a normalised array suitable for the controller to write
+ * (one tool row per batch) or a JsonResponse carrying the first
+ * validation error encountered.
+ */
+final class AnswerQuestionRequestValidator
+{
+    private const ERR_TOOL_CALL_ID_REQUIRED = 'tool_call_id is required.';
+
+    private const ERR_ANSWERS_LIST = 'answers must be a non-empty array.';
+
+    private const ERR_ANSWER_SHAPE = 'Every answer must be an object.';
+
+    private const ERR_HEADER_REQUIRED = "Every answer requires a 'header' string.";
+
+    public function __construct(
+        private readonly PrincipalResolver $principalResolver,
+    ) {}
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{batch: \Spora\Tools\PendingQuestionBatch, formatted: string, byHeader: array<string, array{selections: list<string>, free_text: ?string}>}|JsonResponse
+     */
+    public function parseAndValidate(array $body, int $taskId, int $userId): array|JsonResponse
+    {
+        $toolCallId = trim((string) ($body['tool_call_id'] ?? ''));
+        if ($toolCallId === '') {
+            return $this->error(self::ERR_TOOL_CALL_ID_REQUIRED);
+        }
+
+        $rawAnswers = $body['answers'] ?? null;
+        if (!is_array($rawAnswers) || !array_is_list($rawAnswers) || $rawAnswers === []) {
+            return $this->error(self::ERR_ANSWERS_LIST);
+        }
+
+        $byHeader = [];
+        foreach ($rawAnswers as $item) {
+            if (!is_array($item)) {
+                return $this->error(self::ERR_ANSWER_SHAPE);
+            }
+            $header = trim((string) ($item['header'] ?? ''));
+            if ($header === '') {
+                return $this->error(self::ERR_HEADER_REQUIRED);
+            }
+            $selectionsRaw = $item['selections'] ?? null;
+            if (!is_array($selectionsRaw) || !array_is_list($selectionsRaw)) {
+                return $this->error("Answer for '{$header}' must include a 'selections' array.");
+            }
+            $selections = array_map(static fn($s): string => (string) $s, $selectionsRaw);
+
+            $freeTextRaw = $item['free_text'] ?? null;
+            $freeText = is_string($freeTextRaw) && $freeTextRaw !== '' ? $freeTextRaw : null;
+
+            if (isset($byHeader[$header])) {
+                return $this->error("Duplicate answer for header '{$header}'.");
+            }
+            $byHeader[$header] = ['selections' => $selections, 'free_text' => $freeText];
+        }
+
+        $task = $this->loadTaskForUser($taskId, $userId);
+        if ($task === null) {
+            return $this->notFound();
+        }
+
+        if ($task->status !== 'AWAITING_INPUT') {
+            return $this->error('Task is not awaiting input.');
+        }
+
+        if (!is_string($task->pending_state) || $task->pending_state === '') {
+            return $this->error('No pending question batch on this task.');
+        }
+
+        try {
+            $state = AgentState::fromJson($task->pending_state);
+        } catch (InvalidArgumentException) {
+            return $this->error('Malformed pending_state on this task.');
+        }
+
+        $batch = null;
+        foreach ($state->pendingQuestions as $candidate) {
+            if ($candidate->toolCallId === $toolCallId) {
+                $batch = $candidate;
+                break;
+            }
+        }
+        if ($batch === null) {
+            return $this->error("No pending question batch with tool_call_id '{$toolCallId}'.");
+        }
+
+        if (count($byHeader) !== count($batch->questions)) {
+            return $this->error(sprintf(
+                'Expected %d answer(s), got %d.',
+                count($batch->questions),
+                count($byHeader),
+            ));
+        }
+
+        $formatted = [];
+        foreach ($batch->questions as $question) {
+            $answer = $byHeader[$question->header] ?? null;
+            if ($answer === null) {
+                return $this->error("Missing answer for question: {$question->header}.");
+            }
+
+            $labels = [];
+            foreach ($question->options as $option) {
+                if (is_array($option) && isset($option['label'])) {
+                    $labels[] = (string) $option['label'];
+                }
+            }
+
+            foreach ($answer['selections'] as $sel) {
+                if (!in_array($sel, $labels, true)) {
+                    return $this->error("Unknown option '{$sel}' for question '{$question->header}'.");
+                }
+            }
+
+            if ($answer['free_text'] !== null && !$question->allowFreeText) {
+                return $this->error("Question '{$question->header}' does not allow free-text answers.");
+            }
+
+            $formatted[] = $this->formatAnswer($question, $answer['selections'], $answer['free_text']);
+        }
+
+        return [
+            'batch'    => $batch,
+            'formatted' => implode("\n", $formatted),
+            'byHeader' => $byHeader,
+        ];
+    }
+
+    /**
+     * @param list<string> $selections
+     */
+    private function formatAnswer(PendingQuestion $question, array $selections, ?string $freeText): string
+    {
+        $selectionsLiteral = '[' . implode(', ', array_map(static fn(string $s): string => '"' . $s . '"', $selections)) . ']';
+        $freeTextPart = $freeText === null ? '' : ' free_text: "' . $freeText . '"';
+        return "[ask_user_question selections: {$selectionsLiteral}{$freeTextPart}]";
+    }
+
+    private function loadTaskForUser(int $taskId, int $userId): ?\Spora\Models\Task
+    {
+        $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        $row = Capsule::table('tasks')
+            ->where('id', $taskId)
+            ->whereIn('principal_id', $visiblePrincipalIds)
+            ->first();
+        return $row === null ? null : \Spora\Models\Task::find($row->id);
+    }
+
+    private function error(string $message): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $message]],
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
+    }
+
+    private function notFound(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'NOT_FOUND', 'message' => 'Task not found.']],
+            Response::HTTP_NOT_FOUND,
+        );
+    }
+}

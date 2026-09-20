@@ -8,8 +8,11 @@ use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
+use JsonException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\ValueObjects\AgentState;
+use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -317,6 +320,87 @@ final class TaskService implements TaskServiceInterface
         $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
+    {
+        $result = Capsule::connection()->transaction(function () use ($taskId, $userId, $toolCallId, $formattedContent): array {
+            $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+            $task = Task::where('id', $taskId)
+                ->whereIn('principal_id', $visiblePrincipalIds)
+                ->lockForUpdate()
+                ->first();
+            if ($task === null) {
+                throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
+            }
+            if ($task->status !== 'AWAITING_INPUT') {
+                throw new InvalidArgumentException('Task is not awaiting input.');
+            }
+
+            // Append exactly one tool history row per batch — mirrors the
+            // orchestrator's batched-tool-call pattern. The LLM sees a
+            // single coherent answer block, not per-question fragments.
+            $this->orchestrator->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: $formattedContent,
+                context: new HistoryMessageContext(
+                    toolCallId: $toolCallId,
+                    toolName: 'ask_user_question',
+                ),
+            );
+
+            // Drop the answered batch from pending_state. If another
+            // batch is still pending (multiple ask_user_question calls
+            // in different turns), keep AWAITING_INPUT — the operator
+            // still has work to do.
+            $remaining = [];
+            if (is_string($task->pending_state) && $task->pending_state !== '') {
+                try {
+                    $existing = AgentState::fromJson($task->pending_state);
+                    foreach ($existing->pendingQuestions as $candidate) {
+                        if ($candidate->toolCallId !== $toolCallId) {
+                            $remaining[] = $candidate;
+                        }
+                    }
+                } catch (JsonException) {
+                    // Malformed pending_state — drop the column entirely
+                    // rather than carry forward corrupted data.
+                }
+            }
+
+            if ($remaining === []) {
+                $task->status = 'QUEUED';
+                $task->pending_state = null;
+            } else {
+                $state = new AgentState(
+                    taskId: $task->id,
+                    agentId: $task->agent_id,
+                    pendingToolCalls: [],
+                    messageSnapshot: [],
+                    stepCount: $task->step_count,
+                    maxSteps: $task->max_steps,
+                    pausedAt: gmdate('Y-m-d\TH:i:s\Z'),
+                    pendingQuestions: $remaining,
+                );
+                $task->pending_state = $state->toJson();
+            }
+            $task->save();
+
+            $fresh = $task->fresh();
+            return $this->taskResource($fresh);
+        });
+
+        $this->mercure->publishForPrincipal(
+            $taskId,
+            (int) Task::find($taskId)->principal_id,
+            $result,
+        );
+
+        return $result;
     }
 
     /**

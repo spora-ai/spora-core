@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.23.0-11-gc7c3b187"
+        "version": "0.25.0"
     },
     "servers": [
         {
@@ -2289,6 +2289,95 @@
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/answer": {
+            "post": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Answer pending question batch",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tool_call_id",
+                                    "answers"
+                                ],
+                                "properties": {
+                                    "tool_call_id": {
+                                        "type": "string"
+                                    },
+                                    "answers": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "header",
+                                                "selections"
+                                            ],
+                                            "properties": {
+                                                "header": {
+                                                    "type": "string"
+                                                },
+                                                "selections": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "free_text": {
+                                                    "type": "string",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "Answer accepted."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
+                    },
+                    "422": {
+                        "description": "VALIDATION_ERROR — malformed body or unknown header/selection."
                     }
                 },
                 "security": [

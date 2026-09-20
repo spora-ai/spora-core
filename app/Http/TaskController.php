@@ -33,6 +33,7 @@ final class TaskController
         private readonly TaskMediaCapabilityService $mediaCapability,
         private readonly ContinueTaskDispatcher $continuationDispatcher,
         private readonly DecisionsRequestValidator $decisionsValidator,
+        private readonly AnswerQuestionRequestValidator $answerValidator,
     ) {}
 
     /**
@@ -323,6 +324,88 @@ final class TaskController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * POST /api/v1/tasks/{taskId}/answer
+     *
+     * Submit the operator's answers to a pending question batch parked on
+     * an `AWAITING_INPUT` task. The whole batch is answered atomically —
+     * the request must include exactly one answer per question in the
+     * batch, keyed by `header`. On success: a single `role='tool'`
+     * history row is appended carrying the formatted answers, the batch
+     * is removed from `pending_state`, and the task either flips to
+     * `QUEUED` (no more batches pending) or stays in `AWAITING_INPUT`
+     * (more batches still pending). Returns 204 No Content.
+     */
+    #[OA\Post(
+        path: '/api/v1/tasks/{taskId}/answer',
+        tags: ['Tasks'],
+        summary: 'Answer pending question batch',
+        parameters: [
+            new OA\Parameter(
+                name: 'taskId',
+                in: 'path',
+                required: true,
+                schema: new OA\Schema(type: 'string'),
+            ),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                type: 'object',
+                required: ['tool_call_id', 'answers'],
+                properties: [
+                    new OA\Property(property: 'tool_call_id', type: 'string'),
+                    new OA\Property(
+                        property: 'answers',
+                        type: 'array',
+                        items: new OA\Items(
+                            type: 'object',
+                            required: ['header', 'selections'],
+                            properties: [
+                                new OA\Property(property: 'header', type: 'string'),
+                                new OA\Property(property: 'selections', type: 'array', items: new OA\Items(type: 'string')),
+                                new OA\Property(property: 'free_text', type: 'string', nullable: true),
+                            ],
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        responses: [
+            new OA\Response(response: 204, description: 'Answer accepted.'),
+            new OA\Response(response: 404, description: 'NOT_FOUND — task is not owned by the calling user.'),
+            new OA\Response(response: 422, description: 'VALIDATION_ERROR — malformed body or unknown header/selection.'),
+        ],
+    )]
+    public function answer(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $taskId = (int) $request->attributes->get('taskId', 0);
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->invalidJsonResponse();
+        }
+
+        $parsed = $this->answerValidator->parseAndValidate($body, $taskId, $userId);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
+        }
+
+        try {
+            $this->taskService->answerTask(
+                $taskId,
+                $userId,
+                $parsed['batch']->toolCallId,
+                $parsed['formatted'],
+            );
+            return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        } catch (InvalidArgumentException $e) {
+            return $this->errorForException($e);
+        }
     }
 
     /**

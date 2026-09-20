@@ -26,4 +26,7 @@ enum ToolCallDisposition: string
 
     /** Tool queued for human approval; record written, awaiting user input. */
     case AwaitingApproval = 'awaiting_approval';
+
+    /** Tool queued for user answers (ask_user_question); record written, task parked in AWAITING_INPUT. */
+    case AwaitingInput = 'awaiting_input';
 }

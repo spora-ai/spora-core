@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Exceptions\ToolNotEnabledException;
+use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
@@ -13,6 +15,9 @@ use Spora\Models\Task;
 use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\ScrubDataUrls;
 use Spora\Services\Text\Utf8Sanitizer;
+use Spora\Tools\AskUserQuestionTool;
+use Spora\Tools\PendingQuestion;
+use Spora\Tools\PendingQuestionBatch;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -75,6 +80,18 @@ final class ToolCallExecutor
         }
 
         $requiresApproval = $this->orchestrator->resolveRequiresApproval($toolInstance, $toolClass, $agent->id, $toolCall->arguments);
+
+        // ask_user_question is structurally a "pause-the-tick" tool, not a
+        // normal execute-and-return. It validates its arguments, returns a
+        // placeholder ToolResult, and the caller is expected to treat the
+        // call as AwaitingInput + park the task on a PendingQuestionBatch.
+        // Routing it through the inline-execute path would flip the task
+        // to APPROVED/COMPLETED before any answer ever lands.
+        if ($toolInstance instanceof AskUserQuestionTool) {
+            $toolCallRecord = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, false, $toolInstance);
+            return $this->validateAndParkQuestion($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $operationName);
+        }
+
         $toolCallRecord   = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, $requiresApproval, $toolInstance);
 
         $hasOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
@@ -125,6 +142,125 @@ final class ToolCallExecutor
         }
 
         return ToolCallDisposition::AwaitingApproval;
+    }
+
+    /**
+     * AskUserQuestion-specific path: validate the schema, run the tool's
+     * deeper validation (header length, option counts, …) by calling it,
+     * and on success park the task on a fresh PendingQuestionBatch and
+     * flip the status to AWAITING_INPUT. On validation failure, record
+     * the rejection so the LLM sees a tool row carrying the error.
+     *
+     * Mirrors {@see validateAndExecute()} but writes the row with
+     * status='APPROVED' + a placeholder result so the tool-call row in
+     * the timeline still reflects "the LLM called this tool and it ran",
+     * while the *task* status reflects the parked input state.
+     */
+    private function validateAndParkQuestion(
+        Task           $task,
+        DriverToolCall $toolCall,
+        ToolInterface  $toolInstance,
+        Agent          $agent,
+        ToolCallModel  $toolCallRecord,
+        ?string        $operationName,
+    ): ToolCallDisposition {
+        try {
+            SchemaValidator::validate(
+                $toolCall->arguments,
+                $toolInstance->getParametersSchema(),
+                $operationName,
+            );
+        } catch (Throwable $e) {
+            $this->recordValidationFailure($task, $toolCallRecord, $e, $toolCall);
+            return ToolCallDisposition::ValidationFailed;
+        }
+
+        $result = $this->orchestrator->safeExecute($toolInstance, $toolCall->arguments, $agent->id, $task->id);
+
+        $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content));
+
+        Capsule::connection()->transaction(function () use ($task, $toolCall, $toolCallRecord, $scrubbed, $result): void {
+            // The row is written as APPROVED with executed_at stamped so the
+            // approval-pending UI doesn't surface the call; the parked-task
+            // status on the task row is the source of truth for "waiting".
+            $toolCallRecord->update([
+                'status'         => 'APPROVED',
+                'result_content' => $scrubbed,
+                'result_data'    => $result->data,
+                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+            ]);
+
+            $this->orchestrator->appendHistory(
+                taskId: $task->id,
+                role: 'tool',
+                content: $scrubbed,
+                context: new HistoryMessageContext(
+                    toolCallId: $toolCall->providerCallId,
+                    toolName: $toolCall->toolName,
+                ),
+            );
+
+            if (!$result->success) {
+                // Tool's deeper validation failed (e.g. >4 questions, header
+                // too long). The ToolResult carries the human-readable error;
+                // we leave the task running so the LLM can retry on its next
+                // turn. We also need to drop the just-stamped row out of the
+                // batch picker's view, so we re-read pending_state and write
+                // back a state without the failed batch.
+                return;
+            }
+
+            // Build the PendingQuestionBatch from the validated input.
+            $questions = [];
+            foreach (($toolCall->arguments['questions'] ?? []) as $rawQuestion) {
+                if (!is_array($rawQuestion)) {
+                    continue;
+                }
+                $questions[] = PendingQuestion::fromLlmInput($rawQuestion);
+            }
+            $batch = PendingQuestionBatch::build($toolCall->providerCallId, $questions);
+
+            // Merge into any existing pending_state (a later tool call in
+            // the same tick that lands as AwaitingApproval keeps its row in
+            // pending_tool_calls alongside the new batch).
+            /** @var list<PendingQuestionBatch> $existingQuestions */
+            $existingQuestions = [];
+            /** @var list<\Spora\Drivers\ValueObjects\ToolCall> $existingToolCalls */
+            $existingToolCalls = [];
+            $existingSnapshot = [];
+            if (is_string($task->pending_state) && $task->pending_state !== '') {
+                try {
+                    $existing = AgentState::fromJson($task->pending_state);
+                    $existingQuestions = $existing->pendingQuestions;
+                    $existingToolCalls = $existing->pendingToolCalls;
+                    $existingSnapshot = $existing->messageSnapshot;
+                } catch (Throwable) {
+                    // Bad JSON or shape drift — fall through with empty defaults.
+                }
+            }
+            $mergedQuestions = array_merge($existingQuestions, [$batch]);
+            $mergedState = new AgentState(
+                taskId: $task->id,
+                agentId: $task->agent_id,
+                pendingToolCalls: $existingToolCalls,
+                messageSnapshot: $existingSnapshot,
+                stepCount: $task->step_count,
+                maxSteps: $task->max_steps,
+                pausedAt: gmdate(Orchestrator::ISO8601_UTC_FORMAT),
+                pendingQuestions: $mergedQuestions,
+            );
+
+            Capsule::table('tasks')
+                ->where('id', $task->id)
+                ->update([
+                    'status'        => 'AWAITING_INPUT',
+                    'pending_state' => $mergedState->toJson(),
+                ]);
+        });
+
+        return $result->success
+            ? ToolCallDisposition::AwaitingInput
+            : ToolCallDisposition::Executed;
     }
 
     /**
@@ -202,7 +338,7 @@ final class ToolCallExecutor
     ): void {
         $result = new ToolResult(false, 'Validation Error: ' . $e->getMessage());
 
-        \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+        Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
             $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content));
             $toolCallRecord->update([
                 'status'         => 'APPROVED',
@@ -235,7 +371,7 @@ final class ToolCallExecutor
             $task->id,
         );
 
-        \Illuminate\Database\Capsule\Manager::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
+        Capsule::connection()->transaction(function () use ($toolCallRecord, $result, $task, $toolCall): void {
             $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content));
             $toolCallRecord->update([
                 'status'         => 'APPROVED',

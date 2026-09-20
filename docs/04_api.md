@@ -909,3 +909,85 @@ Per-agent ceiling on temp rows for the (user, agent) pair. Defaults to 5; 0 disa
 ### `media:gc --temporary [--older-than-hours N]`
 
 Reaps `is_temporary=TRUE` rows older than N hours (default 24). Without `--temporary`, the command keeps its orphan-sweep semantics unchanged.
+
+## `POST /api/v1/tasks/{taskId}/answer`
+
+Submit the operator's answers to a `ask_user_question` batch parked on an `AWAITING_INPUT` task. The whole batch is answered atomically — the request must include exactly one answer per question in the batch, keyed by `header`.
+
+### Request
+
+```jsonc
+{
+  "tool_call_id": "call_01HX...",          // required, must match a pending batch
+  "answers": [                              // required, exactly one entry per question
+    {
+      "header": "DB backend",                // must match question.header
+      "selections": ["SQLite"],              // required, list of selected option labels
+      "free_text": null                      // optional, only when allowFreeText=true
+    }
+  ]
+}
+```
+
+### 204 — accepted
+
+On success: the answer is appended as a single `role:tool` history row carrying all formatted answers (one row per batch — mirrors the orchestrator's batched-tool-call pattern). When no more pending batches remain, the task flips to `QUEUED`. When other batches are still pending, status stays `AWAITING_INPUT`.
+
+### Errors
+
+- **404 NOT_FOUND** — task is not owned by the calling user.
+- **422 VALIDATION_ERROR** — body malformed, `tool_call_id` does not match a pending batch, answer count != question count, an unknown `header` is supplied, an unknown `selections` label, or `free_text` was supplied for a `allowFreeText: false` question.
+
+## `tasks.data.todos` (TodoTool persistence)
+
+The `todo` tool persists its working list on the existing `tasks.data` JSON column at key `todos`:
+
+```jsonc
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "t_01HX...",
+      "content": "Migrate notes table to new schema",
+      "activeForm": "Migrating notes table to new schema",
+      "status": "in_progress",            // pending | in_progress | completed
+      "order": 0
+    }
+  ],
+  "updated_at": "2026-09-19T10:30:00+00:00"
+}
+```
+
+`tasks.data` is already serialized to the operator chat (`TaskDetail` payload) and surfaced on Mercure events — no extra API is needed for the SPA to render the todo state. The `MessageHistoryBuilder::compactHistory()` path trims `task_history` rows but never touches `tasks.data`, so the todo list survives context-window compaction.
+
+## `tasks.pending_state.pending_questions` (AskUserQuestion lifecycle)
+
+`ask_user_question` batches are persisted on `tasks.pending_state` under the `pending_questions` key (parallel to the existing `pending_tool_calls` for `PENDING_APPROVAL`). Each batch carries the tool_call_id, the question list, and the creation timestamp:
+
+```jsonc
+{
+  "tool_call_id": "call_01HX...",
+  "questions": [
+    {
+      "question": "Which database backend should we use?",
+      "header": "DB backend",
+      "options": [
+        {"label": "SQLite", "description": "Zero-config, single file", "preview": null},
+        {"label": "MySQL",  "description": "Shared hosting friendly", "preview": null}
+      ],
+      "multiple": false,
+      "allowFreeText": true
+    }
+  ],
+  "created_at": "2026-09-19T10:30:00+00:00"
+}
+```
+
+Multiple batches may coexist when the LLM invokes `ask_user_question` across separate turns. The Mercure intermediate-state event publishes `pending_questions` whenever the task is in `AWAITING_INPUT`, so the chat UI renders the picker without a follow-up `/show` fetch.
+
+The new task status `AWAITING_INPUT` is the parallel to `PENDING_APPROVAL`:
+- new lifecycle state, added to `TaskLifecyclePolicy::QUIESCENT_STATUSES`
+- flips to `QUEUED` on `/answer` when no more batches remain
+- stays `AWAITING_INPUT` when other batches are still pending
+- `ToolCallDisposition::AwaitingInput` is the parallel to `AwaitingApproval`
+

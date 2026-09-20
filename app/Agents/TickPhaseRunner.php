@@ -25,6 +25,7 @@ use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
+use Spora\Tools\PendingQuestionBatch;
 use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
@@ -543,12 +544,26 @@ final class TickPhaseRunner
         /** @var list<DriverToolCall> $pendingApproval */
         $pendingApproval = [];
 
+        /** @var list<array{toolCall: DriverToolCall, batch: PendingQuestionBatch}> $pendingInput */
+        $pendingInput = [];
+
         foreach ($toolCalls as $toolCall) {
             try {
                 $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task);
 
                 if ($disposition === ToolCallDisposition::AwaitingApproval) {
                     $pendingApproval[] = $toolCall;
+                } elseif ($disposition === ToolCallDisposition::AwaitingInput) {
+                    // The ask_user_question tool left a PendingQuestionBatch
+                    // on the Task's pending_state (the executor mutates the
+                    // pending_state column in place). Pull it back out here
+                    // so we can build the new AgentState with the merged
+                    // list — multiple pending batches may already be there
+                    // from earlier turns.
+                    $batch = $this->extractLastPendingBatch($task);
+                    if ($batch !== null) {
+                        $pendingInput[] = ['toolCall' => $toolCall, 'batch' => $batch];
+                    }
                 }
             } catch (ToolNotEnabledException $e) {
                 // Authorization drift: the LLM proposed a tool that is no longer
@@ -581,7 +596,7 @@ final class TickPhaseRunner
             }
         }
 
-        if ($pendingApproval === []) {
+        if ($pendingApproval === [] && $pendingInput === []) {
             // Abort-bail: a user abort could have landed between this tick's
             // claim and the completion of the tool batch. We accept the user's
             // request up to this tool boundary — once the latest tool
@@ -651,6 +666,12 @@ final class TickPhaseRunner
 
             $this->orchestrator->tick($task->id);
         } else {
+            // Input takes precedence over approval when both queues are
+            // non-empty in the same tick — operators answer the question
+            // batch first; the queued approvals stay in pending_state and
+            // re-present after the answer transition resumes the loop.
+            $isAwaitingInput = $pendingInput !== [];
+
             $state = new AgentState(
                 taskId: $task->id,
                 agentId: $agent->id,
@@ -659,23 +680,30 @@ final class TickPhaseRunner
                 stepCount: $task->step_count,
                 maxSteps: $task->max_steps,
                 pausedAt: date('Y-m-d\TH:i:s\Z'),
+                pendingQuestions: array_map(static fn(array $entry): PendingQuestionBatch => $entry['batch'], $pendingInput),
             );
 
-            $task->status        = 'PENDING_APPROVAL';
+            $task->status        = $isAwaitingInput ? 'AWAITING_INPUT' : 'PENDING_APPROVAL';
             $task->pending_state = $state->toJson();
             $task->save();
 
             $toolNames = implode(', ', array_unique(array_map(
                 static fn(DriverToolCall $tc) => $tc->toolName,
-                $pendingApproval,
+                $isAwaitingInput
+                    ? array_map(static fn(array $entry): DriverToolCall => $entry['toolCall'], $pendingInput)
+                    : $pendingApproval,
             )));
-            $this->logger?->info('Task paused — approval needed', [
+            $this->logger?->info($isAwaitingInput ? 'Task paused — user input needed' : 'Task paused — approval needed', [
                 'task_id' => $task->id,
-                'tool_count' => count($pendingApproval),
+                'tool_count' => $isAwaitingInput ? count($pendingInput) : count($pendingApproval),
                 'tools' => $toolNames,
             ]);
 
-            $this->notificationService?->notifyPendingApproval($task);
+            if ($isAwaitingInput) {
+                $this->notificationService?->notifyAwaitingInput($task);
+            } else {
+                $this->notificationService?->notifyPendingApproval($task);
+            }
 
             $this->publishIntermediateState($task);
         }
@@ -702,7 +730,56 @@ final class TickPhaseRunner
             'totals' => $totals,
         ];
 
+        // Surface pending question batches on the Mercure event so the
+        // chat UI can render the picker without an extra `/show` fetch.
+        // We re-read the column — the in-memory $task was loaded before
+        // the executor wrote the new batch, and the runner's own write
+        // happened just before this method runs.
+        $fresh = Task::where('id', $task->id)->first();
+        if ($fresh !== null
+            && $fresh->status === 'AWAITING_INPUT'
+            && is_string($fresh->pending_state)
+            && $fresh->pending_state !== ''
+        ) {
+            try {
+                $state = AgentState::fromJson($fresh->pending_state);
+                if ($state->pendingQuestions !== []) {
+                    $taskData['pending_questions'] = array_map(
+                        static fn(PendingQuestionBatch $b): array => $b->toArray(),
+                        $state->pendingQuestions,
+                    );
+                }
+            } catch (Throwable) {
+                // Bad JSON or shape drift — fall through without pending_questions.
+            }
+        }
+
         $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $taskData);
+    }
+
+    /**
+     * Pull the most-recently-appended PendingQuestionBatch out of the
+     * task's pending_state column. Used by {@see handleToolCalls()} to
+     * fold a just-executed ask_user_question call into the AgentState
+     * snapshot it is about to write.
+     *
+     * Returns null if pending_state is missing, malformed, or contains
+     * zero batches (caller treats null as "nothing to fold in").
+     */
+    private function extractLastPendingBatch(Task $task): ?PendingQuestionBatch
+    {
+        if (!is_string($task->pending_state) || $task->pending_state === '') {
+            return null;
+        }
+        try {
+            $state = AgentState::fromJson($task->pending_state);
+        } catch (Throwable) {
+            return null;
+        }
+        if ($state->pendingQuestions === []) {
+            return null;
+        }
+        return $state->pendingQuestions[array_key_last($state->pendingQuestions)];
     }
 
     /**

@@ -22,6 +22,7 @@ function makeTaskController(): array
         new TaskMediaCapabilityService(),
         new ContinueTaskDispatcher($service, new TaskMediaCapabilityService()),
         new DecisionsRequestValidator($service),
+        new \Spora\Http\AnswerQuestionRequestValidator(new \Spora\Services\PrincipalResolver()),
     );
 
     return [$controller, $authService, $service];

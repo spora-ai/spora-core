@@ -13,7 +13,7 @@ namespace Spora\Agents;
  * Status taxonomy:
  *   - Terminal   : no further transitions. COMPLETED, FAILED, CANCELLED.
  *   - Quiescent  : requires user action before the worker re-engages.
- *                  ABORTED, PENDING_APPROVAL, AWAITING_SUB_AGENTS.
+ *                  ABORTED, PENDING_APPROVAL, AWAITING_INPUT, AWAITING_SUB_AGENTS.
  *   - Active     : the worker / orchestrator is currently driving the task.
  *                  RUNNING, QUEUED.
  */
@@ -23,7 +23,7 @@ final class TaskLifecyclePolicy
     public const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
     /** @var list<string> */
-    public const QUIESCENT_STATUSES = ['ABORTED', 'PENDING_APPROVAL', 'AWAITING_SUB_AGENTS'];
+    public const QUIESCENT_STATUSES = ['ABORTED', 'PENDING_APPROVAL', 'AWAITING_INPUT', 'AWAITING_SUB_AGENTS'];
 
     /** @var list<string> */
     public const ACTIVE_STATUSES = ['RUNNING', 'QUEUED'];
@@ -50,9 +50,9 @@ final class TaskLifecyclePolicy
 
     /**
      * True when `abortTask()` may flip the status to `ABORTED`.
-     * `PENDING_APPROVAL` is rejected with 409 because that state already
-     * offers a dedicated approve/reject affordance — overloading it with
-     * an "abort" would change user-facing semantics.
+     * `PENDING_APPROVAL` and `AWAITING_INPUT` are rejected with 409 because
+     * those states already offer dedicated approve/reject/answer affordances
+     * — overloading them with an "abort" would change user-facing semantics.
      */
     public function canAbortFrom(string $status): bool
     {
