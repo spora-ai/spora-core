@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Todo\TodoStoreRegistry;
+use Spora\Tools\Attributes\Tool;
 use Spora\Tools\TodoTool;
 
 function todoTool(TodoStoreRegistry $registry = new TodoStoreRegistry()): TodoTool
@@ -10,16 +11,23 @@ function todoTool(TodoStoreRegistry $registry = new TodoStoreRegistry()): TodoTo
     return new TodoTool($registry);
 }
 
+function todoToolDescription(): string
+{
+    $attrs = (new ReflectionClass(TodoTool::class))->getAttributes(Tool::class);
+    return $attrs[0]->newInstance()->description;
+}
+
 it('rejects when todos argument is missing', function (): void {
     $result = todoTool()->execute([], 1, null, 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain("'todos' is missing");
+        ->and($result->content)->toContain("For op=write, 'todos' is required");
 });
 
 it('rejects when todos is not an array', function (): void {
     $result = todoTool()->execute(['todos' => 'not-an-array'], 1, null, 1);
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('must be an array');
+        ->and($result->content)->toContain('must be an array')
+        ->and($result->content)->toContain('op=write');
 });
 
 it('clears the list when an empty array is supplied', function (): void {
@@ -65,7 +73,8 @@ it('rejects todo items with unknown status', function (): void {
     ], 1, null, 1);
 
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain("status must be one of");
+        ->and($result->content)->toContain("'status' must be one of")
+        ->and($result->content)->toContain('pending, in_progress, completed');
 });
 
 it('accepts multiple items and surfaces a warning when more than one is in_progress', function (): void {
@@ -334,6 +343,193 @@ it('op=set_status rejects an unknown status value', function (): void {
         ->and($result->content)->toContain("must be one of: pending, in_progress, completed");
 });
 
+it('op=set_status rejects when applying would leave more than one in_progress', function (): void {
+    $taskId = createTodoTestTask();
+
+    todoTool()->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'A', 'status' => 'in_progress', 'id' => 'a'],
+            ['content' => 'B', 'status' => 'pending',     'id' => 'b'],
+        ],
+    ], 1, null, $taskId);
+
+    $result = todoTool()->execute([
+        'op'     => 'set_status',
+        'id'     => 'b',
+        'status' => 'in_progress',
+    ], 1, null, $taskId);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("Cannot mark 'b' as 'in_progress'")
+        ->and($result->content)->toContain('would leave 2 items in_progress')
+        ->and($result->content)->toContain('Maintain exactly one')
+        ->and($result->content)->toContain('[a, b]');
+});
+
+it('op=set_status rejects with all offending ids when three items would conflict', function (): void {
+    $taskId = createTodoTestTask();
+
+    todoTool()->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'A', 'status' => 'in_progress', 'id' => 'a'],
+            ['content' => 'B', 'status' => 'pending',     'id' => 'b'],
+            ['content' => 'C', 'status' => 'pending',     'id' => 'c'],
+        ],
+    ], 1, null, $taskId);
+
+    $result = todoTool()->execute([
+        'op'     => 'set_status',
+        'id'     => 'c',
+        'status' => 'in_progress',
+    ], 1, null, $taskId);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('would leave 2 items in_progress')
+        ->and($result->content)->toContain('[a, c]');
+});
+
+it('op=set_status still completes an in_progress item while another is in_progress (no in_progress added)', function (): void {
+    // Sanity-check that flipping TO pending or completed is allowed
+    // even when other items are in_progress — the guard only fires when
+    // the new status would create a second in_progress.
+    $taskId = createTodoTestTask();
+
+    todoTool()->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'A', 'status' => 'in_progress', 'id' => 'a'],
+            ['content' => 'B', 'status' => 'pending',     'id' => 'b'],
+        ],
+    ], 1, null, $taskId);
+
+    $result = todoTool()->execute([
+        'op'     => 'set_status',
+        'id'     => 'b',
+        'status' => 'completed',
+    ], 1, null, $taskId);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->content)->not->toContain('Cannot mark');
+});
+
+it('op=set_status to in_progress succeeds when no other item is currently in_progress', function (): void {
+    $taskId = createTodoTestTask();
+
+    todoTool()->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'A', 'status' => 'completed', 'id' => 'a'],
+            ['content' => 'B', 'status' => 'pending',   'id' => 'b'],
+        ],
+    ], 1, null, $taskId);
+
+    $result = todoTool()->execute([
+        'op'     => 'set_status',
+        'id'     => 'b',
+        'status' => 'in_progress',
+    ], 1, null, $taskId);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->content)->toContain('- [~] B')
+        ->and($result->content)->not->toContain('Cannot mark');
+});
+
+it('op=set_status names the missing id and the offending op in the error', function (): void {
+    $result = todoTool()->execute(['op' => 'set_status', 'status' => 'completed'], 1, null, 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("For op=set_status, 'id' is required")
+        ->and($result->content)->toContain('top-level');
+});
+
+it('op=set_status names the missing status in the error', function (): void {
+    $result = todoTool()->execute(['op' => 'set_status', 'id' => 'a'], 1, null, 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("For op=set_status, 'status' is required")
+        ->and($result->content)->toContain('pending, in_progress, completed');
+});
+
+it('op=add names the missing item field in the error', function (): void {
+    $result = todoTool()->execute(['op' => 'add'], 1, null, 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("For op=add, 'item' is required")
+        ->and($result->content)->toContain("'content'");
+});
+
+it('op=write names the missing todos field in the error', function (): void {
+    $result = todoTool()->execute(['op' => 'write'], 1, null, 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("For op=write, 'todos' is required");
+});
+
+it('op=add duplicate-id error mentions op=set_status as the recovery path', function (): void {
+    $taskId = createTodoTestTask();
+
+    todoTool()->execute([
+        'op'    => 'write',
+        'todos' => [['content' => 'Existing', 'status' => 'pending', 'id' => 'shared']],
+    ], 1, null, $taskId);
+
+    $result = todoTool()->execute([
+        'op'   => 'add',
+        'item' => ['content' => 'Clash', 'id' => 'shared'],
+    ], 1, null, $taskId);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("For op=add, 'item.id' 'shared' is already in the list")
+        ->and($result->content)->toContain('op=set_status');
+});
+
+it('description documents all four ops and their parameter sets', function (): void {
+    $description = todoToolDescription();
+
+    expect($description)
+        ->toContain('op=write:')
+        ->toContain('{op, todos}')
+        ->toContain('op=add:')
+        ->toContain('{op, item}')
+        ->toContain('op=set_status:')
+        ->toContain('{op, id, status}')
+        ->toContain('op=read:')
+        ->toContain('{op}');
+});
+
+it('description includes worked examples for all four ops', function (): void {
+    $description = todoToolDescription();
+
+    // The <examples> block must carry a copy-paste-ready payload per op;
+    // if a future edit accidentally drops one, this catches it before the
+    // LLM sees a schema-only prompt and burns a turn guessing shapes.
+    expect($description)
+        ->toContain('<examples>')
+        ->toContain('"op": "write"')
+        ->toContain('"op": "add"')
+        ->toContain('"op": "set_status"')
+        ->toContain('"op": "read"');
+});
+
+it('description clarifies that set_status id is top-level, not nested in a wrapper', function (): void {
+    $description = todoToolDescription();
+
+    expect($description)
+        ->toContain('top-level')
+        ->toContain('not inside any wrapper object');
+});
+
+it('description clarifies that item is op=add only', function (): void {
+    $description = todoToolDescription();
+
+    expect($description)
+        ->toContain('item')
+        ->toContain('ONLY field')
+        ->toContain('op=add');
+});
+
 it('op=read returns the current state without mutation', function (): void {
     $taskId = createTodoTestTask();
 
@@ -400,6 +596,19 @@ it('echo invariant — every op returns the full new state in content and data.i
     $fourthId = $add->data['items'][3]['id'];
     expect(array_column($add->data['items'], 'id'))->toContain('run-migration', 'update-api', 'send-notification', $fourthId);
 
+    // Complete run-migration first so the next set_status can move
+    // update-api to in_progress without violating the one-in-progress
+    // invariant (which the guard now hard-rejects).
+    $complete = todoTool()->execute([
+        'op'     => 'set_status',
+        'id'     => 'run-migration',
+        'status' => 'completed',
+    ], 1, null, $taskId);
+    expect($complete->data['items'])->toHaveCount(4);
+    expect(array_column($complete->data['items'], 'status'))->toBe([
+        'completed', 'pending', 'completed', 'pending',
+    ]);
+
     $set = todoTool()->execute([
         'op'     => 'set_status',
         'id'     => 'update-api',
@@ -407,9 +616,9 @@ it('echo invariant — every op returns the full new state in content and data.i
     ], 1, null, $taskId);
     expect($set->data['items'])->toHaveCount(4);
     expect(array_column($set->data['items'], 'status'))->toBe([
-        'in_progress', 'in_progress', 'completed', 'pending',
+        'completed', 'in_progress', 'completed', 'pending',
     ]);
-    expect($set->content)->toContain('**Note:** 2 items are marked `in_progress` at once');
+    expect($set->content)->not->toContain('**Note:**');
 
     $read = todoTool()->execute(['op' => 'read'], 1, null, $taskId);
     expect($read->data['items'])->toBe($set->data['items']);

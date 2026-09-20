@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Services\PrincipalContext;
+use Spora\Todo\TodoGuardException;
 use Spora\Todo\TodoItem;
 use Spora\Todo\TodoItemStatus;
 use Spora\Todo\TodoState;
@@ -39,28 +40,35 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 #[Tool(
     name: 'todo',
-    description: 'Manage a structured task list for the current work. '
-               . 'Use proactively for multi-step tasks (3+ steps); skip trivial '
-               . 'single-step requests, informational questions, or pure conversation. '
-               . 'Mark an item `in_progress` BEFORE you start work on it, and mark it '
-               . '`completed` immediately after — do not batch completions. Maintain '
-               . 'exactly one `in_progress` item at any moment; if you find yourself '
-               . 'with zero or more than one, fix the list before continuing. Remove '
-               . 'items that are no longer relevant; do not keep stale entries. Each '
-               . 'item carries both forms: `content` (imperative, e.g. "Run the '
-               . 'migration") and `activeForm` (present continuous, e.g. "Running '
-               . 'the migration"). If work on an item is blocked, leave it '
-               . '`in_progress` and add a new item describing the blocker; never mark '
-               . 'an item complete unless its work is fully done. '
-               . 'Select the operation via `op`: "write" replaces the whole list '
-               . '(pass an empty `todos` array to clear), "add" appends a single '
-               . 'item (pass `id` explicitly when you want a stable handle for later '
-               . '`set_status` calls; otherwise one is generated from `content` with '
-               . '`-2`, `-3` suffixes on collision), "set_status" flips one item\'s '
-               . 'status by id (idempotent — re-marking `completed` is fine), and '
-               . '"read" returns the current state without mutating. Every op '
-               . 'returns the full new state — use that echo to confirm the call '
-               . 'took effect.',
+    description: <<<'TEXT'
+Manage a structured task list for the current work. Use proactively for multi-step tasks (3+ steps); skip trivial single-step requests, informational questions, or pure conversation.
+
+Select the operation via `op`. Each op takes only the fields shown next to it — sending any other field is a validation error.
+    op=write:        {op, todos}
+    op=add:          {op, item}
+    op=set_status:   {op, id, status}
+    op=read:         {op}
+
+For op=set_status, `id` is the item's id at the TOP LEVEL of the call (not inside any wrapper object). The id comes from earlier ops via `data.items[i].id`.
+For op=add, `item` is the ONLY field that takes the new entry — a top-level object with at least `content`, and optionally `id`, `activeForm`, `status`.
+Do NOT send `todos` for `set_status` or `read`; do NOT send `item` for `write`.
+
+Lifecycle:
+- Mark an item `in_progress` BEFORE you start work on it.
+- Mark it `completed` immediately after — do not batch completions.
+- Maintain exactly one `in_progress` item at any moment. `set_status` will REJECT a write that would leave more than one in_progress, so complete the current item before starting the next.
+- If work is blocked, leave the item `in_progress` and add a new item describing the blocker; never mark an item complete unless its work is fully done.
+- Each item carries both `content` (imperative, e.g. "Run the migration") and `activeForm` (present continuous, e.g. "Running the migration"). Use the same text in both when no live progress label is needed.
+- Items that are no longer relevant should be removed (omit them from the next `write`); do not keep stale entries.
+
+Every op returns the full new state — read `data.items[i].id` from the result to target the item on the next `set_status`.
+
+<examples>
+    {"op": "write", "todos": [{"content": "Run the migration", "status": "in_progress", "activeForm": "Running the migration", "id": "run-migration"}, {"content": "Update the API client", "status": "pending", "id": "update-api"}]}
+    {"op": "add", "item": {"content": "Send notification", "id": "send-notification", "status": "pending"}}
+    {"op": "set_status", "id": "run-migration", "status": "completed"}
+    {"op": "read"}
+TEXT,
     displayName: 'Task List',
     category: 'meta',
     icon: 'list-checks',
@@ -81,7 +89,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'set_status',
-    description: 'Update the status of one item by id. Order preserved; idempotent on the same status.',
+    description: 'Update the status of one item by id. Order preserved; idempotent on the same status. Rejected when the resulting state would have more than one `in_progress` item.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
     discriminatorKey: 'op',
@@ -108,7 +116,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'id',
     type: 'string',
-    description: 'For op=set_status: the `id` of the item to update. Returned in `data.items[i].id` from earlier ops.',
+    description: 'For op=set_status: the `id` of the item to update (top-level, returned in `data.items[i].id` from earlier ops).',
     required: ['set_status'],
 )]
 #[ToolParameter(
@@ -175,10 +183,13 @@ final class TodoTool extends AbstractTool
     {
         $todos = $arguments['todos'] ?? null;
         if ($todos === null) {
-            return new ToolResult(false, "Required argument 'todos' is missing.");
+            return new ToolResult(
+                false,
+                "For op=write, 'todos' is required (the full new todo list — pass [] to clear).",
+            );
         }
         if (!is_array($todos)) {
-            return new ToolResult(false, "Argument 'todos' must be an array.");
+            return new ToolResult(false, "For op=write, 'todos' must be an array.");
         }
 
         $items = [];
@@ -186,17 +197,17 @@ final class TodoTool extends AbstractTool
         $order = 0;
         foreach ($todos as $rawItem) {
             if (!is_array($rawItem)) {
-                return new ToolResult(false, 'Every todo item must be an object.');
+                return new ToolResult(false, "For op=write, every entry of 'todos' must be an object.");
             }
             $content = trim((string) ($rawItem['content'] ?? ''));
             if ($content === '') {
-                return new ToolResult(false, "Every todo item requires a non-empty 'content' string.");
+                return new ToolResult(false, "For op=write, every todo requires a non-empty 'content' string.");
             }
             $statusRaw = (string) ($rawItem['status'] ?? TodoItemStatus::Pending->value);
             if (TodoItemStatus::tryFrom($statusRaw) === null) {
                 return new ToolResult(
                     false,
-                    "Todo item status must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
+                    "For op=write, every todo's 'status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
                 );
             }
             $items[] = TodoItem::fromLlmInput($rawItem, $order);
@@ -222,22 +233,25 @@ final class TodoTool extends AbstractTool
     {
         $item = $arguments['item'] ?? null;
         if ($item === null) {
-            return new ToolResult(false, "Required argument 'item' is missing for op=add.");
+            return new ToolResult(
+                false,
+                "For op=add, 'item' is required (an object with at least 'content'; may also include 'id', 'activeForm', 'status').",
+            );
         }
         if (!is_array($item)) {
-            return new ToolResult(false, "Argument 'item' must be an object.");
+            return new ToolResult(false, "For op=add, 'item' must be an object.");
         }
 
         $content = trim((string) ($item['content'] ?? ''));
         if ($content === '') {
-            return new ToolResult(false, "Argument 'item' requires a non-empty 'content' string.");
+            return new ToolResult(false, "For op=add, 'item.content' must be a non-empty string.");
         }
 
         $statusRaw = (string) ($item['status'] ?? TodoItemStatus::Pending->value);
         if (TodoItemStatus::tryFrom($statusRaw) === null) {
             return new ToolResult(
                 false,
-                "Todo item status must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
+                "For op=add, 'item.status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
             );
         }
 
@@ -253,7 +267,7 @@ final class TodoTool extends AbstractTool
         if ($suppliedId !== null && isset($existingIds[$suppliedId])) {
             return new ToolResult(
                 false,
-                "Todo item id '{$suppliedId}' is already in the list. Use op=set_status to flip its status.",
+                "For op=add, 'item.id' '{$suppliedId}' is already in the list. Use op=set_status to flip its status.",
             );
         }
 
@@ -284,14 +298,23 @@ final class TodoTool extends AbstractTool
     {
         $id = trim((string) ($arguments['id'] ?? ''));
         if ($id === '') {
-            return new ToolResult(false, "Required argument 'id' is missing for op=set_status.");
+            return new ToolResult(
+                false,
+                "For op=set_status, 'id' is required (top-level; returned in data.items[i].id from earlier ops).",
+            );
         }
         $statusRaw = trim((string) ($arguments['status'] ?? ''));
+        if ($statusRaw === '') {
+            return new ToolResult(
+                false,
+                "For op=set_status, 'status' is required (one of: pending, in_progress, completed).",
+            );
+        }
         $status = TodoItemStatus::tryFrom($statusRaw);
         if ($status === null) {
             return new ToolResult(
                 false,
-                "Argument 'status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
+                "For op=set_status, 'status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
             );
         }
 
@@ -305,7 +328,32 @@ final class TodoTool extends AbstractTool
             return new ToolResult(false, "Todo item '{$id}' not found.");
         }
 
-        $state = $store->updateStatus($id, $status);
+        try {
+            $state = $store->updateStatus(
+                $id,
+                $status,
+                function (TodoState $post) use ($id, $status): void {
+                    if ($status !== TodoItemStatus::InProgress) {
+                        return;
+                    }
+                    $ids = [];
+                    foreach ($post->items as $item) {
+                        if ($item->status === TodoItemStatus::InProgress) {
+                            $ids[] = (string) $item->id;
+                        }
+                    }
+                    if (count($ids) > 1) {
+                        throw new TodoGuardException(
+                            "Cannot mark '{$id}' as '{$status->value}' — would leave "
+                            . count($ids) . ' items in_progress. Maintain exactly one. '
+                            . 'Currently in_progress: [' . implode(', ', $ids) . '].',
+                        );
+                    }
+                },
+            );
+        } catch (TodoGuardException $e) {
+            return new ToolResult(false, $e->getMessage());
+        }
 
         return $this->render($state, $this->countInProgress($state->items), 'set_status');
     }

@@ -225,3 +225,43 @@ it('op=set_status on a missing id does not mutate the persisted state', function
         ->and($after->items[0]->id)->toBe('only')
         ->and($after->updatedAt?->toIso8601String())->toBe($before->updatedAt?->toIso8601String());
 });
+
+it('op=set_status is hard-rejected when applying would leave more than one in_progress (DB unchanged)', function (): void {
+    $task = newTodoTestTask();
+    $tool = new TodoTool(new TodoStoreRegistry());
+
+    $tool->execute([
+        'op'    => 'write',
+        'todos' => [
+            ['content' => 'A', 'status' => 'in_progress', 'id' => 'a'],
+            ['content' => 'B', 'status' => 'pending',     'id' => 'b'],
+        ],
+    ], 1, null, $task->id);
+
+    $before = (new TodoStore($task->id))->read();
+    $beforeUpdatedAt = $before->updatedAt?->toIso8601String();
+    $beforeStatuses = array_map(static fn($i) => $i->status->value, $before->items);
+
+    $result = $tool->execute([
+        'op'     => 'set_status',
+        'id'     => 'b',
+        'status' => 'in_progress',
+    ], 1, null, $task->id);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain("Cannot mark 'b' as 'in_progress'")
+        ->and($result->content)->toContain('would leave 2 items in_progress')
+        ->and($result->content)->toContain('[a, b]');
+
+    $after = (new TodoStore($task->id))->read();
+    $afterStatuses = array_map(static fn($i) => $i->status->value, $after->items);
+
+    expect($afterStatuses)->toBe($beforeStatuses)
+        ->and($after->updatedAt?->toIso8601String())->toBe($beforeUpdatedAt);
+
+    // Also verify the change didn't land on tasks.data either — the
+    // rejection must roll back through every persistence path.
+    $taskRow = Task::find($task->id);
+    expect($taskRow->data['todos']['items'][0]['status'])->toBe('in_progress')
+        ->and($taskRow->data['todos']['items'][1]['status'])->toBe('pending');
+});

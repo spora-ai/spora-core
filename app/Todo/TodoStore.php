@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Todo;
 
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
 use Spora\Agents\Orchestrator;
@@ -26,25 +27,9 @@ final class TodoStore
 
     public function read(): TodoState
     {
-        $raw = Capsule::table('tasks')
+        return self::decodeData(Capsule::table('tasks')
             ->where('id', $this->taskId)
-            ->value('data');
-
-        if (!is_string($raw) || $raw === '') {
-            return TodoState::empty();
-        }
-
-        try {
-            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return TodoState::empty();
-        }
-
-        if (!is_array($decoded) || !isset($decoded['todos']) || !is_array($decoded['todos'])) {
-            return TodoState::empty();
-        }
-
-        return TodoState::fromArray($decoded['todos']);
+            ->value('data'));
     }
 
     public function replace(TodoState $next): void
@@ -66,41 +51,68 @@ final class TodoStore
         return $next;
     }
 
-    public function updateStatus(string $id, TodoItemStatus $status): TodoState
+    /**
+     * Flip one item's status under a row lock so concurrent `set_status`
+     * calls cannot race past each other.
+     *
+     * The read-mutate-write cycle is wrapped in a single transaction with
+     * `lockForUpdate`, so a second caller reading after the first commit
+     * sees the updated state before its guard decides whether to apply.
+     *
+     * The optional `$guard` callback receives the proposed post-state and
+     * may throw {@see TodoGuardException} to reject the write; the throw
+     * aborts the surrounding transaction so the database row is unchanged.
+     * Without a guard the call behaves like the legacy "happy path"
+     * updateStatus: idempotent, no-op on missing id or already-target status.
+     */
+    public function updateStatus(string $id, TodoItemStatus $status, ?Closure $guard = null): TodoState
     {
-        $current = $this->read();
-        $changed = false;
-        $items = [];
-        foreach ($current->items as $existing) {
-            if ($existing->id === $id) {
-                if ($existing->status !== $status) {
-                    $changed = true;
-                    $items[] = new TodoItem(
-                        id: $existing->id,
-                        content: $existing->content,
-                        activeForm: $existing->activeForm,
-                        status: $status,
-                        order: $existing->order,
-                    );
+        $result = TodoState::empty();
+        Capsule::connection()->transaction(function () use ($id, $status, $guard, &$result): void {
+            $row = Task::where('id', $this->taskId)->lockForUpdate()->first();
+            $current = $row === null ? TodoState::empty() : self::decodeData($row->data);
+
+            $items = [];
+            $changed = false;
+            foreach ($current->items as $existing) {
+                if ($existing->id === $id) {
+                    if ($existing->status !== $status) {
+                        $changed = true;
+                        $items[] = new TodoItem(
+                            id: $existing->id,
+                            content: $existing->content,
+                            activeForm: $existing->activeForm,
+                            status: $status,
+                            order: $existing->order,
+                        );
+                        continue;
+                    }
+                    $items[] = $existing;
                     continue;
                 }
                 $items[] = $existing;
-                continue;
             }
-            $items[] = $existing;
-        }
 
-        if (!$changed) {
-            return $current;
-        }
+            if (!$changed) {
+                $result = $current;
+                return;
+            }
 
-        $next = new TodoState(
-            version: TodoState::SCHEMA_VERSION,
-            items: $items,
-            updatedAt: CarbonImmutable::now('UTC'),
-        );
-        $this->writeState($next);
-        return $next;
+            $next = new TodoState(
+                version: TodoState::SCHEMA_VERSION,
+                items: $items,
+                updatedAt: CarbonImmutable::now('UTC'),
+            );
+
+            if ($guard !== null) {
+                $guard($next);
+            }
+
+            $this->writeState($next);
+            $result = $next;
+        });
+
+        return $result;
     }
 
     private function writeState(TodoState $next): void
@@ -124,5 +136,32 @@ final class TodoStore
                     'updated_at' => gmdate(Orchestrator::DB_TIMESTAMP_FORMAT),
                 ]);
         });
+    }
+
+    /**
+     * Decode the `tasks.data` JSON column into a {@see TodoState}. Used by
+     * both the unlocked `read()` path (raw query, returns JSON string) and
+     * the locked path inside `updateStatus` (Eloquent, returns the cast
+     * array) so the decoding rules live in one place.
+     */
+    private static function decodeData(mixed $raw): TodoState
+    {
+        if (is_array($raw)) {
+            $decoded = $raw;
+        } elseif (is_string($raw) && $raw !== '') {
+            try {
+                $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            } catch (JsonException) {
+                return TodoState::empty();
+            }
+        } else {
+            return TodoState::empty();
+        }
+
+        if (!isset($decoded['todos']) || !is_array($decoded['todos'])) {
+            return TodoState::empty();
+        }
+
+        return TodoState::fromArray($decoded['todos']);
     }
 }
