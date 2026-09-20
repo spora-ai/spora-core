@@ -10,9 +10,7 @@ use Spora\Services\LLMConfigPersistence;
 use Spora\Services\LLMConfigSchemaInspector;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
+    TestDatabaseFactory::boot();
     Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
 });
 

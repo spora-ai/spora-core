@@ -59,7 +59,8 @@
     },
     "autoload-dev": {
         "files": [
-            "tests/Support/CrossFileTestHelpers.php"
+            "tests/Support/CrossFileTestHelpers.php",
+            "tests/Support/TestDatabaseFactory.php"
         ],
         "psr-4": {
             "Tests\\": "tests/",

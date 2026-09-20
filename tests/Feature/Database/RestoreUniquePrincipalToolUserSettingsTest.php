@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
-use Spora\Core\Database;
 
 /**
  * Migration 0082 restores the unique constraint on
@@ -15,9 +14,11 @@ use Spora\Core\Database;
  * against fresh state.
  */
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly();
+    // `freshConnectionOnly()`: the test builds its own minimal schema,
+    // so we skip the framework's schema installer and just open a fresh
+    // DB connection (per-test on MySQL/MariaDB so the manual CREATE
+    // TABLE statements below don't collide with pre-existing tables).
+    TestDatabaseFactory::freshConnectionOnly();
 
     // `principals.user_id` holds the FK to `users.id`, so the parent table
     // must exist before we can insert any rows the migration dedups.

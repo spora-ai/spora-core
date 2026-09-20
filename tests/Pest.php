@@ -200,9 +200,15 @@ uses(Tests\Concerns\CreatesPrincipal::class)
         $GLOBALS['__spora_storage_dir_previous'] = getenv('SPORA_STORAGE_DIR');
         putenv('SPORA_STORAGE_DIR');
         unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
-        Spora\Core\Database::resetBootState();
-        $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-        $db->boot();
+
+        // `SPORA_TEST_DB_DRIVER` is read by the factory (default `sqlite`).
+        // The factory creates a per-worker DB on first call when set to
+        // `mysql` or `mariadb` and installs the schema once; subsequent
+        // `boot()` calls in the worker reconnect without re-installing
+        // because `Database::setSchemaInstallSkipped(true)` makes the
+        // install step a no-op. See `tests/Support/TestDatabaseFactory.php`.
+        TestDatabaseFactory::boot();
+
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
     })
     ->afterEach(function () {

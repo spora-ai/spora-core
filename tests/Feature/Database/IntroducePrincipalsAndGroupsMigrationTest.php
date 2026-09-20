@@ -10,12 +10,11 @@ use Spora\Models\Principal;
 use Spora\Models\User;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database([
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ]);
-    $db->boot();
+    // `freshDatabase()` so the test sees an empty schema on every driver —
+    // this test file issues DDL mid-test (calling a migration's `up()`
+    // directly on top of the installed schema) so transaction-rollback
+    // isolation is not enough; a per-test fresh database is the safe default.
+    TestDatabaseFactory::freshDatabase();
 });
 
 test('0067 migration creates principals/groups/group_memberships tables', function (): void {

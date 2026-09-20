@@ -20,6 +20,19 @@ final class Database
     /** Stored so DatabaseSchemaInstaller can access getDatabaseManager() after boot. */
     private static ?Capsule $capsule = null;
 
+    /**
+     * Sticky flag flipped by the test bootstrap (`TestDatabaseFactory::boot()`)
+     * after the first schema install on a per-worker database. Subsequent
+     * `boot()` calls in the same worker short-circuit the install step —
+     * the schema is already in place; only the Eloquent connection needs to
+     * be (re-)established.
+     *
+     * Stays `false` in production. The factory is the only caller and is
+     * loaded only via `composer test:parallel`, so production boots always
+     * see the install path.
+     */
+    private static bool $schemaInstallSkipped = false;
+
     public function __construct(
         private readonly array $config,
         private readonly ?PluginLoader $pluginLoader = null,
@@ -35,9 +48,18 @@ final class Database
 
         $capsule = new Capsule();
 
-        if ($this->config['db_driver'] === 'mysql') {
+        $driver = $this->config['db_driver'] ?? 'sqlite';
+
+        // `mariadb` rides the same wire protocol as MySQL but Illuminate ships a
+        // distinct `MariaDbConnection` that swaps in the MariaDB grammars. We pass
+        // the operator's choice through as the connection's `driver` so
+        // `Connection::getDriverName()` returns the exact value the migrations
+        // gate on (their `=== 'mariadb'` branches become reachable instead of
+        // dead code). MySQL still uses `mysql`; either value produces a working
+        // Eloquent connection.
+        if ($driver === 'mysql' || $driver === 'mariadb') {
             $capsule->addConnection([
-                'driver'    => 'mysql',
+                'driver'    => $driver,
                 'host'      => $this->config['db_host'] ?? '127.0.0.1',
                 'port'      => $this->config['db_port'] ?? 3306,
                 'database'  => $this->config['db_name'] ?? '',
@@ -84,6 +106,16 @@ final class Database
     {
         $this->bootDatabaseConnectionOnly();
 
+        if (self::$schemaInstallSkipped) {
+            // The owning test worker has already installed the schema on its
+            // per-worker database; re-running install() here would either no-op
+            // (best case) or fail on a partial re-install (worst case). The
+            // eager stamp-cache short-circuit in production doesn't apply to
+            // per-worker DBs because the stamp file would be shared across
+            // workers against databases that aren't.
+            return;
+        }
+
         // For :memory: SQLite (tests) there is no persistent filesystem, so the stamp
         // cache is disabled and the installer always runs the full DB check.
         // For all other drivers the stamp file gives an O(1) hot path on every HTTP request.
@@ -93,6 +125,17 @@ final class Database
             : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
         (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths, $this->appLoader))->install();
+    }
+
+    /**
+     * Toggle the schema-install short-circuit. Set `true` after a test worker
+     * has finished its first schema install; set `false` to re-enable install
+     * (used by `TestDatabaseFactory::freshDatabase()` when a test drops and
+     * recreates its per-worker DB).
+     */
+    public static function setSchemaInstallSkipped(bool $skipped): void
+    {
+        self::$schemaInstallSkipped = $skipped;
     }
 
     /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */
@@ -134,5 +177,9 @@ final class Database
     {
         self::$booted  = false;
         self::$capsule = null;
+        // Note: $schemaInstallSkipped is intentionally NOT reset here. It is
+        // a worker-scoped flag owned by TestDatabaseFactory; resetting it
+        // here would re-enable the (expensive) schema install on every test
+        // that calls `Database::resetBootState()` between its setup phases.
     }
 }

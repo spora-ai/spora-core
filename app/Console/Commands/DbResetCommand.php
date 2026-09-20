@@ -78,7 +78,12 @@ HELP);
         $stampPath = $this->database->getStampPath();
 
         try {
-            if ($driver === 'mysql') {
+            // `mariadb` rides the same protocol as `mysql`; the DROP/CREATE
+            // DATABASE path is identical. We only branch on the connection
+            // class in Database::bootDatabaseConnectionOnly() so the
+            // operator's choice of `db_driver` (mysql vs mariadb) doesn't
+            // surprise them with a different reset path here.
+            if ($driver === 'mysql' || $driver === 'mariadb') {
                 $exit = $this->resetMysql($io, $force, $config);
             } else {
                 $exit = $this->resetSqlite($io, $force, $config);

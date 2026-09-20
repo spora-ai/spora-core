@@ -5,9 +5,7 @@ declare(strict_types=1);
 use Spora\Http\HealthController;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
+    TestDatabaseFactory::boot();
 });
 
 afterEach(function (): void {

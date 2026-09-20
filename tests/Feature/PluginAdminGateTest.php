@@ -47,8 +47,7 @@ function pluginAdminGate_cleanPaths(): Spora\Core\Paths
 }
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
     $_ENV['SPORA_SECRET_KEY'] = base64_encode(random_bytes(32));
     $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = 'true';
 });

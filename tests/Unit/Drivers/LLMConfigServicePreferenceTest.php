@@ -13,9 +13,7 @@ const PREF_TEST_USER_PASSWORD = 'Password1!';
 const PREF_TEST_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->boot();
+    TestDatabaseFactory::boot();
     Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
 });
 

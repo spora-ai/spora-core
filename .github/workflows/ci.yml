@@ -81,6 +81,113 @@ jobs:
       - name: Run Pest (parallel)
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
+  test-mysql:
+    # MySQL 8.0 compatibility gate: the suite runs against a real MySQL
+    # server (per-worker databases on a tmpfs-backed container). No coverage
+    # here — SonarCloud consumes the clover XML from the SQLite `test` job.
+    # Two explicit jobs (mysql + mariadb) instead of a matrix because the
+    # migration suite has `=== 'mariadb'` branches that only run when the
+    # connection class reports the MariaDB driver; a matrix would hide
+    # engine-specific failures behind a single status check.
+    name: Pest (PHP 8.4, MySQL 8.0)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: spora_root
+        ports: ['3306:3306']
+        options: >-
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      SPORA_TEST_DB_DRIVER:   mysql
+      SPORA_TEST_DB_HOST:     127.0.0.1
+      SPORA_TEST_DB_PORT:     3306
+      SPORA_TEST_DB_USER:     root
+      SPORA_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
+            sleep 2
+          done
+          echo "MySQL did not become ready in time" >&2
+          exit 1
+
+      - name: Run Pest (parallel, MySQL)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
+
+  test-mariadb:
+    # MariaDB 11 compatibility gate. Mirrors `test-mysql`; the separate
+    # driver flag (`SPORA_TEST_DB_DRIVER=mariadb`) is what makes the
+    # migration suite's `=== 'mariadb'` branches reachable instead of
+    # dead code.
+    name: Pest (PHP 8.4, MariaDB 11)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: spora_root
+        ports: ['3306:3306']
+        options: >-
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      SPORA_TEST_DB_DRIVER:   mariadb
+      SPORA_TEST_DB_HOST:     127.0.0.1
+      SPORA_TEST_DB_PORT:     3306
+      SPORA_TEST_DB_USER:     root
+      SPORA_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MariaDB
+        run: |
+          for i in {1..30}; do
+            mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
+            sleep 2
+          done
+          echo "MariaDB did not become ready in time" >&2
+          exit 1
+
+      - name: Run Pest (parallel, MariaDB)
+        run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
+
   static-analysis:
     name: PHPStan
     runs-on: ubuntu-latest

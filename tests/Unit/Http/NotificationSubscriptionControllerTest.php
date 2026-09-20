@@ -7,8 +7,7 @@ use Spora\Services\NotificationSubscriptionService;
 use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());

@@ -3,12 +3,13 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Core\Database;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly();
+    // `freshConnectionOnly()`: the test builds its own minimal schema,
+    // so we skip the framework's schema installer and just open a fresh
+    // DB connection (per-test on MySQL/MariaDB so the manual CREATE
+    // TABLE statement below doesn't collide with a pre-existing table).
+    TestDatabaseFactory::freshConnectionOnly();
 
     // Create the mail_templates table with the legacy column shape so renameColumn has something to act on.
     Capsule::schema()->create('mail_templates', static function (Illuminate\Database\Schema\Blueprint $table): void {
