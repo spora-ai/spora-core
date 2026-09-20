@@ -17,6 +17,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
+use Spora\Tools\PendingQuestionBatch;
 use Throwable;
 
 /**
@@ -660,7 +661,9 @@ final class TaskService implements TaskServiceInterface
      *     retry_after?: string,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
-     *     totals: array<string, int>
+     *     totals: array<string, int>,
+     *     data: array<string, mixed>|null,
+     *     pending_questions: list<array<string, mixed>>|null
      * }
      */
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
@@ -670,7 +673,38 @@ final class TaskService implements TaskServiceInterface
         // the Mercure live stream — operation, operation_description, and
         // parameter_schema all flow through). Re-running the queries here
         // would duplicate work and re-introduce the Shape A/B divergence.
-        return $this->taskResource($task, $sinceSequence);
+        $resource = $this->taskResource($task, $sinceSequence);
+
+        // Surface `tasks.data` (TodoTool writes `data.todos`,
+        // SubAgentTool writes `data.spawned_sub_task_ids`, etc.) and any
+        // pending ask_user_question batches alongside the tool-call
+        // history so the REST poll mirrors the Mercure `data` /
+        // `pending_questions` fields — keeps Mercure-less deployments
+        // (php -S dev server, no hub) on par with the live stream.
+        // Scoped to the detail endpoint only: action responses
+        // (start/approve/reject/retry/continue/abort/answer) and
+        // Mercure payloads go through `taskResource()` directly and
+        // must NOT carry these fields, so the list view stays minimal
+        // and the action-level wire shapes don't drift.
+        $resource['data'] = $task->data;
+
+        $resource['pending_questions'] = null;
+        if (is_string($task->pending_state) && $task->pending_state !== '') {
+            try {
+                $state = AgentState::fromJson($task->pending_state);
+                if ($state->pendingQuestions !== []) {
+                    $resource['pending_questions'] = array_map(
+                        static fn(PendingQuestionBatch $b): array => $b->toArray(),
+                        $state->pendingQuestions,
+                    );
+                }
+            } catch (Throwable) {
+                // Bad JSON or shape drift — fall through with null (defensive,
+                // mirrors TickPhaseRunner::publishIntermediateState).
+            }
+        }
+
+        return $resource;
     }
 
 }
