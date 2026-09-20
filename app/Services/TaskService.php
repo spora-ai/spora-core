@@ -324,7 +324,26 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
-     * @inheritDoc
+     * Records the operator's answers to a pending `ask_user_question`
+     * batch on an `AWAITING_INPUT` task, flips the task back to
+     * `QUEUED` (or leaves it in `AWAITING_INPUT` if other batches are
+     * still pending), and publishes the new state to Mercure.
+     *
+     * Mercure publish is best-effort: the controller has already
+     * returned 204 by the time this method is reached, so a publish
+     * failure must not fail an otherwise-successful answer submit.
+     * `MercurePublisher::doPublish` logs the underlying transport
+     * error internally and returns `false`; this method additionally
+     * catches anything that escapes that layer (interface swaps,
+     * pluggable implementations) so a wedged hub cannot regress a
+     * correct answer into a 502. Clients whose subscription is the
+     * Mercure SSE event still see the new state on the next poll of
+     * `GET /api/v1/tasks/{id}` after the row flips.
+     *
+     * Throws {@see InvalidArgumentException} when the task is missing,
+     * not owned by the calling user, or not in `AWAITING_INPUT`.
+     *
+     * @return array<string, mixed>
      */
     public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
     {
@@ -392,16 +411,35 @@ final class TaskService implements TaskServiceInterface
             $task->save();
 
             $fresh = $task->fresh();
-            return $this->taskResource($fresh);
+            // Capture principal_id inside the transaction so the
+            // post-commit publish doesn't re-query the row — re-queries
+            // outside the lock are unsafe (the row may have been
+            // deleted by a concurrent /cleanup) and would dereference a
+            // null, surfacing as a 502 on the proxy. Mirrors the
+            // `principalOwnerId()` pattern at every other publish site.
+            return [
+                'resource'     => $this->taskResource($fresh),
+                'principal_id' => $fresh->principalOwnerId(),
+            ];
         });
 
-        $this->mercure->publishForPrincipal(
-            $taskId,
-            (int) Task::find($taskId)->principal_id,
-            $result,
-        );
+        // Best-effort Mercure publish — see method docblock. The
+        // controller returns 204 immediately after this method; a
+        // publish failure here is logged by MercurePublisher and the
+        // next poll of GET /api/v1/tasks/{id} re-syncs the client.
+        try {
+            $this->mercure->publishForPrincipal(
+                $taskId,
+                $result['principal_id'],
+                $result['resource'],
+            );
+        } catch (Throwable) {
+            // Mirrors MercurePublisher::doPublish's own try/catch
+            // (app/Services/MercurePublisher.php:122) — nothing else to
+            // do here; the row state is already committed.
+        }
 
-        return $result;
+        return $result['resource'];
     }
 
     /**

@@ -26,9 +26,16 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
+ * @param Closure(MercurePublisherInterface&Mockery\MockInterface):void|null $mercureConfigure
+ *   Optional callback to customise the Mercure mock after it's been
+ *   created. When null (the default for tests that just need a
+ *   well-behaved publisher), `publishForPrincipal` returns true. Pass a
+ *   closure to override — e.g. to make `publishForPrincipal` throw —
+ *   when testing the best-effort Mercure semantics.
+ *
  * @return array{controller: TaskController, task: Task, principal_id: int, user_id: int, taskService: TaskService}
  */
-function answerControllerHarness(): array
+function answerControllerHarness(?Closure $mercureConfigure = null): array
 {
     $authService = bootAuthLayer();
     $userId = $authService->register('answer-ctrl@example.com', 'Password1!', 'Answer Ctrl');
@@ -109,7 +116,11 @@ function answerControllerHarness(): array
 
     /** @var MercurePublisherInterface&\Mockery\MockInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
-    $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
+    if ($mercureConfigure !== null) {
+        $mercureConfigure($mercure);
+    } else {
+        $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
+    }
 
     $driverFactory = Mockery::mock(DriverFactory::class);
     $driverFactory->allows('makeFromAgent')->andReturn(null);
@@ -223,4 +234,31 @@ it('returns 422 when the task is not in AWAITING_INPUT', function (): void {
         'answers' => [['header' => 'DB', 'selections' => ['SQLite']]],
     ]);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+});
+
+it('returns 204 even when Mercure publishing throws', function (): void {
+    // The Mercure publish is best-effort: the controller already
+    // returned 204 by the time the publish call runs, so a wedged
+    // hub must not regress an otherwise-successful answer submit into
+    // a 502 on the proxy. Regression test for spora-core PR #259.
+    $h = answerControllerHarness(static function ($mercure): void {
+        $mercure->shouldReceive('publishForPrincipal')
+            ->andThrow(new RuntimeException('mercure hub unreachable'));
+    });
+
+    $response = answerRequest($h['controller'], $h['task']->id, [
+        'tool_call_id' => 'pc_ask',
+        'answers' => [['header' => 'DB', 'selections' => ['SQLite']]],
+    ]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
+
+    $task = Task::find($h['task']->id);
+    expect($task->status)->toBe('QUEUED')
+        ->and($task->pending_state)->toBeNull();
+
+    $toolRow = TaskHistory::where('task_id', $task->id)->where('tool_call_id', 'pc_ask')->first();
+    expect($toolRow)->not->toBeNull()
+        ->and($toolRow->role)->toBe('tool')
+        ->and($toolRow->content)->toContain('SQLite');
 });
