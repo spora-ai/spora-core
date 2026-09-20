@@ -728,6 +728,11 @@ final class TickPhaseRunner
             'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
             'history' => $historyPayload['history'],
             'totals' => $totals,
+            // Surface the full `data` snapshot so the chat UI gets live
+            // tool-managed state (TodoTool writes `data.todos`,
+            // SubAgentTool writes `data.spawned_sub_task_ids`, etc.)
+            // without waiting for the slow detail poll.
+            'data' => $task->data,
         ];
 
         // Surface pending question batches on the Mercure event so the
