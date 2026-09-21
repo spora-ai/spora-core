@@ -249,7 +249,11 @@ final class SchedulePayloadValidator
             }
         }
 
-        return $this->validateMaxStepsOverride($raw);
+        return $this->validateIntRangeField(
+            $raw['max_steps_override'] ?? null,
+            self::OP_CREATE_SCHEDULE,
+            'max_steps_override',
+        );
     }
 
     /**
@@ -308,7 +312,11 @@ final class SchedulePayloadValidator
             $raw,
             [
                 fn($r) => $this->validateVariables($r['variables'] ?? null),
-                fn($r) => $this->validateMaxSteps($r),
+                fn($r) => $this->validateIntRangeField(
+                    $r['max_steps'] ?? null,
+                    self::OP_CREATE_TEMPLATE,
+                    'max_steps',
+                ),
             ],
         );
     }
@@ -396,40 +404,20 @@ final class SchedulePayloadValidator
     }
 
     /**
-     * @param  array<string, mixed> $raw
+     * Type-coerce an optional integer field bounded to 1..100.
+     * Shared between `max_steps` (templates) and `max_steps_override`
+     * (schedules) — only the error prefix differs.
+     *
      * @return ToolResult|null
      */
-    private function validateMaxSteps(array $raw): ?ToolResult
+    private function validateIntRangeField(mixed $value, string $op, string $fieldLabel): ?ToolResult
     {
-        $value = $raw['max_steps'] ?? null;
         if ($value === null) {
             return null;
         }
 
         if (!is_int($value) || $value < 1 || $value > 100) {
-            return ToolResult::fail(
-                self::OP_CREATE_TEMPLATE . ': `max_steps` must be an integer in 1..100.',
-            );
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  array<string, mixed> $raw
-     * @return ToolResult|null
-     */
-    private function validateMaxStepsOverride(array $raw): ?ToolResult
-    {
-        $value = $raw['max_steps_override'] ?? null;
-        if ($value === null) {
-            return null;
-        }
-
-        if (!is_int($value) || $value < 1 || $value > 100) {
-            return ToolResult::fail(
-                self::OP_CREATE_SCHEDULE . ': `max_steps_override` must be an integer in 1..100.',
-            );
+            return ToolResult::fail($op . ': `' . $fieldLabel . '` must be an integer in 1..100.');
         }
 
         return null;

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
-use DateInvalidTimeZoneException;
 use Spora\Models\Agent;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
@@ -14,6 +13,7 @@ use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\ScheduleTool\ScheduleOperationRunner;
 use Spora\Tools\ScheduleTool\ScheduleSummaryPresenter;
 use Spora\Tools\ScheduleTool\ScheduleToolCollaborators;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -251,17 +251,6 @@ final class ScheduleTool extends AbstractTool
     // pipeline can audit it.
     public const IGNORED_BY_OTHER_OPERATIONS = 'Ignored by every other operation.';
 
-    private const CREATE_SCHEDULE_ERR_PREFIX  = 'create_schedule: ';
-    private const UPDATE_SCHEDULE_ERR_PREFIX  = 'update_schedule: ';
-    private const DELETE_SCHEDULE_ERR_PREFIX  = 'delete_schedule: ';
-    private const TRIGGER_SCHEDULE_ERR_PREFIX = 'trigger_schedule: ';
-    private const READ_SCHEDULE_ERR_PREFIX    = 'read_schedule: ';
-
-    private const CREATE_TEMPLATE_ERR_PREFIX  = 'create_prompt_template: ';
-    private const UPDATE_TEMPLATE_ERR_PREFIX  = 'update_prompt_template: ';
-    private const DELETE_TEMPLATE_ERR_PREFIX  = 'delete_prompt_template: ';
-    private const READ_TEMPLATE_ERR_PREFIX    = 'read_prompt_template: ';
-
     private readonly ScheduleToolCollaborators $collaborators;
 
     private readonly ScheduledRunServiceInterface $scheduledRunService;
@@ -269,6 +258,7 @@ final class ScheduleTool extends AbstractTool
     private readonly PrincipalResolver $principalResolver;
     private readonly PrincipalService $principalService;
     private readonly ScheduleSummaryPresenter $summary;
+    private readonly ScheduleOperationRunner $runner;
 
     public function __construct(
         ScheduledRunServiceInterface $scheduledRunService,
@@ -276,6 +266,7 @@ final class ScheduleTool extends AbstractTool
         ?ScheduleToolCollaborators $collaborators = null,
         ?PrincipalResolver $principalResolver = null,
         ?PrincipalService $principalService = null,
+        ?ScheduleOperationRunner $runner = null,
     ) {
         $this->scheduledRunService = $scheduledRunService;
         $this->promptTemplateService = $promptTemplateService;
@@ -289,6 +280,11 @@ final class ScheduleTool extends AbstractTool
         $this->principalResolver = $collaborators->principalResolver();
         $this->principalService = $collaborators->principalService();
         $this->summary = $collaborators->summary();
+        $this->runner = $runner ?? new ScheduleOperationRunner(
+            $scheduledRunService,
+            $promptTemplateService,
+            $this->summary,
+        );
     }
 
     public function execute(
@@ -389,7 +385,7 @@ final class ScheduleTool extends AbstractTool
 
     private function readSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
     {
-        $targetAgentId = $this->resolveReadTargetAgentId($userId, $agentId, $arguments);
+        $targetAgentId = $this->resolveTargetAgentId($userId, $agentId, $arguments);
         if ($targetAgentId instanceof ToolResult) {
             return $targetAgentId;
         }
@@ -399,25 +395,12 @@ final class ScheduleTool extends AbstractTool
             return $scheduleId;
         }
 
-        return $this->formatScheduleRead($scheduleId, $targetAgentId, $userId ?? 0);
-    }
-
-    private function formatScheduleRead(int $scheduleId, int $targetAgentId, int $userId): ToolResult
-    {
-        $result = $this->scheduledRunService->getRun($scheduleId, $targetAgentId, $userId);
-        if ($result === null) {
-            return ToolResult::fail(self::READ_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        }
-
-        return ToolResult::ok(
-            "Schedule #{$scheduleId} (agent #{$targetAgentId}): " . $this->summary->resource($result),
-            $result,
-        );
+        return $this->runner->readSchedule($scheduleId, $targetAgentId, $userId ?? 0);
     }
 
     private function readTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
     {
-        $targetAgentId = $this->resolveReadTargetAgentId($userId, $agentId, $arguments);
+        $targetAgentId = $this->resolveTargetAgentId($userId, $agentId, $arguments);
         if ($targetAgentId instanceof ToolResult) {
             return $targetAgentId;
         }
@@ -427,21 +410,7 @@ final class ScheduleTool extends AbstractTool
             return $templateId;
         }
 
-        return $this->formatTemplateRead($templateId, $targetAgentId, $userId ?? 0);
-    }
-
-    private function formatTemplateRead(int $templateId, int $targetAgentId, int $userId): ToolResult
-    {
-        $result = $this->promptTemplateService->getTemplate($templateId, $targetAgentId, $userId);
-        if ($result === null) {
-            return ToolResult::fail(self::READ_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
-        }
-
-        return ToolResult::ok(
-            "Prompt template #{$templateId} (agent #{$targetAgentId}): "
-            . (string) ($result['template']['name'] ?? '(unnamed)'),
-            $result,
-        );
+        return $this->runner->readPromptTemplate($templateId, $targetAgentId, $userId ?? 0);
     }
 
     private function createSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -456,32 +425,7 @@ final class ScheduleTool extends AbstractTool
             return $payload;
         }
 
-        return $this->attemptScheduleCreate($targetAgentId, $userId ?? 0, $payload);
-    }
-
-    private function attemptScheduleCreate(int $targetAgentId, int $userId, array $payload): ToolResult
-    {
-        try {
-            $result = $this->scheduledRunService->createRun($targetAgentId, $userId, $payload);
-        } catch (
-            \Spora\Services\Exceptions\AgentNotFoundException
-            | \Spora\Services\Exceptions\PromptTemplateMissingException
-            | DateInvalidTimeZoneException $e
-        ) {
-            return match (true) {
-                $e instanceof \Spora\Services\Exceptions\AgentNotFoundException
-                    => ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND),
-                default
-                => ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage()),
-            };
-        }
-
-        $resource = $result['scheduled_run'];
-        $id = (int) ($resource['id'] ?? 0);
-        return ToolResult::ok(
-            "Created schedule #{$id} on agent #{$targetAgentId}.",
-            $result,
-        );
+        return $this->runner->createSchedule($targetAgentId, $userId ?? 0, $payload);
     }
 
     private function createTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -496,23 +440,7 @@ final class ScheduleTool extends AbstractTool
             return $payload;
         }
 
-        return $this->attemptTemplateCreate($targetAgentId, $userId ?? 0, $payload);
-    }
-
-    private function attemptTemplateCreate(int $targetAgentId, int $userId, array $payload): ToolResult
-    {
-        try {
-            $result = $this->promptTemplateService->createTemplate($targetAgentId, $userId, $payload);
-        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
-            return ToolResult::fail(self::CREATE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
-        }
-
-        $resource = $result['template'];
-        $id = (int) ($resource['id'] ?? 0);
-        return ToolResult::ok(
-            "Created prompt template #{$id} on agent #{$targetAgentId}.",
-            $result,
-        );
+        return $this->runner->createPromptTemplate($targetAgentId, $userId ?? 0, $payload);
     }
 
     private function updateSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -527,23 +455,13 @@ final class ScheduleTool extends AbstractTool
             return $scheduleId;
         }
 
-        return $this->attemptScheduleUpdate($scheduleId, $targetAgentId, $userId ?? 0, $arguments);
-    }
-
-    private function attemptScheduleUpdate(int $scheduleId, int $targetAgentId, int $userId, array $arguments): ToolResult
-    {
-        $patch = $this->collaborators->updateValidator()->validateUpdateSchedulePatch($arguments);
-        if ($patch instanceof ToolResult) {
-            return $patch;
-        }
-
-        $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId, $patch);
-        return $result === null
-            ? ToolResult::fail(self::UPDATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND)
-            : ToolResult::ok(
-                "Updated schedule #{$scheduleId} on agent #{$targetAgentId}.",
-                $result,
-            );
+        return $this->runner->updateSchedule(
+            $scheduleId,
+            $targetAgentId,
+            $userId ?? 0,
+            $arguments,
+            $this->collaborators->updateValidator(),
+        );
     }
 
     private function updateTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -558,23 +476,13 @@ final class ScheduleTool extends AbstractTool
             return $templateId;
         }
 
-        return $this->attemptTemplateUpdate($templateId, $targetAgentId, $userId ?? 0, $arguments);
-    }
-
-    private function attemptTemplateUpdate(int $templateId, int $targetAgentId, int $userId, array $arguments): ToolResult
-    {
-        $patch = $this->collaborators->updateValidator()->validateUpdateTemplatePatch($arguments);
-        if ($patch instanceof ToolResult) {
-            return $patch;
-        }
-
-        $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId, $patch);
-        return $result === null
-            ? ToolResult::fail(self::UPDATE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND)
-            : ToolResult::ok(
-                "Updated prompt template #{$templateId} on agent #{$targetAgentId}.",
-                $result,
-            );
+        return $this->runner->updatePromptTemplate(
+            $templateId,
+            $targetAgentId,
+            $userId ?? 0,
+            $arguments,
+            $this->collaborators->updateValidator(),
+        );
     }
 
     private function deleteSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -589,20 +497,7 @@ final class ScheduleTool extends AbstractTool
             return $scheduleId;
         }
 
-        return $this->attemptScheduleDelete($scheduleId, $targetAgentId, $userId ?? 0);
-    }
-
-    private function attemptScheduleDelete(int $scheduleId, int $targetAgentId, int $userId): ToolResult
-    {
-        $ok = $this->scheduledRunService->deleteRun($scheduleId, $targetAgentId, $userId);
-        if ($ok === false) {
-            return ToolResult::fail(self::DELETE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        }
-
-        return ToolResult::ok(
-            "Deleted schedule #{$scheduleId} on agent #{$targetAgentId}.",
-            ['deleted' => true, 'schedule_id' => $scheduleId, 'agent_id' => $targetAgentId],
-        );
+        return $this->runner->deleteSchedule($scheduleId, $targetAgentId, $userId ?? 0);
     }
 
     private function deleteTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -617,20 +512,7 @@ final class ScheduleTool extends AbstractTool
             return $templateId;
         }
 
-        return $this->attemptTemplateDelete($templateId, $targetAgentId, $userId ?? 0);
-    }
-
-    private function attemptTemplateDelete(int $templateId, int $targetAgentId, int $userId): ToolResult
-    {
-        $ok = $this->promptTemplateService->deleteTemplate($templateId, $targetAgentId, $userId);
-        if ($ok === false) {
-            return ToolResult::fail(self::DELETE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
-        }
-
-        return ToolResult::ok(
-            "Deleted prompt template #{$templateId} on agent #{$targetAgentId}.",
-            ['deleted' => true, 'template_id' => $templateId, 'agent_id' => $targetAgentId],
-        );
+        return $this->runner->deletePromptTemplate($templateId, $targetAgentId, $userId ?? 0);
     }
 
     private function triggerSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
@@ -645,35 +527,14 @@ final class ScheduleTool extends AbstractTool
             return $scheduleId;
         }
 
-        return $this->attemptScheduleTrigger($scheduleId, $targetAgentId, $userId ?? 0);
-    }
-
-    private function attemptScheduleTrigger(int $scheduleId, int $targetAgentId, int $userId): ToolResult
-    {
-        try {
-            $result = $this->scheduledRunService->triggerRun($scheduleId, $targetAgentId, $userId);
-        } catch (
-            \Spora\Services\Exceptions\AgentNotFoundException
-            | \Spora\Services\Exceptions\ScheduledRunNotFoundException
-            | \Spora\Services\Exceptions\PromptTemplateMissingException $e
-        ) {
-            return $e instanceof \Spora\Services\Exceptions\PromptTemplateMissingException
-                ? ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . $e->getMessage())
-                : ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        }
-
-        $taskId = (int) $result['task_id'];
-        return ToolResult::ok(
-            "Triggered schedule #{$scheduleId} on agent #{$targetAgentId}; new task #{$taskId}.",
-            $result,
-        );
+        return $this->runner->triggerSchedule($scheduleId, $targetAgentId, $userId ?? 0);
     }
 
     /**
-     * Resolution for `list_*` and `create_*`: widen to the visibility
-     * matrix so any principal-membership reader can list, any
-     * owner/admin can create. Cross-user agents silently fall back to
-     * "not found" — the service itself enforces the visibility gate.
+     * Resolution for `list_*` + reads + writes/deletes/trigger with
+     * relaxed visibility. Cross-user ids widen to principal-membership
+     * (group members can address agents they belong to); the service
+     * layer still enforces tighter ownership for writes.
      *
      * @return int|ToolResult
      */
@@ -682,13 +543,14 @@ final class ScheduleTool extends AbstractTool
         if (!array_key_exists('agent_id', $arguments)) {
             return $callingAgentId;
         }
-        return $this->resolveCrossUserAgent($userId, $arguments['agent_id']);
+
+        return $this->resolveVisibleAgentId($userId, $arguments['agent_id']);
     }
 
     /**
-     * Resolution for read/write/delete/trigger: callers must control
-     * the agent's principal. We never silently fall back to the
-     * calling agent when an explicit `agent_id` is supplied.
+     * Resolution for write/delete/trigger: callers must control the
+     * agent's principal. We never silently fall back to the calling
+     * agent when an explicit `agent_id` is supplied.
      *
      * @return int|ToolResult
      */
@@ -698,74 +560,46 @@ final class ScheduleTool extends AbstractTool
             return $callingAgentId;
         }
 
-        $resolved = $this->resolveCrossUserAgent($userId, $arguments['agent_id']);
+        $resolved = $this->resolveVisibleAgentId($userId, $arguments['agent_id']);
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
 
-        return $this->assertCallerControlsPrincipal($resolved, $userId) ?? $resolved;
-    }
-
-    private function assertCallerControlsPrincipal(int $agentId, ?int $userId): ?ToolResult
-    {
-        if ($userId === null) {
-            return null;
+        $result = $resolved;
+        if ($userId !== null
+            && !$this->principalService->callerControlsPrincipal($userId, $this->principalIdOfAgent($resolved))
+        ) {
+            $result = ToolResult::fail('agent not found or not owned by this user.');
         }
 
-        if (!$this->principalService->callerControlsPrincipal($userId, $this->principalIdOfAgent($agentId))) {
-            return ToolResult::fail('agent not found or not owned by this user.');
-        }
-
-        return null;
+        return $result;
     }
 
     /**
-     * Reads (`read_schedule` / `read_prompt_template`) widen to
-     * principal-membership, same as the index endpoints.
+     * Coerce + DB lookup + visibility check for an explicit cross-user
+     * `agent_id`. Walks three gates (positive integer, agent exists,
+     * user can see it) via a single typed `$result` variable.
      *
      * @return int|ToolResult
      */
-    private function resolveReadTargetAgentId(?int $userId, int $callingAgentId, array $arguments): int|ToolResult
+    private function resolveVisibleAgentId(?int $userId, mixed $raw): int|ToolResult
     {
-        return $this->resolveTargetAgentId($userId, $callingAgentId, $arguments);
-    }
+        $result = null;
 
-    /**
-     * Cross-user agent resolution. The Agent row may or may not exist;
-     * visibility is widened to principal-membership so group members
-     * can address agents they belong to.
-     *
-     * @return int|ToolResult
-     */
-    private function resolveCrossUserAgent(?int $userId, mixed $raw): int|ToolResult
-    {
-        $resolvedId = $this->coerceAgentId($raw);
-        if ($resolvedId instanceof ToolResult) {
-            return $resolvedId;
-        }
-
-        return $this->resolveVisibleAgent($resolvedId, $userId);
-    }
-
-    private function coerceAgentId(mixed $raw): int|ToolResult
-    {
         if (!is_int($raw) && !(is_string($raw) && ctype_digit($raw))) {
-            return ToolResult::fail('`agent_id` must be a positive integer.');
+            $result = ToolResult::fail('`agent_id` must be a positive integer.');
+        } elseif (($resolvedId = (int) $raw) <= 0) {
+            $result = ToolResult::fail('`agent_id` must be a positive integer.');
+        } else {
+            $agent = Agent::query()->where('id', $resolvedId)->first();
+            $visible = $agent !== null
+                && ($userId === null || $this->principalResolver->isVisibleTo($resolvedId, $userId));
+            $result = $visible
+                ? $resolvedId
+                : ToolResult::fail('agent not found.');
         }
-        $resolvedId = (int) $raw;
-        if ($resolvedId <= 0) {
-            return ToolResult::fail('`agent_id` must be a positive integer.');
-        }
-        return $resolvedId;
-    }
 
-    private function resolveVisibleAgent(int $resolvedId, ?int $userId): int|ToolResult
-    {
-        $agent = Agent::query()->where('id', $resolvedId)->first();
-        if ($agent === null || ($userId !== null && !$this->principalResolver->isVisibleTo($resolvedId, $userId))) {
-            return ToolResult::fail('agent not found.');
-        }
-        return $resolvedId;
+        return $result;
     }
 
     private function principalIdOfAgent(int $agentId): int
