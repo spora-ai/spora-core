@@ -36,7 +36,7 @@ return new class extends Migration
             $table->string('archetype', 32)->nullable();
             $table->string('variant_key', 8)->nullable();
             $table->string('palette_key', 32)->nullable();
-            $table->string('media_asset_id', 36)->nullable();
+            $table->uuid('media_asset_id')->nullable();
             $table->timestamps();
 
             $table->unique('group_id', 'uq_group_pictures_group_id');

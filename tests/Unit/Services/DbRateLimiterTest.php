@@ -46,6 +46,12 @@ describe('DbRateLimiter', function (): void {
         // /housekeeping — fail-open so a transient outage doesn't escalate
         // into a complete feature outage. Drop the table mid-test to force
         // every query inside attempt() to throw.
+        //
+        // On SQLite `:memory:` the table is fresh per test, so dropping it
+        // here was harmless. On MariaDB/MySQL CI the DB is per-worker and
+        // persists across tests, so the drop needs to be undone (via
+        // `freshDatabase()`) so subsequent tests can insert into the table.
+        TestDatabaseFactory::freshDatabase();
         Capsule::schema()->drop('ratelimit_hits');
 
         $limiter = new DbRateLimiter();

@@ -28,11 +28,13 @@ function makePng(int $width, int $height, int $red = 200, int $green = 100, int 
 
 function seedImageAsset(string $bytes, string $mime, string $storageMode = 'data_url', ?string $assetToken = null): MediaAsset
 {
-    $id = sprintf(
-        '%08x-aaaa-bbbb-cccc-%012x',
-        random_int(0, 0xffffffff),
-        random_int(0, 0xffffffffffff),
-    );
+    // Real UUIDv4 (version + variant nibbles set) — MySQL/MariaDB's `uuid`
+    // column type rejects malformed shapes (the third group's leading
+    // nibble must be 4; the fourth group's leading nibble must be 8/9/a/b).
+    $raw    = random_bytes(16);
+    $raw[6] = chr((ord($raw[6]) & 0x0f) | 0x40);
+    $raw[8] = chr((ord($raw[8]) & 0x3f) | 0x80);
+    $id     = vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($raw), 4));
     return MediaAsset::create([
         'id'                            => $id,
         'asset_url'                     => '/api/v1/assets/' . $id,

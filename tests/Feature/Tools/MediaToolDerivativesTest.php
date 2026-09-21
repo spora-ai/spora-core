@@ -85,7 +85,7 @@ function makeMediaToolForDerivatives(?Spora\Auth\AuthService $auth = null): arra
 function seedMediaDerivativeLink(string $parentId, string $derivativeId, string $format, string $plugin, string $operation): void
 {
     Capsule::table('media_derivatives')->insert([
-        'id'                 => sprintf('%08x-aaaa-bbbb-cccc-%012x', random_int(0, 0xffffffff), random_int(0, 0xffffffffffff)),
+        'id'                 => testGenerateUuidV4(),
         'parent_id'          => $parentId,
         'derivative_id'      => $derivativeId,
         'format'             => $format,

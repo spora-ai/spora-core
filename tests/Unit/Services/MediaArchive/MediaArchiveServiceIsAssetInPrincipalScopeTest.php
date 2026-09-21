@@ -56,11 +56,7 @@ function seedMediaArchiveSvcAgent(int $principalId, string $name): int
 
 function seedMediaArchiveSvcAsset(?int $agentId, ?int $userId, ?int $principalId = null): MediaAsset
 {
-    $id = sprintf(
-        '%08x-aaaa-bbbb-cccc-%012x',
-        random_int(0, 0xffffffff),
-        random_int(0, 0xffffffffffff),
-    );
+    $id = testGenerateUuidV4();
     return MediaAsset::create([
         'id'                            => $id,
         'asset_url'                     => '/api/v1/assets/' . $id . '.png',
