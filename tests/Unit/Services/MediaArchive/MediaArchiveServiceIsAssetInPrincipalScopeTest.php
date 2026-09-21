@@ -26,21 +26,21 @@ function seedMediaArchiveSvcPrincipal(int $userId): int
 
 function seedMediaArchiveSvcUser(int $userId): void
 {
-    $pdo = Capsule::connection()->getPdo();
-    $stmt = $pdo->prepare(
-        'INSERT OR IGNORE INTO users (id, email, password, username, verified, resettable, roles_mask, registered, created_at, updated_at) '
-        . 'VALUES (?, ?, ?, ?, 1, 1, 0, ?, ?, ?)',
-    );
+    // Capsule's `insertOrIgnore()` is dialect-aware: it emits
+    // `INSERT OR IGNORE` on SQLite and `INSERT IGNORE` on MySQL/MariaDB.
     $email = sprintf('masps-%d@example.com', $userId);
     $now = time();
-    $stmt->execute([
-        $userId,
-        $email,
-        password_hash('Password1!', PASSWORD_BCRYPT),
-        $email,
-        $now,
-        date('Y-m-d H:i:s', $now),
-        date('Y-m-d H:i:s', $now),
+    Capsule::table('users')->insertOrIgnore([
+        'id'         => $userId,
+        'email'      => $email,
+        'password'   => password_hash('Password1!', PASSWORD_BCRYPT),
+        'username'   => $email,
+        'verified'   => 1,
+        'resettable' => 1,
+        'roles_mask' => 0,
+        'registered' => $now,
+        'created_at' => date('Y-m-d H:i:s', $now),
+        'updated_at' => date('Y-m-d H:i:s', $now),
     ]);
 }
 
