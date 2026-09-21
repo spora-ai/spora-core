@@ -38,6 +38,15 @@ describe('MailTemplateSyncService', function (): void {
     });
 
     afterEach(function (): void {
+        // Drop the worker DB on MySQL/MariaDB so the next factory `boot()`
+        // doesn't try to install the full schema on top of the `mail_templates`
+        // table this test creates manually with non-migration columns —
+        // `Schema::create()` is not idempotent on those engines, and the
+        // resulting `CREATE TABLE mail_templates … already exists` would
+        // cascade-fail every subsequent test in the worker. On SQLite this
+        // is a no-op (`:memory:` is destroyed when `resetBootState()` closes
+        // the connection).
+        TestDatabaseFactory::dropWorkerDatabase();
         Database::resetBootState();
     });
 
