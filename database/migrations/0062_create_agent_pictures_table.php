@@ -58,6 +58,7 @@ return new class extends Migration
                 ->references('id')
                 ->on('agents')
                 ->cascadeOnDelete();
+            // `uuid()` not `char(36)` so the FK matches `media_assets.id` natively on MariaDB 10.7+ (errno 150 otherwise).
             $table->foreign('media_asset_id', 'fk_agent_pictures_media_asset_id')
                 ->references('id')
                 ->on('media_assets')

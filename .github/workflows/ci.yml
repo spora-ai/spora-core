@@ -82,7 +82,7 @@ jobs:
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
   test-mysql:
-    # MySQL 8.0 compatibility gate: the suite runs against a real MySQL
+    # MySQL 9.7 compatibility gate: the suite runs against a real MySQL
     # server (per-worker databases on a tmpfs-backed container). No coverage
     # here — SonarCloud consumes the clover XML from the SQLite `test` job.
     # Two explicit jobs (mysql + mariadb) instead of a matrix because the
@@ -98,7 +98,7 @@ jobs:
     # meantime, this job stays green on the SQLite jobs and gates MySQL
     # compliance on follow-up PRs.
     continue-on-error: true
-    name: Pest (PHP 8.4, MySQL 8.0)
+    name: Pest (PHP 8.4, MySQL 9.7)
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -118,7 +118,7 @@ jobs:
         # connections`. 500 fits 18 workers × ~25 connections with
         # headroom for the migration tests that drop+recreate their DB.
         # GitHub Actions' service container `command:` is a scalar string;
-        # the official mysql:8.0 entrypoint script prepends `mysqld` to
+        # the official mysql:9.7 entrypoint script prepends `mysqld` to
         # any first arg that starts with `-`, so a bare flag here becomes
         # `mysqld --max-connections=500` at exec time.
         command: --max-connections=500
@@ -173,7 +173,7 @@ jobs:
         run: ./vendor/bin/pest --fail-on-risky
 
   test-mariadb:
-    # MariaDB 11 compatibility gate. Mirrors `test-mysql`; the separate
+    # MariaDB 12.3 compatibility gate. Mirrors `test-mysql`; the separate
     # driver flag (`SPORA_TEST_DB_DRIVER=mariadb`) is what makes the
     # migration suite's `=== 'mariadb'` branches reachable instead of
     # dead code.
@@ -183,7 +183,7 @@ jobs:
     # SQLite-only migration tests need a follow-up port before either job
     # can gate the PR.
     continue-on-error: true
-    name: Pest (PHP 8.4, MariaDB 11)
+    name: Pest (PHP 8.4, MariaDB 12.3)
     runs-on: ubuntu-latest
     services:
       mariadb:

@@ -201,10 +201,11 @@ describe('WorkerQueueProcessor::processRetryQueue — DB-driven candidate select
     });
 
     it('skips a FAILED task whose retry_after is still in the future', function (): void {
-        // retry_after=2099 is the production "defer forever" carve-out
-        // — the candidate loop must not see it. Asserting shouldNotReceive
-        // on orchestrator.retry() pins the no-op invariant without forcing
-        // the test to inspect DB state after the call.
+        // RETRY_T_FUTURE (year 2099) is just a far-future sentinel used by
+        // this test fixture to exercise the `<=` boundary — the candidate
+        // loop must not pick it up. Asserting shouldNotReceive on
+        // orchestrator.retry() pins the no-op invariant without forcing the
+        // test to inspect DB state after the call.
         [$logger] = makeRetryLogger();
         [$userId, $agentId, $principalId] = seedRetryAgent('retry-future@example.com');
 

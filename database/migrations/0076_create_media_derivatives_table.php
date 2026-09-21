@@ -40,6 +40,7 @@ return new class extends Migration
             return;
         }
         $schema->create('media_derivatives', static function (Blueprint $t): void {
+            // `uuid()` not `char(36)` so the FKs match `media_assets.id` natively on MariaDB 10.7+ (errno 150 otherwise).
             $t->uuid('id')->primary();
             $t->uuid('parent_id');
             $t->uuid('derivative_id');

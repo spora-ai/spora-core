@@ -43,7 +43,7 @@ use Throwable;
  * `PrincipalResolver::ownerUserId()` / `AgentManifest` etc.).
  *
  * @property-read int|null $user_id Legacy alias for the principal's owner user id.
- * @property-read User|null $user Resolved via {@see Agent::user()} — the principal's owner user.
+ * @property-read User|null $user Resolved via {@see Agent::getUserAttribute()} — `user()` returns the Builder; the accessor calls `->first()`.
  */
 final class Agent extends Model
 {
@@ -97,11 +97,11 @@ final class Agent extends Model
      * consumers are migrated in their own PRs.
      *
      * Returns an Eloquent Builder rather than a `BelongsTo` because the
-     * relation traverses two hops (agents.principal_id → principals.id
-     * → principals.user_id → users.id) and Eloquent's `belongsTo`
-     * can't express that without an intermediate table on the path. The
-     * Builder can still be `->first()`'d by callers (which is what the
-     * `user` accessor and the legacy test rely on).
+     * implementation does a manual two-step resolve
+     * (`Principal::find()` then `User::query()->where()`) — there's no
+     * single FK chain for Eloquent's `belongsTo` to follow. The Builder
+     * can still be `->first()`'d by callers (which is what the `user`
+     * accessor and the legacy test rely on).
      *
      * The previous shape — `belongsTo(User::class, 'principal_id', 'id')`
      * plus a `where('id', $principal->user_id)` — only succeeded on

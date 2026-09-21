@@ -44,6 +44,7 @@ return new class extends Migration
                 ->references('id')
                 ->on('groups')
                 ->cascadeOnDelete();
+            // Same rationale as `agent_pictures.media_asset_id` — `uuid()` so the FK matches `media_assets.id` natively on MariaDB 10.7+.
             $table->foreign('media_asset_id', 'fk_group_pictures_media_asset_id')
                 ->references('id')
                 ->on('media_assets')

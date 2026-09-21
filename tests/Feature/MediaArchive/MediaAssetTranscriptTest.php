@@ -89,7 +89,7 @@ function mediaAssetsColumns(): array
     ))->pluck('name')->all();
 }
 
-function mediaAssetsColumnInfo(): \Illuminate\Support\Collection
+function mediaAssetsColumnInfo(): Illuminate\Support\Collection
 {
     $driver = Capsule::connection()->getDriverName();
     if ($driver === 'sqlite') {

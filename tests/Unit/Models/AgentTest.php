@@ -222,11 +222,11 @@ it('user() resolves the owner user when the principal is a group with an owner',
         ->where('id', $groupPrincipalId)->value('group_id');
     Illuminate\Database\Capsule\Manager::table('group_memberships')
         ->where('group_id', $groupId)
-        ->update(['role' => \Spora\Models\GroupMembership::ROLE_OWNER]);
+        ->update(['role' => Spora\Models\GroupMembership::ROLE_OWNER]);
     Illuminate\Database\Capsule\Manager::table('group_memberships')->insert([
         'group_id'   => $groupId,
         'user_id'    => $userB,
-        'role'       => \Spora\Models\GroupMembership::ROLE_OWNER,
+        'role'       => Spora\Models\GroupMembership::ROLE_OWNER,
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
@@ -254,7 +254,7 @@ it('user() returns null when the principal is a group with no owner', function (
     Illuminate\Database\Capsule\Manager::table('group_memberships')
         ->where('group_id', Illuminate\Database\Capsule\Manager::table('principals')
             ->where('id', $groupPrincipalId)->value('group_id'))
-        ->update(['role' => \Spora\Models\GroupMembership::ROLE_MEMBER]);
+        ->update(['role' => Spora\Models\GroupMembership::ROLE_MEMBER]);
 
     $agent = Agent::create([
         'principal_id' => $groupPrincipalId,
