@@ -43,6 +43,7 @@ use Throwable;
  * `PrincipalResolver::ownerUserId()` / `AgentManifest` etc.).
  *
  * @property-read int|null $user_id Legacy alias for the principal's owner user id.
+ * @property-read User|null $user Resolved via {@see Agent::user()} — the principal's owner user.
  */
 final class Agent extends Model
 {

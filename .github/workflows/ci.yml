@@ -102,11 +102,15 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.0
+        image: mysql:9.7
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: spora_root
         ports: ['3306:3306']
+        # LTS as of 2025: MySQL 9.7 (was mysql:8.0 — bumped because the
+        # previous tag predates the LTS policy and silently masked newer
+        # engine SQL strictness changes). Bump quarterly per the MariaDB /
+        # MySQL LTS release calendar.
         # `command:` raises max_connections from the default 151 — Pest's
         # parallel runner forks ~18 workers and each opens multiple
         # connections (main + per-test transaction), which exhausts the
@@ -183,7 +187,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mariadb:
-        image: mariadb:11
+        image: mariadb:12.3
         env:
           MARIADB_ROOT_PASSWORD: root
           MARIADB_DATABASE: spora_root
@@ -194,11 +198,14 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+        # LTS as of 2025: MariaDB 12.3 (was mariadb:11 — bumped because
+        # the previous major-only tag silently masked post-11.4 LTS engine
+        # changes). Bump quarterly.
         # Same reason as the MySQL job: Pest's parallel runner exhausts
-        # the default 151 max_connections. The `mariadb:11` entrypoint
+        # the default 151 max_connections. The `mariadb:12.3` entrypoint
         # script prepends `mariadbd` to any first arg starting with `-`,
         # so the scalar flag here becomes `mariadbd --max-connections=500`
-        # at exec time. The `mariadb:11` image ships `mysqladmin` (not
+        # at exec time. The `mariadb:12.3` image ships `mysqladmin` (not
         # `mariadb-admin`) so the wait step uses the former.
         command: --max-connections=500
     env:
