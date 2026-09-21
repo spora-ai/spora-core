@@ -18,17 +18,12 @@ use Throwable;
 
 /**
  * Wipes the configured database and clears the schema stamp.
+ *  - sqlite (default): deletes storage/database.sqlite (or db_path).
+ *  - mysql / mariadb: DROP DATABASE + CREATE DATABASE on SPORA_DB_NAME.
  *
- * Driver-aware (reads SPORA_DB_DRIVER / config.db_driver):
- *  - sqlite (default): deletes storage/database.sqlite (or the path in db_path).
- *  - mysql: DROP DATABASE + CREATE DATABASE on SPORA_DB_NAME.
- *  - mariadb: same DROP/CREATE DATABASE path as mysql — the wire protocol is shared.
- *
- * The MySQL/MariaDB path ALWAYS requires --force (or a typed "yes" at the
- * prompt), because it hits a shared server rather than a local file. The
- * db_name is also validated against MySQL's identifier rules before it is
- * interpolated into the DDL — DROP/CREATE DATABASE cannot be
- * parameterised, so rejection is the only safe path for unusual inputs.
+ * MySQL/MariaDB always require --force — shared server. db_name is validated
+ * against MySQL identifier rules before DDL interpolation (DROP/CREATE
+ * DATABASE cannot be parameterised).
  */
 #[AsCommand(
     name: 'db:reset',
@@ -79,11 +74,7 @@ HELP);
         $stampPath = $this->database->getStampPath();
 
         try {
-            // `mariadb` rides the same protocol as `mysql`; the DROP/CREATE
-            // DATABASE path is identical. We only branch on the connection
-            // class in Database::bootDatabaseConnectionOnly() so the
-            // operator's choice of `db_driver` (mysql vs mariadb) doesn't
-            // surprise them with a different reset path here.
+            // mariadb rides the same protocol as mysql — same DROP/CREATE path.
             if ($driver === 'mysql' || $driver === 'mariadb') {
                 $exit = $this->resetMysql($io, $force, $config);
             } else {

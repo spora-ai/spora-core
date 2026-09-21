@@ -23,10 +23,7 @@ use Illuminate\Database\Schema\Blueprint;
  *     `pragma table_info`); a value of 101 raises at the SQL layer.
  */
 beforeEach(function (): void {
-    // `freshConnectionOnly()`: the test builds its own minimal schema,
-    // so we skip the framework's schema installer and just open a fresh
-    // DB connection (per-test on MySQL/MariaDB so the manual CREATE
-    // TABLE statements below don't collide with pre-existing tables).
+    // Test builds its own schema → connect-only, no installer.
     TestDatabaseFactory::freshConnectionOnly();
 
     // The migration touches `media_assets` and `agents` — both need to

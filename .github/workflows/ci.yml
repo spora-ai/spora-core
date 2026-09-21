@@ -82,21 +82,7 @@ jobs:
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
   test-mysql:
-    # MySQL 9.7 compatibility gate: the suite runs against a real MySQL
-    # server (per-worker databases on a tmpfs-backed container). No coverage
-    # here — SonarCloud consumes the clover XML from the SQLite `test` job.
-    # Two explicit jobs (mysql + mariadb) instead of a matrix because the
-    # migration suite has `=== 'mariadb'` branches that only run when the
-    # connection class reports the MariaDB driver; a matrix would hide
-    # engine-specific failures behind a single status check.
-    #
-    # NOTE: `continue-on-error: true` is set on this job — see the
-    # matching flag on `test-mariadb` below. The migration tests in
-    # `tests/Feature/Database/*` exercise SQLite-specific schema
-    # introspection (`PRAGMA`, `sqlite_master`) that has no MySQL
-    # equivalent in the codebase. Porting them is a follow-up; in the
-    # meantime, this job stays green on the SQLite jobs and gates MySQL
-    # compliance on follow-up PRs.
+    # MySQL 9.7 compatibility gate. No coverage here — SonarCloud consumes clover from the SQLite `test` job. `continue-on-error: true` is set until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported.
     continue-on-error: true
     name: Pest (PHP 8.4, MySQL 9.7)
     runs-on: ubuntu-latest
@@ -107,20 +93,7 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: spora_root
         ports: ['3306:3306']
-        # LTS as of 2025: MySQL 9.7 (was mysql:8.0 — bumped because the
-        # previous tag predates the LTS policy and silently masked newer
-        # engine SQL strictness changes). Bump quarterly per the MariaDB /
-        # MySQL LTS release calendar.
-        # `command:` raises max_connections from the default 151 — Pest's
-        # parallel runner forks ~18 workers and each opens multiple
-        # connections (main + per-test transaction), which exhausts the
-        # default and surfaces as `SQLSTATE[08004] [1040] Too many
-        # connections`. 500 fits 18 workers × ~25 connections with
-        # headroom for the migration tests that drop+recreate their DB.
-        # GitHub Actions' service container `command:` is a scalar string;
-        # the official mysql:9.7 entrypoint script prepends `mysqld` to
-        # any first arg that starts with `-`, so a bare flag here becomes
-        # `mysqld --max-connections=500` at exec time.
+        # Bump default max_connections=151 — Pest's ~18 parallel workers exhaust it (SQLSTATE[08004] 1040). The entrypoint prepends `mysqld` to a bare flag.
         command: --max-connections=500
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
@@ -158,30 +131,11 @@ jobs:
           exit 1
 
       - name: Run Pest (sequential, MySQL)
-        # Sequential run — NOT the parallel runner. The parallel
-        # runner opens one fresh DB per worker and has each worker
-        # install the schema independently; with 2 workers it was
-        # still hitting `SQLSTATE[08004] [1040] Too many connections`
-        # (the per-worker transaction + migration install opens more
-        # connections than `max_connections=500` accommodates), and the
-        # partial schema installs (the pre-existing migration ordering
-        # bug at `000062_*`) were leaving some workers with incomplete
-        # tables. A sequential run needs just one connection, runs
-        # the schema install exactly once, and surfaces real failures
-        # instead of race-condition noise. The SQLite jobs keep
-        # `--parallel` because they're unaffected by these issues.
+        # Sequential — the parallel runner hits SQLSTATE[08004] and partial-schema races (pre-existing 000062 ordering bug); a sequential run installs the schema once.
         run: ./vendor/bin/pest --fail-on-risky
 
   test-mariadb:
-    # MariaDB 12.3 compatibility gate. Mirrors `test-mysql`; the separate
-    # driver flag (`SPORA_TEST_DB_DRIVER=mariadb`) is what makes the
-    # migration suite's `=== 'mariadb'` branches reachable instead of
-    # dead code.
-    #
-    # NOTE: `continue-on-error: true` is set on this job for the same
-    # reason as `test-mysql` — see that job's comment for details. The
-    # SQLite-only migration tests need a follow-up port before either job
-    # can gate the PR.
+    # MariaDB 12.3 compatibility gate. Same `continue-on-error` reason as `test-mysql` above.
     continue-on-error: true
     name: Pest (PHP 8.4, MariaDB 12.3)
     runs-on: ubuntu-latest
@@ -198,15 +152,7 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-        # LTS as of 2025: MariaDB 12.3 (was mariadb:11 — bumped because
-        # the previous major-only tag silently masked post-11.4 LTS engine
-        # changes). Bump quarterly.
-        # Same reason as the MySQL job: Pest's parallel runner exhausts
-        # the default 151 max_connections. The `mariadb:12.3` entrypoint
-        # script prepends `mariadbd` to any first arg starting with `-`,
-        # so the scalar flag here becomes `mariadbd --max-connections=500`
-        # at exec time. The `mariadb:12.3` image ships `mysqladmin` (not
-        # `mariadb-admin`) so the wait step uses the former.
+        # Same max_connections=151 reason as `test-mysql`. The entrypoint prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the mariadb:12.3 image).
         command: --max-connections=500
     env:
       SPORA_TEST_DB_DRIVER:   mariadb

@@ -13,17 +13,8 @@ use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\PrincipalResolver;
 
 /**
- * True iff the `user_agent_favorites.user_id` FK is declared with
- * `ON DELETE CASCADE`. The two engines expose FK metadata through
- * different introspection APIs:
- *   - SQLite: `PRAGMA foreign_key_list(<table>)` returns rows with an
- *     `on_delete` column (`CASCADE`, `RESTRICT`, …).
- *   - MySQL / MariaDB: `PRAGMA` is rejected with errno 1064; the
- *     equivalent lives in `information_schema.REFERENTIAL_CONSTRAINTS`
- *     (`DELETE_RULE` = `CASCADE` / `RESTRICT` / `SET NULL` / …).
- * Keeping the cross-engine introspection in one place so the
- * `cascade-deletes the pivot row when the user is deleted` test can
- * pin the same contract on SQLite and on MySQL/MariaDB.
+ * Cross-engine FK introspection: `PRAGMA foreign_key_list` on SQLite,
+ * `information_schema.REFERENTIAL_CONSTRAINTS.DELETE_RULE` on MariaDB/MySQL.
  */
 function userAgentFavoriteHasCascadeOnUserId(): bool
 {

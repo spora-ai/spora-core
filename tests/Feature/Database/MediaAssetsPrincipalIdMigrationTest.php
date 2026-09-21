@@ -3,13 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Core\Database;
 
 beforeEach(function (): void {
-    // `freshDatabase()` so the test sees an empty schema on every driver —
-    // this test file issues DDL mid-test (calling a migration's `up()`
-    // directly on top of the installed schema) so transaction-rollback
-    // isolation is not enough; a per-test fresh database is the safe default.
+    // DDL mid-test → per-test fresh DB (transaction rollback isn't enough).
     TestDatabaseFactory::freshDatabase();
 });
 

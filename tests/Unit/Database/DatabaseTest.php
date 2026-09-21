@@ -81,11 +81,7 @@ test('tasks table has pending_state column', function (): void {
     expect(Capsule::schema()->hasColumn('tasks', 'pending_state'))->toBeTrue();
 });
 
-// Per-worker schema install skip (covers the path `TestDatabaseFactory::boot()`
-// takes on MySQL/MariaDB workers after the first install). On SQLite the
-// flag never flips in the wild — this test pins the contract that
-// `setSchemaInstallSkipped(true)` makes the second `boot()` a no-op
-// instead of re-running the (expensive) schema installer.
+// Pinned contract for the per-worker skip flag — second `boot()` after `setSchemaInstallSkipped(true)` must not re-run the installer.
 
 test('boot() short-circuits the installer when setSchemaInstallSkipped(true)', function (): void {
     Database::resetBootState();

@@ -599,14 +599,7 @@ test('store() creates a config owned by the current user', function (): void {
 
     $result = json_decode($response->getContent(), true)['data']['config'];
     $savedConfig = LLMDriverConfiguration::find($result['id']);
-    // `principal_id` is the user-principal row's id (FK → principals.id),
-    // NOT `users.id`. They only coincided on a fresh SQLite :memory:
-    // where both auto-increment counters started at 1 and no prior
-    // worker had inserted any rows; on MariaDB/MySQL the principals
-    // table accumulates ids from every previous test in the worker.
-    // Resolve the user-principal for the caller and compare against its
-    // id, which is what the controller's
-    // `LLMConfigService::createConfiguration()` actually stores.
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
     $sessionUserId = (int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID];
     $principalId = Spora\Models\Principal::where('type', Spora\Models\Principal::TYPE_USER)
         ->where('user_id', $sessionUserId)

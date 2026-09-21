@@ -142,11 +142,7 @@ test('put sets a personal config as preference', function (): void {
     expect($body['data']['config']['id'])->toBe($config->id)
         ->and($body['data']['config']['name'])->toBe('Personal Pref Test');
 
-    // Verify database. `principal_id` is the user-principal row's id
-    // (FK → principals.id), not `users.id`. The two only coincide on
-    // SQLite :memory: where both AUTO_INCREMENT counters start at 1;
-    // on MariaDB/MySQL the principal id drifts from the user id as
-    // earlier tests in the worker insert rows.
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
     $principalId = Principal::where('type', Principal::TYPE_USER)
         ->where('user_id', $userId)->value('id');
     $pref = PrincipalPreference::where('principal_id', $principalId)->first();
@@ -180,11 +176,7 @@ test('put sets a global config as preference', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['data']['config']['id'])->toBe($globalConfig->id);
 
-    // Verify database. `principal_id` is the user-principal row's id
-    // (FK → principals.id), not `users.id`. The two only coincide on
-    // SQLite :memory: where both AUTO_INCREMENT counters start at 1;
-    // on MariaDB/MySQL the principal id drifts from the user id as
-    // earlier tests in the worker insert rows.
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
     $principalId = Principal::where('type', Principal::TYPE_USER)
         ->where('user_id', $userId)->value('id');
     $pref = PrincipalPreference::where('principal_id', $principalId)->first();

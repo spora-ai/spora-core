@@ -43,7 +43,7 @@ use Throwable;
  * `PrincipalResolver::ownerUserId()` / `AgentManifest` etc.).
  *
  * @property-read int|null $user_id Legacy alias for the principal's owner user id.
- * @property-read User|null $user Resolved via {@see Agent::getUserAttribute()} — `user()` returns the Builder; the accessor calls `->first()`.
+ * @property-read User|null $user Resolved via {@see Agent::getUserAttribute()}.
  */
 final class Agent extends Model
 {
@@ -89,31 +89,14 @@ final class Agent extends Model
     }
 
     /**
-     * Legacy `user` relation — migration 0067 routed ownership through
-     * the principal table, so the direct `User` FK is gone. For a
-     * user-principal this returns the matching `User`; for a
-     * group-principal it returns the first `owner` user so legacy code
-     * paths still get a User instance. Kept temporarily while downstream
-     * consumers are migrated in their own PRs.
-     *
-     * Returns an Eloquent Builder rather than a `BelongsTo` because the
-     * implementation does a manual two-step resolve
-     * (`Principal::find()` then `User::query()->where()`) — there's no
-     * single FK chain for Eloquent's `belongsTo` to follow. The Builder
-     * can still be `->first()`'d by callers (which is what the `user`
-     * accessor and the legacy test rely on).
-     *
-     * The previous shape — `belongsTo(User::class, 'principal_id', 'id')`
-     * plus a `where('id', $principal->user_id)` — only succeeded on
-     * SQLite `:memory:` because users and principals share the same
-     * AUTO_INCREMENT counter there. As soon as the counters diverge
-     * (any non-empty worker DB on MariaDB/MySQL) the join collapses
-     * to an empty result set.
-     *
-     * Returns `null` when the principal is missing or the group has no
-     * owner, matching the legacy `?BelongsTo` contract that the
-     * `legacy user attribute returns null when the principal is missing`
-     * test pins.
+     * Legacy user accessor. Migration 0067 routed ownership through the
+     * principal table, so the direct `User` FK is gone. For a user-principal
+     * returns the matching `User`; for a group-principal returns the first
+     * `owner` user. Returns a Builder (not a `BelongsTo`) because the
+     * implementation is a manual two-step resolve
+     * (`Principal::find()` then `User::query()->where()`) — no single FK
+     * chain for `belongsTo` to follow. Returns null when the principal is
+     * missing or the group has no owner.
      */
     public function user(): ?\Illuminate\Database\Eloquent\Builder
     {

@@ -20,17 +20,7 @@ final class Database
     /** Stored so DatabaseSchemaInstaller can access getDatabaseManager() after boot. */
     private static ?Capsule $capsule = null;
 
-    /**
-     * Sticky flag flipped by the test bootstrap (`TestDatabaseFactory::boot()`)
-     * after the first schema install on a per-worker database. Subsequent
-     * `boot()` calls in the same worker short-circuit the install step —
-     * the schema is already in place; only the Eloquent connection needs to
-     * be (re-)established.
-     *
-     * Stays `false` in production. The factory is the only caller and is
-     * loaded only via `composer test:parallel`, so production boots always
-     * see the install path.
-     */
+    /** Skip the install step on subsequent `boot()` calls in the same worker — only set by `TestDatabaseFactory`. */
     private static bool $schemaInstallSkipped = false;
 
     public function __construct(
@@ -50,13 +40,7 @@ final class Database
 
         $driver = $this->config['db_driver'] ?? 'sqlite';
 
-        // `mariadb` rides the same wire protocol as MySQL but Illuminate ships a
-        // distinct `MariaDbConnection` that swaps in the MariaDB grammars. We pass
-        // the operator's choice through as the connection's `driver` so
-        // `Connection::getDriverName()` returns the exact value the migrations
-        // gate on (their `=== 'mariadb'` branches become reachable instead of
-        // dead code). MySQL still uses `mysql`; either value produces a working
-        // Eloquent connection.
+        // Pass `mariadb` through as the driver's literal name so Illuminate's MariaDB grammar is used and `Connection::getDriverName()` matches the `=== 'mariadb'` gates in migrations.
         if ($driver === 'mysql' || $driver === 'mariadb') {
             $capsule->addConnection([
                 'driver'    => $driver,
@@ -107,18 +91,11 @@ final class Database
         $this->bootDatabaseConnectionOnly();
 
         if (self::$schemaInstallSkipped) {
-            // The owning test worker has already installed the schema on its
-            // per-worker database; re-running install() here would either no-op
-            // (best case) or fail on a partial re-install (worst case). The
-            // eager stamp-cache short-circuit in production doesn't apply to
-            // per-worker DBs because the stamp file would be shared across
-            // workers against databases that aren't.
+            // Worker DB already has the schema; the per-worker stamp file would otherwise be shared across workers against different DBs.
             return;
         }
 
-        // For :memory: SQLite (tests) there is no persistent filesystem, so the stamp
-        // cache is disabled and the installer always runs the full DB check.
-        // For all other drivers the stamp file gives an O(1) hot path on every HTTP request.
+        // Stamp file is skipped for `:memory:` SQLite (no persistent fs); otherwise it's the O(1) hot-path cache.
         $dbPath    = $this->config['db_path'] ?? null;
         $stampPath = ($dbPath === ':memory:')
             ? null
@@ -127,12 +104,7 @@ final class Database
         (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths, $this->appLoader))->install();
     }
 
-    /**
-     * Toggle the schema-install short-circuit. Set `true` after a test worker
-     * has finished its first schema install; set `false` to re-enable install
-     * (used by `TestDatabaseFactory::freshDatabase()` when a test drops and
-     * recreates its per-worker DB).
-     */
+    /** Toggle the schema-install short-circuit — `true` after first install in a worker; reset to `false` by `TestDatabaseFactory::freshDatabase()`. */
     public static function setSchemaInstallSkipped(bool $skipped): void
     {
         self::$schemaInstallSkipped = $skipped;
@@ -177,18 +149,7 @@ final class Database
     {
         self::$booted  = false;
         self::$capsule = null;
-        // The schema-install skip flag MUST be reset here too — otherwise a
-        // test that bypasses the factory and inlines its own
-        // `Database::resetBootState() + new Database([sqlite :memory:])->boot()`
-        // pair inherits the factory's "schema already installed on the
-        // worker DB" optimisation, never runs `DatabaseSchemaInstaller::install()`
-        // on the new (empty) `:memory:` SQLite, and immediately fails every
-        // `insert into users` with "no such table: users" — even though the
-        // global `beforeEach` factory had successfully installed the schema
-        // on the real MariaDB/MySQL DB moments earlier.
-        //
-        // The factory re-establishes the flag in its own `boot()` so the
-        // hot-path optimisation still applies on the per-worker DB it owns.
+        // A test that bypasses the factory and inlines `new Database([sqlite :memory:])->boot()` would otherwise inherit the worker's "already installed" skip and fail every insert with "no such table".
         self::$schemaInstallSkipped = false;
     }
 }

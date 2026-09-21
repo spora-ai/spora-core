@@ -15,10 +15,7 @@ use Illuminate\Database\Schema\Blueprint;
 afterEach(function (): void {
     // The migration-suite schema installs `media_derivatives` (FK to
     // media_assets.id) before this test runs. SQLite's default FK
-    // semantics don't block the drop, but MariaDB/InnoDB refuses to drop
-    // a parent table while a child FK points at it. Suspend FK checks for
-    // the duration of the drop — they're test-scoped and never re-enabled
-    // inside this file's tests.
+    // InnoDB refuses to drop a parent while a child FK points at it; suspend FK checks for the drop.
     $driver = Capsule::connection()->getDriverName();
     if ($driver === 'mysql' || $driver === 'mariadb') {
         Capsule::statement('SET FOREIGN_KEY_CHECKS = 0');
@@ -31,13 +28,7 @@ afterEach(function (): void {
         }
     }
 
-    // On MariaDB the per-worker DB persists across tests in the same
-    // worker. The factory's hot-path optimisation skips the schema install
-    // on subsequent boots — so the next test (e.g. MediaListTempFilterTest
-    // in MediaArchive/) sees a worker DB without `media_assets` and the
-    // `INSERT INTO media_assets …` raises SQLSTATE[42S02]. Mark the worker
-    // DB dirty so the next `boot()` drops+reinstalls the schema.
-    // SQLite's per-test `:memory:` rebuild makes this a no-op.
+    // Drop below makes the next worker's `boot()` reinstall the schema (per-worker DB outlives this test on MariaDB).
     if ($driver !== 'sqlite') {
         TestDatabaseFactory::markWorkerDbDirty();
     }

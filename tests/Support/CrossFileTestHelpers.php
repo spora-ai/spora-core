@@ -14,14 +14,7 @@
 declare(strict_types=1);
 
 if (!function_exists('testGenerateUuidV4')) {
-    /**
-     * RFC 4122 UUIDv4 string. MySQL/MariaDB's `uuid` column type rejects
-     * malformed shapes — the third group's leading nibble must be 4, the
-     * fourth group's leading nibble must be 8/9/a/b. SQLite stores the
-     * value as text and doesn't care, so the previous
-     * `'%08x-aaaa-bbbb-cccc-%012x'` fixture worked locally but crashed on
-     * every MariaDB run with `Incorrect uuid value`.
-     */
+    /** RFC 4122 UUIDv4 (version 4 nibble + variant 8/9/a/b) — MariaDB's `uuid` column rejects malformed shapes. */
     function testGenerateUuidV4(): string
     {
         $raw    = random_bytes(16);

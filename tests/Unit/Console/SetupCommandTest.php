@@ -62,11 +62,7 @@ function makeSetupTester(): CommandTester
 
 it('seeds on a fresh install', function (): void {
     // Per-test fresh schema. The SetupCommand gates the fresh-seeder
-    // branch on `$userCount === 0 && $agentCount === 0`; on MariaDB the
-    // per-worker DB persists across tests in the same worker so earlier
-    // tests' `users` / `agents` rows are still there. `freshDatabase()`
-    // gives every test a clean slate without paying for a full DB drop
-    // on every test.
+    // Per-test fresh DB — the setup branch only fires on an empty schema, which MariaDB's persisting counters would otherwise block.
     TestDatabaseFactory::freshDatabase();
 
     $tester = makeSetupTester();

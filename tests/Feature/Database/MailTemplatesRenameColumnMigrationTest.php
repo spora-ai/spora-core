@@ -5,10 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 
 beforeEach(function (): void {
-    // `freshConnectionOnly()`: the test builds its own minimal schema,
-    // so we skip the framework's schema installer and just open a fresh
-    // DB connection (per-test on MySQL/MariaDB so the manual CREATE
-    // TABLE statement below doesn't collide with a pre-existing table).
+    // Test builds its own schema → connect-only, no installer.
     TestDatabaseFactory::freshConnectionOnly();
 
     // Create the mail_templates table with the legacy column shape so renameColumn has something to act on.

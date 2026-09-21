@@ -41,10 +41,7 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->unsignedBigInteger('user_id');
             $table->string('email', 249);
-            // delight-im/auth's `createConfirmationRequest()` emits a
-            // 16-char base64-url-safe selector; 64 leaves headroom for the
-            // library to grow the format or for hash-based variants without
-            // breaking the SQLite path (which doesn't enforce length).
+            // 64-char selector leaves headroom over delight-im/auth's 16-char `createConfirmationRequest()` output (SQLite ignores length).
             $table->string('selector', 64);
             $table->string('token', 255);
             $table->unsignedInteger('expires');
@@ -58,10 +55,7 @@ return new class extends Migration
             $table->unsignedBigInteger('user_id');
             $table->unsignedInteger('mechanism');
             $table->tinyInteger('single_factor')->default(0);
-            // Same width rationale as `users_confirmations.selector` —
-            // delight-im/auth's `createSelectorForOneTimePassword()`
-            // returns 24 chars today; 64 leaves headroom for the library
-            // to grow the format in future versions.
+            // Same rationale as `users_confirmations.selector` — delight-im/auth's 24-char `createSelectorForOneTimePassword()` output.
             $table->string('selector', 64);
             $table->string('token', 255);
             $table->unsignedInteger('expires_at')->nullable();

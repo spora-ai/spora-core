@@ -10,10 +10,7 @@ use Spora\Models\Principal;
 use Spora\Models\User;
 
 beforeEach(function (): void {
-    // `freshDatabase()` so the test sees an empty schema on every driver —
-    // this test file issues DDL mid-test (calling a migration's `up()`
-    // directly on top of the installed schema) so transaction-rollback
-    // isolation is not enough; a per-test fresh database is the safe default.
+    // DDL mid-test → per-test fresh DB (transaction rollback isn't enough).
     TestDatabaseFactory::freshDatabase();
 });
 
@@ -450,16 +447,7 @@ test('0067 migration recovers from a partially-applied state on SQLite', functio
     if (Capsule::connection()->getDriverName() !== 'sqlite') {
         $this->markTestSkipped('The partial-state simulation uses PRAGMA table_info / foreign_key_list to rebuild a SQLite table — MariaDB/MySQL take the real ALTER path and the simulation is meaningless.');
     }
-    // Simulate the operator's MariaDB partial state: the principal_id FK
-    // add step failed previously, so llm_driver_configurations has the
-    // column + index but no FK to principals. On SQLite ALTER TABLE
-    // cannot add or drop FKs, so the simulation drops the FK via a table
-    // rebuild (the same pattern the migration uses for the user_id
-    // drop). Re-running the migration must (a) detect the missing FK via
-    // foreignKeyExists() and add it, (b) detect the missing index via
-    // indexExists() — already added in the simulation, so this branch
-    // should be a no-op — and (c) keep the user_id drop a no-op since
-    // user_id is already gone after the first boot.
+    // Simulate the operator's partial-state: llm_driver_configurations has the column + index but no FK to principals (the previous FK-add step failed). SQLite ALTER can't drop FKs, so the test rebuilds the table.
 
     $conn = Capsule::connection();
     $table = 'llm_driver_configurations';

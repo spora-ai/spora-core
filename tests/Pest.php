@@ -201,12 +201,7 @@ uses(Tests\Concerns\CreatesPrincipal::class)
         putenv('SPORA_STORAGE_DIR');
         unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
 
-        // `SPORA_TEST_DB_DRIVER` is read by the factory (default `sqlite`).
-        // The factory creates a per-worker DB on first call when set to
-        // `mysql` or `mariadb` and installs the schema once; subsequent
-        // `boot()` calls in the worker reconnect without re-installing
-        // because `Database::setSchemaInstallSkipped(true)` makes the
-        // install step a no-op. See `tests/Support/TestDatabaseFactory.php`.
+        // Driver-aware per-worker DB; see tests/Support/TestDatabaseFactory.php.
         TestDatabaseFactory::boot();
 
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
@@ -215,14 +210,7 @@ uses(Tests\Concerns\CreatesPrincipal::class)
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
             Illuminate\Database\Capsule\Manager::connection()->rollBack();
         }
-        // Clear the simulated PHP session between tests. On SQLite the
-        // per-test `:memory:` rebuild hides this leak; on MariaDB the
-        // per-worker DB keeps the `users_sessions` row alive and the
-        // `$_SESSION` superglobal is a PHP-process-level global that
-        // survives across tests in the same worker, so a `bootAuth()`
-        // call from one test bleeds into the next test that expected to
-        // start unauthenticated (e.g. `AgentTransferController::transfer
-        // Principal → returns 401 when caller is not logged in`).
+        // `$_SESSION` is process-level — leaks across tests on MariaDB where the per-worker DB outlives the test.
         clearSession();
         Spora\Core\Database::resetBootState();
         $previous = $GLOBALS['__spora_storage_dir_previous'] ?? false;

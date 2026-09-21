@@ -46,10 +46,7 @@ function makeSeeder(): DatabaseSeeder
 
 it('seeds the admin user and agent successfully', function () {
     // Per-test fresh schema. SQLite `:memory:` masks this (each Pest test
-    // already gets a clean connection); on MariaDB/MySQL the per-worker
-    // DB persists across tests so earlier `it()` calls left the admin
-    // user/agent row behind, which the seeder's "Existing installation
-    // detected" gate would catch and skip the fresh-install branch.
+    // Per-test fresh DB — MariaDB's persisting counters would otherwise leave the admin/agent row behind.
     TestDatabaseFactory::freshDatabase();
 
     // Initial state
@@ -82,10 +79,7 @@ it('seeds the admin user and agent successfully', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not duplicate records if seeder is run twice', function () {
-    // Same rationale as the previous test — the seeder's idempotency
-    // branch only fires if a previous run in the same worker left
-    // admin + agent rows behind. SQLite rebuilds per-test, MariaDB
-    // does not.
+    // Per-test fresh DB so the seeder's idempotency branch has rows to collide with on MariaDB.
     TestDatabaseFactory::freshDatabase();
 
     $seeder = makeSeeder();
@@ -104,10 +98,7 @@ it('does not duplicate records if seeder is run twice', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not modify an existing admin row (security)', function () {
-    // Same rationale as the previous tests — on MariaDB the per-worker
-    // DB persists so the admin row from earlier `freshDatabase()`-using
-    // tests would trip the email-unique key when this test tries to
-    // re-insert it directly.
+    // Per-test fresh DB so the admin row from a previous test doesn't trip the email-unique key on MariaDB.
     TestDatabaseFactory::freshDatabase();
 
     // Operator-customised admin: renamed, no admin role, suspended. The seeder

@@ -14,10 +14,7 @@ use Illuminate\Database\Schema\Blueprint;
  * against fresh state.
  */
 beforeEach(function (): void {
-    // `freshConnectionOnly()`: the test builds its own minimal schema,
-    // so we skip the framework's schema installer and just open a fresh
-    // DB connection (per-test on MySQL/MariaDB so the manual CREATE
-    // TABLE statements below don't collide with pre-existing tables).
+    // Test builds its own schema → connect-only, no installer.
     TestDatabaseFactory::freshConnectionOnly();
 
     // `principals.user_id` holds the FK to `users.id`, so the parent table
