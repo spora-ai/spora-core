@@ -153,18 +153,20 @@ jobs:
           echo "MySQL did not become ready in time" >&2
           exit 1
 
-      - name: Run Pest (parallel, MySQL)
-        # `--processes=2` instead of `auto`: each Pest worker opens
-        # many connections (main + per-test transaction + Eloquent
-        # helpers + the migration tests that drop+recreate the DB and
-        # open extra ones). Even with the `--max-connections=500`
-        # override applied to the container (via the official
-        # docker-entrypoint.sh prepending `mysqld`), the cumulative
-        # connection count across 8 workers has been hitting
-        # `SQLSTATE[08004] [1040] Too many connections`. Capping at 2
-        # keeps the connection count comfortably under the default 151
-        # and the cost is ~5 minutes of CI time.
-        run: ./vendor/bin/pest --parallel --processes=2 --max-batch-size=50 --fail-on-risky
+      - name: Run Pest (sequential, MySQL)
+        # Sequential run — NOT the parallel runner. The parallel
+        # runner opens one fresh DB per worker and has each worker
+        # install the schema independently; with 2 workers it was
+        # still hitting `SQLSTATE[08004] [1040] Too many connections`
+        # (the per-worker transaction + migration install opens more
+        # connections than `max_connections=500` accommodates), and the
+        # partial schema installs (the pre-existing migration ordering
+        # bug at `000062_*`) were leaving some workers with incomplete
+        # tables. A sequential run needs just one connection, runs
+        # the schema install exactly once, and surfaces real failures
+        # instead of race-condition noise. The SQLite jobs keep
+        # `--parallel` because they're unaffected by these issues.
+        run: ./vendor/bin/pest --fail-on-risky
 
   test-mariadb:
     # MariaDB 11 compatibility gate. Mirrors `test-mysql`; the separate
@@ -228,11 +230,11 @@ jobs:
           echo "MariaDB did not become ready in time" >&2
           exit 1
 
-      - name: Run Pest (parallel, MariaDB)
-        # Same rationale as the MySQL job: cap processes to stay under
-        # MariaDB's default `max_connections=151`. See the MySQL job's
-        # comment for the full breakdown.
-        run: ./vendor/bin/pest --parallel --processes=2 --max-batch-size=50 --fail-on-risky
+      - name: Run Pest (sequential, MariaDB)
+        # Same rationale as the MySQL job: sequential run avoids both
+        # the connection-pool exhaustion and the partial-schema-install
+        # race conditions that come with parallel workers on MySQL/MariaDB.
+        run: ./vendor/bin/pest --fail-on-risky
 
   static-analysis:
     name: PHPStan
