@@ -293,7 +293,7 @@ test('me when not logged in returns 401 UNAUTHENTICATED', function (): void {
 
 // Logout tests
 
-test('logout returns 204 with no body', function (): void {
+test('logout returns 200 with a {logged_out: true} envelope', function (): void {
     clearSession();
     [$controller, $service] = makeAuthController();
 
@@ -302,8 +302,8 @@ test('logout returns 204 with no body', function (): void {
 
     $response = $controller->logout(jsonRequest('POST', '/api/v1/auth/logout'));
 
-    expect($response->getStatusCode())->toBe(204);
-    expect($response->getContent())->toBe('');
+    expect($response->getStatusCode())->toBe(200);
+    expect(json_decode((string) $response->getContent(), true))->toBe(['data' => ['logged_out' => true]]);
 });
 
 test('after logout me returns 401 UNAUTHENTICATED', function (): void {

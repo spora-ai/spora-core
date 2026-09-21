@@ -7,8 +7,6 @@ namespace Spora\Agents;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
-use Spora\Agents\Exceptions\ToolNotEnabledException;
-use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
@@ -540,169 +538,31 @@ final class TickPhaseRunner
 
     private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void
     {
-        /** @var list<DriverToolCall> $pendingApproval */
-        $pendingApproval = [];
+        $handler = $this->makeBatchHandler();
+        [$pendingApproval, $pendingInput] = $handler->dispatchToolCalls($task, $agent, $toolCalls);
 
-        foreach ($toolCalls as $toolCall) {
-            try {
-                $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task);
-
-                if ($disposition === ToolCallDisposition::AwaitingApproval) {
-                    $pendingApproval[] = $toolCall;
-                }
-            } catch (ToolNotEnabledException $e) {
-                // Authorization drift: the LLM proposed a tool that is no longer
-                // (or never was) in this agent's allowed set. Surface it as an
-                // explicit authorization message so the LLM doesn't try again on
-                // its next turn — the next tick will also rebuild the tool list
-                // via {@see prepareTickContext()}, but the LLM needs the in-band
-                // signal so it doesn't waste a round-trip rediscovering it.
-                $this->orchestrator->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString(
-                        "Tool '{$toolCall->toolName}' is not enabled for this agent. The tool may have been revoked; do not propose it again.",
-                    )),
-                    context: new HistoryMessageContext(
-                        toolCallId: $toolCall->providerCallId,
-                        toolName: $toolCall->toolName,
-                    ),
-                );
-            } catch (Throwable $e) {
-                $this->orchestrator->appendHistory(
-                    taskId: $task->id,
-                    role: 'tool',
-                    content: 'System Error: ' . $e->getMessage(),
-                    context: new HistoryMessageContext(
-                        toolCallId: $toolCall->providerCallId,
-                        toolName: $toolCall->toolName,
-                    ),
-                );
-            }
-        }
-
-        if ($pendingApproval === []) {
-            // Abort-bail: a user abort could have landed between this tick's
-            // claim and the completion of the tool batch. We accept the user's
-            // request up to this tool boundary — once the latest tool
-            // returned, we re-read the status before either kicking the next
-            // tick or handing the loop off to the parent-resume hook. If the
-            // row is `ABORTED`, no further LLM traffic happens this tick.
-            //
-            // Publish the just-completed tool output BEFORE the bail: the
-            // chat relies on Mercure for live tool output. If we published
-            // only on the next tick (which never arrives for an aborted
-            // task), the user would have to reload the page to see the
-            // tool result that landed the same instant they clicked Abort.
-            //
-            // Re-read the row before publishing so the payload reflects
-            // the current DB state — passing the in-memory $task here
-            // would carry the stale RUNNING status into the Mercure
-            // event when the row had already been flipped to ABORTED.
-            $latestStatus = Task::where('id', $task->id)->value('status');
-            $this->publishIntermediateState(Task::find($task->id) ?? $task);
-            if ($latestStatus === 'ABORTED') {
-                $this->logger?->info('Tick bailed — task was aborted after tool batch', [
-                    'task_id' => $task->id,
-                ]);
-                return;
-            }
-
-            // Sync-mode auto-approve batch boundary: every tool in this turn ran
-            // inline (no ApprovedBatchExecutor involved), so the resume hook in
-            // ApprovedBatchExecutor::triggerBatchBoundaryResume never fires for
-            // this path. Mirror it here so any spawned sub_agents get a chance
-            // to wake their parent up at the end of the turn. The worker-mode
-            // equivalent lives in executeApprovedPendingToolsForTask() above.
-            $this->maybeResumeParentFromBatchBoundary($task->id);
-
-            // Re-check after the batch-boundary hook — a parent that flipped
-            // to ABORTED through {@see TaskService::abortSubAgentAndCascade}
-            // must not start another LLM turn.
-            $latestStatus = Task::where('id', $task->id)->value('status');
-            if ($latestStatus === 'ABORTED') {
-                return;
-            }
-
-            // Before recursive tick — keep the lease alive across the next
-            // tool batch + LLM round-trip so the reaper does not flip the
-            // row mid-batch.
-            $this->leaseGuard->extend($task->id);
-
-            if ($this->singleStep) {
-                // Client-worker mode: stop after one LLM turn so the SPA
-                // sees this batch of tool calls. Flip status back to
-                // QUEUED so the browser's next /tick can CAS-claim the
-                // row (the orchestrator's claim path rejects rows that
-                // are still RUNNING, which is where the outer tick left
-                // them). Clear the lease so the reaper doesn't pick up
-                // the row while the browser is preparing the next tick —
-                // the browser re-claims it with its own lease_owner.
-                Task::where('id', $task->id)
-                    ->where('status', 'RUNNING')
-                    ->update([
-                        'status'           => 'QUEUED',
-                        'lease_owner'      => null,
-                        'lease_expires_at' => null,
-                    ]);
-                $this->publishIntermediateState(Task::find($task->id) ?? $task);
-                return;
-            }
-
-            $this->orchestrator->tick($task->id);
-        } else {
-            $state = new AgentState(
-                taskId: $task->id,
-                agentId: $agent->id,
-                pendingToolCalls: $pendingApproval,
-                messageSnapshot: $this->orchestrator->buildMessages($task->id),
-                stepCount: $task->step_count,
-                maxSteps: $task->max_steps,
-                pausedAt: date('Y-m-d\TH:i:s\Z'),
-            );
-
-            $task->status        = 'PENDING_APPROVAL';
-            $task->pending_state = $state->toJson();
-            $task->save();
-
-            $toolNames = implode(', ', array_unique(array_map(
-                static fn(DriverToolCall $tc) => $tc->toolName,
-                $pendingApproval,
-            )));
-            $this->logger?->info('Task paused — approval needed', [
-                'task_id' => $task->id,
-                'tool_count' => count($pendingApproval),
-                'tools' => $toolNames,
-            ]);
-
-            $this->notificationService?->notifyPendingApproval($task);
-
-            $this->publishIntermediateState($task);
-        }
-    }
-
-    private function publishIntermediateState(Task $task): void
-    {
-        if ($this->mercure === null) {
+        if ($pendingApproval === [] && $pendingInput === []) {
+            $handler->completeTickAfterTools($task);
             return;
         }
 
-        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
+        $handler->parkTaskForPending($task, $agent, $pendingApproval, $pendingInput);
+    }
 
-        $historyRows = $task->taskHistory()->orderBy('sequence')->get();
-        $historyPayload = \Spora\Services\TaskHistorySerializer::buildHistoryPayload($historyRows);
-        $totals = \Spora\Services\TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
-
-        $taskData = [
-            'id' => $task->id,
-            'status' => $task->status,
-            'step_count' => $task->step_count,
-            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
-            'history' => $historyPayload['history'],
-            'totals' => $totals,
-        ];
-
-        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $taskData);
+    private function makeBatchHandler(): ToolCallBatchHandler
+    {
+        $handler = new ToolCallBatchHandler(
+            orchestrator: $this->orchestrator,
+            logger: $this->logger,
+            notificationService: $this->notificationService,
+            mercure: $this->mercure,
+            toolCallSerializer: $this->toolCallSerializer,
+            toolInstances: $this->toolInstances,
+            leaseGuard: $this->leaseGuard,
+            subAgent: $this->subAgent,
+        );
+        $handler->singleStep = $this->singleStep;
+        return $handler;
     }
 
     /**

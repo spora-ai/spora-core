@@ -10,6 +10,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\AnswerQuestionRequestValidator;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\TaskController;
@@ -25,6 +26,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
@@ -178,6 +180,7 @@ function buildCapabilityController(string $model, string $driverClass): array
             $mediaCapability,
             new ContinueTaskDispatcher($stub, $mediaCapability),
             new DecisionsRequestValidator($stub),
+            new AnswerQuestionRequestValidator(new PrincipalResolver()),
         ),
         $stub,
     ];

@@ -84,10 +84,7 @@ final class AuthController
         $this->csrfService->invalidate();
         $this->authService->logout();
 
-        $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
-        $response->setContent('');
-
-        return $response;
+        return new JsonResponse(['data' => ['logged_out' => true]]);
     }
 
     public function me(): JsonResponse

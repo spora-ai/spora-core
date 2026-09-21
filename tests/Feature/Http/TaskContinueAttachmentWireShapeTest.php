@@ -8,6 +8,7 @@ use Psr\Log\NullLogger;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Http\AnswerQuestionRequestValidator;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\TaskController;
@@ -110,6 +111,7 @@ function buildWireShapeController(): TaskController
         $mediaCapability,
         new ContinueTaskDispatcher($stub, $mediaCapability),
         new DecisionsRequestValidator($stub),
+        new AnswerQuestionRequestValidator(new \Spora\Services\PrincipalResolver()),
     );
 }
 

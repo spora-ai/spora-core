@@ -10,10 +10,12 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\ValueObjects\AgentState;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
+use Spora\Tools\PendingQuestionBatch;
 use Throwable;
 
 /**
@@ -28,7 +30,11 @@ final class TaskService implements TaskServiceInterface
         private readonly MercurePublisherInterface $mercure,
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?PrincipalResolver $principalResolver = null,
-    ) {}
+    ) {
+        $this->answerRecorder = new AnswerTaskRecorder($this->orchestrator, $this->principalResolver);
+    }
+
+    private AnswerTaskRecorder $answerRecorder;
 
     /**
      * @inheritDoc
@@ -320,6 +326,55 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
+     * Records the operator's answers to a pending `ask_user_question`
+     * batch on an `AWAITING_INPUT` task, flips the task back to
+     * `QUEUED` (or leaves it in `AWAITING_INPUT` if other batches are
+     * still pending), and publishes the new state to Mercure.
+     *
+     * Mercure publish is best-effort: the controller has already
+     * returned 204 by the time this method is reached, so a publish
+     * failure must not fail an otherwise-successful answer submit.
+     * `MercurePublisher::doPublish` logs the underlying transport
+     * error internally and returns `false`; this method additionally
+     * catches anything that escapes that layer (interface swaps,
+     * pluggable implementations) so a wedged hub cannot regress a
+     * correct answer into a 502. Clients whose subscription is the
+     * Mercure SSE event still see the new state on the next poll of
+     * `GET /api/v1/tasks/{id}` after the row flips.
+     *
+     * Throws {@see InvalidArgumentException} when the task is missing,
+     * not owned by the calling user, or not in `AWAITING_INPUT`.
+     *
+     * @return array<string, mixed>
+     */
+    public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
+    {
+        $result = $this->answerRecorder->record($taskId, $userId, $toolCallId, $formattedContent);
+        $resource = $this->taskResource($result['task']);
+        $this->publishAnsweredTaskBestEffort($taskId, $resource, $result['principal_id']);
+        return $resource;
+    }
+
+    /**
+     * Best-effort Mercure publish — see method docblock. The controller
+     * returns 200 with the new task resource; a publish failure here is
+     * logged by MercurePublisher and the next poll of GET
+     * /api/v1/tasks/{id} re-syncs the client.
+     *
+     * @param array<string, mixed> $resource
+     */
+    private function publishAnsweredTaskBestEffort(int $taskId, array $resource, int $principalId): void
+    {
+        try {
+            $this->mercure->publishForPrincipal($taskId, $principalId, $resource);
+        } catch (Throwable) {
+            // Mirrors MercurePublisher::doPublish's own try/catch
+            // (app/Services/MercurePublisher.php:122) — nothing else to
+            // do here; the row state is already committed.
+        }
+    }
+
+    /**
      * Walks up the `parent_task_id` chain from `$parentTaskId` (nullable
      * when aborting a root task) and aborts every ancestor that is still
      * in `AWAITING_SUB_AGENTS`. Idempotent: ancestors that are already
@@ -576,7 +631,9 @@ final class TaskService implements TaskServiceInterface
      *     retry_after?: string,
      *     tool_calls: list<array<string, mixed>>,
      *     history: list<array<string, mixed>>,
-     *     totals: array<string, int>
+     *     totals: array<string, int>,
+     *     data: array<string, mixed>|null,
+     *     pending_questions: list<array<string, mixed>>|null
      * }
      */
     private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
@@ -586,7 +643,38 @@ final class TaskService implements TaskServiceInterface
         // the Mercure live stream — operation, operation_description, and
         // parameter_schema all flow through). Re-running the queries here
         // would duplicate work and re-introduce the Shape A/B divergence.
-        return $this->taskResource($task, $sinceSequence);
+        $resource = $this->taskResource($task, $sinceSequence);
+
+        // Surface `tasks.data` (TodoTool writes `data.todos`,
+        // SubAgentTool writes `data.spawned_sub_task_ids`, etc.) and any
+        // pending ask_user_question batches alongside the tool-call
+        // history so the REST poll mirrors the Mercure `data` /
+        // `pending_questions` fields — keeps Mercure-less deployments
+        // (php -S dev server, no hub) on par with the live stream.
+        // Scoped to the detail endpoint only: action responses
+        // (start/approve/reject/retry/continue/abort/answer) and
+        // Mercure payloads go through `taskResource()` directly and
+        // must NOT carry these fields, so the list view stays minimal
+        // and the action-level wire shapes don't drift.
+        $resource['data'] = $task->data;
+
+        $resource['pending_questions'] = null;
+        if (is_string($task->pending_state) && $task->pending_state !== '') {
+            try {
+                $state = AgentState::fromJson($task->pending_state);
+                if ($state->pendingQuestions !== []) {
+                    $resource['pending_questions'] = array_map(
+                        static fn(PendingQuestionBatch $b): array => $b->toArray(),
+                        $state->pendingQuestions,
+                    );
+                }
+            } catch (Throwable) {
+                // Bad JSON or shape drift — fall through with null (defensive,
+                // mirrors TickPhaseRunner::publishIntermediateState).
+            }
+        }
+
+        return $resource;
     }
 
 }

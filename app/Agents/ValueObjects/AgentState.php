@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Agents\ValueObjects;
 
 use Spora\Drivers\ValueObjects\ToolCall;
+use Spora\Tools\PendingQuestion;
+use Spora\Tools\PendingQuestionBatch;
 
 /**
  * Snapshot of Orchestrator state at the moment one or more OutputTool calls are intercepted.
@@ -35,6 +37,16 @@ final readonly class AgentState
 
         /** ISO 8601 UTC timestamp. */
         public string $pausedAt,
+
+        /**
+         * Pending question batches from ask_user_question calls. Empty when
+         * no question batches are pending. Multiple batches can coexist
+         * (the LLM may call ask_user_question across separate turns); each
+         * batch carries its own tool_call_id and is answered atomically.
+         *
+         * @var list<PendingQuestionBatch>
+         */
+        public array $pendingQuestions = [],
     ) {}
 
     public static function fromJson(string $json): static
@@ -58,6 +70,31 @@ final readonly class AgentState
             $data['pending_tool_calls'],
         );
 
+        $pendingQuestions = [];
+        foreach (($data['pending_questions'] ?? []) as $rawBatch) {
+            if (!is_array($rawBatch)) {
+                continue;
+            }
+            $questions = [];
+            foreach (($rawBatch['questions'] ?? []) as $rawQuestion) {
+                if (!is_array($rawQuestion)) {
+                    continue;
+                }
+                $questions[] = new PendingQuestion(
+                    question: (string) ($rawQuestion['question'] ?? ''),
+                    header: (string) ($rawQuestion['header'] ?? ''),
+                    options: is_array($rawQuestion['options'] ?? null) ? $rawQuestion['options'] : [],
+                    multiple: (bool) ($rawQuestion['multiple'] ?? false),
+                    allowFreeText: (bool) ($rawQuestion['allowFreeText'] ?? true),
+                );
+            }
+            $pendingQuestions[] = new PendingQuestionBatch(
+                toolCallId: (string) ($rawBatch['tool_call_id'] ?? ''),
+                questions: $questions,
+                createdAt: (string) ($rawBatch['created_at'] ?? gmdate('Y-m-d\TH:i:s\Z')),
+            );
+        }
+
         return new static(
             taskId: $data['task_id'],
             agentId: $data['agent_id'],
@@ -66,6 +103,7 @@ final readonly class AgentState
             stepCount: $data['step_count'],
             maxSteps: $data['max_steps'],
             pausedAt: $data['paused_at'],
+            pendingQuestions: $pendingQuestions,
         );
     }
 
@@ -86,6 +124,10 @@ final readonly class AgentState
             'step_count'        => $this->stepCount,
             'max_steps'         => $this->maxSteps,
             'paused_at'         => $this->pausedAt,
+            'pending_questions' => array_map(
+                static fn(PendingQuestionBatch $b): array => $b->toArray(),
+                $this->pendingQuestions,
+            ),
         ], JSON_THROW_ON_ERROR);
     }
 }

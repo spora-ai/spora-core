@@ -448,13 +448,13 @@ describe('AuthController::login', function (): void {
 // ---------------------------------------------------------------------------
 
 describe('AuthController::logout', function (): void {
-    test('returns 204 with empty body', function (): void {
+    test('returns 200 with a {logged_out: true} envelope', function (): void {
         [$controller] = makeAuthController();
 
         $response = $controller->logout();
 
-        expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
-        expect($response->getContent())->toBe('');
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode((string) $response->getContent(), true))->toBe(['data' => ['logged_out' => true]]);
     });
 });
 

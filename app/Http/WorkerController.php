@@ -98,7 +98,7 @@ final class WorkerController
         // long enough to complete a normal tick but short enough that a
         // crashed caller's lock won't suppress every other browser.
         if (!$this->housekeepingLock->tryAcquire(self::LOCK_TTL_SECONDS)) {
-            return new Response('', Response::HTTP_NO_CONTENT);
+            return new JsonResponse(['data' => ['acquired' => false]]);
         }
 
         $buffer = new BufferedOutput();

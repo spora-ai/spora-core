@@ -96,6 +96,24 @@ final class TaskStatusWriter
     }
 
     /**
+     * Apply a status flip on $task that resolves an AWAITING_INPUT → QUEUED
+     * transition after the operator answered a pending question batch.
+     * Mirrors {@see applyContinueTransition()} (same single-UPDATE shape)
+     * so the resume path doesn't grow parallel SQL.
+     *
+     * `pending_state` is cleared on the caller side (the controller writes
+     * the updated batch list before calling this method); the writer only
+     * owns the status flip + data column shape.
+     */
+    public function applyAnswerTransition(Task $task): Task
+    {
+        $data = is_array($task->data) ? $task->data : [];
+        $this->writeTransition($task, 'QUEUED', $data);
+
+        return Task::find($task->id);
+    }
+
+    /**
      * Persist a task's new status + updated-at stamp + data column in one
      * place. Used by both {@see applyContinueTransition()} (which adds
      * prompt / max_steps / step_count on top) and {@see abortTransition()}

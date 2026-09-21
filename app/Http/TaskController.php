@@ -23,6 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class TaskController
 {
+    private const NOT_FOUND_DESCRIPTION = 'NOT_FOUND — task is not owned by the calling user.';
+
+
     private const ERR_TASK_NOT_FOUND = 'Task not found.';
 
     private const ERR_INVALID_JSON = 'Request body must be valid JSON.';
@@ -33,6 +36,7 @@ final class TaskController
         private readonly TaskMediaCapabilityService $mediaCapability,
         private readonly ContinueTaskDispatcher $continuationDispatcher,
         private readonly DecisionsRequestValidator $decisionsValidator,
+        private readonly AnswerQuestionRequestValidator $answerValidator,
     ) {}
 
     /**
@@ -259,16 +263,11 @@ final class TaskController
             if ($e->getMessage() === self::ERR_TASK_NOT_FOUND || $e->getMessage() === 'Task is not pending approval.') {
                 return $this->errorForException($e);
             }
-            return $this->validationErrorResponse($e);
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $e->getMessage()]],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
         }
-    }
-
-    private function validationErrorResponse(InvalidArgumentException $e): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $e->getMessage()]],
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-        );
     }
 
     private function invalidJsonResponse(): JsonResponse
@@ -323,6 +322,106 @@ final class TaskController
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
+    }
+
+    /**
+     * POST /api/v1/tasks/{taskId}/answer
+     *
+     * Submit the operator's answers to a pending question batch parked on
+     * an `AWAITING_INPUT` task. The whole batch is answered atomically —
+     * the request must include exactly one answer per question in the
+     * batch, keyed by `header`. On success: a single `role='tool'`
+     * history row is appended carrying the formatted answers, the batch
+     * is removed from `pending_state`, and the task either flips to
+     * `QUEUED` (no more batches pending) or stays in `AWAITING_INPUT`
+     * (more batches still pending). Returns 204 No Content.
+     */
+    #[OA\Post(
+        path: '/api/v1/tasks/{taskId}/answer',
+        tags: ['Tasks'],
+        summary: 'Answer pending question batch',
+        parameters: [
+            new OA\Parameter(
+                name: 'taskId',
+                in: 'path',
+                required: true,
+                schema: new OA\Schema(type: 'string'),
+            ),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                type: 'object',
+                required: ['tool_call_id', 'answers'],
+                properties: [
+                    new OA\Property(property: 'tool_call_id', type: 'string'),
+                    new OA\Property(
+                        property: 'answers',
+                        type: 'array',
+                        items: new OA\Items(
+                            type: 'object',
+                            required: ['header', 'selections'],
+                            properties: [
+                                new OA\Property(property: 'header', type: 'string'),
+                                new OA\Property(property: 'selections', type: 'array', items: new OA\Items(type: 'string')),
+                                new OA\Property(property: 'free_text', type: 'string', nullable: true),
+                            ],
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: 'JSON envelope: `{data: {task: ...}}` — status flips to `QUEUED` (or stays `AWAITING_INPUT` if more batches are still pending).',
+            ),
+            new OA\Response(response: 404, description: self::NOT_FOUND_DESCRIPTION),
+            new OA\Response(response: 422, description: 'VALIDATION_ERROR — malformed body or unknown header/selection.'),
+        ],
+    )]
+    public function answer(Request $request): JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        $taskId = (int) $request->attributes->get('taskId', 0);
+
+        try {
+            $body = $this->decodeJson($request);
+        } catch (JsonException) {
+            return $this->invalidJsonResponse();
+        }
+
+        $parsed = $this->answerValidator->parseAndValidate($body, $taskId, $userId);
+        if ($parsed instanceof JsonResponse) {
+            return $parsed;
+        }
+
+        return $this->executeAnswer($taskId, $userId, $parsed);
+    }
+
+    /**
+     * Mirror approve/reject: state-mutating transitions return the full
+     * task resource so the caller can update its store without an extra
+     * GET round-trip. (Carrying the new `status`, `pending_state` (now
+     * empty or with the next batch), and appended `task_history` row
+     * through the response also dodges the 204+body protocol trap
+     * entirely.)
+     *
+     * @param array{batch: \Spora\Tools\PendingQuestionBatch, formatted: string, byHeader: array<string, array{selections: list<string>, free_text: ?string}>} $parsed
+     */
+    private function executeAnswer(int $taskId, int $userId, array $parsed): JsonResponse
+    {
+        try {
+            $task = $this->taskService->answerTask(
+                $taskId,
+                $userId,
+                $parsed['batch']->toolCallId,
+                $parsed['formatted'],
+            );
+        } catch (InvalidArgumentException $e) {
+            return $this->errorForException($e);
+        }
+        return new JsonResponse(['data' => ['task' => $task]]);
     }
 
     /**
@@ -428,7 +527,7 @@ final class TaskController
             ),
             new OA\Response(
                 response: 404,
-                description: 'NOT_FOUND — task is not owned by the calling user.',
+                description: self::NOT_FOUND_DESCRIPTION,
             ),
         ],
     )]
@@ -478,7 +577,7 @@ final class TaskController
             ),
             new OA\Response(
                 response: 404,
-                description: 'NOT_FOUND — task is not owned by the calling user.',
+                description: self::NOT_FOUND_DESCRIPTION,
             ),
         ],
     )]
