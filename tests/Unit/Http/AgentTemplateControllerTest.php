@@ -48,6 +48,24 @@ function makeController(): AgentTemplateController
 }
 
 beforeEach(function (): void {
+    // Wipe user-owned tables and reset their auto-increment counters
+    // before each test. `bootAuth()` below registers
+    // `controller-test@example.com` — on SQLite the per-test `:memory:`
+    // rebuild gives every test a fresh users table; on MariaDB the
+    // per-worker DB persists so the second `register()` call trips the
+    // email-unique key with `EmailTakenException`. The `import` test
+    // also pins `agent.id == 1`, which needs the agents AUTO_INCREMENT
+    // reset.
+    Illuminate\Database\Capsule\Manager::table('agents')->delete();
+    Illuminate\Database\Capsule\Manager::table('principals')->delete();
+    Illuminate\Database\Capsule\Manager::table('users')->delete();
+    if (Illuminate\Database\Capsule\Manager::connection()->getDriverName() !== 'sqlite') {
+        Illuminate\Database\Capsule\Manager::statement('ALTER TABLE users AUTO_INCREMENT = 1');
+        Illuminate\Database\Capsule\Manager::statement('ALTER TABLE principals AUTO_INCREMENT = 1');
+        Illuminate\Database\Capsule\Manager::statement('ALTER TABLE agents AUTO_INCREMENT = 1');
+    } else {
+        Illuminate\Database\Capsule\Manager::statement("DELETE FROM sqlite_sequence WHERE name IN ('users', 'principals', 'agents')");
+    }
     $this->userId = bootAuth(bootAuthLayer(), 'controller-test@example.com');
     $this->controller = makeController();
 });
