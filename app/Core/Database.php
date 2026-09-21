@@ -177,9 +177,18 @@ final class Database
     {
         self::$booted  = false;
         self::$capsule = null;
-        // Note: $schemaInstallSkipped is intentionally NOT reset here. It is
-        // a worker-scoped flag owned by TestDatabaseFactory; resetting it
-        // here would re-enable the (expensive) schema install on every test
-        // that calls `Database::resetBootState()` between its setup phases.
+        // The schema-install skip flag MUST be reset here too — otherwise a
+        // test that bypasses the factory and inlines its own
+        // `Database::resetBootState() + new Database([sqlite :memory:])->boot()`
+        // pair inherits the factory's "schema already installed on the
+        // worker DB" optimisation, never runs `DatabaseSchemaInstaller::install()`
+        // on the new (empty) `:memory:` SQLite, and immediately fails every
+        // `insert into users` with "no such table: users" — even though the
+        // global `beforeEach` factory had successfully installed the schema
+        // on the real MariaDB/MySQL DB moments earlier.
+        //
+        // The factory re-establishes the flag in its own `boot()` so the
+        // hot-path optimisation still applies on the per-worker DB it owns.
+        self::$schemaInstallSkipped = false;
     }
 }

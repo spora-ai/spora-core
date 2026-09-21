@@ -103,13 +103,21 @@ final class TestDatabaseFactory
             self::createWorkerDatabase();
         }
 
+        // `Database::resetBootState()` now clears `setSchemaInstallSkipped()`
+        // as well (the previous sticky-flag behaviour let test files that
+        // bypass the factory — `new Database([sqlite :memory:])->boot()` —
+        // inherit a "schema already installed" optimisation against a
+        // *different* (empty) DB and crash on the first insert). Re-establish
+        // the skip flag here when this worker has already installed, so the
+        // hot-path optimisation still applies on the per-worker DB.
         Database::resetBootState();
+        if (self::$workerSchemaInstalled) {
+            Database::setSchemaInstallSkipped(true);
+        }
+
         (new Database(self::buildConfigForDriver()))->boot();
 
-        if (!self::$workerSchemaInstalled) {
-            Database::setSchemaInstallSkipped(true);
-            self::$workerSchemaInstalled = true;
-        }
+        self::$workerSchemaInstalled = true;
     }
 
     /**
