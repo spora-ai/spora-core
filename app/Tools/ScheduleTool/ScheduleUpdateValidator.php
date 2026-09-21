@@ -87,6 +87,7 @@ final class ScheduleUpdateValidator
             return $shapeError;
         }
 
+        /** @var array<string, mixed> $raw */
         if ($isSchedule) {
             $scheduleError = $this->validatePartialScheduleFields($raw);
             if ($scheduleError !== null) {
@@ -94,12 +95,7 @@ final class ScheduleUpdateValidator
             }
         }
 
-        $sharedError = $this->validatePartialSharedFields($raw);
-        if ($sharedError !== null) {
-            return $sharedError;
-        }
-
-        return $raw;
+        return $this->validatePartialSharedFields($raw) ?? $raw;
     }
 
     /**
@@ -139,29 +135,67 @@ final class ScheduleUpdateValidator
      */
     private function validatePartialScheduleFields(array $raw): ?ToolResult
     {
+        $error = $this->guardPartialCadenceExclusivity($raw);
+        if ($error !== null) {
+            return $error;
+        }
+
+        $error = $this->guardPartialTimezoneField($raw);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return $this->guardPartialCadenceFields($raw);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function guardPartialCadenceExclusivity(array $raw): ?ToolResult
+    {
         $hasCron  = array_key_exists('cron_expression', $raw);
         $hasRunAt = array_key_exists('run_at', $raw);
-        if ($hasCron && $hasRunAt && $raw['cron_expression'] !== null && $raw['run_at'] !== null) {
+        $cronVal  = $raw['cron_expression'] ?? null;
+        $runAtVal = $raw['run_at'] ?? null;
+
+        if ($hasCron && $hasRunAt && $cronVal !== null && $runAtVal !== null) {
             return ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `cron_expression` and `run_at` are mutually exclusive. '
                 . 'Send exactly one — `null` the other to switch modes.',
             );
         }
 
-        if (isset($raw['timezone'])) {
-            $tzError = $this->validateTimezone($raw['timezone']);
-            if ($tzError !== null) {
-                return $tzError;
-            }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function guardPartialTimezoneField(array $raw): ?ToolResult
+    {
+        $tzValue = $raw['timezone'] ?? null;
+        if ($tzValue === null) {
+            return null;
         }
 
-        if ($hasCron && $raw['cron_expression'] !== null) {
-            return $this->validateCronExpression($raw['cron_expression']);
+        return $this->validateTimezone($tzValue);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function guardPartialCadenceFields(array $raw): ?ToolResult
+    {
+        $cronVal  = $raw['cron_expression'] ?? null;
+        $runAtVal = $raw['run_at'] ?? null;
+
+        if ($cronVal !== null) {
+            return $this->validateCronExpression($cronVal);
         }
 
-        if ($hasRunAt && $raw['run_at'] !== null) {
+        if ($runAtVal !== null) {
             return $this->validateRunAt(
-                $raw['run_at'],
+                $runAtVal,
                 is_string($raw['timezone'] ?? null) ? $raw['timezone'] : 'UTC',
             );
         }
@@ -179,12 +213,12 @@ final class ScheduleUpdateValidator
      */
     private function validatePartialSharedFields(array $raw): ?ToolResult
     {
-        $scheduleResult = $this->validatePartialSharedScheduleFields($raw);
-        if ($scheduleResult !== null) {
-            return $scheduleResult;
-        }
+        $checks = [
+            fn(array $r) => $this->validatePartialSharedScheduleFields($r),
+            fn(array $r) => $this->validatePartialSharedTemplateFields($r),
+        ];
 
-        return $this->validatePartialSharedTemplateFields($raw);
+        return $this->firstFailure($raw, $checks);
     }
 
     /**
@@ -192,25 +226,32 @@ final class ScheduleUpdateValidator
      */
     private function validatePartialSharedScheduleFields(array $raw): ?ToolResult
     {
-        if (isset($raw['is_active']) && !is_bool($raw['is_active'])) {
-            return ToolResult::fail(self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean.');
-        }
+        $checks = [
+            fn(array $r) => isset($r['is_active']) && !is_bool($r['is_active'])
+                ? ToolResult::fail(self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean.')
+                : null,
+            fn(array $r) => (
+                array_key_exists('max_steps_override', $r)
+                && $r['max_steps_override'] !== null
+            )
+                ? $this->checkIntRange(
+                    $r['max_steps_override'],
+                    self::OP_UPDATE_SCHEDULE,
+                    '`max_steps_override`',
+                )
+                : null,
+            fn(array $r) => (
+                array_key_exists('template_id', $r)
+                && $r['template_id'] !== null
+                && !is_int($r['template_id'])
+            )
+                ? ToolResult::fail(
+                    self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer, or null to clear it.',
+                )
+                : null,
+        ];
 
-        if (array_key_exists('max_steps_override', $raw) && $raw['max_steps_override'] !== null) {
-            return $this->checkIntRange(
-                $raw['max_steps_override'],
-                self::OP_UPDATE_SCHEDULE,
-                '`max_steps_override`',
-            );
-        }
-
-        if (array_key_exists('template_id', $raw) && $raw['template_id'] !== null && !is_int($raw['template_id'])) {
-            return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer, or null to clear it.',
-            );
-        }
-
-        return null;
+        return $this->firstFailure($raw, $checks);
     }
 
     /**
@@ -218,24 +259,52 @@ final class ScheduleUpdateValidator
      */
     private function validatePartialSharedTemplateFields(array $raw): ?ToolResult
     {
-        if (array_key_exists('max_steps', $raw) && $raw['max_steps'] !== null) {
-            return $this->checkIntRange(
-                $raw['max_steps'],
-                self::OP_UPDATE_TEMPLATE,
-                '`max_steps`',
-            );
-        }
+        $checks = [
+            fn(array $r) => (
+                array_key_exists('max_steps', $r)
+                && $r['max_steps'] !== null
+            )
+                ? $this->checkIntRange($r['max_steps'], self::OP_UPDATE_TEMPLATE, '`max_steps`')
+                : null,
+            fn(array $r) => (
+                array_key_exists('name', $r)
+                && (
+                    !is_string($r['name'])
+                    || trim($r['name']) === ''
+                    || mb_strlen($r['name']) > 100
+                )
+            )
+                ? ToolResult::fail(
+                    self::OP_UPDATE_TEMPLATE . ': `name` must be a non-empty string (1..100 chars).',
+                )
+                : null,
+            fn(array $r) => (
+                array_key_exists('variables', $r)
+                && $r['variables'] !== null
+            )
+                ? $this->validateVariables($r['variables'])
+                : null,
+        ];
 
-        if (array_key_exists('name', $raw)
-            && (!is_string($raw['name']) || trim($raw['name']) === '' || mb_strlen($raw['name']) > 100)
-        ) {
-            return ToolResult::fail(
-                self::OP_UPDATE_TEMPLATE . ': `name` must be a non-empty string (1..100 chars).',
-            );
-        }
+        return $this->firstFailure($raw, $checks);
+    }
 
-        if (array_key_exists('variables', $raw) && $raw['variables'] !== null) {
-            return $this->validateVariables($raw['variables']);
+    /**
+     * Run a sequence of check callables against `$raw` and return the
+     * first non-null ToolResult. Lets callers express a chain of
+     * validators without each contributing a `return`.
+     *
+     * @template T
+     * @param  T                                          $raw
+     * @param  array<int, callable(T):?ToolResult>        $checks
+     */
+    private function firstFailure(mixed $raw, array $checks): ?ToolResult
+    {
+        foreach ($checks as $check) {
+            $result = $check($raw);
+            if ($result !== null) {
+                return $result;
+            }
         }
 
         return null;
@@ -251,6 +320,7 @@ final class ScheduleUpdateValidator
                 $op . ': ' . $fieldLabel . ' must be an integer in 1..100, or null to clear it.',
             );
         }
+
         return null;
     }
 
@@ -261,16 +331,19 @@ final class ScheduleUpdateValidator
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must be a string (IANA identifier).',
             );
         }
+
         if (strlen($value) > 50) {
             return ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must not exceed 50 characters.',
             );
         }
+
         if (!in_array($value, timezone_identifiers_list(), true)) {
             return ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must be a valid IANA identifier.',
             );
         }
+
         return null;
     }
 
@@ -315,6 +388,7 @@ final class ScheduleUpdateValidator
                 self::OP_UPDATE_TEMPLATE . ': `variables` must be an array of `{key, default_value?}` entries.',
             );
         }
+
         foreach ($value as $i => $entry) {
             if (!is_array($entry) || !isset($entry['key']) || !is_string($entry['key']) || $entry['key'] === '') {
                 return ToolResult::fail(
@@ -322,6 +396,7 @@ final class ScheduleUpdateValidator
                 );
             }
         }
+
         return null;
     }
 }
