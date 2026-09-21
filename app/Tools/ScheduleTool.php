@@ -463,12 +463,17 @@ final class ScheduleTool extends AbstractTool
     {
         try {
             $result = $this->scheduledRunService->createRun($targetAgentId, $userId, $payload);
-        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
-            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        } catch (\Spora\Services\Exceptions\PromptTemplateMissingException $e) {
-            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage());
-        } catch (DateInvalidTimeZoneException $e) {
-            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage());
+        } catch (
+            \Spora\Services\Exceptions\AgentNotFoundException
+            | \Spora\Services\Exceptions\PromptTemplateMissingException
+            | DateInvalidTimeZoneException $e
+        ) {
+            return match (true) {
+                $e instanceof \Spora\Services\Exceptions\AgentNotFoundException
+                    => ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND),
+                default
+                => ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage()),
+            };
         }
 
         $resource = $result['scheduled_run'];
@@ -647,12 +652,14 @@ final class ScheduleTool extends AbstractTool
     {
         try {
             $result = $this->scheduledRunService->triggerRun($scheduleId, $targetAgentId, $userId);
-        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
-            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        } catch (\Spora\Services\Exceptions\ScheduledRunNotFoundException) {
-            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
-        } catch (\Spora\Services\Exceptions\PromptTemplateMissingException $e) {
-            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . $e->getMessage());
+        } catch (
+            \Spora\Services\Exceptions\AgentNotFoundException
+            | \Spora\Services\Exceptions\ScheduledRunNotFoundException
+            | \Spora\Services\Exceptions\PromptTemplateMissingException $e
+        ) {
+            return $e instanceof \Spora\Services\Exceptions\PromptTemplateMissingException
+                ? ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . $e->getMessage())
+                : ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
         }
 
         $taskId = (int) $result['task_id'];

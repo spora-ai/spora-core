@@ -155,25 +155,22 @@ final class SchedulePayloadValidator
         $hasTemplateId = isset($raw['template_id']);
         $hasRawPrompt  = isset($raw['raw_prompt']);
 
+        $error = null;
         if (!$hasTemplateId && !$hasRawPrompt) {
-            return ToolResult::fail(
+            $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': either `template_id` (int) or `raw_prompt` (string) is required.',
             );
-        }
-
-        if ($hasTemplateId && !is_int($raw['template_id'])) {
-            return ToolResult::fail(
+        } elseif ($hasTemplateId && !is_int($raw['template_id'])) {
+            $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': `template_id` must be a positive integer.',
             );
-        }
-
-        if ($hasRawPrompt && (!is_string($raw['raw_prompt']) || trim($raw['raw_prompt']) === '')) {
-            return ToolResult::fail(
+        } elseif ($hasRawPrompt && (!is_string($raw['raw_prompt']) || trim($raw['raw_prompt']) === '')) {
+            $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': `raw_prompt` must be a non-empty string.',
             );
         }
 
-        return null;
+        return $error;
     }
 
     /**
@@ -367,21 +364,23 @@ final class SchedulePayloadValidator
             return null;
         }
 
+        $error = null;
         if (!is_array($value)) {
-            return ToolResult::fail(
+            $error = ToolResult::fail(
                 self::OP_CREATE_TEMPLATE . ': `variables` must be an array of `{key, default_value?}` entries.',
             );
-        }
-
-        foreach ($value as $i => $entry) {
-            if (!$this->isWellFormedVariableEntry($entry)) {
-                return ToolResult::fail(
-                    self::OP_CREATE_TEMPLATE . ": variables[{$i}] must be `{key, default_value?}`. Send the variable key as a non-empty string.",
-                );
+        } else {
+            foreach ($value as $i => $entry) {
+                if (!$this->isWellFormedVariableEntry($entry)) {
+                    $error = ToolResult::fail(
+                        self::OP_CREATE_TEMPLATE . ": variables[{$i}] must be `{key, default_value?}`. Send the variable key as a non-empty string.",
+                    );
+                    break;
+                }
             }
         }
 
-        return null;
+        return $error;
     }
 
     /**

@@ -326,25 +326,22 @@ final class ScheduleUpdateValidator
 
     private function validateTimezone(mixed $value): ?ToolResult
     {
+        $error = null;
         if (!is_string($value)) {
-            return ToolResult::fail(
+            $error = ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must be a string (IANA identifier).',
             );
-        }
-
-        if (strlen($value) > 50) {
-            return ToolResult::fail(
+        } elseif (strlen($value) > 50) {
+            $error = ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must not exceed 50 characters.',
             );
-        }
-
-        if (!in_array($value, timezone_identifiers_list(), true)) {
-            return ToolResult::fail(
+        } elseif (!in_array($value, timezone_identifiers_list(), true)) {
+            $error = ToolResult::fail(
                 self::OP_UPDATE_SCHEDULE . ': `timezone` must be a valid IANA identifier.',
             );
         }
 
-        return null;
+        return $error;
     }
 
     private function validateCronExpression(mixed $cron): ?ToolResult
