@@ -1,0 +1,779 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Tools;
+
+use DateInvalidTimeZoneException;
+use Spora\Models\Agent;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
+use Spora\Services\PromptTemplateServiceInterface;
+use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\ScheduleTool\ScheduleToolCollaborators;
+use Spora\Tools\ValueObjects\ToolResult;
+
+/**
+ * Lets the agent inspect and manage the schedules and prompt templates
+ * attached to its host agent.
+ *
+ * Bundled into one tool (12 operations) because schedule + template
+ * are a tight pair: an LLM creating a schedule almost always
+ * references a template, and pushing template authoring into a
+ * separate tool would force the LLM to switch surfaces mid-flow.
+ *
+ * Permissions follow the existing services (`ScheduledRunService` +
+ * `PromptTemplateService`):
+ *   - reads (`list_*`, `read_*`) widen to principal-membership so any
+ *     user who can see an agent can see its schedules/templates;
+ *   - writes/deletes/trigger require the caller to control the agent's
+ *     principal (owner or admin).
+ *
+ * Cross-agent reads/writes take an explicit `agent_id`. Omitted
+ * `agent_id` resolves to the calling agent. Cross-user `schedule_id` /
+ * `template_id` returns a single uniform "not found" message —
+ * existence is hidden between users.
+ */
+#[Tool(
+    name: 'schedule',
+    displayName: 'Schedule',
+    category: 'productivity',
+    icon: 'calendar',
+    description: 'Create, read, update and delete the schedules and prompt templates '
+                . 'attached to this agent. '
+                . 'Schedules trigger the agent on a cron or one-shot cadence using '
+                . 'either a raw prompt or a saved prompt template. '
+                . 'Use `list_schedules` and `list_prompt_templates` to discover row ids '
+                . 'across turn boundaries, and `read_schedule` / `read_prompt_template` '
+                . 'to confirm what was actually committed.',
+)]
+#[ToolOperation(
+    name: 'list_schedules',
+    description: 'List every scheduled run attached to the calling agent as a slim payload '
+                . '(`schedule_id`, summary, `is_active`, `next_run_at`). '
+                . 'Cross-agent reads accept an `agent_id` (numeric pk). '
+                . 'Pass the row id to `read_schedule`, `update_schedule`, '
+                . '`delete_schedule`, or `trigger_schedule`.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'list_prompt_templates',
+    description: 'List every prompt template attached to the calling agent as a slim payload '
+                . '(`template_id`, `name`, `description`, `max_steps`, `is_active`). '
+                . 'Cross-agent reads accept an `agent_id` (numeric pk). '
+                . 'Pass the row id to `read_prompt_template`, `update_prompt_template`, '
+                . '`delete_prompt_template`, or to `create_schedule(schedule_payload: { '
+                . 'template_id: N, … })` to bind a schedule to it.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'read_schedule',
+    description: 'Read the full configuration of a single scheduled run by `schedule_id` '
+                . '(the numeric primary key returned by `list_schedules`). '
+                . 'Cross-agent reads accept an `agent_id`; omit to read a schedule on the '
+                . 'calling agent. Cross-user ids return "schedule not found".',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'read_prompt_template',
+    description: 'Read the full configuration of a single prompt template by `template_id` '
+                . '(the numeric primary key returned by `list_prompt_templates` or by '
+                . '`create_prompt_template`). Cross-agent reads accept an `agent_id`; '
+                . 'omit to read a template on the calling agent. Cross-user ids return '
+                . '"prompt template not found".',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'create_schedule',
+    description: 'Create a new scheduled run from a slim payload: `schedule_payload` '
+                . '(object) with `template_id` or `raw_prompt` (one required), and '
+                . 'either `cron_expression` (recurring) or `run_at` (ISO 8601 one-shot, '
+                . 'mutually exclusive). Optional `timezone` (IANA, defaults "UTC"), '
+                . '`max_steps_override` (int 1..100, nullable), `is_active` (defaults true). '
+                . 'Pass `agent_id` (numeric pk) to target a different agent; omit to '
+                . 'attach the schedule to the calling agent. Returns the full schedule '
+                . 'resource — call `list_schedules` afterwards only if you need to '
+                . 'confirm the new row id persisted.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'create_prompt_template',
+    description: 'Create a new prompt template from a slim payload: `template_payload` '
+                . '(object) with `name` (1..100 chars, required), `prompt_template` '
+                . '(non-empty string, required), optional `description`, `variables` '
+                . '(list of `{key, default_value?}`), `max_steps` (int 1..100, nullable), '
+                . '`is_active` (defaults true). Pass `agent_id` to target a different '
+                . 'agent; omit to attach the template to the calling agent. Returns the '
+                . 'full template resource.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'update_schedule',
+    description: 'Patch a scheduled run identified by `schedule_id`. '
+                . '`schedule_patch` (object) with any subset of '
+                . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
+                . '`max_steps_override`, `is_active`. Send `null` on `cron_expression` / '
+                . '`run_at` to switch a recurring schedule to one-shot (or vice versa), '
+                . 'but never both populated in the same patch — ambiguous. '
+                . 'Cross-agent updates accept `agent_id`; omit to target the calling '
+                . 'agent. Returns the full schedule resource after the patch.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'update_prompt_template',
+    description: 'Patch a prompt template identified by `template_id`. '
+                . '`template_patch` (object) with any subset of `name`, `description`, '
+                . '`prompt_template`, `variables`, `max_steps`, `is_active`. '
+                . 'Cross-agent updates accept `agent_id`; omit to target the calling '
+                . 'agent. Returns the full template resource after the patch.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'delete_schedule',
+    description: 'Permanently delete a scheduled run identified by `schedule_id`. '
+                . 'Cross-agent deletes accept `agent_id`; omit to target the calling '
+                . 'agent. Pending entries in `scheduled_runs_next` are not auto-claimed '
+                . 'before the delete — call `list_schedules` and re-check the next tick '
+                . 'if you need to confirm the schedule is gone.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'delete_prompt_template',
+    description: 'Permanently delete a prompt template identified by `template_id`. '
+                . 'Cross-agent deletes accept `agent_id`; omit to target the calling '
+                . 'agent. Existing schedules that reference this template will fail at '
+                . 'the next `trigger_schedule` / cron tick with a `prompt template no '
+                . 'longer exists` error — re-point or disable those schedules first.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'trigger_schedule',
+    description: 'Immediately fire the scheduled run identified by `schedule_id` '
+                . 'regardless of its cron / `run_at` cadence. '
+                . 'Returns the new `task_id` and the (now-deactivated) schedule resource '
+                . 'for one-shot runs; recurring schedules remain active and pick up at '
+                . 'the next cron tick. Use this for "run it now" without disabling the '
+                . 'recurrence. Cross-agent triggers accept `agent_id`.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolParameter(
+    name: 'agent_id',
+    type: 'integer',
+    description: 'Optional target for every operation that resolves a per-agent resource '
+                . '(`list_schedules`, `list_prompt_templates`, `read_schedule`, '
+                . '`read_prompt_template`, `create_schedule`, `create_prompt_template`, '
+                . '`update_schedule`, `update_prompt_template`, `delete_schedule`, '
+                . '`delete_prompt_template`, `trigger_schedule`). Omit to operate on the '
+                . 'calling agent. Cross-user ids return "agent not found".',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'schedule_id',
+    type: 'integer',
+    description: 'Numeric primary key for `read_schedule`, `update_schedule`, '
+                . '`delete_schedule`, `trigger_schedule`. Returned by `list_schedules` '
+                . 'and `create_schedule`. Ignored by every other operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'template_id',
+    type: 'integer',
+    description: 'Numeric primary key for `read_prompt_template`, `update_prompt_template`, '
+                . '`delete_prompt_template`. Returned by `list_prompt_templates` and '
+                . '`create_prompt_template`. Ignored by every other operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'schedule_payload',
+    type: 'object',
+    description: 'ONLY for `create_schedule`. Slim payload: top-level `template_id` (int) '
+                . 'OR `raw_prompt` (string, one required), `cron_expression` (5-field cron) '
+                . 'OR `run_at` (ISO 8601, one required — mutually exclusive), '
+                . 'optional `timezone` (IANA, default "UTC"), `max_steps_override` '
+                . '(int 1..100, nullable), `is_active` (bool, default true). '
+                . 'Pass `agent_id` separately to target a different agent. '
+                . 'Ignored by every other operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'template_payload',
+    type: 'object',
+    description: 'ONLY for `create_prompt_template`. Slim payload: top-level `name` '
+                . '(1..100 chars, required), `prompt_template` (non-empty string, required), '
+                . 'optional `description`, `variables` (list of `{key, default_value?}`), '
+                . '`max_steps` (int 1..100, nullable), `is_active` (bool, default true). '
+                . 'Pass `agent_id` separately to target a different agent. '
+                . 'Ignored by every other operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'schedule_patch',
+    type: 'object',
+    description: 'ONLY for `update_schedule`. Partial object with any subset of '
+                . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
+                . '`max_steps_override`, `is_active`. Send `null` on `cron_expression` / '
+                . '`run_at` to switch recurrence modes, never both populated. '
+                . 'Ignored by every other operation.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'template_patch',
+    type: 'object',
+    description: 'ONLY for `update_prompt_template`. Partial object with any subset of '
+                . '`name`, `description`, `prompt_template`, `variables`, `max_steps`, '
+                . '`is_active`. Ignored by every other operation.',
+    required: false,
+)]
+final class ScheduleTool extends AbstractTool
+{
+    private const SCHEDULE_NOT_FOUND          = 'schedule not found or not owned by this user';
+    private const PROMPT_TEMPLATE_NOT_FOUND   = 'prompt template not found or not owned by this user';
+
+    private const CREATE_SCHEDULE_ERR_PREFIX  = 'create_schedule: ';
+    private const UPDATE_SCHEDULE_ERR_PREFIX  = 'update_schedule: ';
+    private const DELETE_SCHEDULE_ERR_PREFIX  = 'delete_schedule: ';
+    private const TRIGGER_SCHEDULE_ERR_PREFIX = 'trigger_schedule: ';
+    private const READ_SCHEDULE_ERR_PREFIX    = 'read_schedule: ';
+
+    private const CREATE_TEMPLATE_ERR_PREFIX  = 'create_prompt_template: ';
+    private const UPDATE_TEMPLATE_ERR_PREFIX  = 'update_prompt_template: ';
+    private const DELETE_TEMPLATE_ERR_PREFIX  = 'delete_prompt_template: ';
+    private const READ_TEMPLATE_ERR_PREFIX    = 'read_prompt_template: ';
+
+    private readonly ScheduleToolCollaborators $collaborators;
+
+    private readonly ScheduledRunServiceInterface $scheduledRunService;
+    private readonly PromptTemplateServiceInterface $promptTemplateService;
+    private readonly PrincipalResolver $principalResolver;
+    private readonly PrincipalService $principalService;
+
+    public function __construct(
+        ScheduledRunServiceInterface $scheduledRunService,
+        PromptTemplateServiceInterface $promptTemplateService,
+        ?ScheduleToolCollaborators $collaborators = null,
+        ?PrincipalResolver $principalResolver = null,
+        ?PrincipalService $principalService = null,
+    ) {
+        $this->scheduledRunService = $scheduledRunService;
+        $this->promptTemplateService = $promptTemplateService;
+
+        $collaborators ??= new ScheduleToolCollaborators(
+            principalResolver: $principalResolver ?? new PrincipalResolver(),
+            principalService: $principalService,
+        );
+        $this->collaborators = $collaborators;
+
+        $this->principalResolver = $collaborators->principalResolver();
+        $this->principalService = $collaborators->principalService();
+    }
+
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $userId = null,
+        ?int $taskId = null,
+        ?PrincipalContext $context = null,
+    ): ToolResult {
+        $operation = $this->getOperationName($arguments);
+
+        return match ($operation) {
+            'list_schedules'         => $this->listSchedules($agentId, $userId, $arguments, $context),
+            'list_prompt_templates'  => $this->listTemplates($agentId, $userId, $arguments, $context),
+            'read_schedule'          => $this->readSchedule($agentId, $userId, $arguments),
+            'read_prompt_template'   => $this->readTemplate($agentId, $userId, $arguments),
+            'create_schedule'        => $this->createSchedule($agentId, $userId, $arguments),
+            'create_prompt_template' => $this->createTemplate($agentId, $userId, $arguments),
+            'update_schedule'        => $this->updateSchedule($agentId, $userId, $arguments),
+            'update_prompt_template' => $this->updateTemplate($agentId, $userId, $arguments),
+            'delete_schedule'        => $this->deleteSchedule($agentId, $userId, $arguments),
+            'delete_prompt_template' => $this->deleteTemplate($agentId, $userId, $arguments),
+            'trigger_schedule'       => $this->triggerSchedule($agentId, $userId, $arguments),
+            default                  => ToolResult::fail("Invalid action '{$operation}'."),
+        };
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        $operation = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
+        $agentLabel = $this->summarizeTargetAgent($arguments);
+
+        return match ($operation) {
+            'list_schedules'           => "List scheduled runs for {$agentLabel}.",
+            'list_prompt_templates'    => "List prompt templates for {$agentLabel}.",
+            'read_schedule'            => sprintf(
+                'Read scheduled run (%s, %s).',
+                $this->summarizeScheduleId($arguments),
+                $agentLabel,
+            ),
+            'read_prompt_template'     => sprintf(
+                'Read prompt template (%s, %s).',
+                $this->summarizeTemplateId($arguments),
+                $agentLabel,
+            ),
+            'create_schedule'          => $this->summarizeCreateSchedule($arguments, $agentLabel),
+            'create_prompt_template'   => $this->summarizeCreateTemplate($arguments, $agentLabel),
+            'update_schedule'          => sprintf(
+                'Update scheduled run (%s, %s).',
+                $this->summarizeScheduleId($arguments),
+                $agentLabel,
+            ),
+            'update_prompt_template'   => sprintf(
+                'Update prompt template (%s, %s).',
+                $this->summarizeTemplateId($arguments),
+                $agentLabel,
+            ),
+            'delete_schedule'          => sprintf(
+                'Delete scheduled run (%s, %s, destructive).',
+                $this->summarizeScheduleId($arguments),
+                $agentLabel,
+            ),
+            'delete_prompt_template'   => sprintf(
+                'Delete prompt template (%s, %s, destructive).',
+                $this->summarizeTemplateId($arguments),
+                $agentLabel,
+            ),
+            'trigger_schedule'         => sprintf(
+                'Trigger scheduled run now (%s, %s).',
+                $this->summarizeScheduleId($arguments),
+                $agentLabel,
+            ),
+            default                    => "Schedule tool: {$operation}",
+        };
+    }
+
+    private function listSchedules(int $agentId, ?int $userId, array $arguments, ?PrincipalContext $context): ToolResult
+    {
+        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments, $context);
+        if ($resolved instanceof ToolResult) {
+            return $resolved;
+        }
+
+        $runs = $this->scheduledRunService->getRunsForAgent($resolved, $userId ?? 0);
+        return $this->collaborators->listPresenter()->presentSchedules($runs);
+    }
+
+    private function listTemplates(int $agentId, ?int $userId, array $arguments, ?PrincipalContext $context): ToolResult
+    {
+        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments, $context);
+        if ($resolved instanceof ToolResult) {
+            return $resolved;
+        }
+
+        $templates = $this->promptTemplateService->getTemplatesForAgent($resolved, $userId ?? 0);
+        return $this->collaborators->listPresenter()->presentTemplates($templates);
+    }
+
+    private function readSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveReadTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $scheduleId = $this->collaborators->targetResolver()->parseScheduleId($arguments['schedule_id'] ?? null);
+        if ($scheduleId instanceof ToolResult) {
+            return $scheduleId;
+        }
+
+        $result = $this->scheduledRunService->getRun($scheduleId, $targetAgentId, $userId ?? 0);
+        return $result === null
+            ? ToolResult::fail(self::READ_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND)
+            : ToolResult::ok(
+                "Schedule #{$scheduleId} (agent #{$targetAgentId}): " . $this->summariseResource($result),
+                $result,
+            );
+    }
+
+    private function readTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveReadTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $templateId = $this->collaborators->targetResolver()->parseTemplateId($arguments['template_id'] ?? null);
+        if ($templateId instanceof ToolResult) {
+            return $templateId;
+        }
+
+        $result = $this->promptTemplateService->getTemplate($templateId, $targetAgentId, $userId ?? 0);
+        return $result === null
+            ? ToolResult::fail(self::READ_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND)
+            : ToolResult::ok(
+                "Prompt template #{$templateId} (agent #{$targetAgentId}): "
+                . (string) ($result['template']['name'] ?? '(unnamed)'),
+                $result,
+            );
+    }
+
+    private function createSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $payload = $this->collaborators->payloadValidator()->validateCreateSchedule($arguments);
+        if ($payload instanceof ToolResult) {
+            return $payload;
+        }
+
+        try {
+            $result = $this->scheduledRunService->createRun($targetAgentId, $userId ?? 0, $payload);
+        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
+            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
+        } catch (\Spora\Services\Exceptions\PromptTemplateMissingException $e) {
+            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage());
+        } catch (DateInvalidTimeZoneException $e) {
+            return ToolResult::fail(self::CREATE_SCHEDULE_ERR_PREFIX . $e->getMessage());
+        }
+
+        $resource = $result['scheduled_run'];
+        $id = (int) ($resource['id'] ?? 0);
+        return ToolResult::ok(
+            "Created schedule #{$id} on agent #{$targetAgentId}.",
+            $result,
+        );
+    }
+
+    private function createTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $payload = $this->collaborators->payloadValidator()->validateCreatePromptTemplate($arguments);
+        if ($payload instanceof ToolResult) {
+            return $payload;
+        }
+
+        try {
+            $result = $this->promptTemplateService->createTemplate($targetAgentId, $userId ?? 0, $payload);
+        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
+            return ToolResult::fail(self::CREATE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
+        }
+
+        $resource = $result['template'];
+        $id = (int) ($resource['id'] ?? 0);
+        return ToolResult::ok(
+            "Created prompt template #{$id} on agent #{$targetAgentId}.",
+            $result,
+        );
+    }
+
+    private function updateSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $scheduleId = $this->collaborators->targetResolver()->parseScheduleId($arguments['schedule_id'] ?? null);
+        if ($scheduleId instanceof ToolResult) {
+            return $scheduleId;
+        }
+
+        $patch = $this->collaborators->updateValidator()->validateUpdateSchedulePatch($arguments);
+        if ($patch instanceof ToolResult) {
+            return $patch;
+        }
+
+        $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId ?? 0, $patch);
+        if ($result === null) {
+            return ToolResult::fail(self::UPDATE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
+        }
+
+        return ToolResult::ok(
+            "Updated schedule #{$scheduleId} on agent #{$targetAgentId}.",
+            $result,
+        );
+    }
+
+    private function updateTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $templateId = $this->collaborators->targetResolver()->parseTemplateId($arguments['template_id'] ?? null);
+        if ($templateId instanceof ToolResult) {
+            return $templateId;
+        }
+
+        $patch = $this->collaborators->updateValidator()->validateUpdateTemplatePatch($arguments);
+        if ($patch instanceof ToolResult) {
+            return $patch;
+        }
+
+        $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId ?? 0, $patch);
+        if ($result === null) {
+            return ToolResult::fail(self::UPDATE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
+        }
+
+        return ToolResult::ok(
+            "Updated prompt template #{$templateId} on agent #{$targetAgentId}.",
+            $result,
+        );
+    }
+
+    private function deleteSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $scheduleId = $this->collaborators->targetResolver()->parseScheduleId($arguments['schedule_id'] ?? null);
+        if ($scheduleId instanceof ToolResult) {
+            return $scheduleId;
+        }
+
+        $ok = $this->scheduledRunService->deleteRun($scheduleId, $targetAgentId, $userId ?? 0);
+        if ($ok === false) {
+            return ToolResult::fail(self::DELETE_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
+        }
+
+        return ToolResult::ok(
+            "Deleted schedule #{$scheduleId} on agent #{$targetAgentId}.",
+            ['deleted' => true, 'schedule_id' => $scheduleId, 'agent_id' => $targetAgentId],
+        );
+    }
+
+    private function deleteTemplate(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $templateId = $this->collaborators->targetResolver()->parseTemplateId($arguments['template_id'] ?? null);
+        if ($templateId instanceof ToolResult) {
+            return $templateId;
+        }
+
+        $ok = $this->promptTemplateService->deleteTemplate($templateId, $targetAgentId, $userId ?? 0);
+        if ($ok === false) {
+            return ToolResult::fail(self::DELETE_TEMPLATE_ERR_PREFIX . self::PROMPT_TEMPLATE_NOT_FOUND);
+        }
+
+        return ToolResult::ok(
+            "Deleted prompt template #{$templateId} on agent #{$targetAgentId}.",
+            ['deleted' => true, 'template_id' => $templateId, 'agent_id' => $targetAgentId],
+        );
+    }
+
+    private function triggerSchedule(int $agentId, ?int $userId, array $arguments): ToolResult
+    {
+        $targetAgentId = $this->resolveWriteTargetAgentId($userId, $agentId, $arguments);
+        if ($targetAgentId instanceof ToolResult) {
+            return $targetAgentId;
+        }
+
+        $scheduleId = $this->collaborators->targetResolver()->parseScheduleId($arguments['schedule_id'] ?? null);
+        if ($scheduleId instanceof ToolResult) {
+            return $scheduleId;
+        }
+
+        try {
+            $result = $this->scheduledRunService->triggerRun($scheduleId, $targetAgentId, $userId ?? 0);
+        } catch (\Spora\Services\Exceptions\AgentNotFoundException) {
+            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
+        } catch (\Spora\Services\Exceptions\ScheduledRunNotFoundException) {
+            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND);
+        } catch (\Spora\Services\Exceptions\PromptTemplateMissingException $e) {
+            return ToolResult::fail(self::TRIGGER_SCHEDULE_ERR_PREFIX . $e->getMessage());
+        }
+
+        $taskId = (int) $result['task_id'];
+        return ToolResult::ok(
+            "Triggered schedule #{$scheduleId} on agent #{$targetAgentId}; new task #{$taskId}.",
+            $result,
+        );
+    }
+
+    /**
+     * Resolution for `list_*` and `create_*`: widen to the visibility
+     * matrix so any principal-membership reader can list, any
+     * owner/admin can create. Cross-user agents silently fall back to
+     * "not found" — the service itself enforces the visibility gate.
+     *
+     * @return int|ToolResult
+     */
+    private function resolveTargetAgentId(?int $userId, int $callingAgentId, array $arguments, ?PrincipalContext $context): int|ToolResult
+    {
+        if (!array_key_exists('agent_id', $arguments)) {
+            return $callingAgentId;
+        }
+        return $this->resolveCrossUserAgent($userId, $arguments['agent_id'], $context);
+    }
+
+    /**
+     * Resolution for read/write/delete/trigger: callers must control
+     * the agent's principal. We never silently fall back to the
+     * calling agent when an explicit `agent_id` is supplied.
+     *
+     * @return int|ToolResult
+     */
+    private function resolveWriteTargetAgentId(?int $userId, int $callingAgentId, array $arguments): int|ToolResult
+    {
+        if (!array_key_exists('agent_id', $arguments)) {
+            return $callingAgentId;
+        }
+        $resolved = $this->resolveCrossUserAgent($userId, $arguments['agent_id'], null);
+        if ($resolved instanceof ToolResult) {
+            return $resolved;
+        }
+        if ($userId === null) {
+            return $resolved;
+        }
+        if (!$this->principalService->callerControlsPrincipal($userId, $this->principalIdOfAgent($resolved))) {
+            return ToolResult::fail('agent not found or not owned by this user.');
+        }
+        return $resolved;
+    }
+
+    /**
+     * Reads (`read_schedule` / `read_prompt_template`) widen to
+     * principal-membership, same as the index endpoints.
+     *
+     * @return int|ToolResult
+     */
+    private function resolveReadTargetAgentId(?int $userId, int $callingAgentId, array $arguments): int|ToolResult
+    {
+        return $this->resolveTargetAgentId($userId, $callingAgentId, $arguments, null);
+    }
+
+    /**
+     * Cross-user agent resolution. The Agent row may or may not exist;
+     * visibility is widened to principal-membership so group members
+     * can address agents they belong to.
+     *
+     * @return int|ToolResult
+     */
+    private function resolveCrossUserAgent(?int $userId, mixed $raw, ?PrincipalContext $context): int|ToolResult
+    {
+        if (!is_int($raw) && !(is_string($raw) && ctype_digit($raw))) {
+            return ToolResult::fail('`agent_id` must be a positive integer.');
+        }
+        $resolvedId = (int) $raw;
+        if ($resolvedId <= 0) {
+            return ToolResult::fail('`agent_id` must be a positive integer.');
+        }
+        $agent = Agent::query()->where('id', $resolvedId)->first();
+        if ($agent === null) {
+            return ToolResult::fail('agent not found.');
+        }
+        if ($userId !== null && !$this->principalResolver->isVisibleTo($resolvedId, $userId)) {
+            return ToolResult::fail('agent not found.');
+        }
+        return $resolvedId;
+    }
+
+    private function principalIdOfAgent(int $agentId): int
+    {
+        $agent = Agent::query()->where('id', $agentId)->first(['principal_id']);
+        return (int) ($agent->principal_id ?? 0);
+    }
+
+    /**
+     * Human-readable label for the approval UI. Avoid echoing
+     * arbitrary content (cron expressions / template bodies) — only
+     * include the agent_id and the discriminated id.
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function summarizeTargetAgent(array $arguments): string
+    {
+        if (isset($arguments['agent_id']) && is_numeric($arguments['agent_id']) && (int) $arguments['agent_id'] > 0) {
+            return 'agent #' . (int) $arguments['agent_id'];
+        }
+        return 'calling agent';
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function summarizeScheduleId(array $arguments): string
+    {
+        if (isset($arguments['schedule_id']) && is_numeric($arguments['schedule_id']) && (int) $arguments['schedule_id'] > 0) {
+            return 'schedule #' . (int) $arguments['schedule_id'];
+        }
+        return 'no schedule_id';
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function summarizeTemplateId(array $arguments): string
+    {
+        if (isset($arguments['template_id']) && is_numeric($arguments['template_id']) && (int) $arguments['template_id'] > 0) {
+            return 'template #' . (int) $arguments['template_id'];
+        }
+        return 'no template_id';
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function summarizeCreateSchedule(array $arguments, string $agentLabel): string
+    {
+        $payload = is_array($arguments['schedule_payload'] ?? null) ? $arguments['schedule_payload'] : [];
+        $when = isset($payload['cron_expression']) && is_string($payload['cron_expression']) && $payload['cron_expression'] !== ''
+            ? 'cron "' . $payload['cron_expression'] . '"'
+            : (isset($payload['run_at']) && is_string($payload['run_at']) && $payload['run_at'] !== ''
+                ? 'one-shot "' . $payload['run_at'] . '"'
+                : 'unspecified cadence');
+        $prompt = isset($payload['template_id']) && is_int($payload['template_id'])
+            ? 'template #' . $payload['template_id']
+            : 'raw_prompt';
+        return "Create schedule for {$agentLabel}: {$when} with {$prompt}.";
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function summarizeCreateTemplate(array $arguments, string $agentLabel): string
+    {
+        $payload = is_array($arguments['template_payload'] ?? null) ? $arguments['template_payload'] : [];
+        $name = isset($payload['name']) && is_string($payload['name']) ? '"' . $payload['name'] . '"' : '"(unnamed)"';
+        return "Create prompt template for {$agentLabel}: {$name}.";
+    }
+
+    private function summariseResource(array $result): string
+    {
+        $run = $result['scheduled_run'] ?? null;
+        if (!is_array($run)) {
+            return '(empty)';
+        }
+        $when = (string) ($run['cron_expression'] ?? '');
+        if ($when !== '') {
+            $when = 'cron ' . $when;
+        } else {
+            $when = (string) ($run['run_at'] ?? '');
+            $when = $when !== '' ? 'one-shot ' . $when : 'unscheduled';
+        }
+        $label = isset($run['template_id']) && is_int($run['template_id'])
+            ? 'template #' . $run['template_id']
+            : 'raw prompt';
+        $state = !empty($run['is_active']) ? 'active' : 'paused';
+        $tz = (string) ($run['timezone'] ?? 'UTC');
+        return "{$when}, {$label}, {$state}, {$tz}";
+    }
+}

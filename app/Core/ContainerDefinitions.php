@@ -172,6 +172,7 @@ use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
+use Spora\Tools\ScheduleTool;
 use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
@@ -843,6 +844,7 @@ final class ContainerDefinitions
                 MediaTool::class,
                 TodoTool::class,
                 AskUserQuestionTool::class,
+                ScheduleTool::class,
             ],
 
             LLMConfigService::class => static function (ContainerInterface $c): LLMConfigService {
@@ -1471,6 +1473,24 @@ final class ContainerDefinitions
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
+                );
+            },
+
+            // ScheduleTool bundles 12 LLM-facing operations across two
+            // sub-domains: scheduled_runs + agent_prompt_templates. The
+            // collaborators bundle is optional (zero-arg constructor
+            // exists) — wiring the PrincipalResolver + PrincipalService
+            // here so the caller's principal is resolved consistently.
+            ScheduleTool::class => static function (ContainerInterface $c): ScheduleTool {
+                return new ScheduleTool(
+                    $c->get(ScheduledRunServiceInterface::class),
+                    $c->get(PromptTemplateServiceInterface::class),
+                    new ScheduleTool\ScheduleToolCollaborators(
+                        principalResolver: $c->get(PrincipalResolver::class),
+                        principalService: $c->get(PrincipalService::class),
+                    ),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
                 );
             },
 
