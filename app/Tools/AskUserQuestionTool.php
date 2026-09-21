@@ -18,7 +18,7 @@ use Spora\Tools\ValueObjects\ToolResult;
  * Wire shape (opencode-compatible): each question has 2-4 options
  * (`label`, `description`) and per-question `multiple` / `allowFreeText`
  * flags. The `header` is the short chip label rendered above each
- * question (≤30 chars).
+ * question.
  *
  * Execution triggers a new `AWAITING_INPUT` lifecycle status (parallel
  * to `PENDING_APPROVAL`) and parks the task on the batch's tool_call_id
@@ -30,19 +30,24 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 #[Tool(
     name: 'ask_user_question',
-    description: 'Use this tool when you need a decision from the operator to proceed. '
-               . 'Provide 1-4 questions per call; each question has 2-4 options. The operator '
-               . 'navigates between questions before submitting all answers at once — do not '
-               . 'expect a follow-up. Size budgets: `header` ≤30 chars (chip label); '
-               . '`options[].label` ~1-5 words; `options[].description` ~one line. '
-               . 'Defaults: `multiple=false` (set true for checkbox-style picks); '
-               . '`allowFreeText=true` (set false to force a selection from `options[]` only). '
-               . 'When `allowFreeText` is true, the operator may submit `free_text` instead '
-               . 'of — or alongside — `selections[]`; `selections` can be empty. Do NOT use '
-               . 'this for clarifying questions about the user\'s intent (use the regular '
-               . 'chat instead), for trivial decisions, or for anything that does not block '
-               . 'the work. Return shape: when the operator submits, the loop resumes with '
-               . 'one plaintext tool-result block per question, lines joined by `\\n` — '
+    description: 'Use this tool to get a decision from the operator that blocks your work. '
+               . 'When NOT to use: clarifying user intent (use regular chat), trivial choices '
+               . 'you can make yourself, or anything not blocking the work. '
+               . 'Enforced limits (violations return errors): 1-4 questions per call, 2-4 '
+               . 'options per question, header ≤30 chars. '
+               . 'Per question, all three fields are required: '
+               . '`question` (phrased as a question), '
+               . '`header` (shown as a chip/tab label), '
+               . '`options` (each has a `label` ≈1-5 words — soft UI guidance — and a '
+               . '`description` ≈one line — soft UI guidance; options are mutually exclusive '
+               . 'unless `multiple=true`, set true when the operator can pick more than one). '
+               . 'Defaults: `multiple=false` (single-select chips); `allowFreeText=true` '
+               . '(operator may type a custom answer, in addition to or instead of chip '
+               . 'selections). '
+               . 'Answer flow: the operator navigates through every question in the UI, '
+               . 'then submits all selections in one reply. Do not expect turn-by-turn Q&A '
+               . '— don\'t ask a follow-up based on a partial answer. '
+               . 'Return shape: one tool-result block per question, in the order asked: '
                . '`[ask_user_question selections: ["Tea"]]` for single-select, '
                . '`[ask_user_question selections: ["Yes", "Morning"] free_text: "any time works"]` '
                . 'when free-text is also given.',
