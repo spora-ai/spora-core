@@ -170,26 +170,43 @@ final class ScheduleUpdateValidator
     }
 
     /**
-     * Cross-cutting type checks: `is_active`, `max_steps_override`,
-     * `template_id`, `max_steps`, `name`, `variables`.
+     * Cross-cutting type checks for fields that appear on both
+     * operations: `is_active`, `max_steps_override`, `template_id`,
+     * `max_steps`, `name`, `variables`. Split into per-field helpers
+     * to keep cognitive complexity manageable.
      *
      * @param array<string, mixed> $raw
      */
     private function validatePartialSharedFields(array $raw, string $op): ?ToolResult
     {
+        $gate = static function (callable $check): ?ToolResult {
+            return $check();
+        };
+        unset($gate);
+
+        $scheduleResult = $this->validatePartialSharedScheduleFields($raw);
+        if ($scheduleResult !== null) {
+            return $scheduleResult;
+        }
+
+        return $this->validatePartialSharedTemplateFields($raw);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function validatePartialSharedScheduleFields(array $raw): ?ToolResult
+    {
         if (isset($raw['is_active']) && !is_bool($raw['is_active'])) {
-            return ToolResult::fail($op . ': `is_active` must be a boolean.');
+            return ToolResult::fail(self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean.');
         }
 
         if (array_key_exists('max_steps_override', $raw) && $raw['max_steps_override'] !== null) {
-            $range = $this->checkIntRange(
+            return $this->checkIntRange(
                 $raw['max_steps_override'],
                 self::OP_UPDATE_SCHEDULE,
                 '`max_steps_override`',
             );
-            if ($range !== null) {
-                return $range;
-            }
         }
 
         if (array_key_exists('template_id', $raw) && $raw['template_id'] !== null && !is_int($raw['template_id'])) {
@@ -198,23 +215,28 @@ final class ScheduleUpdateValidator
             );
         }
 
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function validatePartialSharedTemplateFields(array $raw): ?ToolResult
+    {
         if (array_key_exists('max_steps', $raw) && $raw['max_steps'] !== null) {
-            $range = $this->checkIntRange(
+            return $this->checkIntRange(
                 $raw['max_steps'],
                 self::OP_UPDATE_TEMPLATE,
                 '`max_steps`',
             );
-            if ($range !== null) {
-                return $range;
-            }
         }
 
-        if (array_key_exists('name', $raw)) {
-            if (!is_string($raw['name']) || trim($raw['name']) === '' || mb_strlen($raw['name']) > 100) {
-                return ToolResult::fail(
-                    self::OP_UPDATE_TEMPLATE . ': `name` must be a non-empty string (1..100 chars).',
-                );
-            }
+        if (array_key_exists('name', $raw)
+            && (!is_string($raw['name']) || trim($raw['name']) === '' || mb_strlen($raw['name']) > 100)
+        ) {
+            return ToolResult::fail(
+                self::OP_UPDATE_TEMPLATE . ': `name` must be a non-empty string (1..100 chars).',
+            );
         }
 
         if (array_key_exists('variables', $raw) && $raw['variables'] !== null) {

@@ -208,7 +208,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . 'optional `timezone` (IANA, default "UTC"), `max_steps_override` '
                 . '(int 1..100, nullable), `is_active` (bool, default true). '
                 . 'Pass `agent_id` separately to target a different agent. '
-                . 'Ignored by every other operation.',
+                . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
 #[ToolParameter(
@@ -219,7 +219,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . 'optional `description`, `variables` (list of `{key, default_value?}`), '
                 . '`max_steps` (int 1..100, nullable), `is_active` (bool, default true). '
                 . 'Pass `agent_id` separately to target a different agent. '
-                . 'Ignored by every other operation.',
+                . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
 #[ToolParameter(
@@ -229,7 +229,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
                 . '`max_steps_override`, `is_active`. Send `null` on `cron_expression` / '
                 . '`run_at` to switch recurrence modes, never both populated. '
-                . 'Ignored by every other operation.',
+                . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
 #[ToolParameter(
@@ -242,8 +242,14 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 final class ScheduleTool extends AbstractTool
 {
-    private const SCHEDULE_NOT_FOUND          = 'schedule not found or not owned by this user';
-    private const PROMPT_TEMPLATE_NOT_FOUND   = 'prompt template not found or not owned by this user';
+    public const SCHEDULE_NOT_FOUND          = 'schedule not found or not owned by this user';
+    public const PROMPT_TEMPLATE_NOT_FOUND   = 'prompt template not found or not owned by this user';
+
+    // Standard "Ignored by every other operation." suffix appended to
+    // every per-operation ToolParameter description. Surface used in the
+    // LLM-facing parameter schema; constant kept public so the build
+    // pipeline can audit it.
+    public const IGNORED_BY_OTHER_OPERATIONS = 'Ignored by every other operation.';
 
     private const CREATE_SCHEDULE_ERR_PREFIX  = 'create_schedule: ';
     private const UPDATE_SCHEDULE_ERR_PREFIX  = 'update_schedule: ';
