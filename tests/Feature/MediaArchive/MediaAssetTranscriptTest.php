@@ -61,19 +61,53 @@ function runTranscribeMigration(): mixed
     return require BASE_PATH . '/database/migrations/0080_add_transcript_to_media_assets.php';
 }
 
+function mediaAssetsColumns(): array
+{
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'sqlite') {
+        return collect(Capsule::select('PRAGMA table_info(media_assets)'))
+            ->pluck('name')
+            ->all();
+    }
+
+    $db = Capsule::connection()->getDatabaseName();
+    return collect(Capsule::select(
+        'SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS '
+        . 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+        [$db, 'media_assets'],
+    ))->pluck('name')->all();
+}
+
+function mediaAssetsColumnInfo(): \Illuminate\Support\Collection
+{
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'sqlite') {
+        return collect(Capsule::select('PRAGMA table_info(media_assets)'))->keyBy('name');
+    }
+
+    $db = Capsule::connection()->getDatabaseName();
+    $rows = Capsule::select(
+        'SELECT COLUMN_NAME AS name, IS_NULLABLE AS nullable '
+        . 'FROM information_schema.COLUMNS '
+        . 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+        [$db, 'media_assets'],
+    );
+    return collect($rows)
+        ->keyBy('name')
+        ->map(static fn (object $r): object => (object) [
+            'name'    => $r->name,
+            'notnull' => $r->nullable === 'NO' ? 1 : 0,
+        ]);
+}
+
 test('migration adds nullable transcript + transcript_language columns', function (): void {
     createMediaAssetsTable();
 
     runTranscribeMigration()->up();
 
-    $columns = collect(Capsule::select('PRAGMA table_info(media_assets)'))
-        ->pluck('name')
-        ->all();
-
-    expect($columns)->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->toContain('transcript', 'transcript_language');
     // Both nullable — pre-existing audio rows must not block migration in.
-    // PRAGMA returns rows as stdClass with named properties (not arrays).
-    $colInfo = collect(Capsule::select('PRAGMA table_info(media_assets)'))->keyBy('name');
+    $colInfo = mediaAssetsColumnInfo();
     expect((int) $colInfo['transcript']->notnull)->toBe(0)
         ->and((int) $colInfo['transcript_language']->notnull)->toBe(0);
 });
@@ -104,11 +138,9 @@ test('existing rows survive migration with null transcript columns', function ()
 test('down() drops the columns', function (): void {
     createMediaAssetsTable();
     runTranscribeMigration()->up();
-    expect(collect(Capsule::select('PRAGMA table_info(media_assets)'))->pluck('name'))
-        ->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->toContain('transcript', 'transcript_language');
 
     runTranscribeMigration()->down();
 
-    $columns = collect(Capsule::select('PRAGMA table_info(media_assets)'))->pluck('name')->all();
-    expect($columns)->not->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->not->toContain('transcript', 'transcript_language');
 });
