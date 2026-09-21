@@ -83,9 +83,11 @@ final class AskUserQuestionTool extends AbstractTool
     {
         $questions = is_array($arguments['questions'] ?? null) ? $arguments['questions'] : [];
         $count = count($questions);
-        return $count === 2
-            ? 'Ask the operator 2 questions'
-            : "Ask the operator {$count} question" . ($count === 1 ? '' : 's');
+        if ($count === 2) {
+            return 'Ask the operator 2 questions';
+        }
+        $suffix = $count === 1 ? '' : 's';
+        return "Ask the operator {$count} question{$suffix}";
     }
 
     public function ask(array $arguments): ToolResult // NOSONAR php:S1172 — required by HasOperations dispatch trait
@@ -98,72 +100,10 @@ final class AskUserQuestionTool extends AbstractTool
      */
     private function doAsk(array $arguments, ?int $taskId): ToolResult
     {
-        $questionsRaw = $arguments['questions'] ?? null;
-        if ($questionsRaw === null) {
-            return new ToolResult(false, "Required argument 'questions' is missing.");
+        $questions = $this->extractQuestions($arguments['questions'] ?? null);
+        if ($questions instanceof ToolResult) {
+            return $questions;
         }
-        if (!is_array($questionsRaw) || !array_is_list($questionsRaw)) {
-            return new ToolResult(false, "Argument 'questions' must be a list of 1-4 question objects.");
-        }
-        if (count($questionsRaw) < PendingQuestionBatch::QUESTIONS_MIN
-            || count($questionsRaw) > PendingQuestionBatch::QUESTIONS_MAX
-        ) {
-            return new ToolResult(
-                false,
-                'A single ask_user_question call must include '
-                . PendingQuestionBatch::QUESTIONS_MIN . '-'
-                . PendingQuestionBatch::QUESTIONS_MAX . ' questions (got '
-                . count($questionsRaw) . ').',
-            );
-        }
-
-        $questions = [];
-        foreach ($questionsRaw as $i => $raw) {
-            if (!is_array($raw)) {
-                return new ToolResult(false, "Question #" . ((int) $i + 1) . " must be an object.");
-            }
-            $question = trim((string) ($raw['question'] ?? ''));
-            if ($question === '') {
-                return new ToolResult(false, "Question #" . ((int) $i + 1) . " is missing its 'question' text.");
-            }
-            $header = trim((string) ($raw['header'] ?? ''));
-            if ($header === '') {
-                return new ToolResult(false, "Question #" . ((int) $i + 1) . " is missing its 'header' chip label.");
-            }
-            if (mb_strlen($header, 'UTF-8') > PendingQuestion::HEADER_MAX) {
-                return new ToolResult(
-                    false,
-                    "Question #" . ((int) $i + 1) . " header is "
-                    . mb_strlen($header, 'UTF-8') . " chars; max is "
-                    . PendingQuestion::HEADER_MAX . ".",
-                );
-            }
-            $optionsRaw = $raw['options'] ?? null;
-            if (!is_array($optionsRaw) || !array_is_list($optionsRaw)) {
-                return new ToolResult(false, "Question '{$header}' must have an 'options' list.");
-            }
-            if (count($optionsRaw) < PendingQuestion::OPTIONS_MIN
-                || count($optionsRaw) > PendingQuestion::OPTIONS_MAX
-            ) {
-                return new ToolResult(
-                    false,
-                    "Question '{$header}' must have "
-                    . PendingQuestion::OPTIONS_MIN . '-'
-                    . PendingQuestion::OPTIONS_MAX . " options (got " . count($optionsRaw) . ').',
-                );
-            }
-            foreach ($optionsRaw as $j => $opt) {
-                if (!is_array($opt)) {
-                    return new ToolResult(false, "Question '{$header}' option #" . ((int) $j + 1) . " must be an object.");
-                }
-                $label = trim((string) ($opt['label'] ?? ''));
-                if ($label === '') {
-                    return new ToolResult(false, "Question '{$header}' option #" . ((int) $j + 1) . " has an empty label.");
-                }
-            }
-            $questions[] = PendingQuestion::fromLlmInput($raw);
-        }
-
         if ($taskId === null) {
             return new ToolResult(false, 'Cannot pose questions without a task id.');
         }
@@ -177,5 +117,149 @@ final class AskUserQuestionTool extends AbstractTool
             'Waiting for user answers...',
             ['pending_questions' => true],
         );
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<PendingQuestion>|ToolResult
+     */
+    private function extractQuestions(mixed $raw): array|ToolResult
+    {
+        if ($raw === null) {
+            return new ToolResult(false, "Required argument 'questions' is missing.");
+        }
+        if (!is_array($raw) || !array_is_list($raw)) {
+            return new ToolResult(false, "Argument 'questions' must be a list of 1-4 question objects.");
+        }
+        return $this->parseQuestions($raw);
+    }
+
+    /**
+     * @param list<mixed> $raw
+     * @return list<PendingQuestion>|ToolResult
+     */
+    private function parseQuestions(array $raw): array|ToolResult
+    {
+        $countError = $this->validateQuestionsCount(count($raw));
+        if ($countError instanceof ToolResult) {
+            return $countError;
+        }
+        $questions = [];
+        foreach ($raw as $i => $entry) {
+            $parsed = $this->parseSingleQuestion($entry, (int) $i);
+            if ($parsed instanceof ToolResult) {
+                return $parsed;
+            }
+            $questions[] = $parsed;
+        }
+        return $questions;
+    }
+
+    private function validateQuestionsCount(int $count): ?ToolResult
+    {
+        if ($count >= PendingQuestionBatch::QUESTIONS_MIN && $count <= PendingQuestionBatch::QUESTIONS_MAX) {
+            return null;
+        }
+        return new ToolResult(
+            false,
+            'A single ask_user_question call must include '
+            . PendingQuestionBatch::QUESTIONS_MIN . '-'
+            . PendingQuestionBatch::QUESTIONS_MAX . ' questions (got '
+            . $count . ').',
+        );
+    }
+
+    /**
+     * @param mixed $raw
+     */
+    private function parseSingleQuestion(mixed $raw, int $zeroBasedIndex): PendingQuestion|ToolResult
+    {
+        if (!is_array($raw)) {
+            return new ToolResult(false, "Question #" . ($zeroBasedIndex + 1) . " must be an object.");
+        }
+        $shapeError = $this->validateQuestionShape($raw, $zeroBasedIndex);
+        if ($shapeError instanceof ToolResult) {
+            return $shapeError;
+        }
+        return PendingQuestion::fromLlmInput($raw);
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    private function validateQuestionShape(array $raw, int $zeroBasedIndex): ?ToolResult
+    {
+        $prefix = "Question #" . ($zeroBasedIndex + 1);
+        $question = trim((string) ($raw['question'] ?? ''));
+        $header = trim((string) ($raw['header'] ?? ''));
+        $textError = $this->validateTextAndHeader($question, $header, $prefix);
+        if ($textError instanceof ToolResult) {
+            return $textError;
+        }
+        $lengthError = $this->validateHeaderLength($header, $prefix);
+        if ($lengthError instanceof ToolResult) {
+            return $lengthError;
+        }
+        return $this->validateOptionsChain($raw['options'] ?? null, $header);
+    }
+
+    private function validateTextAndHeader(string $question, string $header, string $prefix): ?ToolResult
+    {
+        if ($question === '') {
+            return new ToolResult(false, "{$prefix} is missing its 'question' text.");
+        }
+        if ($header === '') {
+            return new ToolResult(false, "{$prefix} is missing its 'header' chip label.");
+        }
+        return null;
+    }
+
+    private function validateHeaderLength(string $header, string $prefix): ?ToolResult
+    {
+        $length = mb_strlen($header, 'UTF-8');
+        if ($length <= PendingQuestion::HEADER_MAX) {
+            return null;
+        }
+        return new ToolResult(
+            false,
+            "{$prefix} header is {$length} chars; max is "
+            . PendingQuestion::HEADER_MAX . '.',
+        );
+    }
+
+    /**
+     * @param mixed $optionsRaw
+     */
+    private function validateOptionsChain(mixed $optionsRaw, string $header): ?ToolResult
+    {
+        if (!is_array($optionsRaw) || !array_is_list($optionsRaw)) {
+            return new ToolResult(false, "Question '{$header}' must have an 'options' list.");
+        }
+        $count = count($optionsRaw);
+        if ($count < PendingQuestion::OPTIONS_MIN || $count > PendingQuestion::OPTIONS_MAX) {
+            return new ToolResult(
+                false,
+                "Question '{$header}' must have "
+                . PendingQuestion::OPTIONS_MIN . '-'
+                . PendingQuestion::OPTIONS_MAX . " options (got {$count}).",
+            );
+        }
+        return $this->validateOptionLabels($optionsRaw, $header);
+    }
+
+    /**
+     * @param list<mixed> $optionsRaw
+     */
+    private function validateOptionLabels(array $optionsRaw, string $header): ?ToolResult
+    {
+        foreach ($optionsRaw as $j => $opt) {
+            if (!is_array($opt)) {
+                return new ToolResult(false, "Question '{$header}' option #" . ((int) $j + 1) . " must be an object.");
+            }
+            if (trim((string) ($opt['label'] ?? '')) === '') {
+                return new ToolResult(false, "Question '{$header}' option #" . ((int) $j + 1) . " has an empty label.");
+            }
+        }
+        return null;
     }
 }
