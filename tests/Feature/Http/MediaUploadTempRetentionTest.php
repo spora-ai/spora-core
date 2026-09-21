@@ -134,7 +134,7 @@ test('retention=5 with 5 existing temp rows: 6th upload deletes the oldest one',
     // 5 pre-existing temp rows for (user 1, agent 1).
     for ($i = 0; $i < 5; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -160,7 +160,7 @@ test('retention=0 means manual cleanup only — no purge at ingest', function ()
 
     for ($i = 0; $i < 8; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -182,7 +182,7 @@ test('retention=3 with 10 existing: 11th upload deletes 8 oldest so total equals
 
     for ($i = 0; $i < 10; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -210,7 +210,7 @@ test('retention purge respects user boundaries — user 2 does not see user 1 ro
     // 5 rows for user 1.
     for ($i = 0; $i < 5; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -221,7 +221,7 @@ test('retention purge respects user boundaries — user 2 does not see user 1 ro
     // 5 rows for user 2 — also at the ceiling.
     for ($i = 0; $i < 5; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 2;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -246,7 +246,7 @@ test('retention purge does NOT run when is_temporary is false', function (): voi
     // 5 rows already at the limit.
     for ($i = 0; $i < 5; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = 1;
         $asset->is_temporary = true;
@@ -268,7 +268,7 @@ test('upload without agent_id skips the retention purge entirely (no agent conte
 
     for ($i = 0; $i < 5; $i++) {
         $asset = new MediaAsset();
-        $asset->id = bin2hex(random_bytes(8));
+        $asset->id = testGenerateUuidV4();
         $asset->user_id = 1;
         $asset->agent_id = null;
         $asset->is_temporary = true;
