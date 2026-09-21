@@ -402,7 +402,15 @@ final class TaskController
                 $parsed['batch']->toolCallId,
                 $parsed['formatted'],
             );
-            return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+            // Symfony's JsonResponse with null data encodes to "{}" (2 bytes)
+            // and would forward that body on a 204 — a protocol violation
+            // (RFC 7230 §3.3.3 forbids a message body on 204) that some
+            // HTTP intermediaries re-classify as 502. Mirror AuthController::
+            // logout(): construct the response, then explicitly clear the
+            // body so only the empty status line + headers reach the wire.
+            $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
+            $response->setContent('');
+            return $response;
         } catch (InvalidArgumentException $e) {
             return $this->errorForException($e);
         }

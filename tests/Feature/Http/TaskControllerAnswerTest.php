@@ -180,6 +180,20 @@ it('returns 204 on a successful single-question batch answer', function (): void
         ->and($toolRow->content)->toContain('SQLite');
 });
 
+// Symfony's JsonResponse with null data encodes to "{}" (2 bytes), so
+// without explicit setContent('') the 204 would carry a body — a protocol
+// violation that some HTTP intermediaries re-classify as 502. Guard the
+// wire shape so a regression to `new JsonResponse(null, 204)` is caught.
+it('returns 204 with an empty body on a successful answer', function (): void {
+    $h = answerControllerHarness();
+    $response = answerRequest($h['controller'], $h['task']->id, [
+        'tool_call_id' => 'pc_ask',
+        'answers' => [['header' => 'DB', 'selections' => ['SQLite']]],
+    ]);
+    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT)
+        ->and($response->getContent())->toBe('');
+});
+
 it('returns 422 when tool_call_id does not match', function (): void {
     $h = answerControllerHarness();
     $response = answerRequest($h['controller'], $h['task']->id, [
