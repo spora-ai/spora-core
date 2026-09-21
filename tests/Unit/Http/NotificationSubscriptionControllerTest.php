@@ -82,15 +82,13 @@ test('index() returns null user_principal_id when the user has no user-principal
     [$controller, $authService] = makeSubscriptionControllerUnit();
     seedSubscriptionUserUnit($authService);
 
-    // Wipe the user-principal so the controller has nothing to resolve.
-    // On MariaDB the `agents.principal_id → principals.id` FK blocks the
-    // delete; drop the agents that point at user-principals first.
-    Spora\Models\Agent::query()
-        ->whereIn('principal_id', Spora\Models\Principal::query()->where('type', Spora\Models\Principal::TYPE_USER)->pluck('id'))
-        ->delete();
-    Spora\Models\Principal::query()
-        ->where('type', Spora\Models\Principal::TYPE_USER)
-        ->delete();
+    // No user-principal exists yet — `seedSubscriptionUserUnit()` only
+    // inserts into `users`, not `principals`. The controller must resolve
+    // `user_principal_id` to null without crashing (the previous version
+    // tried to wipe user-principals to set up this state, but the
+    // `agents.principal_id → principals.id` RESTRICT FK made the wipe
+    // fragile across engines and the assertion doesn't actually need it —
+    // `resolveUserPrincipalId()` already filters by `user_id`).
 
     $response = $controller->index();
     $body = json_decode($response->getContent(), true);

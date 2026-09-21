@@ -1122,11 +1122,15 @@ describe('TaskService — continueTask', function (): void {
         $orchestrator->shouldReceive('continue')
             ->once()
             ->with($task->id, 'more please', 10, [])
-            ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId): Task {
+            ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId, $agent): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),
                     'trigger_user_id' => $userId,
-                    'agent_id'    => 1,
+                    // Hardcoded `1` worked on SQLite (auto-increment reuse),
+                    // but MariaDB's per-table AUTO_INCREMENT survives
+                    // rollbacks — there is no guarantee an agent with id=1
+                    // exists. Use the actual agent the test created.
+                    'agent_id'    => $agent->id,
                     'status'      => 'RUNNING',
                     'user_prompt' => 'more please',
                     'max_steps'   => 10,

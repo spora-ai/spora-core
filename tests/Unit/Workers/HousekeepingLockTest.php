@@ -71,6 +71,12 @@ describe('HousekeepingLock', function (): void {
     it('release writes the past-claimed_until sentinel and clears the row idempotently', function (): void {
         // Acquire then release; release is idempotent — calling it twice
         // (e.g. on a finally + crash-recovery path) must not throw.
+        // Earlier tests in this describe block deliberately drop the lock
+        // table to exercise the fail-closed branch; on MariaDB the worker
+        // DB persists across tests so this later test sees the dropped
+        // table. Re-create the schema first.
+        TestDatabaseFactory::freshDatabase();
+
         $lock = new HousekeepingLock();
         $lock->tryAcquire(30);
 

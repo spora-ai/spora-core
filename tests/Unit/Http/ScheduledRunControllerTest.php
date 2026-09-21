@@ -27,10 +27,16 @@ function makeScheduledRunController(): array
     $authService = bootAuthLayer();
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
     $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) {
+        // `trigger_user_id` must reference an existing user row — SQLite
+        // ignores the FK on `users(id)` (foreign_keys pragma off by default)
+        // but MariaDB enforces it. Resolve from the simulated session that
+        // `registerAndGetAgentForScheduledRun()` populates; fall back to 1
+        // for tests that don't simulate a session.
+        $triggerUserId = $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID] ?? 1;
         return Spora\Models\Task::create([
             'agent_id'    => $agentId,
             'principal_id' => (int) Agent::find($agentId)->principal_id,
-            'trigger_user_id' => 1,
+            'trigger_user_id' => $triggerUserId,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,

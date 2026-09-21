@@ -93,10 +93,18 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
     $migration->up();
 
     $userId = (int) Capsule::table('users')->value('id');
+    if ($userId === 0) {
+        Capsule::table('users')->insert([
+            'email' => 'xor@example.com', 'username' => 'xor_user',
+            'password' => 'unused-hash', 'status' => 1, 'verified' => 1,
+            'roles_mask' => 0, 'registered' => time(),
+        ]);
+        $userId = (int) Capsule::table('users')->value('id');
+    }
 
-    // Both set → rejected.
+    // Setting user_id succeeds (the fillable shape principals expects).
     expect(fn() => Principal::create([
-        'type' => 'user', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => null,
+        'type' => 'user', 'user_id' => $userId, 'group_id' => null,
     ]))->not()->toThrow(Throwable::class);
 
     // Both null → rejected via XOR.
@@ -110,11 +118,12 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
     }
     expect($thrown)->toBeInstanceOf(LogicException::class);
 
-    // Both set → rejected via XOR (FK will also fail but LogicException first).
+    // Setting both user_id AND group_id is rejected via XOR
+    // (LogicException fires before the FK insert even reaches MariaDB).
     $thrown = null;
     try {
         Principal::create([
-            'type' => 'user', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => 999,
+            'type' => 'user', 'user_id' => $userId, 'group_id' => 999,
         ]);
     } catch (Throwable $e) {
         $thrown = $e;
@@ -127,9 +136,18 @@ test('Principal type must match the FK that is set', function (): void {
     $migration->up();
 
     $userId = (int) Capsule::table('users')->value('id');
+    if ($userId === 0) {
+        Capsule::table('users')->insert([
+            'email' => 'typefkmatch@example.com', 'username' => 'typefkmatch_user',
+            'password' => 'unused-hash', 'status' => 1, 'verified' => 1,
+            'roles_mask' => 0, 'registered' => time(),
+        ]);
+        $userId = (int) Capsule::table('users')->value('id');
+    }
 
+    // type='group' with user_id set is rejected by the type-check.
     expect(fn() => Principal::create([
-        'type' => 'group', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => null,
+        'type' => 'group', 'user_id' => $userId, 'group_id' => null,
     ]))->toThrow(LogicException::class);
 });
 

@@ -60,7 +60,11 @@ test('setUserPreferredConfig creates preference row', function (): void {
 
     expect($result)->toBeTrue();
 
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
+    // Look up by the config's `principal_id` (= Principal.id for this user),
+    // not by `$userId` — the underlying table FKs `principal_id → principals.id`
+    // and the two values only coincide when auto-increment counters align,
+    // which is engine-specific.
+    $pref = PrincipalPreference::where('principal_id', $config->principal_id)->first();
     expect($pref)->not()->toBeNull()
         ->and($pref->preferred_llm_config_id)->toBe($config->id);
 });
@@ -75,18 +79,18 @@ test('setUserPreferredConfig updates existing preference', function (): void {
 
     // Set first preference
     $service->setUserPreferredConfig($userId, $config1->id);
-    $pref1 = PrincipalPreference::where('principal_id', $userId)->first();
+    $pref1 = PrincipalPreference::where('principal_id', $config1->principal_id)->first();
     expect($pref1->preferred_llm_config_id)->toBe($config1->id);
 
     // Update to second preference
     $result = $service->setUserPreferredConfig($userId, $config2->id);
     expect($result)->toBeTrue();
 
-    $pref2 = PrincipalPreference::where('principal_id', $userId)->first();
+    $pref2 = PrincipalPreference::where('principal_id', $config2->principal_id)->first();
     expect($pref2->preferred_llm_config_id)->toBe($config2->id);
 
     // Should still be only one preference row
-    expect(PrincipalPreference::where('principal_id', $userId)->count())->toBe(1);
+    expect(PrincipalPreference::where('principal_id', $config1->principal_id)->count())->toBe(1);
 });
 
 test('setUserPreferredConfig rejects config belonging to another user', function (): void {
@@ -119,7 +123,9 @@ test('setUserPreferredConfig allows global config', function (): void {
 
     expect($result)->toBeTrue();
 
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
+    $principalId = (int) \Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')->where('user_id', $userId)->value('id');
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($pref->preferred_llm_config_id)->toBe($globalConfig->id);
 });
 
@@ -308,9 +314,9 @@ test('setUserPreferredConfig with the same config twice does not duplicate the p
 
     expect($first)->toBeTrue()
         ->and($second)->toBeTrue()
-        ->and(PrincipalPreference::where('principal_id', $userId)->count())->toBe(1);
+        ->and(PrincipalPreference::where('principal_id', $config->principal_id)->count())->toBe(1);
 
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
+    $pref = PrincipalPreference::where('principal_id', $config->principal_id)->first();
     expect($pref->preferred_llm_config_id)->toBe((int) $config->getKey());
 });
 

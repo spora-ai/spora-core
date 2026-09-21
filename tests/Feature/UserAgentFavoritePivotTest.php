@@ -13,6 +13,45 @@ use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\PrincipalResolver;
 
 /**
+ * True iff the `user_agent_favorites.user_id` FK is declared with
+ * `ON DELETE CASCADE`. The two engines expose FK metadata through
+ * different introspection APIs:
+ *   - SQLite: `PRAGMA foreign_key_list(<table>)` returns rows with an
+ *     `on_delete` column (`CASCADE`, `RESTRICT`, …).
+ *   - MySQL / MariaDB: `PRAGMA` is rejected with errno 1064; the
+ *     equivalent lives in `information_schema.REFERENTIAL_CONSTRAINTS`
+ *     (`DELETE_RULE` = `CASCADE` / `RESTRICT` / `SET NULL` / …).
+ * Keeping the cross-engine introspection in one place so the
+ * `cascade-deletes the pivot row when the user is deleted` test can
+ * pin the same contract on SQLite and on MySQL/MariaDB.
+ */
+function userAgentFavoriteHasCascadeOnUserId(): bool
+{
+    $driver = Capsule::connection()->getDriverName();
+
+    if ($driver === 'sqlite') {
+        foreach (Capsule::connection()->select("PRAGMA foreign_key_list(user_agent_favorites)") as $fk) {
+            if ($fk->from === 'user_id' && $fk->on_delete === 'CASCADE') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    $rows = Capsule::connection()->select(
+        'SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS '
+        . 'WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ?',
+        [Capsule::connection()->getDatabaseName(), 'user_agent_favorites'],
+    );
+    foreach ($rows as $row) {
+        if (strtoupper((string) $row->DELETE_RULE) === 'CASCADE') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Plan A per-user favourites. Replaces the legacy shared
  * `agents.is_favorite` column (migration 0058) which leaked across every
  * member of a group. The pivot is private per user.
@@ -61,33 +100,26 @@ describe('UserAgentFavorite pivot (Plan A)', function (): void {
         ]);
         expect(UserAgentFavorite::count())->toBe(1);
     });
-
     it('cascade-deletes the pivot row when the user is deleted', function (): void {
         $seed = planASeedAgentWithOwner();
         UserAgentFavorite::insertOrIgnore([
-            'user_id' => $seed['ownerId'], 'agent_id' => $seed['agentId'], 'created_at' => date('Y-m-d H:i:s'),
+            'user_id'    => $seed['ownerId'],
+            'agent_id'   => $seed['agentId'],
+            'created_at' => date('Y-m-d H:i:s'),
         ]);
 
         // The test user is referenced by other tables (principals etc.) so
         // a normal user-delete fails the FK. Verify the cascade behaviour
-        // directly by simulating what SQLite's cascade would do: drop the
-        // pivot row alongside the user, then assert the cascade FK is
-        // configured on the pivot table. (The migration declares
-        // `cascadeOnDelete()` — this test pins that contract.)
-        $fks = Capsule::connection()->select("PRAGMA foreign_key_list(user_agent_favorites)");
-        $hasCascade = false;
-        foreach ($fks as $fk) {
-            if ($fk->from === 'user_id' && $fk->on_delete === 'CASCADE') {
-                $hasCascade = true;
-                break;
-            }
-        }
+        // directly by reading the FK metadata on `user_agent_favorites` —
+        // SQLite uses `PRAGMA foreign_key_list`, MySQL/MariaDB uses
+        // `information_schema.REFERENTIAL_CONSTRAINTS`. The contract is
+        // that the `user_id` FK is declared with ON DELETE CASCADE.
+        $hasCascade = userAgentFavoriteHasCascadeOnUserId();
         expect($hasCascade)->toBeTrue();
         // And the cascade actually fires when the FK is honoured: insert
         // a row, then delete the agent with FKs on, and confirm the
         // pivot is gone (a separate table from `users` so no FK conflict).
     });
-
     it('cascade-deletes the pivot row when the agent is deleted', function (): void {
         $seed = planASeedAgentWithOwner();
         UserAgentFavorite::insertOrIgnore([

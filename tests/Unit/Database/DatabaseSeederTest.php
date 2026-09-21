@@ -45,6 +45,13 @@ function makeSeeder(): DatabaseSeeder
 }
 
 it('seeds the admin user and agent successfully', function () {
+    // Per-test fresh schema. SQLite `:memory:` masks this (each Pest test
+    // already gets a clean connection); on MariaDB/MySQL the per-worker
+    // DB persists across tests so earlier `it()` calls left the admin
+    // user/agent row behind, which the seeder's "Existing installation
+    // detected" gate would catch and skip the fresh-install branch.
+    TestDatabaseFactory::freshDatabase();
+
     // Initial state
     expect(User::count())->toBe(0)
         ->and(Agent::count())->toBe(0)
@@ -75,6 +82,12 @@ it('seeds the admin user and agent successfully', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not duplicate records if seeder is run twice', function () {
+    // Same rationale as the previous test — the seeder's idempotency
+    // branch only fires if a previous run in the same worker left
+    // admin + agent rows behind. SQLite rebuilds per-test, MariaDB
+    // does not.
+    TestDatabaseFactory::freshDatabase();
+
     $seeder = makeSeeder();
 
     ob_start();

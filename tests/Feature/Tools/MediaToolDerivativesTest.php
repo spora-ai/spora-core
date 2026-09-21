@@ -498,6 +498,14 @@ describe('MediaTool::create_derivative', function (): void {
 describe('MediaTool::search derivative filtering', function (): void {
     it('still hides derivative rows from the listing', function (): void {
         $parent = seedMediaToolDerivativeParent('abcdef00-aaaa-bbbb-cccc-000000000000');
+        // Search scope is `agent` by default (see MediaTool::resolveScope)
+        // and `ListMediaQuery` filters by `agent_id`. The parent lives on
+        // the agent materialised by `seedMediaToolAgent()` whose id is
+        // whatever AUTO_INCREMENT happens to land on — first call in a
+        // fresh SQLite `:memory:` yields id 1, but MariaDB/MySQL carry
+        // prior inserts from earlier tests in the same worker. Use the
+        // actual id so the search filter matches on both engines.
+        $parentAgentId = (int) $parent->agent_id;
         $child = seedMediaAsset(
             agentId: null,
             userId: 99,
@@ -513,7 +521,7 @@ describe('MediaTool::search derivative filtering', function (): void {
         try {
             $result = $tool->execute(
                 ['action' => 'search', 'limit' => 100],
-                agentId: 1,
+                agentId: $parentAgentId,
                 userId: 99,
             );
 

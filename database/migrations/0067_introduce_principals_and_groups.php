@@ -264,14 +264,22 @@ return new class extends Migration
             });
         }
 
-        $userPrincipals = Capsule::table('principals')
-            ->where('type', 'user')
-            ->pluck('id', 'user_id')
-            ->all();
-        foreach ($userPrincipals as $userId => $principalId) {
-            Capsule::table('agents')
-                ->where('user_id', $userId)
-                ->update(['principal_id' => $principalId]);
+        // Same pattern as the settings-tables loop above — the backfill
+        // only runs while `agents.user_id` still exists. On a re-run after
+        // a prior successful boot the column is already gone and the
+        // WHERE on `user_id` would crash MariaDB/MySQL with errno 1054
+        // ("Unknown column 'user_id' in 'WHERE'") because the column was
+        // dropped in Phase 3b on the previous run.
+        if ($schema->hasColumn('agents', 'user_id')) {
+            $userPrincipals = Capsule::table('principals')
+                ->where('type', 'user')
+                ->pluck('id', 'user_id')
+                ->all();
+            foreach ($userPrincipals as $userId => $principalId) {
+                Capsule::table('agents')
+                    ->where('user_id', $userId)
+                    ->update(['principal_id' => $principalId]);
+            }
         }
 
         $missing = (int) Capsule::table('agents')->whereNull('principal_id')->count();

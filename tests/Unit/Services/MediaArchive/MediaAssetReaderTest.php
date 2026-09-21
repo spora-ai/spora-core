@@ -246,10 +246,14 @@ describe('MediaAssetReader::readAsset', function (): void {
     it('returns null for an unknown storage_mode', function (): void {
         $ctx = makeMediaAssetReader();
         try {
+            // `media_assets.storage_mode` is `VARCHAR(16)`; SQLite enforces no
+            // length (TEXT affinity) so a longer value worked there. MariaDB
+            // rejects values longer than the column, so keep the sentinel
+            // within 16 bytes.
             $asset = persistMediaAsset([
                 'user_id'      => 7,
                 'mime_type'    => 'image/png',
-                'storage_mode' => 'legacy_inline_blob',
+                'storage_mode' => 'legacy_unknown',
             ]);
             expect($ctx['reader']->readAsset($asset->id, 7))->toBeNull();
         } finally {

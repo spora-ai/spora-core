@@ -8,7 +8,6 @@ use Monolog\Logger as MonologLogger;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Console\Worker\WorkerQueueProcessor;
-use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
@@ -177,6 +176,15 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
         // reap continues. Force the throw by disconnecting the
         // underlying PDO before the reap sweep so the next Eloquent
         // SELECT raises a QueryException.
+        //
+        // SQLite's connection is in-memory and there is no reconnector,
+        // so `disconnect()` alone is enough — `reconnect()` then throws
+        // `LostConnectionException`. On MariaDB/MySQL the reconnector
+        // would silently re-establish the TCP connection to the test
+        // DB, so Task::find() returns null with no throw and the
+        // warning never fires. Replace the reconnector with one that
+        // raises a QueryException so the catch branch is exercised on
+        // both engines.
         [$logger, $handler] = makeParentStatusLogger();
         $cmdFactory = static fn(int $taskId): array => [
             PHP_BINARY,
@@ -193,9 +201,25 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
         // DB down — a still-running child would mask the catch branch
         // because the reap would bail at feof() == false.
         usleep(100_000);
-        Capsule::connection()->disconnect();
+        $connection = Capsule::connection();
+        $connection->setReconnector(static function (): void {
+            throw new Illuminate\Database\QueryException(
+                Capsule::connection()->getDriverName(),
+                'select * from `tasks` where `id` = ? limit 1',
+                [404],
+                new PDOException('Connection refused (reconnector stub)'),
+            );
+        });
+        $connection->disconnect();
 
-        $processor->reapChildren($output);
+        try {
+            $processor->reapChildren($output);
+        } finally {
+            // Restore the default reconnect behaviour so the rest of
+            // the worker can talk to the DB.
+            $connection->setReconnector(static fn(): true => true);
+            $connection->reconnect();
+        }
         $rendered = $output->fetch();
 
         expect($rendered)
@@ -214,12 +238,6 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
         expect($warning)->not->toBeNull()
             ->and($warning->context['task_id'])->toBe(404)
             ->and($warning->level)->toBe(Monolog\Level::Warning);
-
-        // Restore the connection so downstream tests in the same worker
-        // process can boot a fresh Database (afterEach would do this
-        // anyway, but explicit is cheaper than a test-ordering surprise).
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-        $db->boot();
     });
 
     it('shutdownParent uses NullOutput and reaps without throwing when children are alive', function (): void {

@@ -94,8 +94,27 @@ final class Agent extends Model
      * group-principal it returns the first `owner` user so legacy code
      * paths still get a User instance. Kept temporarily while downstream
      * consumers are migrated in their own PRs.
+     *
+     * Returns an Eloquent Builder rather than a `BelongsTo` because the
+     * relation traverses two hops (agents.principal_id → principals.id
+     * → principals.user_id → users.id) and Eloquent's `belongsTo`
+     * can't express that without an intermediate table on the path. The
+     * Builder can still be `->first()`'d by callers (which is what the
+     * `user` accessor and the legacy test rely on).
+     *
+     * The previous shape — `belongsTo(User::class, 'principal_id', 'id')`
+     * plus a `where('id', $principal->user_id)` — only succeeded on
+     * SQLite `:memory:` because users and principals share the same
+     * AUTO_INCREMENT counter there. As soon as the counters diverge
+     * (any non-empty worker DB on MariaDB/MySQL) the join collapses
+     * to an empty result set.
+     *
+     * Returns `null` when the principal is missing or the group has no
+     * owner, matching the legacy `?BelongsTo` contract that the
+     * `legacy user attribute returns null when the principal is missing`
+     * test pins.
      */
-    public function user(): ?BelongsTo
+    public function user(): ?\Illuminate\Database\Eloquent\Builder
     {
         $principal = Principal::find($this->principal_id);
         if ($principal === null) {
@@ -103,8 +122,7 @@ final class Agent extends Model
         }
 
         if ($principal->type === Principal::TYPE_USER) {
-            return $this->belongsTo(User::class, 'principal_id', 'id')
-                ->where('id', $principal->user_id);
+            return User::query()->where('id', $principal->user_id);
         }
 
         $ownerUserId = Capsule::table('group_memberships')
@@ -114,7 +132,7 @@ final class Agent extends Model
             ->value('user_id');
 
         return $ownerUserId !== null
-            ? $this->belongsTo(User::class, 'principal_id', 'id')->where('id', $ownerUserId)
+            ? User::query()->where('id', $ownerUserId)
             : null;
     }
 

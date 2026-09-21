@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Database\Schema\Blueprint;
 use Spora\Services\DbRateLimiter;
 
 defined('DB_RL_PASSWORD') || define('DB_RL_PASSWORD', 'Password1!');
@@ -49,13 +50,21 @@ describe('DbRateLimiter', function (): void {
         //
         // On SQLite `:memory:` the table is fresh per test, so dropping it
         // here was harmless. On MariaDB/MySQL CI the DB is per-worker and
-        // persists across tests, so the drop needs to be undone (via
-        // `freshDatabase()`) so subsequent tests can insert into the table.
+        // persists across tests — DDL auto-commits on InnoDB so a rolled-back
+        // transaction cannot undo the DROP. Re-create the table here so the
+        // next test in this file (`attempt isolates bucket counts per key`)
+        // can still insert into it.
         TestDatabaseFactory::freshDatabase();
         Capsule::schema()->drop('ratelimit_hits');
 
         $limiter = new DbRateLimiter();
         expect($limiter->attempt('client_d', 3, 60))->toBeTrue();
+
+        Capsule::schema()->create('ratelimit_hits', static function (Blueprint $t): void {
+            $t->string('key', 100);
+            $t->dateTime('hit_at');
+            $t->primary(['key', 'hit_at']);
+        });
     });
 
     it('attempt isolates bucket counts per key', function (): void {
