@@ -98,6 +98,13 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: spora_root
         ports: ['3306:3306']
+        # `command:` raises max_connections from the default 151 — Pest's
+        # parallel runner forks ~18 workers and each opens multiple
+        # connections (main + per-test transaction), which exhausts the
+        # default and surfaces as `SQLSTATE[08004] [1040] Too many
+        # connections`. 500 fits 18 workers × ~25 connections with
+        # headroom for the migration tests that drop+recreate their DB.
+        command: ["--max-connections=500"]
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
           --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
@@ -150,6 +157,11 @@ jobs:
           MARIADB_ROOT_PASSWORD: root
           MARIADB_DATABASE: spora_root
         ports: ['3306:3306']
+        # Same reason as the MySQL job: Pest's parallel runner exhausts
+        # the default 151 max_connections. The `mariadb:11` image ships
+        # `mysqladmin` (not `mariadb-admin`) so the wait step uses the
+        # former.
+        command: ["--max-connections=500"]
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
@@ -179,7 +191,7 @@ jobs:
       - name: Wait for MariaDB
         run: |
           for i in {1..30}; do
-            mariadb-admin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
+            mysqladmin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
             sleep 2
           done
           echo "MariaDB did not become ready in time" >&2
