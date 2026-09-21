@@ -161,11 +161,15 @@ final class TodoStore
         if (!is_string($raw) || $raw === '') {
             return null;
         }
+        return self::tryJsonDecode($raw);
+    }
+
+    private static function tryJsonDecode(string $raw): ?array
+    {
         try {
-            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            return json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
             return null;
         }
-        return $decoded;
     }
 }

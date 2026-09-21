@@ -263,16 +263,11 @@ final class TaskController
             if ($e->getMessage() === self::ERR_TASK_NOT_FOUND || $e->getMessage() === 'Task is not pending approval.') {
                 return $this->errorForException($e);
             }
-            return $this->validationErrorResponse($e);
+            return new JsonResponse(
+                ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $e->getMessage()]],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
         }
-    }
-
-    private function validationErrorResponse(InvalidArgumentException $e): JsonResponse
-    {
-        return new JsonResponse(
-            ['error' => ['code' => 'VALIDATION_ERROR', 'message' => $e->getMessage()]],
-            Response::HTTP_UNPROCESSABLE_ENTITY,
-        );
     }
 
     private function invalidJsonResponse(): JsonResponse

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
-use Spora\Tools\ValueObjects\ToolResult;
 use Spora\Todo\TodoItem;
 use Spora\Todo\TodoItemStatus;
+use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * Validates the per-op argument shape for {@see TodoTool}.
@@ -19,17 +19,17 @@ use Spora\Todo\TodoItemStatus;
 final class TodoItemValidator
 {
     /**
-     * @param mixed $todos
+     * @param mixed $input
      */
-    public function validateTodosArray(mixed $todos): ?ToolResult
+    public function validateTodosArray(mixed $input): ?ToolResult
     {
-        if ($todos === null) {
+        if ($input === null) {
             return new ToolResult(
                 false,
                 "For op=write, 'todos' is required (the full new todo list — pass [] to clear).",
             );
         }
-        if (!is_array($todos)) {
+        if (!is_array($input)) {
             return new ToolResult(false, "For op=write, 'todos' must be an array.");
         }
         return null;
