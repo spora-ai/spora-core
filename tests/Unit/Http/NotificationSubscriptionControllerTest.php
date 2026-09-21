@@ -83,6 +83,11 @@ test('index() returns null user_principal_id when the user has no user-principal
     seedSubscriptionUserUnit($authService);
 
     // Wipe the user-principal so the controller has nothing to resolve.
+    // On MariaDB the `agents.principal_id → principals.id` FK blocks the
+    // delete; drop the agents that point at user-principals first.
+    Spora\Models\Agent::query()
+        ->whereIn('principal_id', Spora\Models\Principal::query()->where('type', Spora\Models\Principal::TYPE_USER)->pluck('id'))
+        ->delete();
     Spora\Models\Principal::query()
         ->where('type', Spora\Models\Principal::TYPE_USER)
         ->delete();
