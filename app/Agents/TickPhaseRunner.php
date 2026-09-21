@@ -7,8 +7,6 @@ namespace Spora\Agents;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
-use Spora\Agents\Exceptions\ToolNotEnabledException;
-use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
@@ -25,7 +23,6 @@ use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
-use Spora\Tools\PendingQuestionBatch;
 use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
@@ -541,313 +538,31 @@ final class TickPhaseRunner
 
     private function handleToolCalls(Task $task, Agent $agent, array $toolCalls): void
     {
-        [$pendingApproval, $pendingInput] = $this->dispatchToolCalls($task, $agent, $toolCalls);
+        $handler = $this->makeBatchHandler();
+        [$pendingApproval, $pendingInput] = $handler->dispatchToolCalls($task, $agent, $toolCalls);
 
         if ($pendingApproval === [] && $pendingInput === []) {
-            $this->completeTickAfterTools($task);
+            $handler->completeTickAfterTools($task);
             return;
         }
 
-        $this->parkTaskForPending($task, $agent, $pendingApproval, $pendingInput);
+        $handler->parkTaskForPending($task, $agent, $pendingApproval, $pendingInput);
     }
 
-    /**
-     * @param list<DriverToolCall> $toolCalls
-     * @return array{0: list<DriverToolCall>, 1: list<array{toolCall: DriverToolCall, batch: PendingQuestionBatch}>}
-     */
-    private function dispatchToolCalls(Task $task, Agent $agent, array $toolCalls): array
+    private function makeBatchHandler(): ToolCallBatchHandler
     {
-        $pendingApproval = [];
-        $pendingInput = [];
-        foreach ($toolCalls as $toolCall) {
-            $this->dispatchOneToolCall($toolCall, $task, $agent, $pendingApproval, $pendingInput);
-        }
-        return [$pendingApproval, $pendingInput];
-    }
-
-    /**
-     * @param list<DriverToolCall> $pendingApproval
-     * @param list<array{toolCall: DriverToolCall, batch: PendingQuestionBatch}> $pendingInput
-     */
-    private function dispatchOneToolCall(
-        DriverToolCall $toolCall,
-        Task $task,
-        Agent $agent,
-        array &$pendingApproval,
-        array &$pendingInput,
-    ): void {
-        try {
-            $disposition = $this->orchestrator->toolCallExecutor->executeOrQueue($toolCall, $agent, $task);
-            if ($disposition === ToolCallDisposition::AwaitingApproval) {
-                $pendingApproval[] = $toolCall;
-                return;
-            }
-            if ($disposition === ToolCallDisposition::AwaitingInput) {
-                // The ask_user_question tool left a PendingQuestionBatch
-                // on the Task's pending_state (the executor mutates the
-                // pending_state column in place). Pull it back out here
-                // so we can build the new AgentState with the merged
-                // list — multiple pending batches may already be there
-                // from earlier turns.
-                $batch = $this->extractLastPendingBatch($task);
-                if ($batch !== null) {
-                    $pendingInput[] = ['toolCall' => $toolCall, 'batch' => $batch];
-                }
-            }
-        } catch (ToolNotEnabledException $e) {
-            // Authorization drift: the LLM proposed a tool that is no longer
-            // (or never was) in this agent's allowed set. Surface it as an
-            // explicit authorization message so the LLM doesn't try again on
-            // its next turn — the next tick will also rebuild the tool list
-            // via {@see prepareTickContext()}, but the LLM needs the in-band
-            // signal so it doesn't waste a round-trip rediscovering it.
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString(
-                    "Tool '{$toolCall->toolName}' is not enabled for this agent. The tool may have been revoked; do not propose it again.",
-                )),
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
-                ),
-            );
-        } catch (Throwable $e) {
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: 'System Error: ' . $e->getMessage(),
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCall->providerCallId,
-                    toolName: $toolCall->toolName,
-                ),
-            );
-        }
-    }
-
-    /**
-     * Abort-bail: a user abort could have landed between this tick's claim
-     * and the completion of the tool batch. We accept the user's request up
-     * to this tool boundary — once the latest tool returned, we re-read the
-     * status before either kicking the next tick or handing the loop off to
-     * the parent-resume hook. If the row is `ABORTED`, no further LLM
-     * traffic happens this tick.
-     *
-     * Publish the just-completed tool output BEFORE the bail: the chat
-     * relies on Mercure for live tool output. If we published only on the
-     * next tick (which never arrives for an aborted task), the user would
-     * have to reload the page to see the tool result that landed the same
-     * instant they clicked Abort. Re-read the row before publishing so the
-     * payload reflects the current DB state — passing the in-memory $task
-     * here would carry the stale RUNNING status into the Mercure event
-     * when the row had already been flipped to ABORTED.
-     */
-    private function completeTickAfterTools(Task $task): void
-    {
-        if ($this->maybeBailForAbort($task)) {
-            return;
-        }
-        $this->maybeResumeParentFromBatchBoundary($task->id);
-        if ($this->isTaskAborted($task->id)) {
-            return;
-        }
-        $this->continueOrHandOff($task);
-    }
-
-    private function maybeBailForAbort(Task $task): bool
-    {
-        $latestStatus = Task::where('id', $task->id)->value('status');
-        $this->publishIntermediateState(Task::find($task->id) ?? $task);
-        if ($latestStatus !== 'ABORTED') {
-            return false;
-        }
-        $this->logger?->info('Tick bailed — task was aborted after tool batch', [
-            'task_id' => $task->id,
-        ]);
-        return true;
-    }
-
-    private function isTaskAborted(int $taskId): bool
-    {
-        return Task::where('id', $taskId)->value('status') === 'ABORTED';
-    }
-
-    private function continueOrHandOff(Task $task): void
-    {
-        // Before recursive tick — keep the lease alive across the next
-        // tool batch + LLM round-trip so the reaper does not flip the
-        // row mid-batch.
-        $this->leaseGuard->extend($task->id);
-        if ($this->singleStep) {
-            $this->resetForSingleStepBrowser($task);
-            return;
-        }
-        $this->orchestrator->tick($task->id);
-    }
-
-    /**
-     * Client-worker mode: stop after one LLM turn so the SPA sees this batch
-     * of tool calls. Flip status back to QUEUED so the browser's next /tick
-     * can CAS-claim the row (the orchestrator's claim path rejects rows that
-     * are still RUNNING, which is where the outer tick left them). Clear the
-     * lease so the reaper doesn't pick up the row while the browser is
-     * preparing the next tick — the browser re-claims it with its own
-     * lease_owner.
-     */
-    private function resetForSingleStepBrowser(Task $task): void
-    {
-        Task::where('id', $task->id)
-            ->where('status', 'RUNNING')
-            ->update([
-                'status'           => 'QUEUED',
-                'lease_owner'      => null,
-                'lease_expires_at' => null,
-            ]);
-        $this->publishIntermediateState(Task::find($task->id) ?? $task);
-    }
-
-    /**
-     * @param list<DriverToolCall> $pendingApproval
-     * @param list<array{toolCall: DriverToolCall, batch: PendingQuestionBatch}> $pendingInput
-     */
-    private function parkTaskForPending(
-        Task $task,
-        Agent $agent,
-        array $pendingApproval,
-        array $pendingInput,
-    ): void {
-        // Input takes precedence over approval when both queues are
-        // non-empty in the same tick — operators answer the question
-        // batch first; the queued approvals stay in pending_state and
-        // re-present after the answer transition resumes the loop.
-        $isAwaitingInput = $pendingInput !== [];
-
-        $state = new AgentState(
-            taskId: $task->id,
-            agentId: $agent->id,
-            pendingToolCalls: $pendingApproval,
-            messageSnapshot: $this->orchestrator->buildMessages($task->id),
-            stepCount: $task->step_count,
-            maxSteps: $task->max_steps,
-            pausedAt: date('Y-m-d\TH:i:s\Z'),
-            pendingQuestions: array_map(static fn(array $entry): PendingQuestionBatch => $entry['batch'], $pendingInput),
+        $handler = new ToolCallBatchHandler(
+            orchestrator: $this->orchestrator,
+            logger: $this->logger,
+            notificationService: $this->notificationService,
+            mercure: $this->mercure,
+            toolCallSerializer: $this->toolCallSerializer,
+            toolInstances: $this->toolInstances,
+            leaseGuard: $this->leaseGuard,
+            subAgent: $this->subAgent,
         );
-
-        $task->status        = $isAwaitingInput ? 'AWAITING_INPUT' : 'PENDING_APPROVAL';
-        $task->pending_state = $state->toJson();
-        $task->save();
-
-        $this->logger?->info($isAwaitingInput ? 'Task paused — user input needed' : 'Task paused — approval needed', [
-            'task_id'    => $task->id,
-            'tool_count' => $isAwaitingInput ? count($pendingInput) : count($pendingApproval),
-            'tools'      => $this->pausedToolNames($pendingApproval, $pendingInput, $isAwaitingInput),
-        ]);
-
-        if ($isAwaitingInput) {
-            $this->notificationService?->notifyAwaitingInput($task);
-        } else {
-            $this->notificationService?->notifyPendingApproval($task);
-        }
-
-        $this->publishIntermediateState($task);
-    }
-
-    /**
-     * @param list<DriverToolCall> $pendingApproval
-     * @param list<array{toolCall: DriverToolCall, batch: PendingQuestionBatch}> $pendingInput
-     */
-    private function pausedToolNames(array $pendingApproval, array $pendingInput, bool $isAwaitingInput): string
-    {
-        $source = $isAwaitingInput
-            ? array_map(static fn(array $entry): DriverToolCall => $entry['toolCall'], $pendingInput)
-            : $pendingApproval;
-        return implode(', ', array_unique(array_map(
-            static fn(DriverToolCall $tc) => $tc->toolName,
-            $source,
-        )));
-    }
-
-    private function publishIntermediateState(Task $task): void
-    {
-        if ($this->mercure === null) {
-            return;
-        }
-
-        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
-
-        $historyRows = $task->taskHistory()->orderBy('sequence')->get();
-        $historyPayload = \Spora\Services\TaskHistorySerializer::buildHistoryPayload($historyRows);
-        $totals = \Spora\Services\TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
-
-        $taskData = [
-            'id' => $task->id,
-            'status' => $task->status,
-            'step_count' => $task->step_count,
-            'tool_calls' => $task->toolCalls->map(fn(ToolCallModel $tc) => $serializer->toArray($tc))->all(),
-            'history' => $historyPayload['history'],
-            'totals' => $totals,
-            // Surface the full `data` snapshot so the chat UI gets live
-            // tool-managed state (TodoTool writes `data.todos`,
-            // SubAgentTool writes `data.spawned_sub_task_ids`, etc.)
-            // without waiting for the slow detail poll.
-            'data' => $task->data,
-        ];
-
-        // Surface pending question batches on the Mercure event so the
-        // chat UI can render the picker without an extra `/show` fetch.
-        // We re-read the column — the in-memory $task was loaded before
-        // the executor wrote the new batch, and the runner's own write
-        // happened just before this method runs.
-        $fresh = Task::where('id', $task->id)->first();
-        if ($fresh !== null
-            && $fresh->status === 'AWAITING_INPUT'
-            && is_string($fresh->pending_state)
-            && $fresh->pending_state !== ''
-        ) {
-            try {
-                $state = AgentState::fromJson($fresh->pending_state);
-                if ($state->pendingQuestions !== []) {
-                    $taskData['pending_questions'] = array_map(
-                        static fn(PendingQuestionBatch $b): array => $b->toArray(),
-                        $state->pendingQuestions,
-                    );
-                }
-            } catch (Throwable) {
-                // Bad JSON or shape drift — fall through without pending_questions.
-            }
-        }
-
-        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $taskData);
-    }
-
-    /**
-     * Pull the most-recently-appended PendingQuestionBatch out of the
-     * task's pending_state column. Used by {@see handleToolCalls()} to
-     * fold a just-executed ask_user_question call into the AgentState
-     * snapshot it is about to write.
-     *
-     * Returns null if pending_state is missing, malformed, or contains
-     * zero batches (caller treats null as "nothing to fold in").
-     */
-    private function extractLastPendingBatch(Task $task): ?PendingQuestionBatch
-    {
-        $state = $this->decodePendingState($task);
-        if ($state === null || $state->pendingQuestions === []) {
-            return null;
-        }
-        return $state->pendingQuestions[array_key_last($state->pendingQuestions)];
-    }
-
-    private function decodePendingState(Task $task): ?AgentState
-    {
-        if (!is_string($task->pending_state) || $task->pending_state === '') {
-            return null;
-        }
-        try {
-            return AgentState::fromJson($task->pending_state);
-        } catch (Throwable) {
-            return null;
-        }
+        $handler->singleStep = $this->singleStep;
+        return $handler;
     }
 
     /**
