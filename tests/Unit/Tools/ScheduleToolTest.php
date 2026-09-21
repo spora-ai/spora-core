@@ -824,3 +824,163 @@ describe('ScheduleTool — per-op defaults', function (): void {
         }
     });
 });
+
+describe('ScheduleTool — cross-agent resolution', function (): void {
+    test('read_schedule hits the visible-but-cross-owned route (not found on agent)', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        seedSchedule($agentId, $userId);
+
+        [$tool] = makeScheduleToolTestFixture();
+        $result = $tool->execute(
+            ['action' => 'read_schedule', 'schedule_id' => 1, 'agent_id' => 0],
+            $agentId,
+            $userId,
+        );
+
+        // `agent_id` of 0 falls back to the calling agent.
+        expect($result->success)->toBeBool();
+    });
+
+    test('write paths return agent-not-found for an explicit, non-existent agent_id', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        [$tool] = makeScheduleToolTestFixture();
+
+        $result = $tool->execute(
+            ['action' => 'create_schedule', 'agent_id' => 999_999, 'schedule_payload' => [
+                'cron_expression' => SCHEDULE_TOOL_CRON,
+                'raw_prompt'      => 'who am I?',
+            ]],
+            $agentId,
+            $userId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('agent not found');
+    });
+
+    test('write paths return agent-not-found for an agent the user does NOT control', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $strangerAgentId = (int) Agent::create([
+            'principal_id' => createUserPrincipalPublic(99_999_999),
+            'name'         => 'Stranger',
+            'max_steps'    => 5,
+            'is_active'    => true,
+        ])->id;
+
+        [$tool] = makeScheduleToolTestFixture();
+        $result = $tool->execute(
+            ['action' => 'create_schedule', 'agent_id' => $strangerAgentId, 'schedule_payload' => [
+                'cron_expression' => SCHEDULE_TOOL_CRON,
+                'raw_prompt'      => 'hostile takeover',
+            ]],
+            $agentId,
+            $userId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('agent not found');
+    });
+
+    test('read_*_template with cross-agent_id hits the controller-side service', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        seedTemplate($agentId, ['name' => 'Mine']);
+
+        [$tool] = makeScheduleToolTestFixture();
+        $result = $tool->execute(
+            ['action' => 'read_prompt_template', 'template_id' => 1],
+            $agentId,
+            $userId,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['template']['name'])->toBe('Mine');
+    });
+});
+
+describe('ScheduleTool — write-side failure surfaces', function (): void {
+    test('update_prompt_template returns "not found" for an unknown template', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        [$tool] = makeScheduleToolTestFixture();
+
+        $result = $tool->execute([
+            'action'         => 'update_prompt_template',
+            'template_id'    => 999_999,
+            'template_patch' => ['name' => 'X'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('prompt template not found');
+    });
+
+    test('update_schedule rejects bad timezone in patch', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $run = seedSchedule($agentId, $userId);
+
+        [$tool] = makeScheduleToolTestFixture();
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $run->id,
+            'schedule_patch' => ['timezone' => 'Mars/Olympus'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('timezone');
+    });
+
+    test('update_schedule accepts null schedule fields to switch modes', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $run = seedSchedule($agentId, $userId);
+
+        [$tool] = makeScheduleToolTestFixture();
+        // cron_expression becomes null and run_at gets a future ISO 8601 datetime;
+        // the service should re-derive next_run_at and stay valid.
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $run->id,
+            'schedule_patch' => [
+                'cron_expression' => null,
+                'run_at'          => date('Y-m-d\TH:i:sP', strtotime('+1 hour')),
+            ],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
+    });
+
+    test('delete_prompt_template rejects an unknown id', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        [$tool] = makeScheduleToolTestFixture();
+
+        $result = $tool->execute([
+            'action'      => 'delete_prompt_template',
+            'template_id' => 999_999,
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('prompt template not found');
+    });
+});
+
+describe('ScheduleTool — summary presenter integration', function (): void {
+    test('ScheduleTool::describeAction delegates to the summary presenter for every op', function (): void {
+        [$tool] = makeScheduleToolTestFixture();
+
+        $cases = [
+            ['action' => 'list_schedules'],
+            ['action' => 'list_prompt_templates'],
+            ['action' => 'read_schedule', 'schedule_id' => 1],
+            ['action' => 'read_prompt_template', 'template_id' => 2],
+            ['action' => 'update_schedule', 'schedule_id' => 1],
+            ['action' => 'update_prompt_template', 'template_id' => 2],
+            ['action' => 'delete_schedule', 'schedule_id' => 1],
+            ['action' => 'delete_prompt_template', 'template_id' => 2],
+            ['action' => 'trigger_schedule', 'schedule_id' => 1],
+            ['action' => 'unknown_op'],
+        ];
+
+        foreach ($cases as $arguments) {
+            expect($tool->describeAction($arguments))->toBeString();
+        }
+    });
+});

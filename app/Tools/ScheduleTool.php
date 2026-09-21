@@ -14,6 +14,7 @@ use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\ScheduleTool\ScheduleSummaryPresenter;
 use Spora\Tools\ScheduleTool\ScheduleToolCollaborators;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -261,6 +262,7 @@ final class ScheduleTool extends AbstractTool
     private readonly PromptTemplateServiceInterface $promptTemplateService;
     private readonly PrincipalResolver $principalResolver;
     private readonly PrincipalService $principalService;
+    private readonly ScheduleSummaryPresenter $summary;
 
     public function __construct(
         ScheduledRunServiceInterface $scheduledRunService,
@@ -280,6 +282,7 @@ final class ScheduleTool extends AbstractTool
 
         $this->principalResolver = $collaborators->principalResolver();
         $this->principalService = $collaborators->principalService();
+        $this->summary = $collaborators->summary();
     }
 
     public function execute(
@@ -292,8 +295,8 @@ final class ScheduleTool extends AbstractTool
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'list_schedules'         => $this->listSchedules($agentId, $userId, $arguments, $context),
-            'list_prompt_templates'  => $this->listTemplates($agentId, $userId, $arguments, $context),
+            'list_schedules'         => $this->listSchedules($agentId, $userId, $arguments),
+            'list_prompt_templates'  => $this->listTemplates($agentId, $userId, $arguments),
             'read_schedule'          => $this->readSchedule($agentId, $userId, $arguments),
             'read_prompt_template'   => $this->readTemplate($agentId, $userId, $arguments),
             'create_schedule'        => $this->createSchedule($agentId, $userId, $arguments),
@@ -310,55 +313,55 @@ final class ScheduleTool extends AbstractTool
     public function describeAction(array $arguments): string
     {
         $operation = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
-        $agentLabel = $this->summarizeTargetAgent($arguments);
+        $agentLabel = $this->summary->targetAgentLabel($arguments);
 
         return match ($operation) {
             'list_schedules'           => "List scheduled runs for {$agentLabel}.",
             'list_prompt_templates'    => "List prompt templates for {$agentLabel}.",
             'read_schedule'            => sprintf(
                 'Read scheduled run (%s, %s).',
-                $this->summarizeScheduleId($arguments),
+                $this->summary->scheduleIdLabel($arguments),
                 $agentLabel,
             ),
             'read_prompt_template'     => sprintf(
                 'Read prompt template (%s, %s).',
-                $this->summarizeTemplateId($arguments),
+                $this->summary->templateIdLabel($arguments),
                 $agentLabel,
             ),
-            'create_schedule'          => $this->summarizeCreateSchedule($arguments, $agentLabel),
-            'create_prompt_template'   => $this->summarizeCreateTemplate($arguments, $agentLabel),
+            'create_schedule'          => $this->summary->createSchedule($arguments, $agentLabel),
+            'create_prompt_template'   => $this->summary->createPromptTemplate($arguments, $agentLabel),
             'update_schedule'          => sprintf(
                 'Update scheduled run (%s, %s).',
-                $this->summarizeScheduleId($arguments),
+                $this->summary->scheduleIdLabel($arguments),
                 $agentLabel,
             ),
             'update_prompt_template'   => sprintf(
                 'Update prompt template (%s, %s).',
-                $this->summarizeTemplateId($arguments),
+                $this->summary->templateIdLabel($arguments),
                 $agentLabel,
             ),
             'delete_schedule'          => sprintf(
                 'Delete scheduled run (%s, %s, destructive).',
-                $this->summarizeScheduleId($arguments),
+                $this->summary->scheduleIdLabel($arguments),
                 $agentLabel,
             ),
             'delete_prompt_template'   => sprintf(
                 'Delete prompt template (%s, %s, destructive).',
-                $this->summarizeTemplateId($arguments),
+                $this->summary->templateIdLabel($arguments),
                 $agentLabel,
             ),
             'trigger_schedule'         => sprintf(
                 'Trigger scheduled run now (%s, %s).',
-                $this->summarizeScheduleId($arguments),
+                $this->summary->scheduleIdLabel($arguments),
                 $agentLabel,
             ),
             default                    => "Schedule tool: {$operation}",
         };
     }
 
-    private function listSchedules(int $agentId, ?int $userId, array $arguments, ?PrincipalContext $context): ToolResult
+    private function listSchedules(int $agentId, ?int $userId, array $arguments): ToolResult
     {
-        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments, $context);
+        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments);
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
@@ -367,9 +370,9 @@ final class ScheduleTool extends AbstractTool
         return $this->collaborators->listPresenter()->presentSchedules($runs);
     }
 
-    private function listTemplates(int $agentId, ?int $userId, array $arguments, ?PrincipalContext $context): ToolResult
+    private function listTemplates(int $agentId, ?int $userId, array $arguments): ToolResult
     {
-        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments, $context);
+        $resolved = $this->resolveTargetAgentId($userId, $agentId, $arguments);
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
@@ -394,7 +397,7 @@ final class ScheduleTool extends AbstractTool
         return $result === null
             ? ToolResult::fail(self::READ_SCHEDULE_ERR_PREFIX . self::SCHEDULE_NOT_FOUND)
             : ToolResult::ok(
-                "Schedule #{$scheduleId} (agent #{$targetAgentId}): " . $this->summariseResource($result),
+                "Schedule #{$scheduleId} (agent #{$targetAgentId}): " . $this->summary->resource($result),
                 $result,
             );
     }
@@ -616,12 +619,12 @@ final class ScheduleTool extends AbstractTool
      *
      * @return int|ToolResult
      */
-    private function resolveTargetAgentId(?int $userId, int $callingAgentId, array $arguments, ?PrincipalContext $context): int|ToolResult
+    private function resolveTargetAgentId(?int $userId, int $callingAgentId, array $arguments): int|ToolResult
     {
         if (!array_key_exists('agent_id', $arguments)) {
             return $callingAgentId;
         }
-        return $this->resolveCrossUserAgent($userId, $arguments['agent_id'], $context);
+        return $this->resolveCrossUserAgent($userId, $arguments['agent_id']);
     }
 
     /**
@@ -636,7 +639,7 @@ final class ScheduleTool extends AbstractTool
         if (!array_key_exists('agent_id', $arguments)) {
             return $callingAgentId;
         }
-        $resolved = $this->resolveCrossUserAgent($userId, $arguments['agent_id'], null);
+        $resolved = $this->resolveCrossUserAgent($userId, $arguments['agent_id']);
         if ($resolved instanceof ToolResult) {
             return $resolved;
         }
@@ -657,7 +660,7 @@ final class ScheduleTool extends AbstractTool
      */
     private function resolveReadTargetAgentId(?int $userId, int $callingAgentId, array $arguments): int|ToolResult
     {
-        return $this->resolveTargetAgentId($userId, $callingAgentId, $arguments, null);
+        return $this->resolveTargetAgentId($userId, $callingAgentId, $arguments);
     }
 
     /**
@@ -667,7 +670,7 @@ final class ScheduleTool extends AbstractTool
      *
      * @return int|ToolResult
      */
-    private function resolveCrossUserAgent(?int $userId, mixed $raw, ?PrincipalContext $context): int|ToolResult
+    private function resolveCrossUserAgent(?int $userId, mixed $raw): int|ToolResult
     {
         if (!is_int($raw) && !(is_string($raw) && ctype_digit($raw))) {
             return ToolResult::fail('`agent_id` must be a positive integer.');
@@ -690,90 +693,5 @@ final class ScheduleTool extends AbstractTool
     {
         $agent = Agent::query()->where('id', $agentId)->first(['principal_id']);
         return (int) ($agent->principal_id ?? 0);
-    }
-
-    /**
-     * Human-readable label for the approval UI. Avoid echoing
-     * arbitrary content (cron expressions / template bodies) — only
-     * include the agent_id and the discriminated id.
-     *
-     * @param  array<string, mixed> $arguments
-     */
-    private function summarizeTargetAgent(array $arguments): string
-    {
-        if (isset($arguments['agent_id']) && is_numeric($arguments['agent_id']) && (int) $arguments['agent_id'] > 0) {
-            return 'agent #' . (int) $arguments['agent_id'];
-        }
-        return 'calling agent';
-    }
-
-    /**
-     * @param  array<string, mixed> $arguments
-     */
-    private function summarizeScheduleId(array $arguments): string
-    {
-        if (isset($arguments['schedule_id']) && is_numeric($arguments['schedule_id']) && (int) $arguments['schedule_id'] > 0) {
-            return 'schedule #' . (int) $arguments['schedule_id'];
-        }
-        return 'no schedule_id';
-    }
-
-    /**
-     * @param  array<string, mixed> $arguments
-     */
-    private function summarizeTemplateId(array $arguments): string
-    {
-        if (isset($arguments['template_id']) && is_numeric($arguments['template_id']) && (int) $arguments['template_id'] > 0) {
-            return 'template #' . (int) $arguments['template_id'];
-        }
-        return 'no template_id';
-    }
-
-    /**
-     * @param  array<string, mixed> $arguments
-     */
-    private function summarizeCreateSchedule(array $arguments, string $agentLabel): string
-    {
-        $payload = is_array($arguments['schedule_payload'] ?? null) ? $arguments['schedule_payload'] : [];
-        $when = isset($payload['cron_expression']) && is_string($payload['cron_expression']) && $payload['cron_expression'] !== ''
-            ? 'cron "' . $payload['cron_expression'] . '"'
-            : (isset($payload['run_at']) && is_string($payload['run_at']) && $payload['run_at'] !== ''
-                ? 'one-shot "' . $payload['run_at'] . '"'
-                : 'unspecified cadence');
-        $prompt = isset($payload['template_id']) && is_int($payload['template_id'])
-            ? 'template #' . $payload['template_id']
-            : 'raw_prompt';
-        return "Create schedule for {$agentLabel}: {$when} with {$prompt}.";
-    }
-
-    /**
-     * @param  array<string, mixed> $arguments
-     */
-    private function summarizeCreateTemplate(array $arguments, string $agentLabel): string
-    {
-        $payload = is_array($arguments['template_payload'] ?? null) ? $arguments['template_payload'] : [];
-        $name = isset($payload['name']) && is_string($payload['name']) ? '"' . $payload['name'] . '"' : '"(unnamed)"';
-        return "Create prompt template for {$agentLabel}: {$name}.";
-    }
-
-    private function summariseResource(array $result): string
-    {
-        $run = $result['scheduled_run'] ?? null;
-        if (!is_array($run)) {
-            return '(empty)';
-        }
-        $when = (string) ($run['cron_expression'] ?? '');
-        if ($when !== '') {
-            $when = 'cron ' . $when;
-        } else {
-            $when = (string) ($run['run_at'] ?? '');
-            $when = $when !== '' ? 'one-shot ' . $when : 'unscheduled';
-        }
-        $label = isset($run['template_id']) && is_int($run['template_id'])
-            ? 'template #' . $run['template_id']
-            : 'raw prompt';
-        $state = !empty($run['is_active']) ? 'active' : 'paused';
-        $tz = (string) ($run['timezone'] ?? 'UTC');
-        return "{$when}, {$label}, {$state}, {$tz}";
     }
 }

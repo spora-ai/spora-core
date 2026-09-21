@@ -69,11 +69,9 @@ final class ScheduleUpdateValidator
     }
 
     /**
-     * Shared partial-patch pipeline. `allowScheduleRecurrenceSwitch`
-     * forbids mutating a schedule from one-shot ↔ recurring in one
-     * patch (the service reconciles `cron_expression` ↔ `run_at`
-     * internally on a single field, so flipping both at once is
-     * ambiguous).
+     * Shared partial-patch pipeline. Splits into a small chain so each
+     * gate owns one concern (shape → schedule-specific fields →
+     * shared type-coercion), keeping cognitive complexity manageable.
      *
      * @param  mixed $raw
      * @return array<string, mixed>|ToolResult
@@ -84,6 +82,36 @@ final class ScheduleUpdateValidator
         array $allowed,
         bool $isSchedule,
     ): array|ToolResult {
+        $shapeError = $this->validatePartialShape($raw, $op, $allowed);
+        if ($shapeError !== null) {
+            return $shapeError;
+        }
+
+        if ($isSchedule) {
+            $scheduleError = $this->validatePartialScheduleFields($raw);
+            if ($scheduleError !== null) {
+                return $scheduleError;
+            }
+        }
+
+        $sharedError = $this->validatePartialSharedFields($raw, $op);
+        if ($sharedError !== null) {
+            return $sharedError;
+        }
+
+        return $raw;
+    }
+
+    /**
+     * Reject missing or unknown keys; gate every patch on a non-empty
+     * object whose keys are in the per-operation allowlist.
+     *
+     * @param  mixed  $raw
+     * @param  string $op
+     * @param  array<int, string> $allowed
+     */
+    private function validatePartialShape(mixed $raw, string $op, array $allowed): ?ToolResult
+    {
         if (!is_array($raw) || $raw === []) {
             return ToolResult::fail(
                 $op . ': patch object is required with at least one mutable key. '
@@ -100,50 +128,67 @@ final class ScheduleUpdateValidator
             }
         }
 
-        if ($isSchedule) {
-            $hasCron = array_key_exists('cron_expression', $raw);
-            $hasRunAt = array_key_exists('run_at', $raw);
-            if ($hasCron && $hasRunAt && $raw['cron_expression'] !== null && $raw['run_at'] !== null) {
-                return ToolResult::fail(
-                    self::OP_UPDATE_SCHEDULE . ': `cron_expression` and `run_at` are mutually exclusive. '
-                    . 'Send exactly one — `null` the other to switch modes.',
-                );
-            }
-            if (isset($raw['timezone'])) {
-                $tzError = $this->validateTimezone($raw['timezone']);
-                if ($tzError !== null) {
-                    return $tzError;
-                }
-            }
-            if (array_key_exists('cron_expression', $raw) && $raw['cron_expression'] !== null) {
-                $cronError = $this->validateCronExpression($raw['cron_expression']);
-                if ($cronError !== null) {
-                    return $cronError;
-                }
-            }
-            if (array_key_exists('run_at', $raw) && $raw['run_at'] !== null) {
-                $runAtError = $this->validateRunAt(
-                    $raw['run_at'],
-                    is_string($raw['timezone'] ?? null) ? $raw['timezone'] : 'UTC',
-                );
-                if ($runAtError !== null) {
-                    return $runAtError;
-                }
-            }
-        }
+        return null;
+    }
 
-        if (isset($raw['is_active']) && !is_bool($raw['is_active'])) {
+    /**
+     * Schedule-only gates: mutually-exclusive cron_expression ↔ run_at,
+     * plus type checks on `timezone` / cron / run_at.
+     *
+     * @param array<string, mixed> $raw
+     */
+    private function validatePartialScheduleFields(array $raw): ?ToolResult
+    {
+        $hasCron  = array_key_exists('cron_expression', $raw);
+        $hasRunAt = array_key_exists('run_at', $raw);
+        if ($hasCron && $hasRunAt && $raw['cron_expression'] !== null && $raw['run_at'] !== null) {
             return ToolResult::fail(
-                $op . ': `is_active` must be a boolean.',
+                self::OP_UPDATE_SCHEDULE . ': `cron_expression` and `run_at` are mutually exclusive. '
+                . 'Send exactly one — `null` the other to switch modes.',
             );
         }
 
+        if (isset($raw['timezone'])) {
+            $tzError = $this->validateTimezone($raw['timezone']);
+            if ($tzError !== null) {
+                return $tzError;
+            }
+        }
+
+        if ($hasCron && $raw['cron_expression'] !== null) {
+            return $this->validateCronExpression($raw['cron_expression']);
+        }
+
+        if ($hasRunAt && $raw['run_at'] !== null) {
+            return $this->validateRunAt(
+                $raw['run_at'],
+                is_string($raw['timezone'] ?? null) ? $raw['timezone'] : 'UTC',
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Cross-cutting type checks: `is_active`, `max_steps_override`,
+     * `template_id`, `max_steps`, `name`, `variables`.
+     *
+     * @param array<string, mixed> $raw
+     */
+    private function validatePartialSharedFields(array $raw, string $op): ?ToolResult
+    {
+        if (isset($raw['is_active']) && !is_bool($raw['is_active'])) {
+            return ToolResult::fail($op . ': `is_active` must be a boolean.');
+        }
+
         if (array_key_exists('max_steps_override', $raw) && $raw['max_steps_override'] !== null) {
-            $value = $raw['max_steps_override'];
-            if (!is_int($value) || $value < 1 || $value > 100) {
-                return ToolResult::fail(
-                    self::OP_UPDATE_SCHEDULE . ': `max_steps_override` must be an integer in 1..100, or null to clear it.',
-                );
+            $range = $this->checkIntRange(
+                $raw['max_steps_override'],
+                self::OP_UPDATE_SCHEDULE,
+                '`max_steps_override`',
+            );
+            if ($range !== null) {
+                return $range;
             }
         }
 
@@ -154,11 +199,13 @@ final class ScheduleUpdateValidator
         }
 
         if (array_key_exists('max_steps', $raw) && $raw['max_steps'] !== null) {
-            $value = $raw['max_steps'];
-            if (!is_int($value) || $value < 1 || $value > 100) {
-                return ToolResult::fail(
-                    self::OP_UPDATE_TEMPLATE . ': `max_steps` must be an integer in 1..100, or null to clear it.',
-                );
+            $range = $this->checkIntRange(
+                $raw['max_steps'],
+                self::OP_UPDATE_TEMPLATE,
+                '`max_steps`',
+            );
+            if ($range !== null) {
+                return $range;
             }
         }
 
@@ -171,13 +218,23 @@ final class ScheduleUpdateValidator
         }
 
         if (array_key_exists('variables', $raw) && $raw['variables'] !== null) {
-            $variablesError = $this->validateVariables($raw['variables']);
-            if ($variablesError !== null) {
-                return $variablesError;
-            }
+            return $this->validateVariables($raw['variables']);
         }
 
-        return $raw;
+        return null;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function checkIntRange(mixed $value, string $op, string $fieldLabel): ?ToolResult
+    {
+        if (!is_int($value) || $value < 1 || $value > 100) {
+            return ToolResult::fail(
+                $op . ': ' . $fieldLabel . ' must be an integer in 1..100, or null to clear it.',
+            );
+        }
+        return null;
     }
 
     private function validateTimezone(mixed $value): ?ToolResult

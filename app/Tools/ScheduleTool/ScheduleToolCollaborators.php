@@ -22,6 +22,7 @@ final class ScheduleToolCollaborators
         private readonly ?SchedulePayloadValidator $payloadValidator = null,
         private readonly ?ScheduleUpdateValidator $updateValidator = null,
         private readonly ?ScheduleListPresenter $listPresenter = null,
+        private readonly ?ScheduleSummaryPresenter $summary = null,
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?PrincipalService $principalService = null,
         private readonly ?AuthService $authService = null,
@@ -45,6 +46,11 @@ final class ScheduleToolCollaborators
     public function listPresenter(): ScheduleListPresenter
     {
         return $this->listPresenter ?? new ScheduleListPresenter();
+    }
+
+    public function summary(): ScheduleSummaryPresenter
+    {
+        return $this->summary ?? new ScheduleSummaryPresenter();
     }
 
     public function principalResolver(): PrincipalResolver

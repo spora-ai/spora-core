@@ -144,6 +144,51 @@ final class SchedulePayloadValidator
      */
     private function buildValidatedSchedulePayload(array $raw): array|ToolResult
     {
+        $promptError = $this->validateCreateSchedulePrompt($raw);
+        if ($promptError !== null) {
+            return $promptError;
+        }
+
+        $whenError = $this->validateCreateScheduleWhen($raw);
+        if ($whenError !== null) {
+            return $whenError;
+        }
+
+        $timezone = $this->resolveTimezone($raw);
+        if ($timezone instanceof ToolResult) {
+            return $timezone;
+        }
+
+        $detailError = $this->validateCreateScheduleDetails($raw, $timezone);
+        if ($detailError !== null) {
+            return $detailError;
+        }
+
+        $hasTemplateId = isset($raw['template_id']);
+        $hasRawPrompt  = isset($raw['raw_prompt']);
+        $hasCron       = !empty($raw['cron_expression']);
+        $hasRunAt      = !empty($raw['run_at']);
+
+        return [
+            'template_id'        => $hasTemplateId ? (int) $raw['template_id'] : null,
+            'raw_prompt'         => $hasRawPrompt ? trim((string) $raw['raw_prompt']) : null,
+            'cron_expression'    => $hasCron ? trim((string) $raw['cron_expression']) : null,
+            'run_at'             => $hasRunAt ? (string) $raw['run_at'] : null,
+            'timezone'           => $timezone,
+            'max_steps_override' => isset($raw['max_steps_override']) ? (int) $raw['max_steps_override'] : null,
+            'is_active'          => (bool) ($raw['is_active'] ?? true),
+        ];
+    }
+
+    /**
+     * Either `template_id` (int) or `raw_prompt` (non-empty string) must be
+     * supplied. Mutually exclusive with itself: both empty (fail), one of
+     * each — type-check on the next pass.
+     *
+     * @param array<string, mixed> $raw
+     */
+    private function validateCreateSchedulePrompt(array $raw): ?ToolResult
+    {
         $hasTemplateId = isset($raw['template_id']);
         $hasRawPrompt  = isset($raw['raw_prompt']);
 
@@ -153,7 +198,30 @@ final class SchedulePayloadValidator
             );
         }
 
-        $hasCron = !empty($raw['cron_expression']);
+        if ($hasTemplateId && !is_int($raw['template_id'])) {
+            return ToolResult::fail(
+                self::OP_CREATE_SCHEDULE . ': `template_id` must be a positive integer.',
+            );
+        }
+
+        if ($hasRawPrompt && (!is_string($raw['raw_prompt']) || trim($raw['raw_prompt']) === '')) {
+            return ToolResult::fail(
+                self::OP_CREATE_SCHEDULE . ': `raw_prompt` must be a non-empty string.',
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Either `cron_expression` (recurring) or `run_at` (one-shot, ISO 8601)
+     * is required — exactly one of them.
+     *
+     * @param array<string, mixed> $raw
+     */
+    private function validateCreateScheduleWhen(array $raw): ?ToolResult
+    {
+        $hasCron  = !empty($raw['cron_expression']);
         $hasRunAt = !empty($raw['run_at']);
 
         if ($hasCron && $hasRunAt) {
@@ -169,22 +237,19 @@ final class SchedulePayloadValidator
             );
         }
 
-        $timezone = $this->resolveTimezone($raw);
-        if ($timezone instanceof ToolResult) {
-            return $timezone;
-        }
+        return null;
+    }
 
-        if ($hasTemplateId && !is_int($raw['template_id'])) {
-            return ToolResult::fail(
-                self::OP_CREATE_SCHEDULE . ': `template_id` must be a positive integer.',
-            );
-        }
-
-        if ($hasRawPrompt && (!is_string($raw['raw_prompt']) || trim($raw['raw_prompt']) === '')) {
-            return ToolResult::fail(
-                self::OP_CREATE_SCHEDULE . ': `raw_prompt` must be a non-empty string.',
-            );
-        }
+    /**
+     * Type-check `cron_expression`, `run_at`, and `max_steps_override`
+     * after the timezone + recurrency gates have passed.
+     *
+     * @param array<string, mixed> $raw
+     */
+    private function validateCreateScheduleDetails(array $raw, string $timezone): ?ToolResult
+    {
+        $hasCron  = !empty($raw['cron_expression']);
+        $hasRunAt = !empty($raw['run_at']);
 
         if ($hasCron) {
             $cronError = $this->validateCronExpression($raw['cron_expression']);
@@ -200,20 +265,7 @@ final class SchedulePayloadValidator
             }
         }
 
-        $maxStepsError = $this->validateMaxStepsOverride($raw);
-        if ($maxStepsError !== null) {
-            return $maxStepsError;
-        }
-
-        return [
-            'template_id'        => $hasTemplateId ? (int) $raw['template_id'] : null,
-            'raw_prompt'         => $hasRawPrompt ? trim((string) $raw['raw_prompt']) : null,
-            'cron_expression'    => $hasCron ? trim((string) $raw['cron_expression']) : null,
-            'run_at'             => $hasRunAt ? (string) $raw['run_at'] : null,
-            'timezone'           => $timezone,
-            'max_steps_override' => isset($raw['max_steps_override']) ? (int) $raw['max_steps_override'] : null,
-            'is_active'          => (bool) ($raw['is_active'] ?? true),
-        ];
+        return $this->validateMaxStepsOverride($raw);
     }
 
     /**
