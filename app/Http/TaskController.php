@@ -374,7 +374,10 @@ final class TaskController
             ),
         ),
         responses: [
-            new OA\Response(response: 204, description: 'Answer accepted.'),
+            new OA\Response(
+                response: 200,
+                description: 'JSON envelope: `{data: {task: ...}}` — status flips to `QUEUED` (or stays `AWAITING_INPUT` if more batches are still pending).',
+            ),
             new OA\Response(response: 404, description: 'NOT_FOUND — task is not owned by the calling user.'),
             new OA\Response(response: 422, description: 'VALIDATION_ERROR — malformed body or unknown header/selection.'),
         ],
@@ -396,21 +399,19 @@ final class TaskController
         }
 
         try {
-            $this->taskService->answerTask(
+            // Mirror approve/reject: state-mutating transitions return the
+            // full task resource so the caller can update its store without
+            // an extra GET round-trip. (Carrying the new `status`,
+            // `pending_state` (now empty or with the next batch), and
+            // appended `task_history` row through the response also dodges
+            // the 204+body protocol trap entirely.)
+            $task = $this->taskService->answerTask(
                 $taskId,
                 $userId,
                 $parsed['batch']->toolCallId,
                 $parsed['formatted'],
             );
-            // Symfony's JsonResponse with null data encodes to "{}" (2 bytes)
-            // and would forward that body on a 204 — a protocol violation
-            // (RFC 7230 §3.3.3 forbids a message body on 204) that some
-            // HTTP intermediaries re-classify as 502. Mirror AuthController::
-            // logout(): construct the response, then explicitly clear the
-            // body so only the empty status line + headers reach the wire.
-            $response = new JsonResponse(null, Response::HTTP_NO_CONTENT);
-            $response->setContent('');
-            return $response;
+            return new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
             return $this->errorForException($e);
         }

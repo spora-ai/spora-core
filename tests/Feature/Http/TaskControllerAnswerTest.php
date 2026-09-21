@@ -160,7 +160,7 @@ function answerRequest(TaskController $controller, int $taskId, array $body): Js
     return $controller->answer($request);
 }
 
-it('returns 204 on a successful single-question batch answer', function (): void {
+it('returns 200 with the updated task on a successful single-question batch answer', function (): void {
     $h = answerControllerHarness();
     $response = answerRequest($h['controller'], $h['task']->id, [
         'tool_call_id' => 'pc_ask',
@@ -168,7 +168,16 @@ it('returns 204 on a successful single-question batch answer', function (): void
             ['header' => 'DB', 'selections' => ['SQLite']],
         ],
     ]);
-    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    // Mirror approve/reject — state-mutating transitions return the full
+    // task resource so the caller can update its store without an extra
+    // GET round-trip. Also dodges the 204+body protocol trap entirely.
+    $body = json_decode((string) $response->getContent(), true);
+    expect($body)->toHaveKey('data')
+        ->and($body['data'])->toHaveKey('task')
+        ->and($body['data']['task']['id'])->toBe($h['task']->id)
+        ->and($body['data']['task']['status'])->toBe('QUEUED');
 
     $task = Task::find($h['task']->id);
     expect($task->status)->toBe('QUEUED')
@@ -178,20 +187,6 @@ it('returns 204 on a successful single-question batch answer', function (): void
     expect($toolRow)->not->toBeNull()
         ->and($toolRow->role)->toBe('tool')
         ->and($toolRow->content)->toContain('SQLite');
-});
-
-// Symfony's JsonResponse with null data encodes to "{}" (2 bytes), so
-// without explicit setContent('') the 204 would carry a body — a protocol
-// violation that some HTTP intermediaries re-classify as 502. Guard the
-// wire shape so a regression to `new JsonResponse(null, 204)` is caught.
-it('returns 204 with an empty body on a successful answer', function (): void {
-    $h = answerControllerHarness();
-    $response = answerRequest($h['controller'], $h['task']->id, [
-        'tool_call_id' => 'pc_ask',
-        'answers' => [['header' => 'DB', 'selections' => ['SQLite']]],
-    ]);
-    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT)
-        ->and($response->getContent())->toBe('');
 });
 
 it('returns 422 when tool_call_id does not match', function (): void {
@@ -250,11 +245,11 @@ it('returns 422 when the task is not in AWAITING_INPUT', function (): void {
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 });
 
-it('returns 204 even when Mercure publishing throws', function (): void {
-    // The Mercure publish is best-effort: the controller already
-    // returned 204 by the time the publish call runs, so a wedged
-    // hub must not regress an otherwise-successful answer submit into
-    // a 502 on the proxy. Regression test for spora-core PR #259.
+it('returns 200 even when Mercure publishing throws', function (): void {
+    // The Mercure publish is best-effort: it runs inside answerTask before
+    // the controller returns. A wedged hub must not regress an otherwise-
+    // successful answer submit into a 5xx on the proxy. Regression test
+    // for spora-core PR #259.
     $h = answerControllerHarness(static function ($mercure): void {
         $mercure->shouldReceive('publishForPrincipal')
             ->andThrow(new RuntimeException('mercure hub unreachable'));
@@ -265,7 +260,7 @@ it('returns 204 even when Mercure publishing throws', function (): void {
         'answers' => [['header' => 'DB', 'selections' => ['SQLite']]],
     ]);
 
-    expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
 
     $task = Task::find($h['task']->id);
     expect($task->status)->toBe('QUEUED')

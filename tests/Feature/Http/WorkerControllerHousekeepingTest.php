@@ -83,7 +83,7 @@ describe('WorkerController::housekeeping (client-worker mode)', function (): voi
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
     });
 
-    it('returns 204 when another call already holds the lock', function (): void {
+    it('returns 200 with {acquired: false} when another call already holds the lock', function (): void {
         $harness = makeHousekeepingController(WorkerRuntimeMode::Client);
         $userId = $harness['auth']->register('hk-lock@example.com', HOUSEKEEPING_TEST_PASSWORD, 'HKLock');
         simulateLoggedInSession($userId, 'hk-lock@example.com');
@@ -97,8 +97,8 @@ describe('WorkerController::housekeeping (client-worker mode)', function (): voi
 
         $response = $harness['controller']->housekeeping();
 
-        expect($response->getStatusCode())->toBe(Response::HTTP_NO_CONTENT);
-        expect((string) $response->getContent())->toBe('');
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        expect(json_decode((string) $response->getContent(), true))->toBe(['data' => ['acquired' => false]]);
     });
 
     it('returns 200 with reaped + scheduled_dispatched + ran_by counts on a fresh call', function (): void {

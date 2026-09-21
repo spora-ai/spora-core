@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.25.0"
+        "version": "0.25.0-7-gb5334d20"
     },
     "servers": [
         {
@@ -2370,8 +2370,8 @@
                     }
                 },
                 "responses": {
-                    "204": {
-                        "description": "Answer accepted."
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ...}}` — status flips to `QUEUED` (or stays `AWAITING_INPUT` if more batches are still pending)."
                     },
                     "404": {
                         "description": "NOT_FOUND — task is not owned by the calling user."
