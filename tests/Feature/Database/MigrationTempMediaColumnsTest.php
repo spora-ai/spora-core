@@ -42,6 +42,8 @@ beforeEach(function (): void {
     Capsule::schema()->create('agents', static function (Blueprint $t): void {
         $t->bigIncrements('id');
         $t->string('name');
+        $t->boolean('is_active')->default(true);
+        $t->unsignedBigInteger('llm_driver_config_id')->nullable();
         $t->integer('max_retries')->default(0);
         $t->timestamps();
     });

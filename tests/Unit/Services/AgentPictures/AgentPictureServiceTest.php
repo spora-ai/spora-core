@@ -20,6 +20,16 @@ use Spora\Services\Exceptions\AgentPictureNotOwnedException;
 beforeEach(function (): void {
     $this->service = new AgentPictureService();
     $this->userId = bootAuth(bootAuthLayer());
+    // Wipe and reset the agents auto-increment before each test. On
+    // SQLite the per-test `:memory:` rebuild makes id=1 always available;
+    // on MariaDB the per-worker DB persists so an `id=1` insert trips the
+    // PRIMARY KEY after a few tests.
+    Capsule::table('agents')->delete();
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        Capsule::statement('ALTER TABLE agents AUTO_INCREMENT = 1');
+    } else {
+        Capsule::statement("DELETE FROM sqlite_sequence WHERE name = 'agents'");
+    }
     Capsule::table('agents')->insert([
         'id' => 1, 'principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Test', 'max_steps' => 10,
         'is_active' => 1, 'allow_followup' => 1, 'created_at' => date('Y-m-d H:i:s'),

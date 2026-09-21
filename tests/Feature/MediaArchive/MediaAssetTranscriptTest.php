@@ -92,12 +92,14 @@ function mediaAssetsColumnInfo(): \Illuminate\Support\Collection
         . 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
         [$db, 'media_assets'],
     );
-    return collect($rows)
-        ->keyBy('name')
-        ->map(static fn (object $r): object => (object) [
+    $byName = [];
+    foreach ($rows as $r) {
+        $byName[$r->name] = (object) [
             'name'    => $r->name,
             'notnull' => $r->nullable === 'NO' ? 1 : 0,
-        ]);
+        ];
+    }
+    return collect($byName);
 }
 
 test('migration adds nullable transcript + transcript_language columns', function (): void {

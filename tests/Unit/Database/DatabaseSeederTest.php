@@ -104,6 +104,12 @@ it('does not duplicate records if seeder is run twice', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not modify an existing admin row (security)', function () {
+    // Same rationale as the previous tests — on MariaDB the per-worker
+    // DB persists so the admin row from earlier `freshDatabase()`-using
+    // tests would trip the email-unique key when this test tries to
+    // re-insert it directly.
+    TestDatabaseFactory::freshDatabase();
+
     // Operator-customised admin: renamed, no admin role, suspended. The seeder
     // must leave it untouched so it cannot re-grant admin via `db:seed`.
     $now = date('Y-m-d H:i:s');
@@ -148,6 +154,11 @@ it('does not modify an existing admin row (security)', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not recreate a deleted admin row (security)', function () {
+    // Per-test fresh schema — the previous tests left the admin row
+    // behind in the per-worker MariaDB DB. SQLite rebuilds per-test,
+    // MariaDB does not.
+    TestDatabaseFactory::freshDatabase();
+
     expect(User::where('email', 'admin@spora.local')->exists())->toBeFalse();
 
     ob_start();
@@ -158,6 +169,10 @@ it('does not recreate a deleted admin row (security)', function () {
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('inserts mail templates from YAML that are missing from the DB', function () {
+    // Per-test fresh schema — earlier tests in the file leave the system
+    // mail templates and the admin row behind in the per-worker MariaDB DB.
+    TestDatabaseFactory::freshDatabase();
+
     // Pre-condition: drop one of the system templates so the seeder has to recreate it.
     $now = date('Y-m-d H:i:s');
     Capsule::table('mail_templates')->insert([
@@ -185,6 +200,11 @@ it('inserts mail templates from YAML that are missing from the DB', function () 
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('does not overwrite operator-customised mail templates', function () {
+    // Per-test fresh schema — earlier tests in the file leave mail
+    // templates behind in the per-worker MariaDB DB. SQLite rebuilds
+    // per-test, MariaDB does not.
+    TestDatabaseFactory::freshDatabase();
+
     $now = date('Y-m-d H:i:s');
     Capsule::table('mail_templates')->insert([
         'name'       => 'welcome',

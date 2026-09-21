@@ -152,6 +152,9 @@ test('Principal type must match the FK that is set', function (): void {
 });
 
 test('0067 migration does not cascade-delete dependent rows when rebuilding the agents table', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('rebuildSqliteTableWithoutUserId() is a SQLite-only helper; the bug it pins (PRAGMA foreign_keys = OFF being a no-op inside a transaction) does not exist on MySQL/MariaDB.');
+    }
     // Regression test for the SQLite PRAGMA-foreign-keys-is-a-no-op-in-a-
     // transaction bug that previously dropped every row in `tasks`,
     // `task_history`, `tool_calls`, `agent_tools`, `agent_tool_overrides`,
