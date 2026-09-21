@@ -328,8 +328,13 @@ final class OrchestratorContainerBindings
             },
 
             ScheduledRunServiceInterface::class => static function (ContainerInterface $c): ScheduledRunServiceInterface {
+                // Orchestrator is wrapped in a closure so the eager DI
+                // graph doesn't loop: Orchestrator → tool_instances →
+                // ScheduleTool → ScheduledRunService → Orchestrator.
+                // The Orchestrator is only materialised the first time
+                // triggerRun() spawns a task.
                 return new ScheduledRunService(
-                    $c->get(OrchestratorInterface::class),
+                    static fn(): OrchestratorInterface => $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
                 );
             },

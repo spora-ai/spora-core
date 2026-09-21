@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Closure;
 use Cron\CronExpression;
 use DateInvalidTimeZoneException;
 use DateTimeImmutable;
@@ -31,15 +32,32 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     public const VISIBILITY_READ = true;
     public const VISIBILITY_WRITE = false;
 
+    /**
+     * @param  OrchestratorInterface|Closure(): OrchestratorInterface $orchestrator
+     *         Resolved eagerly when `triggerRun()` actually spawns the
+     *         task. The lazy path is required so the DI container can
+     *         construct `ScheduledRunService` outside the
+     *         Orchestrator → tool_instances → ScheduleTool →
+     *         ScheduledRunService → Orchestrator cycle; pass a
+     *         `static fn(): OrchestratorInterface => $c->get(...)`
+     *         closure from the binding so the resolve happens on
+     *         first use rather than at boot.
+     */
     public function __construct(
-        private readonly OrchestratorInterface $orchestrator,
+        OrchestratorInterface|Closure $orchestrator,
         private readonly MercurePublisherInterface $mercure,
         ?PrincipalService $principalService = null,
         ?PrincipalResolver $principalResolver = null,
     ) {
+        $this->orchestratorProvider = $orchestrator instanceof Closure
+            ? $orchestrator
+            : static fn(): OrchestratorInterface => $orchestrator;
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
+
+    /** @var Closure(): OrchestratorInterface */
+    private readonly Closure $orchestratorProvider;
 
     private readonly PrincipalService $principalService;
     private readonly PrincipalResolver $principalResolver;
@@ -282,7 +300,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $maxSteps = $agent->max_steps;
         }
 
-        $task = $this->orchestrator->start($agent->id, $prompt, (int) $maxSteps);
+        $task = ($this->orchestratorProvider)()->start($agent->id, $prompt, (int) $maxSteps);
 
         $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
 
