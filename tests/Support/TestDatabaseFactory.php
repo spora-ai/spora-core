@@ -331,6 +331,23 @@ final class TestDatabaseFactory
     }
 
     /**
+     * Flag the worker DB as dirty so the next `boot()` drops and
+     * reinstalls the schema. Tests that issue manual DDL (drop tables,
+     * drop columns) call this from their `afterEach` so the next test in
+     * the same worker — which inherits the factory's hot-path schema
+     * install skip — doesn't see a worker DB missing the tables it just
+     * dropped. SQLite's per-test `:memory:` rebuild makes the flag a
+     * no-op on that driver.
+     */
+    public static function markWorkerDbDirty(): void
+    {
+        if (self::driver() === 'sqlite') {
+            return;
+        }
+        self::$workerDbDirty = true;
+    }
+
+    /**
      * Drop the worker DB. Idempotent and best-effort — failures are
      * swallowed so a flaky DROP at the end of the run doesn't mask a
      * earlier real failure.

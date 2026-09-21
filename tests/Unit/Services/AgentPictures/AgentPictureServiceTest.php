@@ -19,17 +19,24 @@ use Spora\Services\Exceptions\AgentPictureNotOwnedException;
  */
 beforeEach(function (): void {
     $this->service = new AgentPictureService();
-    $this->userId = bootAuth(bootAuthLayer());
-    // Wipe and reset the agents auto-increment before each test. On
-    // SQLite the per-test `:memory:` rebuild makes id=1 always available;
-    // on MariaDB the per-worker DB persists so an `id=1` insert trips the
-    // PRIMARY KEY after a few tests.
+    // Wipe user-owned tables and reset their auto-increment counters
+    // before each test. `bootAuth()` below registers
+    // `test@example.com` — on SQLite the per-test `:memory:` rebuild
+    // gives every test a fresh users table; on MariaDB the per-worker
+    // DB persists so the second `register()` call trips the email
+    // unique key with `EmailTakenException`. The `agents` insert below
+    // also pins `id = 1`, which needs the same AUTO_INCREMENT reset.
     Capsule::table('agents')->delete();
+    Capsule::table('principals')->delete();
+    Capsule::table('users')->delete();
     if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        Capsule::statement('ALTER TABLE users AUTO_INCREMENT = 1');
+        Capsule::statement('ALTER TABLE principals AUTO_INCREMENT = 1');
         Capsule::statement('ALTER TABLE agents AUTO_INCREMENT = 1');
     } else {
-        Capsule::statement("DELETE FROM sqlite_sequence WHERE name = 'agents'");
+        Capsule::statement("DELETE FROM sqlite_sequence WHERE name IN ('users', 'principals', 'agents')");
     }
+    $this->userId = bootAuth(bootAuthLayer());
     Capsule::table('agents')->insert([
         'id' => 1, 'principal_id' => createUserPrincipalPublic($this->userId), 'name' => 'Test', 'max_steps' => 10,
         'is_active' => 1, 'allow_followup' => 1, 'created_at' => date('Y-m-d H:i:s'),

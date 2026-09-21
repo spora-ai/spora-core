@@ -30,6 +30,17 @@ afterEach(function (): void {
             Capsule::statement('SET FOREIGN_KEY_CHECKS = 1');
         }
     }
+
+    // On MariaDB the per-worker DB persists across tests in the same
+    // worker. The factory's hot-path optimisation skips the schema install
+    // on subsequent boots — so the next test (e.g. MediaListTempFilterTest
+    // in MediaArchive/) sees a worker DB without `media_assets` and the
+    // `INSERT INTO media_assets …` raises SQLSTATE[42S02]. Mark the worker
+    // DB dirty so the next `boot()` drops+reinstalls the schema.
+    // SQLite's per-test `:memory:` rebuild makes this a no-op.
+    if ($driver !== 'sqlite') {
+        TestDatabaseFactory::markWorkerDbDirty();
+    }
 });
 
 function createMediaAssetsTable(): void
