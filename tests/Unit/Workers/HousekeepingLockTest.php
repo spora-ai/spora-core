@@ -46,9 +46,12 @@ describe('HousekeepingLock', function (): void {
     });
 
     it('tryAcquire returns false (fail-closed) when the lock table is missing', function (): void {
-        // Drop the table mid-test so every query throws — tryAcquire must
-        // swallow the Throwable and report false. The transaction rollback
-        // in afterEach restores the schema for the next test.
+        // On MariaDB the schema install is per-worker and persists across tests;
+        // a mid-test `drop` leaves the DB in a state the transaction rollback
+        // can restore on SQLite (table recreated on next boot) but not on
+        // MariaDB. Use freshDatabase() so the drop is wrapped in a fresh
+        // schema install.
+        TestDatabaseFactory::freshDatabase();
         Capsule::schema()->drop('worker_housekeeping_locks');
 
         $lock = new HousekeepingLock();
@@ -58,6 +61,7 @@ describe('HousekeepingLock', function (): void {
     it('release is a no-op when the lock table is missing (suppresses Throwable)', function (): void {
         // The catch block in release() must swallow any DB error so the
         // controller's `finally` doesn't mask the real response.
+        TestDatabaseFactory::freshDatabase();
         Capsule::schema()->drop('worker_housekeeping_locks');
 
         $lock = new HousekeepingLock();
@@ -67,6 +71,12 @@ describe('HousekeepingLock', function (): void {
     it('release writes the past-claimed_until sentinel and clears the row idempotently', function (): void {
         // Acquire then release; release is idempotent — calling it twice
         // (e.g. on a finally + crash-recovery path) must not throw.
+        // Earlier tests in this describe block deliberately drop the lock
+        // table to exercise the fail-closed branch; on MariaDB the worker
+        // DB persists across tests so this later test sees the dropped
+        // table. Re-create the schema first.
+        TestDatabaseFactory::freshDatabase();
+
         $lock = new HousekeepingLock();
         $lock->tryAcquire(30);
 

@@ -176,6 +176,9 @@ describe('WorkerController::housekeeping (client-worker mode)', function (): voi
     });
 
     it('returns 500 with HOUSEKEEPING_FAILED when the reaper throws mid-flight', function (): void {
+        if (Capsule::connection()->getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('This test deliberately drops `tasks` mid-test to force the reaper to throw — the PRAGMA foreign_keys = OFF/ON around the drop is SQLite-specific. On MySQL/MariaDB the FKs would either reject the drop or cascade, neither of which is what the test simulates.');
+        }
         // Force the catch-block path: any Throwable from inside the try
         // (reaper, scheduled-run processor, etc.) must surface as a
         // HOUSEKEEPING_FAILED envelope so the SPA can distinguish a

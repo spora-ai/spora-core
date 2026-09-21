@@ -20,6 +20,9 @@ final class Database
     /** Stored so DatabaseSchemaInstaller can access getDatabaseManager() after boot. */
     private static ?Capsule $capsule = null;
 
+    /** Skip the install step on subsequent `boot()` calls in the same worker — only set by `TestDatabaseFactory`. */
+    private static bool $schemaInstallSkipped = false;
+
     public function __construct(
         private readonly array $config,
         private readonly ?PluginLoader $pluginLoader = null,
@@ -35,9 +38,12 @@ final class Database
 
         $capsule = new Capsule();
 
-        if ($this->config['db_driver'] === 'mysql') {
+        $driver = $this->config['db_driver'] ?? 'sqlite';
+
+        // Pass `mariadb` through as the driver's literal name so Illuminate's MariaDB grammar is used and `Connection::getDriverName()` matches the `=== 'mariadb'` gates in migrations.
+        if ($driver === 'mysql' || $driver === 'mariadb') {
             $capsule->addConnection([
-                'driver'    => 'mysql',
+                'driver'    => $driver,
                 'host'      => $this->config['db_host'] ?? '127.0.0.1',
                 'port'      => $this->config['db_port'] ?? 3306,
                 'database'  => $this->config['db_name'] ?? '',
@@ -84,15 +90,24 @@ final class Database
     {
         $this->bootDatabaseConnectionOnly();
 
-        // For :memory: SQLite (tests) there is no persistent filesystem, so the stamp
-        // cache is disabled and the installer always runs the full DB check.
-        // For all other drivers the stamp file gives an O(1) hot path on every HTTP request.
+        if (self::$schemaInstallSkipped) {
+            // Worker DB already has the schema; the per-worker stamp file would otherwise be shared across workers against different DBs.
+            return;
+        }
+
+        // Stamp file is skipped for `:memory:` SQLite (no persistent fs); otherwise it's the O(1) hot-path cache.
         $dbPath    = $this->config['db_path'] ?? null;
         $stampPath = ($dbPath === ':memory:')
             ? null
             : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
         (new DatabaseSchemaInstaller($this->pluginLoader, $stampPath, null, $this->paths, $this->appLoader))->install();
+    }
+
+    /** Toggle the schema-install short-circuit — `true` after first install in a worker; reset to `false` by `TestDatabaseFactory::freshDatabase()`. */
+    public static function setSchemaInstallSkipped(bool $skipped): void
+    {
+        self::$schemaInstallSkipped = $skipped;
     }
 
     /** Returns the active Capsule instance (available after bootDatabaseConnectionOnly). */
@@ -134,5 +149,7 @@ final class Database
     {
         self::$booted  = false;
         self::$capsule = null;
+        // A test that bypasses the factory and inlines `new Database([sqlite :memory:])->boot()` would otherwise inherit the worker's "already installed" skip and fail every insert with "no such table".
+        self::$schemaInstallSkipped = false;
     }
 }

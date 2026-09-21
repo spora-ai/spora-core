@@ -54,6 +54,42 @@ function makeRetryChainController(?TaskServiceInterface $taskService = null): ar
 
 function seedUserAndAgent(mixed $authService): array
 {
+    // Force user / agent / task ids to be `1` so the mock expectations
+    // (which pin `startTask(1, 1, …)`, `getTaskWithHistory(1, 1)`,
+    // `retryTask(1, 1)`, `cancelRetryChain(1, 1)`, etc. to specific ids)
+    // match on every driver. On SQLite the auto-increment counter for the
+    // ROWID-backed tables (`users`, `tasks`, `task_history`) starts at 1
+    // per test because `DELETE FROM` clears the rowid space; on MariaDB
+    // `DELETE FROM` only clears rows and the per-table AUTO_INCREMENT
+    // counter survives — so `1` is unreachable after the worker has run
+    // any other test, and every expectation miss.
+    //
+    // Reset every table the mocks touch (not just `users`) so agents and
+    // tasks also start at id=1. The same FK-ordered delete list is
+    // reused; AUTO_INCREMENT is per-table so the resets are independent.
+    $tables = ['tool_calls', 'task_history', 'tasks', 'agents', 'principals', 'users'];
+    foreach ($tables as $table) {
+        Illuminate\Database\Capsule\Manager::table($table)->delete();
+    }
+    if (Illuminate\Database\Capsule\Manager::connection()->getDriverName() === 'sqlite') {
+        // Tables declared with `bigIncrements` map to AUTOINCREMENT on
+        // SQLite only when the migration explicitly opts in; Laravel's
+        // `bigIncrements` does not, so `users` / `tasks` / `task_history`
+        // are absent from `sqlite_sequence` and `DELETE FROM` there is a
+        // no-op. `principals` / `agents` / `tool_calls` may be present —
+        // resetting them keeps counters aligned with the wiped rows.
+        Illuminate\Database\Capsule\Manager::statement(
+            "DELETE FROM sqlite_sequence WHERE name IN ('users', 'principals', 'agents', 'tasks', 'task_history', 'tool_calls')",
+        );
+    } else {
+        // InnoDB persists AUTO_INCREMENT across `DELETE FROM` (and across
+        // rolled-back transactions); `ALTER TABLE … AUTO_INCREMENT = 1`
+        // is the only portable way to make the next insert land on 1.
+        foreach ($tables as $table) {
+            Illuminate\Database\Capsule\Manager::statement("ALTER TABLE {$table} AUTO_INCREMENT = 1");
+        }
+    }
+
     $userId = $authService->register('task@example.com', TEST_PASSWORD, 'Task');
     simulateLoggedInSession($userId, 'task@example.com');
 

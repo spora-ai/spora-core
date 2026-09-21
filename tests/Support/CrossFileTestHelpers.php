@@ -13,6 +13,17 @@
 
 declare(strict_types=1);
 
+if (!function_exists('testGenerateUuidV4')) {
+    /** RFC 4122 UUIDv4 (version 4 nibble + variant 8/9/a/b) — MariaDB's `uuid` column rejects malformed shapes. */
+    function testGenerateUuidV4(): string
+    {
+        $raw    = random_bytes(16);
+        $raw[6] = chr((ord($raw[6]) & 0x0f) | 0x40);
+        $raw[8] = chr((ord($raw[8]) & 0x3f) | 0x80);
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($raw), 4));
+    }
+}
+
 if (!function_exists('makeAdmin')) {
     function makeAdmin(Spora\Auth\AuthService $authService, int $userId): void
     {
@@ -258,11 +269,7 @@ if (!function_exists('seedMediaAsset')) {
         ?string $mime = 'image/png',
         ?string $idOverride = null,
     ): Spora\Models\MediaAsset {
-        $id = $idOverride ?? sprintf(
-            '%08x-aaaa-bbbb-cccc-%012x',
-            random_int(0, 0xffffffff),
-            random_int(0, 0xffffffffffff),
-        );
+        $id = $idOverride ?? testGenerateUuidV4();
 
         return Spora\Models\MediaAsset::create([
             'id'                            => $id,

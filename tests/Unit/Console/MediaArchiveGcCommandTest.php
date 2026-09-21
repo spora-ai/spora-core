@@ -116,7 +116,7 @@ it('keeps rows whose on-disk asset is present and counts them as kept', function
         // Force a local-mode row whose asset_url points at a real file we
         // place in the assets dir the command will scan.
         $asset = new MediaAsset();
-        $asset->id           = bin2hex(random_bytes(8));
+        $asset->id           = testGenerateUuidV4();
         $asset->storage_mode = 'local';
         $asset->asset_url    = '/api/v1/assets/keep-token.png';
         $asset->media_type   = 'image';

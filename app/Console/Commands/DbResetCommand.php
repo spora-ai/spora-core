@@ -18,20 +18,16 @@ use Throwable;
 
 /**
  * Wipes the configured database and clears the schema stamp.
+ *  - sqlite (default): deletes storage/database.sqlite (or db_path).
+ *  - mysql / mariadb: DROP DATABASE + CREATE DATABASE on SPORA_DB_NAME.
  *
- * Driver-aware (reads SPORA_DB_DRIVER / config.db_driver):
- *  - sqlite (default): deletes storage/database.sqlite (or the path in db_path).
- *  - mysql: DROP DATABASE + CREATE DATABASE on SPORA_DB_NAME.
- *
- * The MySQL path ALWAYS requires --force (or a typed "yes" at the prompt),
- * because it hits a shared server rather than a local file. The MySQL
- * db_name is also validated against MySQL's identifier rules before it
- * is interpolated into the DDL — DROP/CREATE DATABASE cannot be
- * parameterised, so rejection is the only safe path for unusual inputs.
+ * MySQL/MariaDB always require --force — shared server. db_name is validated
+ * against MySQL identifier rules before DDL interpolation (DROP/CREATE
+ * DATABASE cannot be parameterised).
  */
 #[AsCommand(
     name: 'db:reset',
-    description: 'Wipe the database and clear the schema stamp. SQLite: deletes the file. MySQL: DROP + CREATE DATABASE.',
+    description: 'Wipe the database and clear the schema stamp. SQLite: deletes the file. MySQL/MariaDB: DROP + CREATE DATABASE.',
 )]
 final class DbResetCommand extends Command
 {
@@ -62,8 +58,8 @@ built-in defaults → <comment>config.php</comment> → <comment>SPORA_*</commen
         (or the path in <comment>db_path</comment>). Prompts before deleting a
         non-empty file unless <info>--force</info> is given.
 
-<comment>MySQL:</comment>  runs <info>DROP DATABASE IF EXISTS</info> + <info>CREATE DATABASE</info>
-        on the configured <comment>SPORA_DB_NAME</comment>. The MySQL path
+<comment>MySQL / MariaDB:</comment>  runs <info>DROP DATABASE IF EXISTS</info> + <info>CREATE DATABASE</info>
+        on the configured <comment>SPORA_DB_NAME</comment>. This path
         <error>always</error> requires <info>--force</info> (or the literal answer
         "yes" typed at the prompt) because it cannot be undone on a shared server.
 HELP);
@@ -78,7 +74,8 @@ HELP);
         $stampPath = $this->database->getStampPath();
 
         try {
-            if ($driver === 'mysql') {
+            // mariadb rides the same protocol as mysql — same DROP/CREATE path.
+            if ($driver === 'mysql' || $driver === 'mariadb') {
                 $exit = $this->resetMysql($io, $force, $config);
             } else {
                 $exit = $this->resetSqlite($io, $force, $config);

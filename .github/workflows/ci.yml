@@ -81,6 +81,114 @@ jobs:
       - name: Run Pest (parallel)
         run: ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky
 
+  test-mysql:
+    # MySQL 9.7 compatibility gate. No coverage here — SonarCloud consumes clover from the SQLite `test` job. `continue-on-error: true` is set until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported.
+    continue-on-error: true
+    name: Pest (PHP 8.4, MySQL 9.7)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: spora_root
+        ports: ['3306:3306']
+        # Bump default max_connections=151 — Pest's ~18 parallel workers exhaust it (SQLSTATE[08004] 1040). The entrypoint prepends `mysqld` to a bare flag.
+        command: --max-connections=500
+        options: >-
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      SPORA_TEST_DB_DRIVER:   mysql
+      SPORA_TEST_DB_HOST:     127.0.0.1
+      SPORA_TEST_DB_PORT:     3306
+      SPORA_TEST_DB_USER:     root
+      SPORA_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
+            sleep 2
+          done
+          echo "MySQL did not become ready in time" >&2
+          exit 1
+
+      - name: Run Pest (sequential, MySQL)
+        # Sequential — the parallel runner hits SQLSTATE[08004] and partial-schema races (pre-existing 000062 ordering bug); a sequential run installs the schema once.
+        run: ./vendor/bin/pest --fail-on-risky
+
+  test-mariadb:
+    # MariaDB 12.3 compatibility gate. Same `continue-on-error` reason as `test-mysql` above.
+    continue-on-error: true
+    name: Pest (PHP 8.4, MariaDB 12.3)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:12.3
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: spora_root
+        ports: ['3306:3306']
+        options: >-
+          --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+        # Same max_connections=151 reason as `test-mysql`. The entrypoint prepends `mariadbd`; the wait step uses `mysqladmin` (shipped in the mariadb:12.3 image).
+        command: --max-connections=500
+    env:
+      SPORA_TEST_DB_DRIVER:   mariadb
+      SPORA_TEST_DB_HOST:     127.0.0.1
+      SPORA_TEST_DB_PORT:     3306
+      SPORA_TEST_DB_USER:     root
+      SPORA_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for MariaDB
+        run: |
+          for i in {1..30}; do
+            mysqladmin ping -h 127.0.0.1 -uroot -proot --silent && exit 0
+            sleep 2
+          done
+          echo "MariaDB did not become ready in time" >&2
+          exit 1
+
+      - name: Run Pest (sequential, MariaDB)
+        # Same rationale as the MySQL job: sequential run avoids both
+        # the connection-pool exhaustion and the partial-schema-install
+        # race conditions that come with parallel workers on MySQL/MariaDB.
+        run: ./vendor/bin/pest --fail-on-risky
+
   static-analysis:
     name: PHPStan
     runs-on: ubuntu-latest

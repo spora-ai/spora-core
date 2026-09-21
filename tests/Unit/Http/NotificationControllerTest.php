@@ -9,8 +9,7 @@ use Spora\Services\NotificationService;
 use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -52,8 +51,15 @@ function seedNotificationUserUnit(Spora\Auth\AuthService $authService, string $e
 
 function createNotificationForUnit(int $userId, string $type = 'task_completed', ?string $readAt = null): Notification
 {
+    // Make sure the principal row exists so `notifications.principal_id`
+    // can reference it (and so the controller's `notifications.principal_id = X`
+    // filter still has a row to find). The FK on `notifications.user_id`
+    // references `users.id` directly though — `createUserPrincipalPublic()`
+    // returns the principal_id, which would violate that FK on MySQL/MariaDB.
+    createUserPrincipalPublic($userId);
+
     return Notification::create([
-        'user_id' => createUserPrincipalPublic($userId),
+        'user_id' => $userId,
         'type'    => $type,
         'title'   => 'A notification',
         'body'    => 'body',

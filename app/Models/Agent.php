@@ -43,6 +43,7 @@ use Throwable;
  * `PrincipalResolver::ownerUserId()` / `AgentManifest` etc.).
  *
  * @property-read int|null $user_id Legacy alias for the principal's owner user id.
+ * @property-read User|null $user Resolved via {@see Agent::getUserAttribute()}.
  */
 final class Agent extends Model
 {
@@ -88,14 +89,16 @@ final class Agent extends Model
     }
 
     /**
-     * Legacy `user` relation — migration 0067 routed ownership through
-     * the principal table, so the direct `User` FK is gone. For a
-     * user-principal this returns the matching `User`; for a
-     * group-principal it returns the first `owner` user so legacy code
-     * paths still get a User instance. Kept temporarily while downstream
-     * consumers are migrated in their own PRs.
+     * Legacy user accessor. Migration 0067 routed ownership through the
+     * principal table, so the direct `User` FK is gone. For a user-principal
+     * returns the matching `User`; for a group-principal returns the first
+     * `owner` user. Returns a Builder (not a `BelongsTo`) because the
+     * implementation is a manual two-step resolve
+     * (`Principal::find()` then `User::query()->where()`) — no single FK
+     * chain for `belongsTo` to follow. Returns null when the principal is
+     * missing or the group has no owner.
      */
-    public function user(): ?BelongsTo
+    public function user(): ?\Illuminate\Database\Eloquent\Builder
     {
         $principal = Principal::find($this->principal_id);
         if ($principal === null) {
@@ -103,8 +106,7 @@ final class Agent extends Model
         }
 
         if ($principal->type === Principal::TYPE_USER) {
-            return $this->belongsTo(User::class, 'principal_id', 'id')
-                ->where('id', $principal->user_id);
+            return User::query()->where('id', $principal->user_id);
         }
 
         $ownerUserId = Capsule::table('group_memberships')
@@ -114,7 +116,7 @@ final class Agent extends Model
             ->value('user_id');
 
         return $ownerUserId !== null
-            ? $this->belongsTo(User::class, 'principal_id', 'id')->where('id', $ownerUserId)
+            ? User::query()->where('id', $ownerUserId)
             : null;
     }
 

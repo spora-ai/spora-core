@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
-use Spora\Core\Database;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 
 /**
@@ -22,9 +21,8 @@ use Spora\Speech\OpenAiCompatibleTranscriber;
  * (0081 → 0084).
  */
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly();
+    // Test builds its own schema → connect-only, no installer.
+    TestDatabaseFactory::freshConnectionOnly();
 
     // Minimal schema for the migration to find rows in.
     Capsule::schema()->create('tool_configurations', static function (Blueprint $t): void {

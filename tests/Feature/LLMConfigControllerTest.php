@@ -599,7 +599,12 @@ test('store() creates a config owned by the current user', function (): void {
 
     $result = json_decode($response->getContent(), true)['data']['config'];
     $savedConfig = LLMDriverConfiguration::find($result['id']);
-    expect((int) $savedConfig->principal_id)->toBe((int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID]);
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
+    $sessionUserId = (int) $_SESSION[Delight\Auth\Auth::SESSION_FIELD_USER_ID];
+    $principalId = Spora\Models\Principal::where('type', Spora\Models\Principal::TYPE_USER)
+        ->where('user_id', $sessionUserId)
+        ->value('id');
+    expect((int) $savedConfig->principal_id)->toBe((int) $principalId);
 
     LLMDriverConfiguration::where('id', $result['id'])->delete();
 });

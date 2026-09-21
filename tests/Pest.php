@@ -200,15 +200,18 @@ uses(Tests\Concerns\CreatesPrincipal::class)
         $GLOBALS['__spora_storage_dir_previous'] = getenv('SPORA_STORAGE_DIR');
         putenv('SPORA_STORAGE_DIR');
         unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
-        Spora\Core\Database::resetBootState();
-        $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-        $db->boot();
+
+        // Driver-aware per-worker DB; see tests/Support/TestDatabaseFactory.php.
+        TestDatabaseFactory::boot();
+
         Illuminate\Database\Capsule\Manager::connection()->beginTransaction();
     })
     ->afterEach(function () {
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
             Illuminate\Database\Capsule\Manager::connection()->rollBack();
         }
+        // `$_SESSION` is process-level — leaks across tests on MariaDB where the per-worker DB outlives the test.
+        clearSession();
         Spora\Core\Database::resetBootState();
         $previous = $GLOBALS['__spora_storage_dir_previous'] ?? false;
         if ($previous === false) {

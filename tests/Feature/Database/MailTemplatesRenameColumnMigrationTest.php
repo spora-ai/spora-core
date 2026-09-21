@@ -3,12 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Core\Database;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly();
+    // Test builds its own schema → connect-only, no installer.
+    TestDatabaseFactory::freshConnectionOnly();
 
     // Create the mail_templates table with the legacy column shape so renameColumn has something to act on.
     Capsule::schema()->create('mail_templates', static function (Illuminate\Database\Schema\Blueprint $table): void {

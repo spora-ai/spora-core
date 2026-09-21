@@ -36,7 +36,7 @@ return new class extends Migration
             $table->string('archetype', 32)->nullable();
             $table->string('variant_key', 8)->nullable();
             $table->string('palette_key', 32)->nullable();
-            $table->string('media_asset_id', 36)->nullable();
+            $table->uuid('media_asset_id')->nullable();
             $table->timestamps();
 
             $table->unique('group_id', 'uq_group_pictures_group_id');
@@ -44,6 +44,7 @@ return new class extends Migration
                 ->references('id')
                 ->on('groups')
                 ->cascadeOnDelete();
+            // Same rationale as `agent_pictures.media_asset_id` — `uuid()` so the FK matches `media_assets.id` natively on MariaDB 10.7+.
             $table->foreign('media_asset_id', 'fk_group_pictures_media_asset_id')
                 ->references('id')
                 ->on('media_assets')

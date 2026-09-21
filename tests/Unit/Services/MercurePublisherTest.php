@@ -48,7 +48,11 @@ function seedGroupPrincipalWithMembers(int $memberCount): int
             'email'      => "member{$i}@example.test",
             'password'   => password_hash('Password1!', PASSWORD_BCRYPT),
             'username'   => "member{$i}",
-            'registered' => $now,
+            // `users.registered` is `int unsigned` (Delight/Auth schema); the
+            // timestamp string from `$now` works in SQLite (numeric affinity)
+            // but MariaDB strict mode rejects it with `Data truncated`. Pass
+            // an actual unix timestamp.
+            'registered' => time(),
             'created_at' => $now,
             'updated_at' => $now,
         ]);

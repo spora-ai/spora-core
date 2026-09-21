@@ -7,8 +7,7 @@ use Spora\Services\NotificationSubscriptionService;
 use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -83,10 +82,13 @@ test('index() returns null user_principal_id when the user has no user-principal
     [$controller, $authService] = makeSubscriptionControllerUnit();
     seedSubscriptionUserUnit($authService);
 
-    // Wipe the user-principal so the controller has nothing to resolve.
-    Spora\Models\Principal::query()
-        ->where('type', Spora\Models\Principal::TYPE_USER)
-        ->delete();
+    // No user-principal exists yet — `seedSubscriptionUserUnit()` only
+    // inserts into `users`, not `principals`. The controller must resolve
+    // `user_principal_id` to null without crashing (the previous version
+    // tried to wipe user-principals to set up this state, but the
+    // `agents.principal_id → principals.id` RESTRICT FK made the wipe
+    // fragile across engines and the assertion doesn't actually need it —
+    // `resolveUserPrincipalId()` already filters by `user_id`).
 
     $response = $controller->index();
     $body = json_decode($response->getContent(), true);

@@ -206,3 +206,89 @@ it('legacy user attribute returns null when the principal is missing', function 
 
     expect($agent->user())->toBeNull();
 });
+
+it('user() resolves the owner user when the principal is a group with an owner', function (): void {
+    // Two users, two owner memberships. `Agent::user()` picks the
+    // lowest-id owner — the first user inserted gets the lower id on a
+    // fresh AUTO_INCREMENT counter, so the test asserts `min($a, $b)`.
+    $userA    = bootAuthLayer()->register('agent-grpowner-a@example.com', AGENT_TEST_PASSWORD, 'OwnerA');
+    $userB    = bootAuthLayer()->register('agent-grpowner-b@example.com', AGENT_TEST_PASSWORD, 'OwnerB');
+    $expected = min($userA, $userB);
+
+    // `makeGroupPrincipal` inserts the creator as a `member`, so promote
+    // both users to owner explicitly to make the test deterministic.
+    $groupPrincipalId = $this->makeGroupPrincipal($userA, 'OwnedGroup');
+    $groupId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('id', $groupPrincipalId)->value('group_id');
+    Illuminate\Database\Capsule\Manager::table('group_memberships')
+        ->where('group_id', $groupId)
+        ->update(['role' => Spora\Models\GroupMembership::ROLE_OWNER]);
+    Illuminate\Database\Capsule\Manager::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $userB,
+        'role'       => Spora\Models\GroupMembership::ROLE_OWNER,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $agent = Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'Group Owned Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+
+    $user = $agent->user();
+    expect($user)->not->toBeNull();
+    $loaded = $user->first();
+    expect($loaded)->toBeInstanceOf(Spora\Models\User::class)
+        ->and((int) $loaded->getKey())->toBe($expected);
+});
+
+it('user() returns null when the principal is a group with no owner', function (): void {
+    $creatorId = bootAuthLayer()->register('agent-grpcreator@example.com', AGENT_TEST_PASSWORD, 'GroupCreator');
+    // Group with a creator-as-member only — no owner membership.
+    $groupPrincipalId = $this->makeGroupPrincipal($creatorId, 'OwnerlessGroup');
+    Illuminate\Database\Capsule\Manager::table('group_memberships')
+        ->where('group_id', Illuminate\Database\Capsule\Manager::table('principals')
+            ->where('id', $groupPrincipalId)->value('group_id'))
+        ->update(['role' => Spora\Models\GroupMembership::ROLE_MEMBER]);
+
+    $agent = Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'Ownerless Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+
+    expect($agent->user())->toBeNull();
+});
+
+it('getUserAttribute returns the resolved User instance', function (): void {
+    $userId = bootAuthLayer()->register('agent-getuserattr@example.com', AGENT_TEST_PASSWORD, 'GetUserAttr');
+    $principalId = $this->createUserPrincipal($userId);
+    $agent = Agent::create([
+        'principal_id' => $principalId,
+        'name'         => 'Attr Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+
+    $attr = $agent->user;
+    expect($attr)->toBeInstanceOf(Spora\Models\User::class)
+        ->and((int) $attr->getKey())->toBe($userId);
+});
+
+it('getUserAttribute returns null when the principal is missing', function (): void {
+    $agent = new Agent();
+    $agent->id = 44444;
+    $agent->principal_id = 999998;
+
+    expect($agent->user)->toBeNull();
+});

@@ -13,19 +13,49 @@ use Illuminate\Database\Schema\Blueprint;
  */
 
 afterEach(function (): void {
-    Capsule::schema()->dropIfExists('media_assets');
+    // The migration-suite schema installs `media_derivatives` (FK to
+    // media_assets.id) before this test runs. SQLite's default FK
+    // InnoDB refuses to drop a parent while a child FK points at it; suspend FK checks for the drop.
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'mysql' || $driver === 'mariadb') {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS = 0');
+    }
+    try {
+        Capsule::schema()->dropIfExists('media_assets');
+    } finally {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            Capsule::statement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
+
+    // Drop below makes the next worker's `boot()` reinstall the schema (per-worker DB outlives this test on MariaDB).
+    if ($driver !== 'sqlite') {
+        TestDatabaseFactory::markWorkerDbDirty();
+    }
 });
 
 function createMediaAssetsTable(): void
 {
     // The shared in-memory SQLite DB carries state from prior tests, so
-    // every migration test starts from a clean table.
-    Capsule::schema()->dropIfExists('media_assets');
-    Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
-        $t->string('id', 36)->primary();
-        $t->text('markdown_content')->nullable();
-        $t->timestamps();
-    });
+    // every migration test starts from a clean table. MariaDB/InnoDB holds
+    // an FK from `media_derivatives` to `media_assets.id` from earlier
+    // migrations in the suite — suspend FK checks so the drop succeeds.
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'mysql' || $driver === 'mariadb') {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS = 0');
+    }
+    try {
+        Capsule::schema()->dropIfExists('media_assets');
+        Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
+            $t->string('id', 36)->primary();
+            $t->text('markdown_content')->nullable();
+            $t->timestamps();
+        });
+    } finally {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            Capsule::statement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
 }
 
 function runTranscribeMigration(): mixed
@@ -33,19 +63,55 @@ function runTranscribeMigration(): mixed
     return require BASE_PATH . '/database/migrations/0080_add_transcript_to_media_assets.php';
 }
 
+function mediaAssetsColumns(): array
+{
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'sqlite') {
+        return collect(Capsule::select('PRAGMA table_info(media_assets)'))
+            ->pluck('name')
+            ->all();
+    }
+
+    $db = Capsule::connection()->getDatabaseName();
+    return collect(Capsule::select(
+        'SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS '
+        . 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+        [$db, 'media_assets'],
+    ))->pluck('name')->all();
+}
+
+function mediaAssetsColumnInfo(): Illuminate\Support\Collection
+{
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'sqlite') {
+        return collect(Capsule::select('PRAGMA table_info(media_assets)'))->keyBy('name');
+    }
+
+    $db = Capsule::connection()->getDatabaseName();
+    $rows = Capsule::select(
+        'SELECT COLUMN_NAME AS name, IS_NULLABLE AS nullable '
+        . 'FROM information_schema.COLUMNS '
+        . 'WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+        [$db, 'media_assets'],
+    );
+    $byName = [];
+    foreach ($rows as $r) {
+        $byName[$r->name] = (object) [
+            'name'    => $r->name,
+            'notnull' => $r->nullable === 'NO' ? 1 : 0,
+        ];
+    }
+    return collect($byName);
+}
+
 test('migration adds nullable transcript + transcript_language columns', function (): void {
     createMediaAssetsTable();
 
     runTranscribeMigration()->up();
 
-    $columns = collect(Capsule::select('PRAGMA table_info(media_assets)'))
-        ->pluck('name')
-        ->all();
-
-    expect($columns)->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->toContain('transcript', 'transcript_language');
     // Both nullable — pre-existing audio rows must not block migration in.
-    // PRAGMA returns rows as stdClass with named properties (not arrays).
-    $colInfo = collect(Capsule::select('PRAGMA table_info(media_assets)'))->keyBy('name');
+    $colInfo = mediaAssetsColumnInfo();
     expect((int) $colInfo['transcript']->notnull)->toBe(0)
         ->and((int) $colInfo['transcript_language']->notnull)->toBe(0);
 });
@@ -76,11 +142,9 @@ test('existing rows survive migration with null transcript columns', function ()
 test('down() drops the columns', function (): void {
     createMediaAssetsTable();
     runTranscribeMigration()->up();
-    expect(collect(Capsule::select('PRAGMA table_info(media_assets)'))->pluck('name'))
-        ->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->toContain('transcript', 'transcript_language');
 
     runTranscribeMigration()->down();
 
-    $columns = collect(Capsule::select('PRAGMA table_info(media_assets)'))->pluck('name')->all();
-    expect($columns)->not->toContain('transcript', 'transcript_language');
+    expect(mediaAssetsColumns())->not->toContain('transcript', 'transcript_language');
 });

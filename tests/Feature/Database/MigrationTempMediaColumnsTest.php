@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
-use Spora\Core\Database;
 
 /**
  * Migration 0081 introduces the temp-file media lifecycle: an
@@ -24,9 +23,8 @@ use Spora\Core\Database;
  *     `pragma table_info`); a value of 101 raises at the SQL layer.
  */
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-    $db->bootDatabaseConnectionOnly();
+    // Test builds its own schema → connect-only, no installer.
+    TestDatabaseFactory::freshConnectionOnly();
 
     // The migration touches `media_assets` and `agents` — both need to
     // exist in the shape the original migrations created. Stamping
@@ -41,12 +39,17 @@ beforeEach(function (): void {
     Capsule::schema()->create('agents', static function (Blueprint $t): void {
         $t->bigIncrements('id');
         $t->string('name');
+        $t->boolean('is_active')->default(true);
+        $t->unsignedBigInteger('llm_driver_config_id')->nullable();
         $t->integer('max_retries')->default(0);
         $t->timestamps();
     });
 });
 
 test('up adds is_temporary to media_assets with the documented default', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The not-null assertion reads `notnull` from `PRAGMA table_info`; the column presence check works on MariaDB but the not-null flag does not.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -67,6 +70,9 @@ test('up adds is_temporary to media_assets with the documented default', functio
 });
 
 test('up creates the (user_id, agent_id, is_temporary, created_at) composite index', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`; the SHOW INDEX equivalent would need its own block.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -76,6 +82,9 @@ test('up creates the (user_id, agent_id, is_temporary, created_at) composite ind
 });
 
 test('up adds voice_message_retention_count with default 5 and a CHECK constraint', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Reads `dflt_value` from `PRAGMA table_info` and exercises the CHECK constraint shape that SQLite emits; the MariaDB path uses information_schema.columns and the constraint syntax differs.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -155,6 +164,9 @@ test('up backfills pre-existing agents with the default retention count', functi
 });
 
 test('down drops the columns and index', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`; the column-drops are driver-portable but the index assertion needs the MariaDB SHOW INDEX path.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
     $migration->down();

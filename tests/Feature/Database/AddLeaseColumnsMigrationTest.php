@@ -3,15 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Core\Database;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database([
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ]);
-    $db->boot();
+    // DDL mid-test → per-test fresh DB (transaction rollback isn't enough).
+    TestDatabaseFactory::freshDatabase();
 });
 
 test('0070 migration adds lease_owner and lease_expires_at columns to tasks', function (): void {

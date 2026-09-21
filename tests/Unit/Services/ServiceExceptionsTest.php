@@ -140,6 +140,9 @@ describe('ScheduledRunService throws typed exceptions', function (): void {
     });
 
     it('triggerRun throws PromptTemplateMissingException when the assigned template was deleted', function (): void {
+        if (Illuminate\Database\Capsule\Manager::connection()->getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('This test relies on `PRAGMA foreign_keys = OFF` to insert an orphan ScheduledRun on SQLite; the test scenario itself (orphan template_id) only happens because SQLite FKs are turned off. On MySQL/MariaDB FK enforcement has no opt-out mid-test, so the setup is impossible — and the production bug this test guards against is SQLite-specific.');
+        }
         $service = makeScheduledRunServiceForExceptions();
         [$userId, $agentId] = createServiceExceptionUserAgent('run-tpl-missing@example.com');
 

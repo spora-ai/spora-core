@@ -67,11 +67,7 @@ function buildDerivativeControllerFixture(int $userId = 42, bool $isAdmin = fals
 
 function seedDerivativeParentForController(?int $userId = null): MediaAsset
 {
-    $id = sprintf(
-        '%08x-aaaa-bbbb-cccc-%012x',
-        random_int(0, 0xffffffff),
-        random_int(0, 0xffffffffffff),
-    );
+    $id = testGenerateUuidV4();
     return MediaAsset::create([
         'id'                            => $id,
         'asset_url'                     => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $id . '.png',

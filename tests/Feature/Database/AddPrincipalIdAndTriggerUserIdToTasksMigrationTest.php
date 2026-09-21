@@ -7,12 +7,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Spora\Core\Database;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database([
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ]);
-    $db->boot();
+    // DDL mid-test → per-test fresh DB (transaction rollback isn't enough).
+    TestDatabaseFactory::freshDatabase();
 });
 
 /**
@@ -185,6 +181,9 @@ test('0071 migration throws when a tasks.user_id has no matching user-principal'
 });
 
 test('0071 rebuild preserves dependent rows (task_history, tool_calls)', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('`rebuildSqliteTableWithoutUserId()` uses PRAGMA table_info to walk the column list — MariaDB/MySQL take the real ALTER path and the rebuild simulation is meaningless.');
+    }
     // SQLite drops the user_id column by rebuilding the table — verify
     // dependent rows survive. Mirrors the 0067 agents-table cascade test.
     $now = date('Y-m-d H:i:s');

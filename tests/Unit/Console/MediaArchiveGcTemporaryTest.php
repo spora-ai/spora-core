@@ -91,7 +91,7 @@ afterEach(function (): void {
 function seedTempAsset(bool $isTemp, ?DateTimeInterface $createdAt = null): MediaAsset
 {
     $asset = new MediaAsset();
-    $asset->id = bin2hex(random_bytes(8));
+    $asset->id = testGenerateUuidV4();
     $asset->user_id = 1;
     $asset->is_temporary = $isTemp;
     $asset->asset_url = '/api/v1/assets/' . $asset->id;

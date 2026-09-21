@@ -8,8 +8,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
 
     // SystemMailer::getMailConfig() lets SPORA_MAIL_* env vars override the
     // passed config; the .env's SPORA_MAIL_DRIVER=log leaks into $_ENV the

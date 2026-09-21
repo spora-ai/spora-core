@@ -9,8 +9,12 @@ use Spora\Services\MailTemplateService;
 use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
+    // Wipe between tests — on MariaDB the per-worker DB persists, so a
+    // `MailTemplate::create(['name' => 'email_verification'])` from one test
+    // trips the `mail_templates_name_unique` index in the next. SQLite's
+    // per-test `:memory:` rebuild hides this leak.
+    Illuminate\Database\Capsule\Manager::table('mail_templates')->delete();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());

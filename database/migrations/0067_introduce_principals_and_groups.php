@@ -264,14 +264,17 @@ return new class extends Migration
             });
         }
 
-        $userPrincipals = Capsule::table('principals')
-            ->where('type', 'user')
-            ->pluck('id', 'user_id')
-            ->all();
-        foreach ($userPrincipals as $userId => $principalId) {
-            Capsule::table('agents')
-                ->where('user_id', $userId)
-                ->update(['principal_id' => $principalId]);
+        // Skip the backfill if `agents.user_id` was already dropped by a prior run — WHERE on a missing column throws errno 1054.
+        if ($schema->hasColumn('agents', 'user_id')) {
+            $userPrincipals = Capsule::table('principals')
+                ->where('type', 'user')
+                ->pluck('id', 'user_id')
+                ->all();
+            foreach ($userPrincipals as $userId => $principalId) {
+                Capsule::table('agents')
+                    ->where('user_id', $userId)
+                    ->update(['principal_id' => $principalId]);
+            }
         }
 
         $missing = (int) Capsule::table('agents')->whereNull('principal_id')->count();

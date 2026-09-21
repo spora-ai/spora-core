@@ -61,9 +61,9 @@ function makeSetupTester(): CommandTester
 }
 
 it('seeds on a fresh install', function (): void {
-    // Defensive: the per-test transaction is rolled back, but make sure no
-    // admin user lingers from a previous run.
-    Spora\Models\User::where('email', 'admin@spora.local')->delete();
+    // Per-test fresh schema. The SetupCommand gates the fresh-seeder
+    // Per-test fresh DB — the setup branch only fires on an empty schema, which MariaDB's persisting counters would otherwise block.
+    TestDatabaseFactory::freshDatabase();
 
     $tester = makeSetupTester();
     $tester->execute([]);
@@ -81,6 +81,8 @@ it('seeds on a fresh install', function (): void {
 });
 
 it('skips seeding on a second run when users and agents exist', function (): void {
+    TestDatabaseFactory::freshDatabase();
+
     $auth = bootAuthLayer();
     $userId = $auth->register('existing@example.com', 'Password1!', 'Existing');
 

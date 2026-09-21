@@ -23,18 +23,23 @@ const SCHEDULED_RUN_TEST_BAD_CRON = 'not-a-cron';
  * @param  MockInterface&OrchestratorInterface  $orchestrator
  * @param  MockInterface&MercurePublisherInterface  $mercure
  */
-function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?MercurePublisherInterface $mercure = null): ScheduledRunService
+function makeScheduledRunService(?OrchestratorInterface $orchestrator = null, ?MercurePublisherInterface $mercure = null, ?int $triggerUserId = null): ScheduledRunService
 {
     $orchestrator ??= Mockery::mock(OrchestratorInterface::class);
     $mercure      ??= Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     /** @var MockInterface&MercurePublisherInterface $mercure */
 
-    // Default stubs that callers can override.
-    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+    // Default stubs that callers can override. `trigger_user_id` must point
+    // at a real `users.id` — on MariaDB the auto-increment counter
+    // advances past 1 after the first rolled-back insert in the worker,
+    // so the previous hardcoded `1` produced `fk_tasks_trigger_user_id`
+    // violations on every CI run. `null` (the column is nullable by
+    // design — see migration 0073) is the safe default.
+    $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use ($triggerUserId): Task {
         return Task::create([
             'agent_id'    => $agentId,
             'principal_id' => (int) Agent::find($agentId)->principal_id,
-            'trigger_user_id' => 1,
+            'trigger_user_id' => $triggerUserId,
             'status'      => 'RUNNING',
             'user_prompt' => $prompt,
             'max_steps'   => $maxSteps,
@@ -499,12 +504,12 @@ describe('ScheduledRunService::triggerRun', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
 
         $captured = ['agentId' => -1, 'prompt' => '', 'maxSteps' => 0];
-        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use (&$captured): Task {
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use (&$captured, &$userId): Task {
             $captured = ['agentId' => $agentId, 'prompt' => $prompt, 'maxSteps' => $maxSteps];
             return Task::create([
                 'agent_id'    => $agentId,
                 'principal_id' => (int) Agent::find($agentId)->principal_id,
-                'trigger_user_id' => 1,
+                'trigger_user_id' => $userId,
                 'status'      => 'RUNNING',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,
@@ -538,11 +543,11 @@ describe('ScheduledRunService::triggerRun', function (): void {
         /** @var MockInterface&MercurePublisherInterface $mercure */
         /** @var MockInterface&MercurePublisherInterface $mercure */
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
-        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps): Task {
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt, int $maxSteps) use (&$userId): Task {
             return Task::create([
                 'agent_id'    => $agentId,
                 'principal_id' => (int) Agent::find($agentId)->principal_id,
-                'trigger_user_id' => 1,
+                'trigger_user_id' => $userId,
                 'status'      => 'RUNNING',
                 'user_prompt' => $prompt,
                 'max_steps'   => $maxSteps,

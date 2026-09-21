@@ -8,8 +8,7 @@ use Spora\Http\Middleware\AdminGuard;
 use Spora\Models\User;
 
 beforeEach(function (): void {
-    Spora\Core\Database::resetBootState();
-    (new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+    TestDatabaseFactory::boot();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());

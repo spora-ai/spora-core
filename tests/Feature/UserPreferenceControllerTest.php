@@ -6,6 +6,7 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\UserPreferenceController;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\Principal;
 use Spora\Models\PrincipalPreference;
 use Spora\Services\LLMConfigService;
 use Symfony\Component\HttpFoundation\Response;
@@ -141,12 +142,14 @@ test('put sets a personal config as preference', function (): void {
     expect($body['data']['config']['id'])->toBe($config->id)
         ->and($body['data']['config']['name'])->toBe('Personal Pref Test');
 
-    // Verify database
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
+    $principalId = Principal::where('type', Principal::TYPE_USER)
+        ->where('user_id', $userId)->value('id');
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($pref->preferred_llm_config_id)->toBe($config->id);
 
     // Cleanup
-    PrincipalPreference::where('principal_id', $userId)->delete();
+    PrincipalPreference::where('principal_id', $principalId)->delete();
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });
 
@@ -173,12 +176,14 @@ test('put sets a global config as preference', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['data']['config']['id'])->toBe($globalConfig->id);
 
-    // Verify database
-    $pref = PrincipalPreference::where('principal_id', $userId)->first();
+    // principal_id is the user-principal's id (FK → principals.id), not users.id — they diverge on MariaDB's persisting counters.
+    $principalId = Principal::where('type', Principal::TYPE_USER)
+        ->where('user_id', $userId)->value('id');
+    $pref = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($pref->preferred_llm_config_id)->toBe($globalConfig->id);
 
     // Cleanup
-    PrincipalPreference::where('principal_id', $userId)->delete();
+    PrincipalPreference::where('principal_id', $principalId)->delete();
     LLMDriverConfiguration::where('id', $globalConfig->id)->delete();
 });
 

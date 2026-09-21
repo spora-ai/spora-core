@@ -82,6 +82,7 @@ GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [
 
 ### Testing
 - Backend: **always run `composer test:parallel` for verification (~22s on a typical PR).** Never run `composer test` or `vendor/bin/pest` (serial) for the full suite — they take ~270s. Serial Pest is reserved for debugging one specific failing test. A parallel run may report 0–12 `risky` tests across reruns (well-known parallel-isolation flake); if `passed + risky == total` and there are no `failed`, the suite is clean — proceed.
+- **Per-engine testing.** Set `SPORA_TEST_DB_DRIVER=mysql|mariadb` to run the suite against a real engine (default `sqlite`). On MySQL/MariaDB, every Pest parallel worker creates its own `spora_test_w<PID>_<RAND>` database, installs the schema once, and drops it on exit. Override the server via `SPORA_TEST_DB_HOST`/`_PORT`/`_USER`/`_PASSWORD` (defaults: `127.0.0.1:3306 root:root`). CI runs against MySQL 9.7 and MariaDB 12.3 on every PR.
 - Frontend unit: `composer frontend:test` (Vitest)
 - E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [docs/09_frontend.md](docs/09_frontend.md))
 

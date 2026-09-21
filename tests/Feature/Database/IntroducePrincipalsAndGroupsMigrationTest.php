@@ -10,12 +10,8 @@ use Spora\Models\Principal;
 use Spora\Models\User;
 
 beforeEach(function (): void {
-    Database::resetBootState();
-    $db = new Database([
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ]);
-    $db->boot();
+    // DDL mid-test → per-test fresh DB (transaction rollback isn't enough).
+    TestDatabaseFactory::freshDatabase();
 });
 
 test('0067 migration creates principals/groups/group_memberships tables', function (): void {
@@ -94,10 +90,18 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
     $migration->up();
 
     $userId = (int) Capsule::table('users')->value('id');
+    if ($userId === 0) {
+        Capsule::table('users')->insert([
+            'email' => 'xor@example.com', 'username' => 'xor_user',
+            'password' => 'unused-hash', 'status' => 1, 'verified' => 1,
+            'roles_mask' => 0, 'registered' => time(),
+        ]);
+        $userId = (int) Capsule::table('users')->value('id');
+    }
 
-    // Both set → rejected.
+    // Setting user_id succeeds (the fillable shape principals expects).
     expect(fn() => Principal::create([
-        'type' => 'user', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => null,
+        'type' => 'user', 'user_id' => $userId, 'group_id' => null,
     ]))->not()->toThrow(Throwable::class);
 
     // Both null → rejected via XOR.
@@ -111,11 +115,12 @@ test('Principal model enforces XOR: only one of user_id/group_id', function (): 
     }
     expect($thrown)->toBeInstanceOf(LogicException::class);
 
-    // Both set → rejected via XOR (FK will also fail but LogicException first).
+    // Setting both user_id AND group_id is rejected via XOR
+    // (LogicException fires before the FK insert even reaches MariaDB).
     $thrown = null;
     try {
         Principal::create([
-            'type' => 'user', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => 999,
+            'type' => 'user', 'user_id' => $userId, 'group_id' => 999,
         ]);
     } catch (Throwable $e) {
         $thrown = $e;
@@ -128,13 +133,25 @@ test('Principal type must match the FK that is set', function (): void {
     $migration->up();
 
     $userId = (int) Capsule::table('users')->value('id');
+    if ($userId === 0) {
+        Capsule::table('users')->insert([
+            'email' => 'typefkmatch@example.com', 'username' => 'typefkmatch_user',
+            'password' => 'unused-hash', 'status' => 1, 'verified' => 1,
+            'roles_mask' => 0, 'registered' => time(),
+        ]);
+        $userId = (int) Capsule::table('users')->value('id');
+    }
 
+    // type='group' with user_id set is rejected by the type-check.
     expect(fn() => Principal::create([
-        'type' => 'group', 'principal_id' => createUserPrincipalPublic($userId), 'group_id' => null,
+        'type' => 'group', 'user_id' => $userId, 'group_id' => null,
     ]))->toThrow(LogicException::class);
 });
 
 test('0067 migration does not cascade-delete dependent rows when rebuilding the agents table', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('rebuildSqliteTableWithoutUserId() is a SQLite-only helper; the bug it pins (PRAGMA foreign_keys = OFF being a no-op inside a transaction) does not exist on MySQL/MariaDB.');
+    }
     // Regression test for the SQLite PRAGMA-foreign-keys-is-a-no-op-in-a-
     // transaction bug that previously dropped every row in `tasks`,
     // `task_history`, `tool_calls`, `agent_tools`, `agent_tool_overrides`,
@@ -292,6 +309,9 @@ test('0067 migration does not cascade-delete dependent rows when rebuilding the 
 });
 
 test('0067 migration leaves a coherent sqlite_master with no orphan indexes', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('sqlite_master / PRAGMA queries are SQLite-only.');
+    }
     // The Pest `beforeEach` already booted every migration including 0067.
     // Re-running 0067 would throw — and we don't need to. We just inspect
     // the post-0067 schema for the kind of malformed state the operator's
@@ -342,6 +362,9 @@ test('0067 migration leaves a coherent sqlite_master with no orphan indexes', fu
 });
 
 test('0067 migration rebuild preserves pre-existing indexes on settings tables', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The test exercises the SQLite-only rebuild path (PRAGMA table_info / foreign_key_list). MariaDB/MySQL take the real ALTER path.');
+    }
     // The migration's rebuildSqliteTableWithoutUserId() recreates the table
     // from PRAGMA table_info + PRAGMA foreign_key_list. It does NOT walk
     // PRAGMA index_list, so any index on the source table that isn't the
@@ -421,16 +444,10 @@ test('0067 migration is idempotent — up() can be re-run against the post-0067 
 });
 
 test('0067 migration recovers from a partially-applied state on SQLite', function (): void {
-    // Simulate the operator's MariaDB partial state: the principal_id FK
-    // add step failed previously, so llm_driver_configurations has the
-    // column + index but no FK to principals. On SQLite ALTER TABLE
-    // cannot add or drop FKs, so the simulation drops the FK via a table
-    // rebuild (the same pattern the migration uses for the user_id
-    // drop). Re-running the migration must (a) detect the missing FK via
-    // foreignKeyExists() and add it, (b) detect the missing index via
-    // indexExists() — already added in the simulation, so this branch
-    // should be a no-op — and (c) keep the user_id drop a no-op since
-    // user_id is already gone after the first boot.
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The partial-state simulation uses PRAGMA table_info / foreign_key_list to rebuild a SQLite table — MariaDB/MySQL take the real ALTER path and the simulation is meaningless.');
+    }
+    // Simulate the operator's partial-state: llm_driver_configurations has the column + index but no FK to principals (the previous FK-add step failed). SQLite ALTER can't drop FKs, so the test rebuilds the table.
 
     $conn = Capsule::connection();
     $table = 'llm_driver_configurations';
@@ -549,6 +566,9 @@ test('0067 migration recovers from a partially-applied state on SQLite', functio
 });
 
 test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA foreign_key_list`; on MariaDB/MySQL the helper itself switches to information_schema.key_column_usage.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 
@@ -570,6 +590,9 @@ test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
 });
 
 test('0067 migration helper: indexExists on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA index_list`; on MariaDB/MySQL the helper itself switches to information_schema.statistics.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 
@@ -585,6 +608,9 @@ test('0067 migration helper: indexExists on SQLite', function (): void {
 });
 
 test('0067 migration helper: findIndexOn on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA index_list` / `PRAGMA index_info`; on MariaDB/MySQL the helper itself switches to information_schema.statistics.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 

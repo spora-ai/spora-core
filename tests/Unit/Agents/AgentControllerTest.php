@@ -147,6 +147,45 @@ function agentJsonRequest(string $method, string $path, array $body = [], int $a
 }
 
 
+/**
+ * Wipe user-owned tables before each test so cross-test data leaks on
+ * MariaDB don't trip the UNIQUE on `users.email`.
+ *
+ * The Pest global beforeEach opens a transaction that is supposed to
+ * isolate each test, but `ensureAgentsHasUserIdColumnForController()`
+ * issues an `ALTER TABLE agents ADD COLUMN user_id` mid-test. DDL
+ * forces an implicit commit on MySQL/MariaDB, so the subsequent
+ * `rollBack()` in afterEach has nothing to roll back — every
+ * `registerUser()` row from that test survives into the next one, and
+ * the next `registerUser('user@example.com')` trips the UNIQUE on
+ * `users.email` with `EmailTakenException`. SQLite's per-test `:memory:`
+ * rebuild hides the leak; the per-worker MariaDB DB exposes it.
+ */
+function wipeAgentControllerTestTables(): void
+{
+    $capsule = Capsule::connection();
+
+    $capsule->table('agent_tool_overrides')->delete();
+    $capsule->table('agent_tools')->delete();
+    $capsule->table('principal_preferences')->delete();
+    $capsule->table('llm_driver_configurations')->delete();
+    $capsule->table('tool_configurations')->delete();
+    $capsule->table('agents')->delete();
+    $capsule->table('principals')->delete();
+    $capsule->table('users')->delete();
+
+    if ($capsule->getDriverName() === 'sqlite') {
+        $capsule->statement("DELETE FROM sqlite_sequence WHERE name = 'users'");
+    } else {
+        $capsule->statement('ALTER TABLE users AUTO_INCREMENT = 1');
+    }
+}
+
+beforeEach(function (): void {
+    wipeAgentControllerTestTables();
+});
+
+
 test('unauthenticated request throws UnauthenticatedException', function (): void {
     clearSession();
     [$controller, , , , $authMiddleware] = makeAgentController();

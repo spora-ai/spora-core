@@ -20,9 +20,12 @@ use Spora\Services\MailTemplateService;
 describe('MailTemplateSyncService', function (): void {
 
     beforeEach(function (): void {
-        Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-        $db->bootDatabaseConnectionOnly();
+        // Boot honouring SPORA_TEST_DB_DRIVER (sqlite|mysql|mariadb); this
+        // test builds its own partial schema (no full installer), so the
+        // connection-only entry point is the right one. On MySQL/MariaDB
+        // the factory creates a per-test fresh DB so the manual CREATE
+        // TABLE below doesn't collide with a pre-existing table.
+        TestDatabaseFactory::freshConnectionOnly();
 
         Capsule::schema()->create('mail_templates', static function (Blueprint $table): void {
             $table->bigIncrements('id');

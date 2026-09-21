@@ -13,7 +13,8 @@ return new class extends Migration
         Capsule::schema()->table('tasks', static function ($table): void {
             $table->unsignedBigInteger('retry_of_task_id')->nullable()->after('max_steps');
             $table->unsignedSmallInteger('retry_count')->default(0)->after('retry_of_task_id');
-            $table->timestamp('retry_after')->nullable()->after('retry_count');
+            // dateTime instead of timestamp — MySQL TIMESTAMP caps at 2038 (errno 1292 beyond); SQLite ignores the distinction.
+            $table->dateTime('retry_after')->nullable()->after('retry_count');
             $table->string('failure_reason', 1000)->nullable()->change();
         });
 

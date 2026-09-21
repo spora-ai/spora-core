@@ -3999,7 +3999,7 @@ describe('Orchestrator::start — attachment serialization round-trip', function
     function seedTextAsset(int $agentId, int $userId, string $body): MediaAsset
     {
         return MediaAsset::create([
-            'id'                => sprintf('%08x-%04x-%04x-%04x-%012x', random_int(0, 0xffffffff), random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffff), random_int(0, 0xffffffffffff)),
+            'id'                => testGenerateUuidV4(),
             'asset_url'         => '/api/v1/assets/' . bin2hex(random_bytes(16)) . '.pdf',
             'storage_mode'      => 'data_url',
             'mime_type'         => 'application/pdf',
