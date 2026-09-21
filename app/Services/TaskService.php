@@ -348,85 +348,128 @@ final class TaskService implements TaskServiceInterface
     public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
     {
         $result = Capsule::connection()->transaction(function () use ($taskId, $userId, $toolCallId, $formattedContent): array {
-            $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
-            $task = Task::where('id', $taskId)
-                ->whereIn('principal_id', $visiblePrincipalIds)
-                ->lockForUpdate()
-                ->first();
-            if ($task === null) {
-                throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
-            }
-            if ($task->status !== 'AWAITING_INPUT') {
-                throw new InvalidArgumentException('Task is not awaiting input.');
-            }
-
-            // Append exactly one tool history row per batch — mirrors the
-            // orchestrator's batched-tool-call pattern. The LLM sees a
-            // single coherent answer block, not per-question fragments.
-            $this->orchestrator->appendHistory(
-                taskId: $task->id,
-                role: 'tool',
-                content: $formattedContent,
-                context: new HistoryMessageContext(
-                    toolCallId: $toolCallId,
-                    toolName: 'ask_user_question',
-                ),
-            );
-
-            // Drop the answered batch from pending_state. If another
-            // batch is still pending (multiple ask_user_question calls
-            // in different turns), keep AWAITING_INPUT — the operator
-            // still has work to do.
-            $remaining = [];
-            if (is_string($task->pending_state) && $task->pending_state !== '') {
-                try {
-                    $existing = AgentState::fromJson($task->pending_state);
-                    foreach ($existing->pendingQuestions as $candidate) {
-                        if ($candidate->toolCallId !== $toolCallId) {
-                            $remaining[] = $candidate;
-                        }
-                    }
-                } catch (JsonException) {
-                    // Malformed pending_state — drop the column entirely
-                    // rather than carry forward corrupted data.
-                }
-            }
-
-            if ($remaining === []) {
-                $task->status = 'QUEUED';
-                $task->pending_state = null;
-            } else {
-                $state = new AgentState(
-                    taskId: $task->id,
-                    agentId: $task->agent_id,
-                    pendingToolCalls: [],
-                    messageSnapshot: [],
-                    stepCount: $task->step_count,
-                    maxSteps: $task->max_steps,
-                    pausedAt: gmdate('Y-m-d\TH:i:s\Z'),
-                    pendingQuestions: $remaining,
-                );
-                $task->pending_state = $state->toJson();
-            }
-            $task->save();
-
-            $fresh = $task->fresh();
-            // Capture principal_id inside the transaction so the
-            // post-commit publish doesn't re-query the row — re-queries
-            // outside the lock are unsafe (the row may have been
-            // deleted by a concurrent /cleanup) and would dereference a
-            // null, surfacing as a 502 on the proxy. Mirrors the
-            // `principalOwnerId()` pattern at every other publish site.
-            return [
-                'resource'     => $this->taskResource($fresh),
-                'principal_id' => $fresh->principalOwnerId(),
-            ];
+            $task = $this->loadAwaitingTask($taskId, $userId);
+            $this->recordAnswerHistory($task, $toolCallId, $formattedContent);
+            $this->persistAnsweredState($task, $toolCallId);
+            return $this->capturePublishedResource($task);
         });
 
-        // Best-effort Mercure publish — see method docblock. The
-        // controller returns 204 immediately after this method; a
-        // publish failure here is logged by MercurePublisher and the
-        // next poll of GET /api/v1/tasks/{id} re-syncs the client.
+        $this->publishAnsweredTaskBestEffort($taskId, $result);
+        return $result['resource'];
+    }
+
+    /**
+     * @throws InvalidArgumentException when the task is missing, not owned
+     *         by the calling user, or not in `AWAITING_INPUT`.
+     */
+    private function loadAwaitingTask(int $taskId, int $userId): Task
+    {
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)
+            ->whereIn('principal_id', $visiblePrincipalIds)
+            ->lockForUpdate()
+            ->first();
+        if ($task === null) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
+        }
+        if ($task->status !== 'AWAITING_INPUT') {
+            throw new InvalidArgumentException('Task is not awaiting input.');
+        }
+        return $task;
+    }
+
+    // Append exactly one tool history row per batch — mirrors the
+    // orchestrator's batched-tool-call pattern. The LLM sees a
+    // single coherent answer block, not per-question fragments.
+    private function recordAnswerHistory(Task $task, string $toolCallId, string $formattedContent): void
+    {
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: $formattedContent,
+            context: new HistoryMessageContext(
+                toolCallId: $toolCallId,
+                toolName: 'ask_user_question',
+            ),
+        );
+    }
+
+    // Drop the answered batch from pending_state. If another batch is
+    // still pending (multiple ask_user_question calls in different
+    // turns), keep AWAITING_INPUT — the operator still has work to do.
+    private function persistAnsweredState(Task $task, string $toolCallId): void
+    {
+        $remaining = $this->remainingPendingQuestions($task, $toolCallId);
+        if ($remaining === []) {
+            $task->status = 'QUEUED';
+            $task->pending_state = null;
+        } else {
+            $state = new AgentState(
+                taskId: $task->id,
+                agentId: $task->agent_id,
+                pendingToolCalls: [],
+                messageSnapshot: [],
+                stepCount: $task->step_count,
+                maxSteps: $task->max_steps,
+                pausedAt: gmdate('Y-m-d\TH:i:s\Z'),
+                pendingQuestions: $remaining,
+            );
+            $task->pending_state = $state->toJson();
+        }
+        $task->save();
+    }
+
+    /**
+     * @return list<PendingQuestionBatch>
+     */
+    private function remainingPendingQuestions(Task $task, string $answeredToolCallId): array
+    {
+        if (!is_string($task->pending_state) || $task->pending_state === '') {
+            return [];
+        }
+        try {
+            $existing = AgentState::fromJson($task->pending_state);
+        } catch (JsonException) {
+            // Malformed pending_state — drop the column entirely rather
+            // than carry forward corrupted data.
+            return [];
+        }
+        $remaining = [];
+        foreach ($existing->pendingQuestions as $candidate) {
+            if ($candidate->toolCallId !== $answeredToolCallId) {
+                $remaining[] = $candidate;
+            }
+        }
+        return $remaining;
+    }
+
+    // Capture principal_id inside the transaction so the post-commit
+    // publish doesn't re-query the row — re-queries outside the lock
+    // are unsafe (the row may have been deleted by a concurrent
+    // /cleanup) and would dereference a null, surfacing as a 502 on the
+    // proxy. Mirrors the `principalOwnerId()` pattern at every other
+    // publish site.
+    /**
+     * @return array{resource: array<string, mixed>, principal_id: int}
+     */
+    private function capturePublishedResource(Task $task): array
+    {
+        $fresh = $task->fresh();
+        return [
+            'resource'     => $this->taskResource($fresh),
+            'principal_id' => $fresh->principalOwnerId(),
+        ];
+    }
+
+    // Best-effort Mercure publish — see method docblock. The controller
+    // returns 200 with the new task resource; a publish failure here is
+    // logged by MercurePublisher and the next poll of GET
+    // /api/v1/tasks/{id} re-syncs the client.
+    /**
+     * @param array{resource: array<string, mixed>, principal_id: int} $result
+     */
+    private function publishAnsweredTaskBestEffort(int $taskId, array $result): void
+    {
         try {
             $this->mercure->publishForPrincipal(
                 $taskId,
@@ -438,8 +481,6 @@ final class TaskService implements TaskServiceInterface
             // (app/Services/MercurePublisher.php:122) — nothing else to
             // do here; the row state is already committed.
         }
-
-        return $result['resource'];
     }
 
     /**

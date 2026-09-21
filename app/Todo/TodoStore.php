@@ -146,22 +146,25 @@ final class TodoStore
      */
     private static function decodeData(mixed $raw): TodoState
     {
-        if (is_array($raw)) {
-            $decoded = $raw;
-        } elseif (is_string($raw) && $raw !== '') {
-            try {
-                $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-            } catch (JsonException) {
-                return TodoState::empty();
-            }
-        } else {
+        $decoded = self::decodeRaw($raw);
+        if ($decoded === null || !isset($decoded['todos']) || !is_array($decoded['todos'])) {
             return TodoState::empty();
         }
-
-        if (!isset($decoded['todos']) || !is_array($decoded['todos'])) {
-            return TodoState::empty();
-        }
-
         return TodoState::fromArray($decoded['todos']);
+    }
+
+    private static function decodeRaw(mixed $raw): ?array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        try {
+            return json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
     }
 }

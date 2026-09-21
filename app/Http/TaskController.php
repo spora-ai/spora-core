@@ -23,6 +23,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class TaskController
 {
+    private const NOT_FOUND_DESCRIPTION = 'NOT_FOUND — task is not owned by the calling user.';
+
+
     private const ERR_TASK_NOT_FOUND = 'Task not found.';
 
     private const ERR_INVALID_JSON = 'Request body must be valid JSON.';
@@ -378,7 +381,7 @@ final class TaskController
                 response: 200,
                 description: 'JSON envelope: `{data: {task: ...}}` — status flips to `QUEUED` (or stays `AWAITING_INPUT` if more batches are still pending).',
             ),
-            new OA\Response(response: 404, description: 'NOT_FOUND — task is not owned by the calling user.'),
+            new OA\Response(response: 404, description: self::NOT_FOUND_DESCRIPTION),
             new OA\Response(response: 422, description: 'VALIDATION_ERROR — malformed body or unknown header/selection.'),
         ],
     )]
@@ -398,23 +401,23 @@ final class TaskController
             return $parsed;
         }
 
+        // Mirror approve/reject: state-mutating transitions return the
+        // full task resource so the caller can update its store without
+        // an extra GET round-trip. (Carrying the new `status`,
+        // `pending_state` (now empty or with the next batch), and
+        // appended `task_history` row through the response also dodges
+        // the 204+body protocol trap entirely.)
         try {
-            // Mirror approve/reject: state-mutating transitions return the
-            // full task resource so the caller can update its store without
-            // an extra GET round-trip. (Carrying the new `status`,
-            // `pending_state` (now empty or with the next batch), and
-            // appended `task_history` row through the response also dodges
-            // the 204+body protocol trap entirely.)
             $task = $this->taskService->answerTask(
                 $taskId,
                 $userId,
                 $parsed['batch']->toolCallId,
                 $parsed['formatted'],
             );
-            return new JsonResponse(['data' => ['task' => $task]]);
         } catch (InvalidArgumentException $e) {
             return $this->errorForException($e);
         }
+        return new JsonResponse(['data' => ['task' => $task]]);
     }
 
     /**
@@ -520,7 +523,7 @@ final class TaskController
             ),
             new OA\Response(
                 response: 404,
-                description: 'NOT_FOUND — task is not owned by the calling user.',
+                description: self::NOT_FOUND_DESCRIPTION,
             ),
         ],
     )]
@@ -570,7 +573,7 @@ final class TaskController
             ),
             new OA\Response(
                 response: 404,
-                description: 'NOT_FOUND — task is not owned by the calling user.',
+                description: self::NOT_FOUND_DESCRIPTION,
             ),
         ],
     )]

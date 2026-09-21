@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use Closure;
 use Spora\Services\PrincipalContext;
 use Spora\Todo\TodoGuardException;
 use Spora\Todo\TodoItem;
@@ -419,7 +420,7 @@ final class TodoTool extends AbstractTool
         }
     }
 
-    private function inProgressGuard(string $id, TodoItemStatus $status): \Closure
+    private function inProgressGuard(string $id, TodoItemStatus $status): Closure
     {
         return function (TodoState $post) use ($id, $status): void {
             if ($status !== TodoItemStatus::InProgress) {
