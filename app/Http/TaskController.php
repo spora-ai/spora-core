@@ -401,12 +401,21 @@ final class TaskController
             return $parsed;
         }
 
-        // Mirror approve/reject: state-mutating transitions return the
-        // full task resource so the caller can update its store without
-        // an extra GET round-trip. (Carrying the new `status`,
-        // `pending_state` (now empty or with the next batch), and
-        // appended `task_history` row through the response also dodges
-        // the 204+body protocol trap entirely.)
+        return $this->executeAnswer($taskId, $userId, $parsed);
+    }
+
+    /**
+     * Mirror approve/reject: state-mutating transitions return the full
+     * task resource so the caller can update its store without an extra
+     * GET round-trip. (Carrying the new `status`, `pending_state` (now
+     * empty or with the next batch), and appended `task_history` row
+     * through the response also dodges the 204+body protocol trap
+     * entirely.)
+     *
+     * @param array{batch: \Spora\Tools\PendingQuestionBatch, formatted: string, byHeader: array<string, array{selections: list<string>, free_text: ?string}>} $parsed
+     */
+    private function executeAnswer(int $taskId, int $userId, array $parsed): JsonResponse
+    {
         try {
             $task = $this->taskService->answerTask(
                 $taskId,

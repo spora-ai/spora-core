@@ -131,6 +131,7 @@ final class TodoTool extends AbstractTool
 {
     public function __construct(
         private readonly TodoStoreRegistry $registry = new TodoStoreRegistry(),
+        private readonly TodoItemValidator $validator = new TodoItemValidator(),
     ) {}
 
     public function execute(
@@ -185,7 +186,7 @@ final class TodoTool extends AbstractTool
     private function doWrite(array $arguments, ?int $taskId): ToolResult
     {
         $todos = $arguments['todos'] ?? null;
-        $shape = $this->validateTodosArray($todos);
+        $shape = $this->validator->validateTodosArray($todos);
         if ($shape instanceof ToolResult) {
             return $shape;
         }
@@ -194,7 +195,7 @@ final class TodoTool extends AbstractTool
         $inProgressCount = 0;
         $order = 0;
         foreach ($todos as $rawItem) {
-            $built = $this->buildWriteItem($rawItem, $order);
+            $built = $this->validator->buildWriteItem($rawItem, $order);
             if ($built instanceof ToolResult) {
                 return $built;
             }
@@ -216,61 +217,17 @@ final class TodoTool extends AbstractTool
     }
 
     /**
-     * @param mixed $todos
-     */
-    private function validateTodosArray(mixed $todos): ?ToolResult
-    {
-        if ($todos === null) {
-            return new ToolResult(
-                false,
-                "For op=write, 'todos' is required (the full new todo list — pass [] to clear).",
-            );
-        }
-        if (!is_array($todos)) {
-            return new ToolResult(false, "For op=write, 'todos' must be an array.");
-        }
-        return null;
-    }
-
-    /**
-     * @param mixed $rawItem
-     * @return array{0: TodoItem, 1: bool}|ToolResult
-     */
-    private function buildWriteItem(mixed $rawItem, int $order): array|ToolResult
-    {
-        if (!is_array($rawItem)) {
-            return new ToolResult(false, "For op=write, every entry of 'todos' must be an object.");
-        }
-        $content = trim((string) ($rawItem['content'] ?? ''));
-        if ($content === '') {
-            return new ToolResult(false, "For op=write, every todo requires a non-empty 'content' string.");
-        }
-        $statusRaw = (string) ($rawItem['status'] ?? TodoItemStatus::Pending->value);
-        if (TodoItemStatus::tryFrom($statusRaw) === null) {
-            return new ToolResult(
-                false,
-                "For op=write, every todo's 'status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
-            );
-        }
-        return [
-            TodoItem::fromLlmInput($rawItem, $order),
-            $statusRaw === TodoItemStatus::InProgress->value,
-        ];
-    }
-
-    /**
      * @param array<string, mixed> $arguments
      */
     private function doAdd(array $arguments, ?int $taskId): ToolResult
     {
         $item = $arguments['item'] ?? null;
-        $shape = $this->validateAddItem($item);
+        $shape = $this->validator->validateForAdd($item);
         if ($shape instanceof ToolResult) {
             return $shape;
         }
 
         $content = trim((string) ($item['content'] ?? ''));
-        $statusRaw = (string) ($item['status'] ?? TodoItemStatus::Pending->value);
 
         $current = $taskId !== null
             ? $this->registry->forTask($taskId)->read()
@@ -309,39 +266,11 @@ final class TodoTool extends AbstractTool
     }
 
     /**
-     * @param mixed $item
-     */
-    private function validateAddItem(mixed $item): ?ToolResult
-    {
-        if ($item === null) {
-            return new ToolResult(
-                false,
-                "For op=add, 'item' is required (an object with at least 'content'; may also include 'id', 'activeForm', 'status').",
-            );
-        }
-        if (!is_array($item)) {
-            return new ToolResult(false, "For op=add, 'item' must be an object.");
-        }
-        $content = trim((string) ($item['content'] ?? ''));
-        if ($content === '') {
-            return new ToolResult(false, "For op=add, 'item.content' must be a non-empty string.");
-        }
-        $statusRaw = (string) ($item['status'] ?? TodoItemStatus::Pending->value);
-        if (TodoItemStatus::tryFrom($statusRaw) === null) {
-            return new ToolResult(
-                false,
-                "For op=add, 'item.status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
-            );
-        }
-        return null;
-    }
-
-    /**
      * @param array<string, mixed> $arguments
      */
     private function doSetStatus(array $arguments, ?int $taskId): ToolResult
     {
-        $parsed = $this->parseSetStatusArgs($arguments);
+        $parsed = $this->validator->parseSetStatusArgs($arguments);
         if ($parsed instanceof ToolResult) {
             return $parsed;
         }
@@ -350,41 +279,6 @@ final class TodoTool extends AbstractTool
         return $result instanceof ToolResult
             ? $result
             : $this->render($result, $this->countInProgress($result->items), 'set_status');
-    }
-
-    /**
-     * @param array<string, mixed> $arguments
-     * @return array{0: string, 1: TodoItemStatus}|ToolResult
-     */
-    private function parseSetStatusArgs(array $arguments): array|ToolResult
-    {
-        $id = trim((string) ($arguments['id'] ?? ''));
-        if ($id === '') {
-            return new ToolResult(
-                false,
-                "For op=set_status, 'id' is required (top-level; returned in data.items[i].id from earlier ops).",
-            );
-        }
-        $status = $this->validateStatusValue(trim((string) ($arguments['status'] ?? '')));
-        return $status instanceof ToolResult ? $status : [$id, $status];
-    }
-
-    /**
-     * @return TodoItemStatus|ToolResult
-     */
-    private function validateStatusValue(string $statusRaw): TodoItemStatus|ToolResult
-    {
-        if ($statusRaw === '') {
-            return new ToolResult(
-                false,
-                "For op=set_status, 'status' is required (one of: pending, in_progress, completed).",
-            );
-        }
-        $status = TodoItemStatus::tryFrom($statusRaw);
-        return $status ?? new ToolResult(
-            false,
-            "For op=set_status, 'status' must be one of: pending, in_progress, completed. Got: '{$statusRaw}'.",
-        );
     }
 
     private function lookupAndUpdateStatus(string $id, TodoItemStatus $status, ?int $taskId): TodoState|ToolResult

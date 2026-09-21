@@ -162,9 +162,10 @@ final class TodoStore
             return null;
         }
         try {
-            return json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
             return null;
         }
+        return $decoded;
     }
 }
