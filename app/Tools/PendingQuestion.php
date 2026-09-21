@@ -33,7 +33,6 @@ final readonly class PendingQuestion
             $options[] = [
                 'label'       => (string) ($raw['label'] ?? ''),
                 'description' => isset($raw['description']) ? (string) $raw['description'] : null,
-                'preview'     => isset($raw['preview']) ? (string) $raw['preview'] : null,
             ];
         }
 

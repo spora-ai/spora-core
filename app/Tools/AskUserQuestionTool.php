@@ -15,33 +15,37 @@ use Spora\Tools\ValueObjects\ToolResult;
  * questions to the operator. Disabled by default — operators must opt
  * the agent in on the Tools tab before the model can use it.
  *
- * The wire shape is opencode-compatible: each question has 2-4 options,
- * an optional `preview` snippet shown when the option is focused, and
- * per-question `multiple` / `allowFreeText` flags (both default sensible).
- * The `header` field is the short chip label rendered above each
- * question (≤30 chars, matches opencode).
+ * Wire shape (opencode-compatible): each question has 2-4 options
+ * (`label`, `description`) and per-question `multiple` / `allowFreeText`
+ * flags. The `header` is the short chip label rendered above each
+ * question (≤30 chars).
  *
  * Execution triggers a new `AWAITING_INPUT` lifecycle status (parallel
  * to `PENDING_APPROVAL`) and parks the task on the batch's tool_call_id
  * until the operator submits answers via
  * `POST /api/v1/tasks/{id}/answer`. The tool call itself never
  * resolves to a real ToolResult — the disposition flow handles
- * resuming the loop.
+ * resuming the loop, and the operator's answers are replayed into
+ * the LLM as a plaintext tool-result block (see description below).
  */
 #[Tool(
     name: 'ask_user_question',
     description: 'Use this tool when you need a decision from the operator to proceed. '
                . 'Provide 1-4 questions per call; each question has 2-4 options. The operator '
                . 'navigates between questions before submitting all answers at once — do not '
-               . 'expect to ask a follow-up. Each question carries a `header` (≤30 char chip '
-               . 'label) and a `question` (full text). `options[].label` is 1-5 words; '
-               . '`options[].description` is a one-line hint; `options[].preview` is an '
-               . 'optional short snippet shown when the option is focused. Set `multiple: '
-               . 'true` on a question to let the operator pick more than one option; set '
-               . '`allowFreeText: false` to disable the free-text escape hatch on a question. '
-               . 'Do NOT use this for clarifying questions about the user\'s intent (use the '
-               . 'regular chat instead), for trivial decisions, or for anything that does not '
-               . 'block the work.',
+               . 'expect a follow-up. Size budgets: `header` ≤30 chars (chip label); '
+               . '`options[].label` ~1-5 words; `options[].description` ~one line. '
+               . 'Defaults: `multiple=false` (set true for checkbox-style picks); '
+               . '`allowFreeText=true` (set false to force a selection from `options[]` only). '
+               . 'When `allowFreeText` is true, the operator may submit `free_text` instead '
+               . 'of — or alongside — `selections[]`; `selections` can be empty. Do NOT use '
+               . 'this for clarifying questions about the user\'s intent (use the regular '
+               . 'chat instead), for trivial decisions, or for anything that does not block '
+               . 'the work. Return shape: when the operator submits, the loop resumes with '
+               . 'one plaintext tool-result block per question, lines joined by `\\n` — '
+               . '`[ask_user_question selections: ["Tea"]]` for single-select, '
+               . '`[ask_user_question selections: ["Yes", "Morning"] free_text: "any time works"]` '
+               . 'when free-text is also given.',
     displayName: 'Ask User',
     category: 'meta',
     icon: 'help-circle',

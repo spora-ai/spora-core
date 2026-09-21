@@ -103,8 +103,8 @@ function answerControllerHarness(?Closure $mercureConfigure = null): array
                 question: 'Pick a DB',
                 header: 'DB',
                 options: [
-                    ['label' => 'SQLite', 'description' => null, 'preview' => null],
-                    ['label' => 'MySQL', 'description' => null, 'preview' => null],
+                    ['label' => 'SQLite', 'description' => null],
+                    ['label' => 'MySQL', 'description' => null],
                 ],
                 multiple: false,
                 allowFreeText: true,

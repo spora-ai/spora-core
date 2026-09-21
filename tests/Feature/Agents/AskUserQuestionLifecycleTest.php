@@ -73,7 +73,7 @@ it('round-trips a PendingQuestionBatch through AgentState JSON', function (): vo
                 new Spora\Tools\PendingQuestion(
                     question: 'Pick a DB',
                     header: 'DB',
-                    options: [['label' => 'SQLite', 'description' => null, 'preview' => null]],
+                    options: [['label' => 'SQLite', 'description' => null]],
                     multiple: false,
                     allowFreeText: true,
                 ),
@@ -169,8 +169,8 @@ it('answerTask flips AWAITING_INPUT → QUEUED when no batches remain', function
                     'question' => 'Pick a DB',
                     'header' => 'DB',
                     'options' => [
-                        ['label' => 'SQLite', 'description' => null, 'preview' => null],
-                        ['label' => 'MySQL', 'description' => null, 'preview' => null],
+                        ['label' => 'SQLite', 'description' => null],
+                        ['label' => 'MySQL', 'description' => null],
                     ],
                     'multiple' => false,
                     'allowFreeText' => true,
@@ -220,7 +220,7 @@ it('answerTask keeps AWAITING_INPUT when other batches remain pending', function
                 'created_at' => '2026-09-19T10:30:00Z',
                 'questions' => [[
                     'question' => 'A', 'header' => 'A',
-                    'options' => [['label' => 'a1', 'description' => null, 'preview' => null], ['label' => 'a2', 'description' => null, 'preview' => null]],
+                    'options' => [['label' => 'a1', 'description' => null], ['label' => 'a2', 'description' => null]],
                     'multiple' => false, 'allowFreeText' => true,
                 ]],
             ],
@@ -229,7 +229,7 @@ it('answerTask keeps AWAITING_INPUT when other batches remain pending', function
                 'created_at' => '2026-09-19T10:31:00Z',
                 'questions' => [[
                     'question' => 'B', 'header' => 'B',
-                    'options' => [['label' => 'b1', 'description' => null, 'preview' => null], ['label' => 'b2', 'description' => null, 'preview' => null]],
+                    'options' => [['label' => 'b1', 'description' => null], ['label' => 'b2', 'description' => null]],
                     'multiple' => false, 'allowFreeText' => true,
                 ]],
             ],
@@ -273,7 +273,7 @@ it('rejects an answer that targets a tool_call_id not in pending_state', functio
                 'created_at' => '2026-09-19T10:30:00Z',
                 'questions' => [[
                     'question' => 'Q', 'header' => 'H',
-                    'options' => [['label' => 'a', 'description' => null, 'preview' => null], ['label' => 'b', 'description' => null, 'preview' => null]],
+                    'options' => [['label' => 'a', 'description' => null], ['label' => 'b', 'description' => null]],
                     'multiple' => false, 'allowFreeText' => true,
                 ]],
             ],
@@ -309,8 +309,8 @@ it('rejects when answers count != questions count', function (): void {
                 'tool_call_id' => 'pc_two_questions',
                 'created_at' => '2026-09-19T10:30:00Z',
                 'questions' => [
-                    ['question' => 'Q1', 'header' => 'Q1', 'options' => [['label' => 'a', 'description' => null, 'preview' => null], ['label' => 'b', 'description' => null, 'preview' => null]], 'multiple' => false, 'allowFreeText' => true],
-                    ['question' => 'Q2', 'header' => 'Q2', 'options' => [['label' => 'a', 'description' => null, 'preview' => null], ['label' => 'b', 'description' => null, 'preview' => null]], 'multiple' => false, 'allowFreeText' => true],
+                    ['question' => 'Q1', 'header' => 'Q1', 'options' => [['label' => 'a', 'description' => null], ['label' => 'b', 'description' => null]], 'multiple' => false, 'allowFreeText' => true],
+                    ['question' => 'Q2', 'header' => 'Q2', 'options' => [['label' => 'a', 'description' => null], ['label' => 'b', 'description' => null]], 'multiple' => false, 'allowFreeText' => true],
                 ],
             ],
         ],
@@ -347,7 +347,7 @@ it('rejects free-text answer when allowFreeText=false', function (): void {
                 'created_at' => '2026-09-19T10:30:00Z',
                 'questions' => [[
                     'question' => 'Q', 'header' => 'H',
-                    'options' => [['label' => 'a', 'description' => null, 'preview' => null], ['label' => 'b', 'description' => null, 'preview' => null]],
+                    'options' => [['label' => 'a', 'description' => null], ['label' => 'b', 'description' => null]],
                     'multiple' => false, 'allowFreeText' => false,
                 ]],
             ],
@@ -385,7 +385,7 @@ it('rejects an unknown option label', function (): void {
                 'created_at' => '2026-09-19T10:30:00Z',
                 'questions' => [[
                     'question' => 'Q', 'header' => 'H',
-                    'options' => [['label' => 'a', 'description' => null, 'preview' => null], ['label' => 'b', 'description' => null, 'preview' => null]],
+                    'options' => [['label' => 'a', 'description' => null], ['label' => 'b', 'description' => null]],
                     'multiple' => false, 'allowFreeText' => true,
                 ]],
             ],

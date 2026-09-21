@@ -101,8 +101,8 @@ it('exposes pending_questions batches under data.task.pending_questions when pen
                     question: 'Pick a database',
                     header: 'DB',
                     options: [
-                        ['label' => 'SQLite', 'description' => 'Zero-config', 'preview' => null],
-                        ['label' => 'MySQL',  'description' => 'Shared host', 'preview' => null],
+                        ['label' => 'SQLite', 'description' => 'Zero-config'],
+                        ['label' => 'MySQL',  'description' => 'Shared host'],
                     ],
                     multiple: false,
                     allowFreeText: true,
