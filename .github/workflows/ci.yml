@@ -154,15 +154,17 @@ jobs:
           exit 1
 
       - name: Run Pest (parallel, MySQL)
-        # `--processes=8` instead of `auto`: the GitHub-hosted 4-core runner
-        # gives `auto` ≈ 4, but each Pest worker opens several connections
-        # (main + per-test transaction + Eloquent). With the engine's
-        # default `max_connections=151` we hit
-        # `SQLSTATE[08004] [1040] Too many connections` long before the
-        # suite finishes. Capping at 8 keeps the connection count under
-        # the default while still amortising the per-worker schema
-        # install across enough tests to stay in the ~5 minute budget.
-        run: ./vendor/bin/pest --parallel --processes=8 --max-batch-size=50 --fail-on-risky
+        # `--processes=2` instead of `auto`: each Pest worker opens
+        # many connections (main + per-test transaction + Eloquent
+        # helpers + the migration tests that drop+recreate the DB and
+        # open extra ones). Even with the `--max-connections=500`
+        # override applied to the container (via the official
+        # docker-entrypoint.sh prepending `mysqld`), the cumulative
+        # connection count across 8 workers has been hitting
+        # `SQLSTATE[08004] [1040] Too many connections`. Capping at 2
+        # keeps the connection count comfortably under the default 151
+        # and the cost is ~5 minutes of CI time.
+        run: ./vendor/bin/pest --parallel --processes=2 --max-batch-size=50 --fail-on-risky
 
   test-mariadb:
     # MariaDB 11 compatibility gate. Mirrors `test-mysql`; the separate
@@ -230,7 +232,7 @@ jobs:
         # Same rationale as the MySQL job: cap processes to stay under
         # MariaDB's default `max_connections=151`. See the MySQL job's
         # comment for the full breakdown.
-        run: ./vendor/bin/pest --parallel --processes=8 --max-batch-size=50 --fail-on-risky
+        run: ./vendor/bin/pest --parallel --processes=2 --max-batch-size=50 --fail-on-risky
 
   static-analysis:
     name: PHPStan
