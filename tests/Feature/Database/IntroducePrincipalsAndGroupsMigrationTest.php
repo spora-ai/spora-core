@@ -291,6 +291,9 @@ test('0067 migration does not cascade-delete dependent rows when rebuilding the 
 });
 
 test('0067 migration leaves a coherent sqlite_master with no orphan indexes', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('sqlite_master / PRAGMA queries are SQLite-only.');
+    }
     // The Pest `beforeEach` already booted every migration including 0067.
     // Re-running 0067 would throw — and we don't need to. We just inspect
     // the post-0067 schema for the kind of malformed state the operator's
@@ -420,6 +423,9 @@ test('0067 migration is idempotent — up() can be re-run against the post-0067 
 });
 
 test('0067 migration recovers from a partially-applied state on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The partial-state simulation uses PRAGMA table_info / foreign_key_list to rebuild a SQLite table — MariaDB/MySQL take the real ALTER path and the simulation is meaningless.');
+    }
     // Simulate the operator's MariaDB partial state: the principal_id FK
     // add step failed previously, so llm_driver_configurations has the
     // column + index but no FK to principals. On SQLite ALTER TABLE
