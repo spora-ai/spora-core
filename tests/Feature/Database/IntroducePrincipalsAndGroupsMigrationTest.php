@@ -344,6 +344,9 @@ test('0067 migration leaves a coherent sqlite_master with no orphan indexes', fu
 });
 
 test('0067 migration rebuild preserves pre-existing indexes on settings tables', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The test exercises the SQLite-only rebuild path (PRAGMA table_info / foreign_key_list). MariaDB/MySQL take the real ALTER path.');
+    }
     // The migration's rebuildSqliteTableWithoutUserId() recreates the table
     // from PRAGMA table_info + PRAGMA foreign_key_list. It does NOT walk
     // PRAGMA index_list, so any index on the source table that isn't the
@@ -554,6 +557,9 @@ test('0067 migration recovers from a partially-applied state on SQLite', functio
 });
 
 test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA foreign_key_list`; on MariaDB/MySQL the helper itself switches to information_schema.key_column_usage.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 
@@ -575,6 +581,9 @@ test('0067 migration helper: foreignKeyExists on SQLite', function (): void {
 });
 
 test('0067 migration helper: indexExists on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA index_list`; on MariaDB/MySQL the helper itself switches to information_schema.statistics.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 
@@ -590,6 +599,9 @@ test('0067 migration helper: indexExists on SQLite', function (): void {
 });
 
 test('0067 migration helper: findIndexOn on SQLite', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The helper under test walks `PRAGMA index_list` / `PRAGMA index_info`; on MariaDB/MySQL the helper itself switches to information_schema.statistics.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0067_introduce_principals_and_groups.php';
     $migration->up();
 
