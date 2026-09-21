@@ -53,6 +53,38 @@ function makeRetryChainController(?TaskServiceInterface $taskService = null): ar
 
 function seedUserAndAgent(mixed $authService): array
 {
+    // Force the user id to be `1` so the mock expectations (which pin
+    // `startTask(1, 1, …)`, `cancelTask(1, …)`, etc. to specific ids) match
+    // on every driver. On SQLite the auto-increment counter starts at 1
+    // per test, so this was a no-op; on MariaDB the counter advances past
+    // 1 across rolled-back transactions, which made `1` unreachable and
+    // every expectation miss.
+    //
+    // Truncate-then-reseed: `DELETE FROM users` would leave the auto-
+    // increment counter alone on InnoDB. `TRUNCATE` resets the counter
+    // but fails on FK references from agents/principals/etc. Easiest path
+    // that survives FKs is to delete everything that references users,
+    // truncate, then re-register via authService so the delight-im/auth
+    // throttling and audit-trail plumbing all still run.
+    // Wipe everything that holds a FK to users (FKs are ON on both engines
+    // via Capsule's SQLite `PRAGMA foreign_keys = ON` and InnoDB), then
+    // wipe users themselves, then reset the auto-increment counter so the
+    // next insert gets id=1.
+    Illuminate\Database\Capsule\Manager::table('tool_calls')->delete();
+    Illuminate\Database\Capsule\Manager::table('task_history')->delete();
+    Illuminate\Database\Capsule\Manager::table('tasks')->delete();
+    Illuminate\Database\Capsule\Manager::table('agents')->delete();
+    Illuminate\Database\Capsule\Manager::table('principals')->delete();
+    Illuminate\Database\Capsule\Manager::table('users')->delete();
+    if (Illuminate\Database\Capsule\Manager::connection()->getDriverName() === 'sqlite') {
+        // SQLite stores the AUTOINCREMENT counter in a separate `sqlite_sequence`
+        // table; `DELETE FROM users` does not touch it. The simplest portable
+        // reset is to truncate that side-table directly.
+        Illuminate\Database\Capsule\Manager::statement("DELETE FROM sqlite_sequence WHERE name = 'users'");
+    } else {
+        Illuminate\Database\Capsule\Manager::statement('ALTER TABLE users AUTO_INCREMENT = 1');
+    }
+
     $userId = $authService->register('task@example.com', TEST_PASSWORD, 'Task');
     simulateLoggedInSession($userId, 'task@example.com');
 
