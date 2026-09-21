@@ -123,7 +123,7 @@ test('setUserPreferredConfig allows global config', function (): void {
 
     expect($result)->toBeTrue();
 
-    $principalId = (int) \Illuminate\Database\Capsule\Manager::table('principals')
+    $principalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
         ->where('type', 'user')->where('user_id', $userId)->value('id');
     $pref = PrincipalPreference::where('principal_id', $principalId)->first();
     expect($pref->preferred_llm_config_id)->toBe($globalConfig->id);
