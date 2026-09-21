@@ -8,7 +8,7 @@ use Spora\Services\MediaArchive\MediaAssetSerializer;
 test('serialize emits is_temporary=false on a fresh non-temp asset', function (): void {
     $serializer = new MediaAssetSerializer();
     $asset = new MediaAsset();
-    $asset->id = bin2hex(random_bytes(8));
+    $asset->id = testGenerateUuidV4();
     $asset->user_id = 1;
     $asset->asset_url = '/api/v1/assets/' . $asset->id;
     $asset->storage_mode = 'local';
@@ -22,7 +22,7 @@ test('serialize emits is_temporary=false on a fresh non-temp asset', function ()
 test('serialize emits is_temporary=true when the row is stamped temp', function (): void {
     $serializer = new MediaAssetSerializer();
     $asset = new MediaAsset();
-    $asset->id = bin2hex(random_bytes(8));
+    $asset->id = testGenerateUuidV4();
     $asset->user_id = 1;
     $asset->asset_url = '/api/v1/assets/' . $asset->id;
     $asset->storage_mode = 'local';
@@ -36,7 +36,7 @@ test('serialize emits is_temporary=true when the row is stamped temp', function 
 test('serialize coerces null and missing to false (no leftover nulls on the wire)', function (): void {
     $serializer = new MediaAssetSerializer();
     $asset = new MediaAsset();
-    $asset->id = bin2hex(random_bytes(8));
+    $asset->id = testGenerateUuidV4();
     $asset->user_id = 1;
     $asset->asset_url = '/api/v1/assets/' . $asset->id;
     $asset->storage_mode = 'local';

@@ -67,7 +67,7 @@ afterEach(function (): void {
 function seedTempAsset(int $userId, ?int $agentId, bool $isTemp, string $suffix): MediaAsset
 {
     $asset = new MediaAsset();
-    $asset->id = bin2hex(random_bytes(8));
+    $asset->id = testGenerateUuidV4();
     $asset->user_id = $userId;
     $asset->agent_id = $agentId;
     $asset->is_temporary = $isTemp;

@@ -13,19 +13,47 @@ use Illuminate\Database\Schema\Blueprint;
  */
 
 afterEach(function (): void {
-    Capsule::schema()->dropIfExists('media_assets');
+    // The migration-suite schema installs `media_derivatives` (FK to
+    // media_assets.id) before this test runs. SQLite's default FK
+    // semantics don't block the drop, but MariaDB/InnoDB refuses to drop
+    // a parent table while a child FK points at it. Suspend FK checks for
+    // the duration of the drop — they're test-scoped and never re-enabled
+    // inside this file's tests.
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'mysql' || $driver === 'mariadb') {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS = 0');
+    }
+    try {
+        Capsule::schema()->dropIfExists('media_assets');
+    } finally {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            Capsule::statement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
 });
 
 function createMediaAssetsTable(): void
 {
     // The shared in-memory SQLite DB carries state from prior tests, so
-    // every migration test starts from a clean table.
-    Capsule::schema()->dropIfExists('media_assets');
-    Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
-        $t->string('id', 36)->primary();
-        $t->text('markdown_content')->nullable();
-        $t->timestamps();
-    });
+    // every migration test starts from a clean table. MariaDB/InnoDB holds
+    // an FK from `media_derivatives` to `media_assets.id` from earlier
+    // migrations in the suite — suspend FK checks so the drop succeeds.
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'mysql' || $driver === 'mariadb') {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS = 0');
+    }
+    try {
+        Capsule::schema()->dropIfExists('media_assets');
+        Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
+            $t->string('id', 36)->primary();
+            $t->text('markdown_content')->nullable();
+            $t->timestamps();
+        });
+    } finally {
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            Capsule::statement('SET FOREIGN_KEY_CHECKS = 1');
+        }
+    }
 }
 
 function runTranscribeMigration(): mixed

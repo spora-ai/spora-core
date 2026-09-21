@@ -94,15 +94,20 @@ if (!function_exists('seedGroupPrincipal')) {
      * Insert a `groups` row + the matching `principals` row in one shot.
      * Used by the principal-scoping list tests — the FK on
      * `principals.group_id` requires the group row to exist first.
+     *
+     * `$createdByUserId` must reference an existing `users.id`. The FK on
+     * `groups.created_by_user_id` rejects stale ids — SQLite's per-test
+     * auto-increment starts at 1, MariaDB's counter persists across tests,
+     * so a hardcoded `1` worked locally and broke in CI.
      */
-    function seedGroupPrincipal(int $groupId, string $name): int
+    function seedGroupPrincipal(int $groupId, string $name, int $createdByUserId): int
     {
         Capsule::table('groups')->updateOrInsert(
             ['id' => $groupId],
             [
                 'name' => $name,
                 'description' => null,
-                'created_by_user_id' => 1,
+                'created_by_user_id' => $createdByUserId,
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s'),
             ],
@@ -511,8 +516,8 @@ describe('MediaArchiveService::list', function (): void {
 
             $callerId = bootAuthLayer()->register('principal-filter@example.com', 'Password1!', 'Owner');
             $userPrincipalId = createUserPrincipalPublic($callerId);
-            $groupPrincipalAId = seedGroupPrincipal(901, 'PF Group A');
-            $groupPrincipalBId = seedGroupPrincipal(902, 'PF Group B');
+            $groupPrincipalAId = seedGroupPrincipal(901, 'PF Group A', $callerId);
+            $groupPrincipalBId = seedGroupPrincipal(902, 'PF Group B', $callerId);
 
             $userAgent = Agent::create([
                 'principal_id' => $userPrincipalId,
@@ -582,7 +587,7 @@ describe('MediaArchiveService::list', function (): void {
 
             $callerId = bootAuthLayer()->register('pf-uploads@example.com', 'Password1!', 'Uploader');
             $userPrincipalId = createUserPrincipalPublic($callerId);
-            $groupPrincipalId = seedGroupPrincipal(903, 'PF Uploads Group');
+            $groupPrincipalId = seedGroupPrincipal(903, 'PF Uploads Group', $callerId);
 
             // Direct upload by the caller (user_id = $callerId, agent_id = null).
             $ctx['service']->ingest(new MediaIngestRequest(
@@ -625,7 +630,7 @@ describe('MediaArchiveService::list', function (): void {
 
             $callerId = bootAuthLayer()->register('pf-legacy@example.com', 'Password1!', 'Legacy');
             $userPrincipalId = createUserPrincipalPublic($callerId);
-            $otherPrincipalId = seedGroupPrincipal(904, 'PF Legacy Other');
+            $otherPrincipalId = seedGroupPrincipal(904, 'PF Legacy Other', $callerId);
             $ownAgent = Agent::create([
                 'principal_id' => $userPrincipalId,
                 'name' => 'pf-legacy-own',
