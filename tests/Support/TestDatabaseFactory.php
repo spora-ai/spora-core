@@ -142,6 +142,13 @@ final class TestDatabaseFactory
         self::dropWorkerDatabase();
         self::createWorkerDatabase();
         self::$workerSchemaInstalled = false;
+        // The local stamp file from the previous worker DB is still in
+        // place (it lives at <BASE_PATH>/storage/.schema_stamp, not on the
+        // remote DB server). Its hash would still match the unchanged
+        // migration files, so the installer's O(1) hot path would skip the
+        // migration run entirely and leave the freshly-created (empty) DB
+        // without a schema. Invalidate the stamp so the install runs.
+        self::invalidateLocalStamp();
 
         Database::resetBootState();
         Database::setSchemaInstallSkipped(false);
@@ -197,11 +204,20 @@ final class TestDatabaseFactory
         self::dropWorkerDatabase();
         self::createWorkerDatabase();
         self::$workerSchemaInstalled = false;
+        // Same rationale as `freshDatabase()` above — the local stamp file
+        // would otherwise short-circuit the next `boot()` against this
+        // empty DB. The test calling this method will manually `CREATE TABLE`
+        // its own partial schema; the next factory `boot()` is responsible
+        // for re-installing the full schema.
+        self::invalidateLocalStamp();
 
         Database::resetBootState();
         Database::setSchemaInstallSkipped(false);
         (new Database(self::buildConfigForDriver()))->bootDatabaseConnectionOnly();
-        Database::setSchemaInstallSkipped(true);
+        // Don't set the skip flag here — the DB is empty; the next
+        // `boot()` (or this test's manual DDL) is responsible for whatever
+        // schema it wants to see. `workerSchemaInstalled` stays false so
+        // the next factory boot knows it still owes an install.
         self::$workerSchemaInstalled = false;
     }
 
@@ -309,6 +325,26 @@ final class TestDatabaseFactory
         } catch (Throwable) {
             // Best effort — running at shutdown means we have nowhere to
             // surface the error and the parent process is already moving on.
+        }
+    }
+
+    /**
+     * Delete the local `storage/.schema_stamp` so the installer's O(1)
+     * hot path doesn't skip a migration run we actually need. Called
+     * after `freshDatabase()`/`freshConnectionOnly()` drop the worker DB
+     * — the remote DB is empty, but the local stamp file (which lives
+     * on the runner's filesystem, not the DB server) still claims the
+     * schema is current and would otherwise short-circuit the install
+     * for the next `boot()` against the freshly-created DB.
+     *
+     * Best-effort — missing stamp file is fine (the install runs anyway);
+     * an unwritable stamp file would just cost one extra migration run.
+     */
+    private static function invalidateLocalStamp(): void
+    {
+        $stampPath = BASE_PATH . '/storage/.schema_stamp';
+        if (is_file($stampPath)) {
+            @unlink($stampPath);
         }
     }
 }
