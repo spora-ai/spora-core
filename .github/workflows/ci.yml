@@ -113,10 +113,11 @@ jobs:
         # default and surfaces as `SQLSTATE[08004] [1040] Too many
         # connections`. 500 fits 18 workers × ~25 connections with
         # headroom for the migration tests that drop+recreate their DB.
-        # Array form because the official `mysql:8.0` image's CMD is
-        # `mysqld` — a scalar `command:` would replace it, leaving the
-        # entrypoint to invoke a non-existent binary.
-        command: ["mysqld", "--max-connections=500"]
+        # GitHub Actions' service container `command:` is a scalar string;
+        # the official mysql:8.0 entrypoint script prepends `mysqld` to
+        # any first arg that starts with `-`, so a bare flag here becomes
+        # `mysqld --max-connections=500` at exec time.
+        command: --max-connections=500
         options: >-
           --tmpfs /var/lib/mysql:rw,noexec,nosuid,size=1024m
           --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
@@ -190,12 +191,12 @@ jobs:
           --health-timeout=5s
           --health-retries=10
         # Same reason as the MySQL job: Pest's parallel runner exhausts
-        # the default 151 max_connections. Array form because the
-        # `mariadb:11` image's CMD is `mariadbd` — scalar `command:`
-        # would replace it and leave the entrypoint invoking a
-        # non-existent binary. The `mariadb:11` image ships `mysqladmin`
-        # (not `mariadb-admin`) so the wait step uses the former.
-        command: ["mariadbd", "--max-connections=500"]
+        # the default 151 max_connections. The `mariadb:11` entrypoint
+        # script prepends `mariadbd` to any first arg starting with `-`,
+        # so the scalar flag here becomes `mariadbd --max-connections=500`
+        # at exec time. The `mariadb:11` image ships `mysqladmin` (not
+        # `mariadb-admin`) so the wait step uses the former.
+        command: --max-connections=500
     env:
       SPORA_TEST_DB_DRIVER:   mariadb
       SPORA_TEST_DB_HOST:     127.0.0.1
