@@ -215,6 +215,15 @@ uses(Tests\Concerns\CreatesPrincipal::class)
         if (Illuminate\Database\Capsule\Manager::connection()->transactionLevel() > 0) {
             Illuminate\Database\Capsule\Manager::connection()->rollBack();
         }
+        // Clear the simulated PHP session between tests. On SQLite the
+        // per-test `:memory:` rebuild hides this leak; on MariaDB the
+        // per-worker DB keeps the `users_sessions` row alive and the
+        // `$_SESSION` superglobal is a PHP-process-level global that
+        // survives across tests in the same worker, so a `bootAuth()`
+        // call from one test bleeds into the next test that expected to
+        // start unauthenticated (e.g. `AgentTransferController::transfer
+        // Principal → returns 401 when caller is not logged in`).
+        clearSession();
         Spora\Core\Database::resetBootState();
         $previous = $GLOBALS['__spora_storage_dir_previous'] ?? false;
         if ($previous === false) {
