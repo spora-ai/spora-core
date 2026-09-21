@@ -32,6 +32,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 final class ScheduleOperationRunner
 {
+    use SchedulableTypeCoercion;
+
     public function __construct(
         private readonly ScheduledRunServiceInterface $scheduledRunService,
         private readonly PromptTemplateServiceInterface $promptTemplateService,
@@ -120,7 +122,7 @@ final class ScheduleOperationRunner
             return $patch;
         }
 
-        $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId, $patch);
+        $result = $this->scheduledRunService->updateRun($scheduleId, $targetAgentId, $userId, $this->canonicaliseSchedulePatch($patch));
 
         return $result === null
             ? ToolResult::fail('update_schedule: schedule not found or not owned by this user')
@@ -142,7 +144,7 @@ final class ScheduleOperationRunner
             return $patch;
         }
 
-        $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId, $patch);
+        $result = $this->promptTemplateService->updateTemplate($templateId, $targetAgentId, $userId, $this->canonicaliseTemplatePatch($patch));
 
         return $result === null
             ? ToolResult::fail('update_prompt_template: prompt template not found or not owned by this user')
@@ -198,5 +200,60 @@ final class ScheduleOperationRunner
             "Triggered schedule #{$scheduleId} on agent #{$targetAgentId}; new task #{$taskId}.",
             $result,
         );
+    }
+
+    /**
+     * Normalise the leniently-validated schedule patch to canonical PHP
+     * types (bool / int) before handing it to the service layer. The
+     * DB columns expect tinyint, so a string `"25"` would otherwise
+     * round-trip as 0 in MySQL.
+     *
+     * @param  array<string, mixed> $patch
+     * @return array<string, mixed>
+     */
+    private function canonicaliseSchedulePatch(array $patch): array
+    {
+        if (isset($patch['is_active'])) {
+            $bool = $this->coerceBool($patch['is_active']);
+            if ($bool !== null) {
+                $patch['is_active'] = $bool;
+            }
+        }
+        if (array_key_exists('template_id', $patch) && $patch['template_id'] !== null) {
+            $int = $this->coercePositiveInt($patch['template_id']);
+            if ($int !== null) {
+                $patch['template_id'] = $int;
+            }
+        }
+        if (array_key_exists('max_steps_override', $patch) && $patch['max_steps_override'] !== null) {
+            $int = $this->coercePositiveInt($patch['max_steps_override']);
+            if ($int !== null) {
+                $patch['max_steps_override'] = $int;
+            }
+        }
+
+        return $patch;
+    }
+
+    /**
+     * @param  array<string, mixed> $patch
+     * @return array<string, mixed>
+     */
+    private function canonicaliseTemplatePatch(array $patch): array
+    {
+        if (isset($patch['is_active'])) {
+            $bool = $this->coerceBool($patch['is_active']);
+            if ($bool !== null) {
+                $patch['is_active'] = $bool;
+            }
+        }
+        if (array_key_exists('max_steps', $patch) && $patch['max_steps'] !== null) {
+            $int = $this->coercePositiveInt($patch['max_steps']);
+            if ($int !== null) {
+                $patch['max_steps'] = $int;
+            }
+        }
+
+        return $patch;
     }
 }

@@ -18,6 +18,8 @@ use Throwable;
  */
 final class ScheduleUpdateValidator
 {
+    use SchedulableTypeCoercion;
+
     public const OP_UPDATE_SCHEDULE  = 'update_schedule';
     public const OP_UPDATE_TEMPLATE = 'update_prompt_template';
 
@@ -227,8 +229,11 @@ final class ScheduleUpdateValidator
     private function validatePartialSharedScheduleFields(array $raw): ?ToolResult
     {
         $checks = [
-            fn(array $r) => isset($r['is_active']) && !is_bool($r['is_active'])
-                ? ToolResult::fail(self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean.')
+            fn(array $r) => isset($r['is_active']) && $this->coerceBool($r['is_active']) === null
+                ? ToolResult::fail(
+                    self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean (got '
+                    . $this->describeValue($r['is_active']) . ').',
+                )
                 : null,
             fn(array $r) => (
                 array_key_exists('max_steps_override', $r)
@@ -243,10 +248,11 @@ final class ScheduleUpdateValidator
             fn(array $r) => (
                 array_key_exists('template_id', $r)
                 && $r['template_id'] !== null
-                && !is_int($r['template_id'])
+                && $this->coercePositiveInt($r['template_id']) === null
             )
                 ? ToolResult::fail(
-                    self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer, or null to clear it.',
+                    self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer, or null to clear it (got '
+                    . $this->describeValue($r['template_id']) . ').',
                 )
                 : null,
         ];
@@ -315,9 +321,17 @@ final class ScheduleUpdateValidator
      */
     private function checkIntRange(mixed $value, string $op, string $fieldLabel): ?ToolResult
     {
-        if (!is_int($value) || $value < 1 || $value > 100) {
+        $int = $this->coercePositiveInt($value);
+        if ($int === null) {
             return ToolResult::fail(
-                $op . ': ' . $fieldLabel . ' must be an integer in 1..100, or null to clear it.',
+                $op . ': ' . $fieldLabel . ' must be an integer in 1..100, or null to clear it (got '
+                . $this->describeValue($value) . ').',
+            );
+        }
+
+        if ($int < 1 || $int > 100) {
+            return ToolResult::fail(
+                $op . ': ' . $fieldLabel . ' must be between 1 and 100 (got ' . $int . ').',
             );
         }
 

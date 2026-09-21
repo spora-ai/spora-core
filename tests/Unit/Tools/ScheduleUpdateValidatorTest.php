@@ -235,4 +235,72 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
             expect($result->success)->toBeFalse();
         });
     });
+
+    describe('lenient LLM type coercion', function (): void {
+        test('is_active accepts bool, int 0/1, and string "true"/"false"', function (): void {
+            foreach ([true, false, 0, 1, '0', '1', 'true', 'false'] as $value) {
+                $result = $this->validator->validateUpdateSchedulePatch([
+                    'schedule_patch' => ['is_active' => $value],
+                ]);
+                expect($result)->toBeArray("is_active " . var_export($value, true) . " should validate as array");
+            }
+
+            // Truly hostile inputs still reject
+            $r = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['is_active' => 'maybe'],
+            ]);
+            expect($r->success)->toBeFalse()->and($r->content)->toContain('`is_active` must be a boolean');
+        });
+
+        test('max_steps_override accepts int, numeric string, integral float', function (): void {
+            foreach ([25, '25', 25.0] as $value) {
+                $result = $this->validator->validateUpdateSchedulePatch([
+                    'schedule_patch' => ['max_steps_override' => $value],
+                ]);
+                expect($result)->toBeArray(
+                    "max_steps_override " . var_export($value, true) . " should validate as array",
+                );
+            }
+
+            // Out-of-range still rejected
+            $r = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['max_steps_override' => 200],
+            ]);
+            expect($r->success)->toBeFalse()->and($r->content)->toContain('between 1 and 100');
+
+            // Non-numeric still rejected
+            $r2 = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['max_steps_override' => 'abc'],
+            ]);
+            expect($r2->success)->toBeFalse();
+        });
+
+        test('template_id on update accepts int and numeric string', function (): void {
+            foreach ([4, '4'] as $value) {
+                $result = $this->validator->validateUpdateSchedulePatch([
+                    'schedule_patch' => ['template_id' => $value],
+                ]);
+                expect($result)->toBeArray(
+                    "template_id " . var_export($value, true) . " should validate as array",
+                );
+            }
+
+            $r = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['template_id' => 'oops'],
+            ]);
+            expect($r->success)->toBeFalse()->and($r->content)->toContain('`template_id`');
+        });
+
+        test('multi-field patch stays atomic — one bad field rejects the whole patch', function (): void {
+            $result = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => [
+                    'is_active' => false,
+                    'timezone'  => 'Europe/Prague',
+                    'max_steps_override' => 'abc',
+                ],
+            ]);
+            expect($result->success)->toBeFalse()
+                ->and($result->content)->toContain('`max_steps_override`');
+        });
+    });
 });

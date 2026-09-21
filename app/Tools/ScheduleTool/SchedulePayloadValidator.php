@@ -21,6 +21,8 @@ use Throwable;
  */
 final class SchedulePayloadValidator
 {
+    use SchedulableTypeCoercion;
+
     public const OP_CREATE_SCHEDULE  = 'create_schedule';
     public const OP_CREATE_TEMPLATE = 'create_prompt_template';
 
@@ -160,7 +162,7 @@ final class SchedulePayloadValidator
             $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': either `template_id` (int) or `raw_prompt` (string) is required.',
             );
-        } elseif ($hasTemplateId && !is_int($raw['template_id'])) {
+        } elseif ($hasTemplateId && $this->coercePositiveInt($raw['template_id']) === null) {
             $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': `template_id` must be a positive integer.',
             );
@@ -408,6 +410,10 @@ final class SchedulePayloadValidator
      * Shared between `max_steps` (templates) and `max_steps_override`
      * (schedules) — only the error prefix differs.
      *
+     * Accepts PHP int, integral float (`25.0`), or numeric string.
+     * The create-payload path additionally null-coerces to keep
+     * `max_steps_override: null` flowing through as "no override".
+     *
      * @return ToolResult|null
      */
     private function validateIntRangeField(mixed $value, string $op, string $fieldLabel): ?ToolResult
@@ -416,8 +422,16 @@ final class SchedulePayloadValidator
             return null;
         }
 
-        if (!is_int($value) || $value < 1 || $value > 100) {
-            return ToolResult::fail($op . ': `' . $fieldLabel . '` must be an integer in 1..100.');
+        if ($this->coercePositiveInt($value) === null) {
+            return ToolResult::fail(
+                $op . ': `' . $fieldLabel . '` must be a positive integer between 1 and 100 (got '
+                . (is_scalar($value) ? var_export($value, true) : gettype($value)) . ').',
+            );
+        }
+
+        $int = (int) $value;
+        if ($int < 1 || $int > 100) {
+            return ToolResult::fail($op . ': `' . $fieldLabel . '` must be between 1 and 100.');
         }
 
         return null;
