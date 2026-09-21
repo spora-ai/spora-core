@@ -141,6 +141,9 @@ test('0082 NULL updated_at rows sort last (the epoch fallback)', function (): vo
 });
 
 test('0082 adds the unique constraint uq_tool_user_settings_principal_tool after dedup', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`; the SHOW INDEX equivalent would need its own block.');
+    }
     $userId = (int) Capsule::table('users')->insertGetId(['email' => 'idx@example.com', 'username' => 'idx']);
     $principalId = (int) Capsule::table('principals')->insertGetId([
         'type' => 'user', 'user_id' => $userId, 'created_at' => '2026-01-01 00:00:00', 'updated_at' => '2026-01-01 00:00:00',
@@ -167,6 +170,9 @@ test('0082 adds the unique constraint uq_tool_user_settings_principal_tool after
 });
 
 test('0082 is idempotent — re-running on an already-migrated DB is a no-op', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0082_restore_unique_principal_tool_user_settings.php';
     $migration->up();
 
@@ -178,6 +184,9 @@ test('0082 is idempotent — re-running on an already-migrated DB is a no-op', f
 });
 
 test('0082 is forward-only — down() leaves the constraint in place', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0082_restore_unique_principal_tool_user_settings.php';
     $migration->up();
     $migration->down();

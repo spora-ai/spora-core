@@ -48,6 +48,9 @@ beforeEach(function (): void {
 });
 
 test('up adds is_temporary to media_assets with the documented default', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('The not-null assertion reads `notnull` from `PRAGMA table_info`; the column presence check works on MariaDB but the not-null flag does not.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -68,6 +71,9 @@ test('up adds is_temporary to media_assets with the documented default', functio
 });
 
 test('up creates the (user_id, agent_id, is_temporary, created_at) composite index', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`; the SHOW INDEX equivalent would need its own block.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -77,6 +83,9 @@ test('up creates the (user_id, agent_id, is_temporary, created_at) composite ind
 });
 
 test('up adds voice_message_retention_count with default 5 and a CHECK constraint', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Reads `dflt_value` from `PRAGMA table_info` and exercises the CHECK constraint shape that SQLite emits; the MariaDB path uses information_schema.columns and the constraint syntax differs.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
 
@@ -156,6 +165,9 @@ test('up backfills pre-existing agents with the default retention count', functi
 });
 
 test('down drops the columns and index', function (): void {
+    if (Capsule::connection()->getDriverName() !== 'sqlite') {
+        $this->markTestSkipped('Index enumeration uses `PRAGMA index_list`; the column-drops are driver-portable but the index assertion needs the MariaDB SHOW INDEX path.');
+    }
     $migration = require __DIR__ . '/../../../database/migrations/0081_add_temp_media_columns.php';
     $migration->up();
     $migration->down();
