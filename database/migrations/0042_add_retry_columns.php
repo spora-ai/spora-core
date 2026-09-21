@@ -13,7 +13,12 @@ return new class extends Migration
         Capsule::schema()->table('tasks', static function ($table): void {
             $table->unsignedBigInteger('retry_of_task_id')->nullable()->after('max_steps');
             $table->unsignedSmallInteger('retry_count')->default(0)->after('retry_of_task_id');
-            $table->timestamp('retry_after')->nullable()->after('retry_count');
+            // `dateTime` instead of `timestamp` — MySQL's TIMESTAMP only
+            // spans 1970–2038 and the orchestrator's retry scheduler
+            // inserts values up to '2099-01-01' for "defer forever" tasks.
+            // SQLite doesn't distinguish the two so the existing path is
+            // unchanged there.
+            $table->dateTime('retry_after')->nullable()->after('retry_count');
             $table->string('failure_reason', 1000)->nullable()->change();
         });
 

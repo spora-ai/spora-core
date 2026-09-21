@@ -41,7 +41,11 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->unsignedBigInteger('user_id');
             $table->string('email', 249);
-            $table->string('selector', 16);
+            // delight-im/auth's `createPasswordResetRequest()` emits a
+            // 20-char base64-url-safe selector and `createRememberDirective()`
+            // emits a 24-char one; 64 leaves headroom for both without
+            // breaking the SQLite path (length is unenforced there).
+            $table->string('selector', 64);
             $table->string('token', 255);
             $table->unsignedInteger('expires');
             $table->unique('selector', 'users_confirmations_selector_uq');
@@ -54,7 +58,9 @@ return new class extends Migration
             $table->unsignedBigInteger('user_id');
             $table->unsignedInteger('mechanism');
             $table->tinyInteger('single_factor')->default(0);
-            $table->string('selector', 24);
+            // Same width rationale as `users_confirmations.selector` —
+            // the auth library emits 24+ chars for some flows.
+            $table->string('selector', 64);
             $table->string('token', 255);
             $table->unsignedInteger('expires_at')->nullable();
             $table->index(['user_id', 'mechanism'], 'users_otps_user_id_mechanism_ix');
