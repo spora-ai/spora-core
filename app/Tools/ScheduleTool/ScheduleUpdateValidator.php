@@ -94,7 +94,7 @@ final class ScheduleUpdateValidator
             }
         }
 
-        $sharedError = $this->validatePartialSharedFields($raw, $op);
+        $sharedError = $this->validatePartialSharedFields($raw);
         if ($sharedError !== null) {
             return $sharedError;
         }
@@ -177,13 +177,8 @@ final class ScheduleUpdateValidator
      *
      * @param array<string, mixed> $raw
      */
-    private function validatePartialSharedFields(array $raw, string $op): ?ToolResult
+    private function validatePartialSharedFields(array $raw): ?ToolResult
     {
-        $gate = static function (callable $check): ?ToolResult {
-            return $check();
-        };
-        unset($gate);
-
         $scheduleResult = $this->validatePartialSharedScheduleFields($raw);
         if ($scheduleResult !== null) {
             return $scheduleResult;
