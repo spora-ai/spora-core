@@ -61,6 +61,16 @@ final class TestDatabaseFactory
     private static bool $workerSchemaInstalled = false;
 
     /**
+     * `true` after a partial-schema call (`bootConnectionOnly` /
+     * `freshConnectionOnly`) leaves the worker DB with manual DDL that
+     * is incompatible with the framework installer. The next `boot()`
+     * will drop+recreate the DB instead of installing on top of the
+     * polluted state — see the matching branch in `boot()` for the
+     * consumer side.
+     */
+    private static bool $workerDbDirty = false;
+
+    /**
      * Effective driver (`sqlite` | `mysql` | `mariadb`). Cached after the
      * first read so the factory doesn't re-touch `getenv()` on every call.
      */
@@ -101,6 +111,19 @@ final class TestDatabaseFactory
         // MySQL / MariaDB path.
         if (self::$workerDbName === null) {
             self::createWorkerDatabase();
+        }
+
+        // `bootConnectionOnly` / `freshConnectionOnly` leave the worker DB
+        // polluted with manual DDL that doesn't match the installer's table
+        // shapes (e.g. `mail_templates` with non-migration columns). On the
+        // next `boot()` we drop the DB and reinstall so the framework
+        // installer doesn't crash on `CREATE TABLE … already exists` for
+        // every subsequent test in the worker.
+        if (self::$workerDbDirty) {
+            self::dropWorkerDatabase();
+            self::createWorkerDatabase();
+            self::invalidateLocalStamp();
+            self::$workerDbDirty = false;
         }
 
         // `Database::resetBootState()` now clears `setSchemaInstallSkipped()`
@@ -181,6 +204,13 @@ final class TestDatabaseFactory
             self::createWorkerDatabase();
         }
 
+        // Whatever the test creates manually after this point is, by
+        // definition, not the full framework schema. Mark the worker DB
+        // as "dirty" so the next `boot()` drops it before re-installing
+        // (otherwise the installer would crash on CREATE TABLE for a
+        // table the test just created with a different shape).
+        self::$workerDbDirty = true;
+
         Database::resetBootState();
         Database::setSchemaInstallSkipped(false);
         (new Database(self::buildConfigForDriver()))->bootDatabaseConnectionOnly();
@@ -210,6 +240,11 @@ final class TestDatabaseFactory
         // its own partial schema; the next factory `boot()` is responsible
         // for re-installing the full schema.
         self::invalidateLocalStamp();
+
+        // Whatever the test creates manually after this point is, by
+        // definition, not the full framework schema. Mark the worker DB
+        // as "dirty" so the next `boot()` drops it before re-installing.
+        self::$workerDbDirty = true;
 
         Database::resetBootState();
         Database::setSchemaInstallSkipped(false);
@@ -309,6 +344,9 @@ final class TestDatabaseFactory
         $name = self::$workerDbName;
         self::$workerDbName = null;
         self::$workerSchemaInstalled = false;
+        // The DB is gone — no point carrying the "dirty" flag through to
+        // the next (freshly-created) DB.
+        self::$workerDbDirty = false;
 
         try {
             $pdo = new PDO(
