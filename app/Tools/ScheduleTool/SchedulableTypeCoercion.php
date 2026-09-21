@@ -117,6 +117,15 @@ trait SchedulableTypeCoercion
     /**
      * Render a value into a short human-readable phrase for error
      * messages — e.g. `bool(true)`, `string("42")`, `int(25)`, `null`.
+     *
+     * Strings are wrapped in double quotes so `describeValue('null')`
+     * is distinguishable from `describeValue(null)`. The bare four-
+     * character word "null" without quotes was the smoking gun in a
+     * bug report where an upstream serializer was producing the
+     * literal string "null" instead of JSON null — the unquoted
+     * output made the agent and operators believe the validator was
+     * receiving JSON null and rejecting it.
+     *
      * Scalar only; arrays/objects fall back to their gettype() label.
      */
     private function describeValue(mixed $value): string
@@ -131,7 +140,7 @@ trait SchedulableTypeCoercion
             return gettype($value) . '(' . $value . ')';
         }
         if (is_string($value)) {
-            return 'string(' . $this->truncateString($value, 32) . ')';
+            return 'string("' . $this->truncateString($value, 32) . '")';
         }
 
         return gettype($value);

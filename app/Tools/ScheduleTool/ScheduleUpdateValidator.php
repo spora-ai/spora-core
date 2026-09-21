@@ -231,18 +231,19 @@ final class ScheduleUpdateValidator
         $checks = [
             fn(array $r) => isset($r['is_active']) && $this->coerceBool($r['is_active']) === null
                 ? ToolResult::fail(
-                    self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean (got '
-                    . $this->describeValue($r['is_active']) . ').',
+                    self::OP_UPDATE_SCHEDULE . ': `is_active` must be a boolean — '
+                    . 'send JSON `true` / `false` (not the strings "true" / "false"). '
+                    . 'Got ' . $this->describeValue($r['is_active']) . '.',
                 )
                 : null,
             fn(array $r) => (
                 array_key_exists('max_steps_override', $r)
                 && $r['max_steps_override'] !== null
             )
-                ? $this->checkIntRange(
+                ? $this->checkClearableIntRange(
                     $r['max_steps_override'],
                     self::OP_UPDATE_SCHEDULE,
-                    '`max_steps_override`',
+                    'max_steps_override',
                 )
                 : null,
             fn(array $r) => (
@@ -251,8 +252,10 @@ final class ScheduleUpdateValidator
                 && $this->coercePositiveInt($r['template_id']) === null
             )
                 ? ToolResult::fail(
-                    self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer, or null to clear it (got '
-                    . $this->describeValue($r['template_id']) . ').',
+                    self::OP_UPDATE_SCHEDULE . ': `template_id` must be a positive integer referencing an existing '
+                    . 'prompt template, or JSON `null` to unbind the template (the schedule will fall back to its '
+                    . 'raw prompt). The four-character string "null" is NOT the same as JSON null and cannot be used '
+                    . 'to clear the field. Got ' . $this->describeValue($r['template_id']) . '.',
                 )
                 : null,
         ];
@@ -270,7 +273,11 @@ final class ScheduleUpdateValidator
                 array_key_exists('max_steps', $r)
                 && $r['max_steps'] !== null
             )
-                ? $this->checkIntRange($r['max_steps'], self::OP_UPDATE_TEMPLATE, '`max_steps`')
+                ? $this->checkClearableIntRange(
+                    $r['max_steps'],
+                    self::OP_UPDATE_TEMPLATE,
+                    'max_steps',
+                )
                 : null,
             fn(array $r) => (
                 array_key_exists('name', $r)
@@ -317,21 +324,28 @@ final class ScheduleUpdateValidator
     }
 
     /**
+     * Range-check an integer field whose null semantics are documented as a
+     * "clear the value" sentinel. The error message distinguishes the JSON
+     * `null` contract from the literal string "null" because prior reports
+     * showed the bare four-character word confused callers into believing
+     * the server was rejecting JSON null.
+     *
      * @param mixed $value
      */
-    private function checkIntRange(mixed $value, string $op, string $fieldLabel): ?ToolResult
+    private function checkClearableIntRange(mixed $value, string $op, string $field): ?ToolResult
     {
         $int = $this->coercePositiveInt($value);
         if ($int === null) {
             return ToolResult::fail(
-                $op . ': ' . $fieldLabel . ' must be an integer in 1..100, or null to clear it (got '
-                . $this->describeValue($value) . ').',
+                $op . ': `' . $field . '` must be an integer in 1..100, or JSON `null` to clear the field. '
+                . 'The four-character string "null" is NOT a valid value here — send the JSON null literal, '
+                . 'not the string "null". Got ' . $this->describeValue($value) . '.',
             );
         }
 
         if ($int < 1 || $int > 100) {
             return ToolResult::fail(
-                $op . ': ' . $fieldLabel . ' must be between 1 and 100 (got ' . $int . ').',
+                $op . ': `' . $field . '` must be between 1 and 100 (got ' . $int . ').',
             );
         }
 
@@ -360,9 +374,23 @@ final class ScheduleUpdateValidator
 
     private function validateCronExpression(mixed $cron): ?ToolResult
     {
-        if (!is_string($cron) || trim($cron) === '') {
+        // Surface a clear "send JSON null, not the string" hint when the
+        // caller submitted the literal four-character string "null".
+        // Without this, CronExpression("null") throws and we bubble up
+        // a generic "invalid syntax" error that buries the real cause.
+        if (is_string($cron) && in_array(trim($cron), ['', 'null', 'NULL', 'Null'], true)) {
             return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty string, or null to clear it.',
+                self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty 5-field cron string, or JSON '
+                . '`null` to clear the schedule (switch to one-shot mode). '
+                . 'Got the string ' . $this->describeValue($cron) . ' — the JSON null literal is not a string. '
+                . 'To clear the cron field, send the JSON null value, not the string "null".',
+            );
+        }
+        if (!is_string($cron)) {
+            return ToolResult::fail(
+                self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty 5-field cron string, or JSON '
+                . '`null` to clear the schedule (switch to one-shot mode). '
+                . 'Got ' . $this->describeValue($cron) . '.',
             );
         }
         try {
@@ -377,9 +405,18 @@ final class ScheduleUpdateValidator
 
     private function validateRunAt(mixed $runAt, string $timezone): ?ToolResult
     {
-        if (!is_string($runAt) || trim($runAt) === '') {
+        if (is_string($runAt) && in_array(trim($runAt), ['', 'null', 'NULL', 'Null'], true)) {
             return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or null to clear it.',
+                self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or JSON `null` to clear '
+                . 'the schedule (switch to recurring mode). Got the string ' . $this->describeValue($runAt)
+                . ' — the JSON null literal is not a string. '
+                . 'To clear the run_at field, send the JSON null value, not the string "null".',
+            );
+        }
+        if (!is_string($runAt)) {
+            return ToolResult::fail(
+                self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or JSON `null` to clear '
+                . 'the schedule (switch to recurring mode). Got ' . $this->describeValue($runAt) . '.',
             );
         }
         try {
