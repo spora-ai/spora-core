@@ -1149,7 +1149,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
      * reschedules cleanly: the old row is marked SKIPPED then deleted
      * (freeing the slot), and the new row is inserted.
      */
-    test('updating run_at on a cron schedule reschedules cleanly without UNIQUE collision', function (): void {
+    test('cron → one-shot transition via {run_at: <iso>} clears cron and reschedules cleanly', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
         [$tool, $service] = makeScheduleToolTestFixture();
         $created = $service->createRun($agentId, $userId, [
@@ -1159,11 +1159,13 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         ]);
         $runId = (int) $created['scheduled_run']['id'];
 
-        // Setting run_at on a cron schedule is documented as "ambiguous"
-        // — the existing cron keeps firing. The bug was that this
-        // scenario also crashed on UNIQUE. Fix: cron stays, next_run_at
-        // is recomputed from cron, but the PENDING row is rescheduled
-        // cleanly (mark SKIPPED → delete collision → insert).
+        // Round 4 tightened the assertion — setting run_at on a cron
+        // schedule now also implicitly clears cron_expression per the
+        // implicit mode-transition policy in
+        // {@see \Spora\Services\ScheduledRunService::recomputeNextRunAtIfNeeded()}.
+        // The pre-Round-4 test asserted the silent-no-op behaviour (cron
+        // stays, run_at ignored); Round 4 made the two directions
+        // symmetric from the caller's perspective.
         $result = $tool->execute([
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
@@ -1171,14 +1173,22 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         ], $agentId, $userId);
 
         expect($result->success)->toBeTrue()
-            ->and($result->data['scheduled_run']['cron_expression'])->toBe(SCHEDULE_TOOL_CRON);
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
 
         $rows = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $runId)
             ->orderBy('id')
             ->get();
         $pending = $rows->where('status', ScheduledRunNext::STATUS_PENDING);
-        expect($pending)->toHaveCount(1);
+        // Normalise the resource's ISO 8601 (with offset) to UTC `Y-m-d H:i:s`
+        // to match the DB column format — same shape used in the explicit
+        // cron→one-shot regression test.
+        $expectedDueAt = (new DateTimeImmutable($result->data['scheduled_run']['next_run_at']))
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d H:i:s');
+        expect($pending)->toHaveCount(1)
+            ->and($pending->first()->due_at)->toBe($expectedDueAt);
     });
 
     test('delete_prompt_template rejects an unknown id', function (): void {
@@ -1215,5 +1225,153 @@ describe('ScheduleTool — summary presenter integration', function (): void {
         foreach ($cases as $arguments) {
             expect($tool->describeAction($arguments))->toBeString();
         }
+    });
+});
+
+/**
+ * Round 4 regression: setting `run_at` on a cron schedule used to be a
+ * silent no-op. The service accepted the patch, updated the `run_at`
+ * column to the new value, kept the old `cron_expression` in place, and
+ * recomputed `next_run_at` from the existing cron — so the worker kept
+ * firing per cron and the caller's `run_at` was effectively ignored.
+ *
+ * The fix is implicit mode-transition clearing in
+ * {@see \Spora\Services\ScheduledRunService::recomputeNextRunAtIfNeeded()}:
+ * when the patch sets ONE cadence field to a non-null value and the
+ * existing schedule has the OPPOSITE cadence field set, clear the
+ * opposite. The two directions of cron↔one-shot are now symmetric and
+ * there's no silent no-op for the caller to retry against.
+ */
+describe('Round 4 — implicit mode-transition clearing', function (): void {
+    test('setting run_at on a cron schedule clears cron_expression and switches to one-shot', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['run_at' => '2027-08-01T09:00:00+00:00'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull()
+            ->and($result->data['scheduled_run']['is_active'])->toBeTrue();
+
+        // The patch's run_at drove next_run_at (not the old cron's next
+        // firing). Read the schedule back from the DB to confirm the
+        // cleared cron survived the round-trip — earlier rounds only
+        // checked the in-memory resource, which the failing pre-fix
+        // build also returned as success.
+        $readBack = $service->getRun($runId, $agentId, $userId);
+        expect($readBack['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($readBack['scheduled_run']['run_at'])->not->toBeNull()
+            ->and($readBack['scheduled_run']['next_run_at'])->toBe(
+                $result->data['scheduled_run']['next_run_at'],
+            );
+    });
+
+    test('setting cron_expression on a one-shot schedule clears run_at and switches to recurring', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => null,
+            'run_at'          => date('Y-m-d H:i:s', strtotime('+4 hours')),
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['cron_expression' => '0 9 * * *'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBe('0 9 * * *')
+            ->and($result->data['scheduled_run']['run_at'])->toBeNull();
+
+        $readBack = $service->getRun($runId, $agentId, $userId);
+        expect($readBack['scheduled_run']['cron_expression'])->toBe('0 9 * * *')
+            ->and($readBack['scheduled_run']['run_at'])->toBeNull();
+    });
+
+    test('changing just the run_at on a one-shot schedule does NOT clear cron (none was set)', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => null,
+            'run_at'          => date('Y-m-d H:i:s', strtotime('+4 hours')),
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['run_at' => date('Y-m-d H:i:s', strtotime('+5 hours'))],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
+    });
+
+    test('changing just the cron on a recurring schedule does NOT clear run_at (none was set)', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['cron_expression' => '0 17 * * *'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBe('0 17 * * *')
+            ->and($result->data['scheduled_run']['run_at'])->toBeNull();
+    });
+
+    test('explicit {cron_expression: null, run_at: <iso>} still works (no double-clearing)', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => [
+                'cron_expression' => null,
+                'run_at'          => '2027-08-01T09:00:00+00:00',
+            ],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
     });
 });

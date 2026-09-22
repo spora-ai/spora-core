@@ -219,6 +219,42 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         $runAt = array_key_exists('run_at', $updateData) ? $updateData['run_at'] : $run->run_at?->toDateTimeString();
+
+        // Mode-transition policy: when the patch sets ONE cadence field
+        // to a non-null value AND the existing schedule has the OPPOSITE
+        // cadence field set, clear the opposite field. This makes the two
+        // directions of cron↔one-shot transition symmetric from the
+        // caller's perspective — `{run_at: <iso>}` on a cron schedule
+        // switches to one-shot (and clears cron), `{cron_expression: <cron>}`
+        // on a one-shot schedule switches to recurring (and clears run_at).
+        //
+        // The pre-fix behavior silently kept the old mode in the second
+        // direction: setting `run_at` on a cron schedule only updated the
+        // `run_at` column; `cron_expression` and the cron-derived
+        // `next_run_at` stayed, so the worker kept firing per cron and
+        // the caller's `run_at` was ignored. The bug report called this
+        // "worse than the previous crash because clients have no signal
+        // to retry". Clearing the opposite field resolves the asymmetry
+        // without a try/catch around the schedule_runs_next write.
+        //
+        // Explicit `{cron_expression: null, run_at: <iso>}` patches already
+        // work via the array_key_exists() lookup above — this policy only
+        // activates when the patch is implicit (only one cadence key set).
+        if (array_key_exists('cron_expression', $updateData)
+            && $cron !== null
+            && $run->run_at !== null
+        ) {
+            $updateData['run_at'] = null;
+            $runAt = null;
+        }
+        if (array_key_exists('run_at', $updateData)
+            && $updateData['run_at'] !== null
+            && $run->cron_expression !== null
+        ) {
+            $updateData['cron_expression'] = null;
+            $cron = null;
+        }
+
         $isRecurring = !empty($cron);
         $updateData['next_run_at'] = $isRecurring
             ? $this->computeNextRunAt($cron, $timezone)

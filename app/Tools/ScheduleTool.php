@@ -126,9 +126,14 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '`max_steps_override`, `is_active`. To clear a nullable field '
                 . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
                 . 'send the JSON `null` literal — NOT the four-character string "null". '
-                . 'Send `null` on `cron_expression` / `run_at` to switch a recurring '
-                . 'schedule to one-shot (or vice versa), but never both populated in '
-                . 'the same patch — ambiguous. '
+                . 'Switching recurrence modes: setting ONE cadence field '
+                . '(`cron_expression` or `run_at`) on a schedule that currently '
+                . 'has the OTHER cadence set implicitly clears the other. '
+                . 'To switch from recurring to one-shot send `{run_at: <iso>}` '
+                . '(or explicitly `{cron_expression: null, run_at: <iso>}`). '
+                . 'To switch from one-shot to recurring send `{cron_expression: <cron>}` '
+                . '(or explicitly `{cron_expression: <cron>, run_at: null}`). '
+                . 'Sending both populated in the same patch is rejected. '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full schedule resource after the patch.',
     enabledByDefault: false,
