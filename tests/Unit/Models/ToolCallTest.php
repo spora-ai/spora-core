@@ -141,3 +141,96 @@ it('belongs to a task, agent, and approver', function (): void {
         ->and($call->approvedBy)->toBeInstanceOf(User::class)
         ->and($call->rejectedBy)->toBeInstanceOf(User::class);
 });
+
+it('assertStringColumnsFit throws InvalidArgumentException when a VARCHAR field exceeds its cap', function (): void {
+    $call = new ToolCall();
+    $call->tool_class = 'Spora\Tools\SearchTool';
+    // tool_name is VARCHAR(100) on `tool_calls` — 101 chars is the regression case.
+    $call->tool_name = str_repeat('x', 101);
+
+    try {
+        $call->assertStringColumnsFit();
+        $this->fail('Expected InvalidArgumentException was not thrown.');
+    } catch (InvalidArgumentException $e) {
+        expect($e->getMessage())->toContain('tool_calls.tool_name')
+            ->and($e->getMessage())->toContain('101 chars')
+            ->and($e->getMessage())->toContain('column limit is 100')
+            ->and($e->getMessage())->toContain('Spora\\Tools\\SearchTool');
+    }
+});
+
+it('assertStringColumnsFit counts multi-byte characters under mb_strlen to match utf8mb4 VARCHAR semantics', function (): void {
+    // 100 emoji = 100 chars under mb_strlen, fits VARCHAR(100). strlen() would
+    // see 400 bytes and falsely reject.
+    $call = new ToolCall();
+    $call->tool_name = str_repeat('🚀', 100);
+
+    expect(fn() => $call->assertStringColumnsFit())->not()->toThrow(InvalidArgumentException::class);
+});
+
+it('save() rejects a row whose tool_name exceeds VARCHAR(100)', function (): void {
+    $userId = bootAuthLayer()->register('save-insert@example.com', TOOL_CALL_TEST_PASSWORD, 'Save');
+    $agent = Agent::create([
+        'principal_id' => $this->createUserPrincipal($userId),
+        'name'         => 'Save Agent',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+    $task = Task::create([
+        'agent_id'        => $agent->id,
+        'principal_id'    => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'status'          => 'RUNNING',
+        'user_prompt'     => 'save test',
+        'step_count'      => 0,
+        'max_steps'       => 10,
+    ]);
+
+    expect(fn() => ToolCall::create([
+        'task_id'            => $task->id,
+        'agent_id'           => $agent->id,
+        'provider_call_id'   => 'call_save_1',
+        'tool_name'          => str_repeat('x', 101),
+        'tool_class'         => 'Spora\Tools\WhateverTool',
+        'tool_type'          => 'input',
+        'status'             => 'PENDING_APPROVAL',
+        'proposed_arguments' => [],
+    ]))->toThrow(InvalidArgumentException::class);
+});
+
+it('save() rejects an update whose approval_note exceeds VARCHAR(500)', function (): void {
+    $userId = bootAuthLayer()->register('save-update@example.com', TOOL_CALL_TEST_PASSWORD, 'Save');
+    $agent = Agent::create([
+        'principal_id' => $this->createUserPrincipal($userId),
+        'name'         => 'Save Agent 2',
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]);
+    $task = Task::create([
+        'agent_id'        => $agent->id,
+        'principal_id'    => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'status'          => 'RUNNING',
+        'user_prompt'     => 'save test 2',
+        'step_count'      => 0,
+        'max_steps'       => 10,
+    ]);
+
+    $call = ToolCall::create([
+        'task_id'            => $task->id,
+        'agent_id'           => $agent->id,
+        'provider_call_id'   => 'call_save_2',
+        'tool_name'          => 'short_name',
+        'tool_class'         => 'Spora\Tools\WhateverTool',
+        'tool_type'          => 'input',
+        'status'             => 'PENDING_APPROVAL',
+        'proposed_arguments' => [],
+    ]);
+
+    expect(fn() => $call->update(['approval_note' => str_repeat('y', 501)]))
+        ->toThrow(InvalidArgumentException::class);
+});

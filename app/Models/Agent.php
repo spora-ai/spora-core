@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 use Spora\Services\PrincipalResolver;
 use Throwable;
 
@@ -21,9 +22,12 @@ use Throwable;
  * @property string $name
  * @property string|null $description
  * @property string|null $system_prompt
- * @property int|null $llm_driver_config_id
- * @property int|null $speech_driver_config_id
- * @property int|null $max_steps
+ * @property int|null    $llm_driver_config_id
+ * @property int|null    $speech_driver_config_id
+ * @property string|null $llm_provider
+ * @property string|null $llm_model
+ * @property string|null $llm_base_url
+ * @property int|null    $max_steps
  * @property bool $is_active
  * @property bool $allow_followup
  * @property int $retry_after_minutes
@@ -47,6 +51,7 @@ use Throwable;
  */
 final class Agent extends Model
 {
+    use HasStringColumnLengthValidation;
     protected $table = 'agents';
 
     protected $fillable = [
@@ -221,5 +226,19 @@ final class Agent extends Model
             return false;
         }
         return $driver->supportsImageInput();
+    }
+
+    /** @var array<string, int> */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'name'         => 100,
+        'llm_provider' => 50,
+        'llm_model'    => 100,
+        'llm_base_url' => 255,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['agents', "agent #{$this->id}"];
     }
 }

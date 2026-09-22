@@ -102,6 +102,32 @@ it('has many tasks, agent tools, and tool calls', function (): void {
         ->and($agent->toolCalls)->toHaveCount(1);
 });
 
+it('assertStringColumnsFit throws when llm_base_url exceeds VARCHAR(255)', function (): void {
+    $agent = new Agent();
+    $agent->llm_base_url = 'https://' . str_repeat('a', 250) . '.example.com';
+
+    try {
+        $agent->assertStringColumnsFit();
+        $this->fail('Expected InvalidArgumentException was not thrown.');
+    } catch (InvalidArgumentException $e) {
+        expect($e->getMessage())->toContain('agents.llm_base_url')
+            ->and($e->getMessage())->toContain('column limit is 255');
+    }
+});
+
+it('save() rejects an agent whose name exceeds VARCHAR(100)', function (): void {
+    $userId = bootAuthLayer()->register('agent-longname@example.com', AGENT_TEST_PASSWORD, 'LongName');
+
+    expect(fn() => Agent::create([
+        'principal_id' => $this->createUserPrincipal($userId),
+        'name'         => str_repeat('a', 101),
+        'llm_provider' => 'mock',
+        'llm_model'    => 'mock',
+        'max_steps'    => 10,
+        'is_active'    => true,
+    ]))->toThrow(InvalidArgumentException::class);
+});
+
 it('legacy user_id accessor resolves the user-principal owner', function (): void {
     $userId = bootAuthLayer()->register('agent-legacyuid@example.com', AGENT_TEST_PASSWORD, 'Legacy');
     $principalId = $this->createUserPrincipal($userId);

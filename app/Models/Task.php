@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 
 /**
  * @property int         $id
@@ -38,6 +39,7 @@ use Illuminate\Support\Carbon;
  */
 final class Task extends Model
 {
+    use HasStringColumnLengthValidation;
     /** @var string */
     protected $table = 'tasks';
 
@@ -150,5 +152,18 @@ final class Task extends Model
     public function parentTask(): BelongsTo
     {
         return $this->belongsTo(Task::class, 'parent_task_id');
+    }
+
+    /** @var array<string, int> */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'status'         => 30,
+        'failure_reason' => 1000,
+        'error_code'     => 30,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['tasks', "task #{$this->id}"];
     }
 }
