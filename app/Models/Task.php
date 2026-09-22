@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
-use Spora\Services\MaxLengthValidator;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 
 /**
  * @property int         $id
@@ -39,6 +39,8 @@ use Spora\Services\MaxLengthValidator;
  */
 final class Task extends Model
 {
+    /** {@see HasStringColumnLengthValidation} */
+    use HasStringColumnLengthValidation;
     /** @var string */
     protected $table = 'tasks';
 
@@ -91,21 +93,10 @@ final class Task extends Model
         'error_code'     => 30,
     ];
 
-    /** @see \Spora\Services\MaxLengthValidator */
-    public function save(array $options = []): bool
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
     {
-        $this->assertStringColumnsFit();
-        return parent::save($options);
-    }
-
-    public function assertStringColumnsFit(): void
-    {
-        MaxLengthValidator::assertFits(
-            $this->attributes,
-            self::STRING_COLUMN_MAX_LENGTHS,
-            'tasks',
-            "task #{$this->id}",
-        );
+        return ['tasks', "task #{$this->id}"];
     }
 
     public function agent(): BelongsTo

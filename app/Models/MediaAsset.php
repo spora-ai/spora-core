@@ -6,7 +6,7 @@ namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Spora\Services\MaxLengthValidator;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 use Spora\Services\MediaArchive\MediaType;
 
 /**
@@ -53,6 +53,8 @@ use Spora\Services\MediaArchive\MediaType;
  */
 final class MediaAsset extends Model
 {
+    /** {@see HasStringColumnLengthValidation} */
+    use HasStringColumnLengthValidation;
     /**
      * Single source of truth for the columns persisted on a
      * {@see MediaAsset} row. Drives both `$fillable` and the
@@ -148,21 +150,10 @@ final class MediaAsset extends Model
         'upload_source'       => 16,
     ];
 
-    /** @see \Spora\Services\MaxLengthValidator */
-    public function save(array $options = []): bool
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
     {
-        $this->assertStringColumnsFit();
-        return parent::save($options);
-    }
-
-    public function assertStringColumnsFit(): void
-    {
-        MaxLengthValidator::assertFits(
-            $this->attributes,
-            self::STRING_COLUMN_MAX_LENGTHS,
-            'media_assets',
-            "media asset {$this->id}",
-        );
+        return ['media_assets', "media asset {$this->id}"];
     }
 
     public function agent(): BelongsTo

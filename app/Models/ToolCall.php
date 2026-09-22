@@ -7,7 +7,7 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
-use Spora\Services\MaxLengthValidator;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 
 /**
  * @property int              $id
@@ -36,6 +36,8 @@ use Spora\Services\MaxLengthValidator;
  */
 final class ToolCall extends Model
 {
+    /** {@see HasStringColumnLengthValidation} */
+    use HasStringColumnLengthValidation;
     /** @var string */
     protected $table = 'tool_calls';
 
@@ -92,26 +94,13 @@ final class ToolCall extends Model
         'approval_note'    => 500,
     ];
 
-    /** @see \Spora\Services\MaxLengthValidator */
-    public function save(array $options = []): bool
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
     {
-        $this->assertStringColumnsFit();
-        return parent::save($options);
-    }
-
-    /**
-     * Public so the bulk insert path can validate rows in tests without
-     * round-tripping through Eloquent (same pattern as
-     * {@see \Spora\Models\Principal::validateXor()}).
-     */
-    public function assertStringColumnsFit(): void
-    {
-        MaxLengthValidator::assertFits(
-            $this->attributes,
-            self::STRING_COLUMN_MAX_LENGTHS,
+        return [
             'tool_calls',
             (string) ($this->attributes['tool_class'] ?? 'tool call'),
-        );
+        ];
     }
 
     public function task(): BelongsTo

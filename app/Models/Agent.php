@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
-use Spora\Services\MaxLengthValidator;
+use Spora\Models\Concerns\HasStringColumnLengthValidation;
 use Spora\Services\PrincipalResolver;
 use Throwable;
 
@@ -51,6 +51,8 @@ use Throwable;
  */
 final class Agent extends Model
 {
+    /** {@see HasStringColumnLengthValidation} */
+    use HasStringColumnLengthValidation;
     protected $table = 'agents';
 
     protected $fillable = [
@@ -99,21 +101,10 @@ final class Agent extends Model
         'llm_base_url' => 255,
     ];
 
-    /** @see \Spora\Services\MaxLengthValidator */
-    public function save(array $options = []): bool
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
     {
-        $this->assertStringColumnsFit();
-        return parent::save($options);
-    }
-
-    public function assertStringColumnsFit(): void
-    {
-        MaxLengthValidator::assertFits(
-            $this->attributes,
-            self::STRING_COLUMN_MAX_LENGTHS,
-            'agents',
-            "agent #{$this->id}",
-        );
+        return ['agents', "agent #{$this->id}"];
     }
 
     public function principal(): BelongsTo
