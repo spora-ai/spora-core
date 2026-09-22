@@ -125,14 +125,13 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
                 . '`max_steps_override`, `is_active`. To clear a nullable field '
                 . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
-                . 'send the JSON `null` literal — NOT the four-character string "null". '
+                . 'send `null` (JSON null is canonical; the literal string "null" is '
+                . 'also accepted). '
                 . 'Switching recurrence modes: setting ONE cadence field '
                 . '(`cron_expression` or `run_at`) on a schedule that currently '
-                . 'has the OTHER cadence set implicitly clears the other. '
-                . 'To switch from recurring to one-shot send `{run_at: <iso>}` '
-                . '(or explicitly `{cron_expression: null, run_at: <iso>}`). '
-                . 'To switch from one-shot to recurring send `{cron_expression: <cron>}` '
-                . '(or explicitly `{cron_expression: <cron>, run_at: null}`). '
+                . 'has the OTHER cadence set implicitly clears the other — so '
+                . '`{run_at: <iso>}` switches a recurring schedule to one-shot and '
+                . '`{cron_expression: <cron>}` switches a one-shot to recurring. '
                 . 'Sending both populated in the same patch is rejected. '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full schedule resource after the patch.',
@@ -144,8 +143,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Patch a prompt template identified by `template_id`. '
                 . '`template_patch` (object) with any subset of `name`, `description`, '
                 . '`prompt_template`, `variables`, `max_steps`, `is_active`. '
-                . 'To clear `max_steps` send the JSON `null` literal — NOT the '
-                . 'four-character string "null". '
+                . 'Send `null` to clear `max_steps`. '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full template resource after the patch.',
     enabledByDefault: false,
@@ -239,9 +237,10 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
                 . '`max_steps_override`, `is_active`. To clear a nullable field '
                 . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
-                . 'send the JSON `null` literal — NOT the four-character string "null". '
-                . 'Send `null` on `cron_expression` / `run_at` to switch recurrence '
-                . 'modes, never both populated. '
+                . 'send `null` (JSON null is canonical; the literal string "null" is '
+                . 'also accepted). Setting ONE cadence field on a schedule that '
+                . 'has the OTHER cadence set implicitly clears the other — '
+                . 'never populate both in the same patch. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
@@ -250,8 +249,7 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for `update_prompt_template`. Partial object with any subset of '
                 . '`name`, `description`, `prompt_template`, `variables`, `max_steps`, '
-                . '`is_active`. To clear `max_steps` send the JSON `null` literal — NOT '
-                . 'the four-character string "null". '
+                . '`is_active`. Send `null` to clear `max_steps`. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]

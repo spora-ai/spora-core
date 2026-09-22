@@ -1015,27 +1015,12 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
     });
 
     /**
-     * Bug 2 regression: switching cron → one-shot via the documented
-     * `cron_expression: null + run_at: <iso>` patch crashed with a UNIQUE
-     * constraint violation on `scheduled_runs_next(scheduled_run_id,
-     * due_at)` because (a) the service used `??` to fall back to the
-     * existing cron instead of respecting the explicit `null`, and (b)
-     * `reschedulePendingEntries()` marked the existing PENDING row as
-     * SKIPPED but kept it in the table — the new INSERT collided on the
-     * UNIQUE index when the cron-derived `next_run_at` matched the
-     * existing row's `due_at`.
-     *
-     * The fix is two-part:
-     *   - `array_key_exists()` everywhere so explicit nulls clear.
-     *   - `reschedulePendingEntries()` deletes any SKIPPED/DONE row at the
-     *     new `(scheduled_run_id, due_at)` before inserting the fresh
-     *     PENDING row, freeing the unique slot.
+     * Bug 2 regression: cron → one-shot transition used to collide on the
+     * UNIQUE (scheduled_run_id, due_at) index when the existing
+     * PENDING row's due_at matched the recomputed cron-derived one.
      */
     test('cron → one-shot transition replaces scheduled_runs_next row without UNIQUE collision', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
-        // createRun goes through ScheduledRunService::createRun() which
-        // inserts the first PENDING row in scheduled_runs_next — that's
-        // the row that used to collide on UNIQUE.
         [$tool, $service] = makeScheduleToolTestFixture();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => SCHEDULE_TOOL_CRON,
@@ -1044,18 +1029,6 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         ]);
         $runId = (int) $created['scheduled_run']['id'];
 
-        // The freshly-created recurring schedule has exactly one PENDING
-        // row in scheduled_runs_next.
-        $pendingBefore = Capsule::table('scheduled_runs_next')
-            ->where('scheduled_run_id', $runId)
-            ->where('status', ScheduledRunNext::STATUS_PENDING)
-            ->count();
-        expect($pendingBefore)->toBe(1);
-
-        // Simulate the LLM tool call: the JSON arrives as
-        // `{"cron_expression":null,"run_at":"<iso>"}` — the dispatcher
-        // parses it, and the validator sees real PHP `null`, not the
-        // string "null". Patch goes end-to-end through ScheduleTool.
         $newRunAt = date('Y-m-d\TH:i:sP', strtotime('+5 hours'));
         $result = $tool->execute([
             'action'         => 'update_schedule',
@@ -1071,17 +1044,12 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             ->and($result->data['scheduled_run']['run_at'])->not->toBeNull()
             ->and($result->data['scheduled_run']['is_active'])->toBeTrue();
 
-        // The schedule now has exactly one PENDING row in
-        // scheduled_runs_next (at the new run_at), and the old cron
-        // entry was marked SKIPPED. No UNIQUE collision, no extra
-        // duplicate rows.
         $rows = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $runId)
             ->orderBy('id')
             ->get();
-        // `next_run_at` in the resource is ISO 8601 with offset;
-        // `due_at` in the DB column is `Y-m-d H:i:s`. Normalize the
-        // resource value to UTC `Y-m-d H:i:s` for the equality check.
+        // Resource next_run_at is ISO 8601 with offset; DB due_at is
+        // `Y-m-d H:i:s`. Normalise for the equality check.
         $expectedDueAt = (new DateTimeImmutable($result->data['scheduled_run']['next_run_at']))
             ->setTimezone(new DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
@@ -1091,12 +1059,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             ->and($rows[1]->due_at)->toBe($expectedDueAt);
     });
 
-    /**
-     * Bug 2 regression variant: re-applying the same patch (run_at update
-     * without changing the cron-derived next_run_at) used to collide on
-     * UNIQUE because the prior PENDING row was just marked SKIPPED but
-     * not deleted. With the delete-then-insert fix this is idempotent.
-     */
+    /** Bug 2 regression variant: re-applying the same patch used to collide on UNIQUE because the prior PENDING row was only marked SKIPPED, not deleted. */
     test('updating run_at on a one-shot schedule is idempotent (no UNIQUE collision on re-update)', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
         [$tool, $service] = makeScheduleToolTestFixture();
@@ -1108,8 +1071,6 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         ]);
         $runId = (int) $created['scheduled_run']['id'];
 
-        // Push the same run_at again — the service should reschedule the
-        // existing PENDING row in place, not collide on UNIQUE.
         $secondRunAt = date('Y-m-d H:i:s', strtotime('+4 hours'));
         $first  = $tool->execute([
             'action'         => 'update_schedule',
@@ -1126,9 +1087,6 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             ->and($second->success)->toBeTrue()
             ->and($second->data['scheduled_run']['run_at'])->not->toBeNull();
 
-        // Final state: exactly two rows — the original PENDING (now
-        // SKIPPED), and one PENDING at the second run_at. No
-        // duplicates, no UNIQUE collisions.
         $rows = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $runId)
             ->orderBy('id')
@@ -1142,12 +1100,8 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
     });
 
     /**
-     * Bug 2 regression variant: setting `run_at` alone on a cron schedule
-     * (without nulling cron) used to crash with UNIQUE because the
-     * existing PENDING row at the cron-derived next_run_at collided with
-     * the re-inserted row at the same due_at. With the fix it
-     * reschedules cleanly: the old row is marked SKIPPED then deleted
-     * (freeing the slot), and the new row is inserted.
+     * Round 4: setting run_at on a cron schedule now also implicitly
+     * clears cron_expression — the implicit mode-transition policy.
      */
     test('cron → one-shot transition via {run_at: <iso>} clears cron and reschedules cleanly', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
@@ -1159,13 +1113,6 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         ]);
         $runId = (int) $created['scheduled_run']['id'];
 
-        // Round 4 tightened the assertion — setting run_at on a cron
-        // schedule now also implicitly clears cron_expression per the
-        // implicit mode-transition policy in
-        // {@see \Spora\Services\ScheduledRunService::recomputeNextRunAtIfNeeded()}.
-        // The pre-Round-4 test asserted the silent-no-op behaviour (cron
-        // stays, run_at ignored); Round 4 made the two directions
-        // symmetric from the caller's perspective.
         $result = $tool->execute([
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
@@ -1181,9 +1128,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             ->orderBy('id')
             ->get();
         $pending = $rows->where('status', ScheduledRunNext::STATUS_PENDING);
-        // Normalise the resource's ISO 8601 (with offset) to UTC `Y-m-d H:i:s`
-        // to match the DB column format — same shape used in the explicit
-        // cron→one-shot regression test.
+        // Normalise ISO 8601 (with offset) to UTC `Y-m-d H:i:s` to match the DB column.
         $expectedDueAt = (new DateTimeImmutable($result->data['scheduled_run']['next_run_at']))
             ->setTimezone(new DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
@@ -1230,17 +1175,10 @@ describe('ScheduleTool — summary presenter integration', function (): void {
 
 /**
  * Round 4 regression: setting `run_at` on a cron schedule used to be a
- * silent no-op. The service accepted the patch, updated the `run_at`
- * column to the new value, kept the old `cron_expression` in place, and
- * recomputed `next_run_at` from the existing cron — so the worker kept
- * firing per cron and the caller's `run_at` was effectively ignored.
- *
- * The fix is implicit mode-transition clearing in
- * {@see \Spora\Services\ScheduledRunService::recomputeNextRunAtIfNeeded()}:
- * when the patch sets ONE cadence field to a non-null value and the
- * existing schedule has the OPPOSITE cadence field set, clear the
- * opposite. The two directions of cron↔one-shot are now symmetric and
- * there's no silent no-op for the caller to retry against.
+ * silent no-op. The implicit mode-transition policy in
+ * {@see \Spora\Services\ScheduledRunService::recomputeNextRunAtIfNeeded()}
+ * now clears the opposite cadence field when the patch sets ONE side,
+ * making the two directions symmetric.
  */
 describe('Round 4 — implicit mode-transition clearing', function (): void {
     test('setting run_at on a cron schedule clears cron_expression and switches to one-shot', function (): void {
@@ -1377,27 +1315,12 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 });
 
 /**
- * Round 5 regression: the OpenAI tool-call wire shape encodes the
- * `arguments` field as a JSON string, so when an LLM pattern-matches
- * the documentation "send null to clear a field" and emits
- * `"cron_expression":"null"` (the four-character string literal),
- * the validator receives a PHP string "null" — not the JSON null
- * type. Pre-Round-5 the validator strict-rejected it with the
- * "send JSON null, not the string" hint, which Round 5 callers
- * couldn't action: the LLM produces the string, not the caller.
- *
- * The fix is lenient normalisation in
- * {@see \Spora\Tools\ScheduleTool\ScheduleUpdateValidator::normalizeNullLikeStrings()}:
- * string "null" / "NULL" / "Null" / "" / "   " for any of the five
- * clearable fields (cron_expression, run_at, template_id,
- * max_steps_override, max_steps) coerces to PHP null before the
- * field-type checks run.
- *
- * These end-to-end tests go through ScheduleTool::execute() with the
- * exact wire shape a Round 5 caller would send — including the
- * JSON-string-encoded outer layer that the OpenAI driver decodes —
- * so any future re-introduction of the strict rejection path fails
- * loudly here.
+ * Round 5 regression: the OpenAI tool-call wire shape encodes
+ * `arguments` as a JSON string, so an LLM that intends JSON null often
+ * emits the literal four-character "null". The validator's
+ * {@see \Spora\Tools\ScheduleTool\ScheduleUpdateValidator::normalizeNullLikeStrings()}
+ * coerces these to PHP null for every clearable field before the
+ * field-type checks run. These tests pin the end-to-end behaviour.
  */
 describe('Round 5 — wire-shape leniency for the literal string "null"', function (): void {
     test('update_schedule with {cron_expression: "null"} clears cron end-to-end', function (): void {

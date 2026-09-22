@@ -87,10 +87,6 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
         });
 
         test('whitespace-only cron_expression is coerced to null (clears)', function (): void {
-            // After the Round 5 leniency, `trim()`ed "" / "null" / "  "
-            // all coerce to null and clear the field. A genuinely-invalid
-            // cron like "definitely not a cron" is still rejected (see
-            // the regression test at the bottom of this describe).
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['cron_expression' => '   '],
             ]);
@@ -309,29 +305,12 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
     });
 
     /**
-     * Bug report (Round 5): a user reported that all five "clear by null"
-     * fields rejected the literal four-character string "null" — what
-     * models emit on the wire when they intend JSON null.
-     *
-     * Investigation showed:
-     *   - JSON null works correctly (the previous "send JSON null, not
-     *     the string" guidance was honest, but unhelpful in practice —
-     *     LLMs don't reliably produce JSON null through the OpenAI
-     *     tool-call wire shape, where `arguments` is a JSON-encoded
-     *     string and `"cron_expression":"null"` arrives at the
-     *     validator as the PHP string "null").
-     *   - Real PHP null was already accepted.
-     *
-     * The fix is lenient normalisation: the validator coerces the
-     * literal string "null" / "NULL" / "Null" / "" to PHP null BEFORE
-     * the field-type checks, so the existing null-aware paths treat
-     * these as real clears.
-     *
-     * These tests pin both halves of the new contract for every clearable
-     * field:
-     *   (a) JSON null clears each field (the strict-positive contract).
-     *   (b) the four-character string "null" / "" / "NULL" / "Null" is
-     *       now coerced to null and clears the field too.
+     * Round 5: clearable fields accept both JSON null AND the literal
+     * four-character string "null" / "" / "NULL" / "Null" — the
+     * validator's
+     * {@see \Spora\Tools\ScheduleTool\ScheduleUpdateValidator::normalizeNullLikeStrings()}
+     * coerces the wire-shape string that LLMs commonly emit before the
+     * field-type checks run.
      */
     describe('Null clears fields (JSON null and string "null" both work)', function (): void {
         test('JSON null clears max_steps_override', function (): void {
