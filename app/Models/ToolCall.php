@@ -78,12 +78,7 @@ final class ToolCall extends Model
         'executed_at'            => 'datetime',
     ];
 
-    /**
-     * Mirror migrations 000006 + 0019 — keep both in sync. `operation_description`
-     * was widened to TEXT by migration 0085, so it's intentionally absent.
-     *
-     * @var array<string, int>
-     */
+    /** @var array<string, int> operation_description was widened to TEXT by migration 0085 — intentionally absent. */
     public const STRING_COLUMN_MAX_LENGTHS = [
         'provider_call_id' => 100,
         'tool_name'        => 100,
@@ -97,10 +92,7 @@ final class ToolCall extends Model
     /** @return array{0: string, 1: string} */
     protected function stringColumnsFitContext(): array
     {
-        return [
-            'tool_calls',
-            (string) ($this->attributes['tool_class'] ?? 'tool call'),
-        ];
+        return ['tool_calls', (string) ($this->attributes['tool_class'] ?? 'tool call')];
     }
 
     public function task(): BelongsTo

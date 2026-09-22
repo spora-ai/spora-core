@@ -131,11 +131,7 @@ final class MediaAsset extends Model
     /** @var array<string, string> */
     protected $casts = self::CASTS;
 
-    /**
-     * Mirror migrations 0051 + 0052 + 0056 — keep both in sync.
-     *
-     * @var array<string, int>
-     */
+    /** @var array<string, int> */
     public const STRING_COLUMN_MAX_LENGTHS = [
         'plugin_slug'         => 64,
         'tool_name'           => 64,

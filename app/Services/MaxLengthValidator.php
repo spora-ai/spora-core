@@ -8,16 +8,11 @@ use InvalidArgumentException;
 
 /**
  * Throws {@see InvalidArgumentException} before MySQL/MariaDB silently
- * truncate a string column with SQLSTATE 22001. Callers pass the values
- * + the bounded-column map; the helper fails fast on the first violation.
- *
- * Defended models follow the same shape: a `STRING_COLUMN_MAX_LENGTHS`
- * const + a `save()` override that calls {@see assertFits()}. The
- * `save()` override (rather than `static::saving` in `booted()`) is
- * required because Spora's standalone Capsule never wires an
- * EventDispatcher into `Model::$dispatcher` — same constraint that
- * drove {@see \Spora\Models\Principal::save()} /
- * {@see \Spora\Models\LLMDriverConfiguration::save()}.
+ * truncate a string column with SQLSTATE 22001. Defended models use
+ * {@see \Spora\Models\Concerns\HasStringColumnLengthValidation}, which
+ * overrides `save()` (Spora's standalone Capsule never wires an
+ * EventDispatcher into `Model::$dispatcher` — same constraint as
+ * {@see \Spora\Models\Principal::save()}).
  */
 final class MaxLengthValidator
 {

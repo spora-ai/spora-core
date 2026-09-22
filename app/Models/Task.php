@@ -78,15 +78,7 @@ final class Task extends Model
         'data'             => 'array',
     ];
 
-    /**
-     * Mirror migrations 000005 + 0017 + 0042 — keep both in sync.
-     * `failure_reason` was widened from default → 1000 by migration 0042
-     * specifically to fix a SQLSTATE 22001 from over-long stack traces;
-     * guarding it now means future regressions throw a clear message
-     * instead of "Data too long for column".
-     *
-     * @var array<string, int>
-     */
+    /** @var array<string, int> */
     public const STRING_COLUMN_MAX_LENGTHS = [
         'status'         => 30,
         'failure_reason' => 1000,

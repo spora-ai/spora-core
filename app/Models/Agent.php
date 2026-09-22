@@ -89,11 +89,7 @@ final class Agent extends Model
         'updated_at' => 'datetime',
     ];
 
-    /**
-     * Mirror migrations 000003 + 0012 — keep both in sync.
-     *
-     * @var array<string, int>
-     */
+    /** @var array<string, int> */
     public const STRING_COLUMN_MAX_LENGTHS = [
         'name'         => 100,
         'llm_provider' => 50,
