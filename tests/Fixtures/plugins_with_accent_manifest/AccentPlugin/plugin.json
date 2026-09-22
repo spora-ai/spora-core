@@ -1,0 +1,5 @@
+{
+    "slug": "accent-manifest",
+    "class": "Tests\\Fixtures\\Plugins\\AccentPlugin\\Plugin",
+    "accent": "amber"
+}

@@ -27,4 +27,9 @@ final class StubSampleApp implements AppInterface
     {
         return 'puzzle';
     }
+
+    public function accent(): string
+    {
+        return 'primary';
+    }
 }

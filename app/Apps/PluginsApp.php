@@ -25,4 +25,9 @@ final class PluginsApp implements AppInterface
     {
         return 'puzzle';
     }
+
+    public function accent(): string
+    {
+        return 'violet';
+    }
 }

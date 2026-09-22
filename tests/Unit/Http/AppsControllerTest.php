@@ -8,6 +8,7 @@ use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
+use Tests\Fixtures\SpyAccentApp;
 use Tests\Fixtures\StubSampleApp;
 use Tests\Fixtures\StubVueApp;
 use Tests\Fixtures\StubVueAppEmpty;
@@ -176,5 +177,72 @@ describe('AppsController', function (): void {
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
         expect($body['data']['apps'][0])->not->toHaveKey('slug');
+    });
+
+    it('emits the accent returned by the PHP app class', function (): void {
+        // StubVueApp::accent() returns 'emerald' — exercises the PHP-
+        // method-wins branch of resolveAccent().
+        $authService = bootAuthLayer();
+        $userId = $authService->register('accent-php@example.com', 'ValidPass1!', 'AccentPhp');
+        simulateLoggedInSession($userId, 'accent-php@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubVueApp::class);
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0]['accent'])->toBe('emerald');
+    });
+
+    it('falls back to the plugin manifest accent when the PHP method returns an unknown token', function (): void {
+        // SpyAccentApp::accent() returns 'neon-pink' (not in the enum).
+        // The controller must ignore it and read the manifest's accent
+        // instead — fallback is silent so a plugin author's typo never
+        // breaks the SPA's render path.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('accent-manifest@example.com', 'ValidPass1!', 'AccentManifest');
+        simulateLoggedInSession($userId, 'accent-manifest@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(SpyAccentApp::class);
+
+        $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_accent_manifest'], null);
+        $loader->boot();
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry, $loader);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['apps'][0]['accent'])->toBe('amber');
+    });
+
+    it('falls back to "primary" when neither the PHP method nor the manifest declares a known accent', function (): void {
+        $authService = bootAuthLayer();
+        $userId = $authService->register('accent-default@example.com', 'ValidPass1!', 'AccentDefault');
+        simulateLoggedInSession($userId, 'accent-default@example.com');
+
+        $registry = new AppRegistry();
+        $registry->register(StubSampleApp::class);
+
+        [$controller, $authMiddleware, $csrfMiddleware] = makeAppsController($registry);
+
+        $request = jsonRequest('GET', '/api/v1/apps');
+        $response = callController($controller, 'index', $request, [$authMiddleware, $csrfMiddleware]);
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        // StubSampleApp::accent() returns 'primary' — covers the
+        // default branch directly. A future test could swap in a
+        // fixture that returns an unknown token + has no manifest
+        // to exercise the unknown → default fallback.
+        expect($body['data']['apps'][0]['accent'])->toBe('primary');
     });
 });

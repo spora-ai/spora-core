@@ -31,6 +31,20 @@
                 "M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z",
                 "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z\"/></svg>"
             ]
+        },
+        "accent": {
+            "type": "string",
+            "description": "Tile accent colour for the plugin's app in the navbar drawer. Maps to a Tailwind gradient + text colour on the host SPA. Keep the enum short so the bundled Tailwind classes ship without a safelist — if a new colour is genuinely needed, add it to both this enum and the host's `tileAccent()` map in the same change.\n\nMirrors the precedence used by `frontendEntry`: the PHP app class's `accent()` method wins over this field, which wins over the default `\"primary\"`. If the value is missing, empty, or not in the enum, AppsController silently falls back to `\"primary\"`.\n\nDefaults to `\"primary\"` when omitted.",
+            "default": "primary",
+            "enum": [
+                "violet",
+                "amber",
+                "emerald",
+                "sky",
+                "rose",
+                "primary"
+            ],
+            "examples": ["emerald", "amber"]
         }
     }
 }
