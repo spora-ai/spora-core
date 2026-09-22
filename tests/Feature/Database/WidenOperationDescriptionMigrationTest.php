@@ -6,7 +6,6 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 
 beforeEach(function (): void {
     TestDatabaseFactory::freshDatabase();
-    Spora\Agents\ToolCallInsertGuard::resetCache();
 });
 
 test('0085 migration runs without throwing on the test database', function (): void {

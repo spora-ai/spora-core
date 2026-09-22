@@ -7,7 +7,7 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
-use Spora\Agents\ToolCallInsertGuard;
+use InvalidArgumentException;
 
 /**
  * @property int              $id
@@ -77,15 +77,68 @@ final class ToolCall extends Model
     ];
 
     /**
+     * Bounded string columns on `tool_calls`. Mirror the widths declared in
+     * migrations 000006 + 0019 — keep both in sync if a future migration
+     * widens or narrows one.
+     *
+     * `operation_description` was widened to TEXT in migration 0085, so
+     * it is intentionally absent from this map (TEXT is unbounded for our
+     * purposes; SQLite has no length cap on TEXT either).
+     *
+     * @var array<string, int>
+     */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'provider_call_id' => 100,
+        'tool_name'        => 100,
+        'tool_class'       => 200,
+        'tool_type'        => 10,
+        'status'           => 20,
+        'operation'        => 100,
+        'approval_note'    => 500,
+    ];
+
+    /**
      * Override pattern (instead of `static::saving` in `booted()`):
      * Spora's standalone Capsule never wires an EventDispatcher into
      * `Model::$dispatcher`, so static listeners silently never fire. Same
-     * constraint that drove {@see \Spora\Models\LLMDriverConfiguration::save()}.
+     * constraint that drove {@see \Spora\Models\LLMDriverConfiguration::save()}
+     * and {@see \Spora\Models\Principal::save()}.
      */
     public function save(array $options = []): bool
     {
-        ToolCallInsertGuard::assertInsertable($this->getAttributes(), self::class);
+        $this->assertStringColumnsFit();
         return parent::save($options);
+    }
+
+    /**
+     * Throw when any bounded string column would be silently truncated by
+     * MariaDB (1406 "Data too long for column") at INSERT time. Mirrors
+     * {@see \Spora\Models\Principal::validateXor()} — public so the bulk
+     * insert path can validate rows in tests without round-tripping through
+     * Eloquent.
+     *
+     * @throws InvalidArgumentException
+     */
+    public function assertStringColumnsFit(): void
+    {
+        foreach (self::STRING_COLUMN_MAX_LENGTHS as $column => $max) {
+            $value = $this->attributes[$column] ?? null;
+            if (!is_string($value)) {
+                continue;
+            }
+            $length = mb_strlen($value);
+            if ($length > $max) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        'tool_calls.%s for %s is %d chars; column limit is %d.',
+                        $column,
+                        (string) ($this->attributes['tool_class'] ?? 'tool call'),
+                        $length,
+                        $max,
+                    ),
+                );
+            }
+        }
     }
 
     public function task(): BelongsTo
