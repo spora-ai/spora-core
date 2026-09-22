@@ -7,11 +7,8 @@ namespace Tests\Fixtures;
 use Spora\Apps\AppInterface;
 
 /**
- * Test fixture whose `accent()` returns a value outside the known enum.
- * Lets the AppsController tests prove that an unknown PHP-supplied
- * token is dropped in favour of the plugin manifest's `accent` field —
- * the same fallback posture as the unknown-icon-name → `puzzle`
- * resolver, but for the accent wire shape.
+ * App fixture whose `accent()` returns a value outside the known enum —
+ * lets AppsControllerTest prove the manifest-overrides-bad-PHP fallback.
  */
 final class SpyAccentApp implements AppInterface
 {

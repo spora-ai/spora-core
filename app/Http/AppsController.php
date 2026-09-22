@@ -18,20 +18,9 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  * `frontendEntry` field (JSON). When either is present, the SPA's
  * generic `/apps/:appName` loader uses it to fetch the IIFE script from
  * `public/plugins/<slug>/<entry>`.
- *
- * The `name` stays stable so existing routes keep working; this is an
- * additive contract change.
  */
 final class AppsController
 {
-    /**
-     * Known tile-accent tokens. Mirrors the `accent` enum in
-     * plugin.schema.json — keep both in sync when adding a new colour.
-     * Used by {@see resolveAccent()} to validate plugin-supplied values
-     * without dragging the JSON schema into runtime land.
-     */
-    private const ACCENT_TOKENS = ['violet', 'amber', 'emerald', 'sky', 'rose', 'primary'];
-
     public function __construct(
         private readonly AppRegistry $appRegistry,
         private readonly ?PluginLoader $pluginLoader = null,
@@ -107,13 +96,7 @@ final class AppsController
         return null;
     }
 
-    /**
-     * Resolve the tile accent for an app. Precedence — PHP method,
-     * then manifest field, then the default. Unknown or empty values
-     * fall back to `"primary"` silently so a plugin author's typo
-     * never breaks the SPA's render path (same posture as {@see AppInterface::icon()},
-     * which silently falls back to `puzzle` for unknown icon names).
-     */
+    /** PHP-method > manifest > default. Unknown values silently fall back to the default. */
     private function resolveAccent(AppInterface $app, ?string $slug): string
     {
         $phpValue = $app->accent();
@@ -131,11 +114,11 @@ final class AppsController
             }
         }
 
-        return 'primary';
+        return AppInterface::DEFAULT_ACCENT;
     }
 
     private function isKnownAccent(string $value): bool
     {
-        return in_array($value, self::ACCENT_TOKENS, true);
+        return in_array($value, AppInterface::ACCENT_TOKENS, true);
     }
 }
