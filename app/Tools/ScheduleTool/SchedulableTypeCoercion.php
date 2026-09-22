@@ -40,20 +40,28 @@ trait SchedulableTypeCoercion
         if (is_bool($value)) {
             return $value;
         }
-        if ($value === 0 || $value === 1) {
-            return $value === 1;
-        }
-        if (is_string($value)) {
-            $lower = strtolower(trim($value));
-            if ($lower === 'true' || $lower === '1') {
-                return true;
-            }
-            if ($lower === 'false' || $lower === '0' || $lower === '') {
-                return false;
-            }
-        }
 
-        return null;
+        return match (true) {
+            $value === 1                => true,
+            $value === 0                => false,
+            is_string($value)           => $this->coerceBoolFromString($value),
+            default                     => null,
+        };
+    }
+
+    /**
+     * Helper for {@see coerceBool()} — handles the string branch in
+     * isolation so the parent keeps its return count manageable.
+     */
+    private function coerceBoolFromString(string $value): ?bool
+    {
+        $lower = strtolower(trim($value));
+
+        return match ($lower) {
+            'true', '1'  => true,
+            'false', '0', '' => false,
+            default      => null,
+        };
     }
 
     /**
@@ -69,26 +77,15 @@ trait SchedulableTypeCoercion
      */
     private function coercePositiveInt(mixed $value): ?int
     {
-        if (is_int($value)) {
-            return $value >= 1 ? $value : null;
-        }
-        if (is_float($value)) {
-            if (!is_finite($value) || $value !== floor($value) || $value < 1) {
-                return null;
-            }
-            return (int) $value;
-        }
-        if (is_string($value)) {
-            $trimmed = trim($value);
-            if ($trimmed === '' || !ctype_digit($trimmed)) {
-                return null;
-            }
-            $int = (int) $trimmed;
-
-            return $int >= 1 ? $int : null;
+        if (!is_int($value) && !is_float($value) && !is_string($value)) {
+            return null;
         }
 
-        return null;
+        return match (true) {
+            is_int($value)   => $this->intInRange($value, 1, PHP_INT_MAX),
+            is_float($value) => $this->intFromIntegralFloat($value, 1),
+            default          => $this->intFromDigitString($value, 1),
+        };
     }
 
     /**
@@ -97,21 +94,41 @@ trait SchedulableTypeCoercion
      */
     private function coerceNonNegativeInt(mixed $value): ?int
     {
-        if (is_int($value)) {
-            return $value >= 0 ? $value : null;
-        }
-        if (is_float($value) && is_finite($value) && $value === floor($value) && $value >= 0) {
-            return (int) $value;
-        }
-        if (is_string($value)) {
-            $trimmed = trim($value);
-            if ($trimmed === '' || !ctype_digit($trimmed)) {
-                return null;
-            }
-            return (int) $trimmed;
+        if (!is_int($value) && !is_float($value) && !is_string($value)) {
+            return null;
         }
 
-        return null;
+        return match (true) {
+            is_int($value)   => $this->intInRange($value, 0, PHP_INT_MAX),
+            is_float($value) => $this->intFromIntegralFloat($value, 0),
+            default          => $this->intFromDigitString($value, 0),
+        };
+    }
+
+    private function intInRange(int $value, int $min, int $max): ?int
+    {
+        return ($value >= $min && $value <= $max) ? $value : null;
+    }
+
+    private function intFromIntegralFloat(float $value, int $min): ?int
+    {
+        if (!is_finite($value) || $value !== floor($value) || $value < $min) {
+            return null;
+        }
+
+        return (int) $value;
+    }
+
+    private function intFromDigitString(string $value, int $min): ?int
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '' || !ctype_digit($trimmed)) {
+            return null;
+        }
+
+        $int = (int) $trimmed;
+
+        return $int >= $min ? $int : null;
     }
 
     /**
@@ -130,20 +147,16 @@ trait SchedulableTypeCoercion
      */
     private function describeValue(mixed $value): string
     {
-        if ($value === null) {
-            return 'null';
-        }
-        if (is_bool($value)) {
-            return 'bool(' . ($value ? 'true' : 'false') . ')';
-        }
-        if (is_int($value) || is_float($value)) {
-            return gettype($value) . '(' . $value . ')';
-        }
         if (is_string($value)) {
             return 'string("' . $this->truncateString($value, 32) . '")';
         }
 
-        return gettype($value);
+        return match (true) {
+            $value === null                          => 'null',
+            is_bool($value)                          => 'bool(' . ($value ? 'true' : 'false') . ')',
+            is_int($value) || is_float($value)       => gettype($value) . '(' . $value . ')',
+            default                                  => gettype($value),
+        };
     }
 
     private function truncateString(string $value, int $maxLength): string

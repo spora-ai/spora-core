@@ -105,6 +105,56 @@ function seedTemplate(int $agentId, array $overrides = []): AgentPromptTemplate
     ], $overrides));
 }
 
+/**
+ * Disable foreign-key checking for the next direct UPDATE the test
+ * performs. The Spora tools intentionally allow `template_id` to be
+ * a "dangling" reference at storage time — the service layer is the
+ * one that decides the row is unschedulable, not the FK — so a few
+ * tests need to plant a missing-id reference on an existing
+ * `scheduled_runs` row without the FK rejecting the write.
+ *
+ * The driver switch is necessary because the two backend families
+ * expose FK toggling differently:
+ *
+ *   - SQLite: `PRAGMA defer_foreign_keys = ON` (per-transaction,
+ *     auto-restored on the test's transaction rollback).
+ *   - MySQL / MariaDB: `SET FOREIGN_KEY_CHECKS=0` (session-scoped —
+ *     persists across the rollback, so pair with
+ *     {@see restoreForeignKeysForTest()} to keep the session clean).
+ */
+function bypassForeignKeysForTest(): void
+{
+    $driver = Capsule::connection()->getDriverName();
+    if ($driver === 'sqlite') {
+        Capsule::statement('PRAGMA defer_foreign_keys = ON');
+
+        return;
+    }
+    if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS=0');
+
+        return;
+    }
+    // Other drivers (pg, sqlsrv) weren't requested yet; the test
+    // skips the bypass and lets the FK do its job — that path is
+    // exercised in production where the bug we are testing requires
+    // a missing-template id to slip past the FK in the first place.
+}
+
+/**
+ * Companion to {@see bypassForeignKeysForTest()} — re-enable FK
+ * checking after a session-scoped bypass so the next test starts
+ * from a clean baseline. No-op for SQLite (the pragma is
+ * per-transaction and the afterEach rollback restores the default).
+ */
+function restoreForeignKeysForTest(): void
+{
+    $driver = Capsule::connection()->getDriverName();
+    if (in_array($driver, ['mysql', 'mariadb'], true)) {
+        Capsule::statement('SET FOREIGN_KEY_CHECKS=1');
+    }
+}
+
 describe('ScheduleTool::list_schedules', function (): void {
     test('returns empty list when no schedules exist', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
@@ -710,9 +760,12 @@ describe('ScheduleTool::trigger_schedule', function (): void {
         // Insert via Eloquent (template_id = null passes FK), then patch the
         // row directly to point at a non-existent template id — that simulates
         // a deleted template without tripping the FK cascade. Pest wraps every
-        // test in a transaction; use SQLite's per-transaction
-        // `defer_foreign_keys = ON` so the update can violate the FK only
-        // within this test's transactional scope.
+        // test in a transaction; bypass FK enforcement only for this update so
+        // the violating reference can land in the row but the trigger still
+        // sees a missing template. The driver switch is necessary because
+        // SQLite uses `PRAGMA defer_foreign_keys` while MySQL/MariaDB use
+        // `SET FOREIGN_KEY_CHECKS=0` (session-scoped); either way the value
+        // reverts on transaction rollback.
         $run = seedSchedule($agentId, $userId, [
             'template_id'     => null,
             'raw_prompt'      => 'fallback',
@@ -720,10 +773,14 @@ describe('ScheduleTool::trigger_schedule', function (): void {
         ]);
 
         $missingTemplateId = 999_999_999;
-        Capsule::statement('PRAGMA defer_foreign_keys = ON');
-        Capsule::table('scheduled_runs')
-            ->where('id', $run->id)
-            ->update(['template_id' => $missingTemplateId]);
+        bypassForeignKeysForTest();
+        try {
+            Capsule::table('scheduled_runs')
+                ->where('id', $run->id)
+                ->update(['template_id' => $missingTemplateId]);
+        } finally {
+            restoreForeignKeysForTest();
+        }
 
         $run->refresh();
         expect($run->template_id)->toBe($missingTemplateId);

@@ -422,19 +422,17 @@ final class SchedulePayloadValidator
             return null;
         }
 
-        if ($this->coercePositiveInt($value) === null) {
-            return ToolResult::fail(
+        $int = $this->coercePositiveInt($value);
+        return match (true) {
+            $int === null         => ToolResult::fail(
                 $op . ': `' . $fieldLabel . '` must be a positive integer between 1 and 100 (got '
                 . (is_scalar($value) ? var_export($value, true) : gettype($value)) . ').',
-            );
-        }
-
-        $int = (int) $value;
-        if ($int < 1 || $int > 100) {
-            return ToolResult::fail($op . ': `' . $fieldLabel . '` must be between 1 and 100.');
-        }
-
-        return null;
+            ),
+            $int < 1 || $int > 100 => ToolResult::fail(
+                $op . ': `' . $fieldLabel . '` must be between 1 and 100.',
+            ),
+            default               => null,
+        };
     }
 
     /**

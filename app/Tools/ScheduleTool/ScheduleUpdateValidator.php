@@ -378,20 +378,8 @@ final class ScheduleUpdateValidator
         // caller submitted the literal four-character string "null".
         // Without this, CronExpression("null") throws and we bubble up
         // a generic "invalid syntax" error that buries the real cause.
-        if (is_string($cron) && in_array(trim($cron), ['', 'null', 'NULL', 'Null'], true)) {
-            return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty 5-field cron string, or JSON '
-                . '`null` to clear the schedule (switch to one-shot mode). '
-                . 'Got the string ' . $this->describeValue($cron) . ' — the JSON null literal is not a string. '
-                . 'To clear the cron field, send the JSON null value, not the string "null".',
-            );
-        }
-        if (!is_string($cron)) {
-            return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty 5-field cron string, or JSON '
-                . '`null` to clear the schedule (switch to one-shot mode). '
-                . 'Got ' . $this->describeValue($cron) . '.',
-            );
+        if (!is_string($cron) || in_array(trim($cron), ['', 'null', 'NULL', 'Null'], true)) {
+            return $this->cronShapeError($cron);
         }
         try {
             new CronExpression($cron);
@@ -403,21 +391,31 @@ final class ScheduleUpdateValidator
         return null;
     }
 
+    /**
+     * Companion to {@see validateCronExpression()} — keeps the parent
+     * under Sonar's 3-return limit by emitting the "send JSON null"
+     * hint and the "must be a string" diagnostic from a single helper.
+     */
+    private function cronShapeError(mixed $cron): ToolResult
+    {
+        $gotString = in_array(trim(is_string($cron) ? $cron : ''), ['', 'null', 'NULL', 'Null'], true);
+
+        $hint = $gotString
+            ? ' Got the string ' . $this->describeValue($cron) . ' — the JSON null literal is not a string. '
+              . 'To clear the cron field, send the JSON null value, not the string "null".'
+            : '';
+
+        return ToolResult::fail(
+            self::OP_UPDATE_SCHEDULE . ': `cron_expression` must be a non-empty 5-field cron string, or JSON '
+            . '`null` to clear the schedule (switch to one-shot mode). '
+            . 'Got ' . $this->describeValue($cron) . '.' . $hint,
+        );
+    }
+
     private function validateRunAt(mixed $runAt, string $timezone): ?ToolResult
     {
-        if (is_string($runAt) && in_array(trim($runAt), ['', 'null', 'NULL', 'Null'], true)) {
-            return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or JSON `null` to clear '
-                . 'the schedule (switch to recurring mode). Got the string ' . $this->describeValue($runAt)
-                . ' — the JSON null literal is not a string. '
-                . 'To clear the run_at field, send the JSON null value, not the string "null".',
-            );
-        }
-        if (!is_string($runAt)) {
-            return ToolResult::fail(
-                self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or JSON `null` to clear '
-                . 'the schedule (switch to recurring mode). Got ' . $this->describeValue($runAt) . '.',
-            );
+        if (!is_string($runAt) || in_array(trim($runAt), ['', 'null', 'NULL', 'Null'], true)) {
+            return $this->runAtShapeError($runAt);
         }
         try {
             new DateTimeImmutable($runAt, new DateTimeZone($timezone));
@@ -427,6 +425,26 @@ final class ScheduleUpdateValidator
             );
         }
         return null;
+    }
+
+    /**
+     * Companion to {@see validateRunAt()} — same role as
+     * {@see cronShapeError()}, kept separate so each validator stays
+     * under Sonar's 3-return limit while preserving distinct wording.
+     */
+    private function runAtShapeError(mixed $runAt): ToolResult
+    {
+        $gotString = in_array(trim(is_string($runAt) ? $runAt : ''), ['', 'null', 'NULL', 'Null'], true);
+
+        $hint = $gotString
+            ? ' Got the string ' . $this->describeValue($runAt) . ' — the JSON null literal is not a string. '
+              . 'To clear the run_at field, send the JSON null value, not the string "null".'
+            : '';
+
+        return ToolResult::fail(
+            self::OP_UPDATE_SCHEDULE . ': `run_at` must be a non-empty ISO 8601 string, or JSON `null` to clear '
+            . 'the schedule (switch to recurring mode). Got ' . $this->describeValue($runAt) . '.' . $hint,
+        );
     }
 
     private function validateVariables(mixed $value): ?ToolResult
