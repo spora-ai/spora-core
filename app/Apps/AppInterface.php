@@ -12,6 +12,12 @@ namespace Spora\Apps;
  */
 interface AppInterface
 {
+    /** Tile-accent tokens the host SPA renders. Mirror in `plugin.schema.json`'s `accent` enum and the host's `tileAccent()` map. */
+    public const ACCENT_TOKENS = ['violet', 'amber', 'emerald', 'sky', 'rose', 'primary'];
+
+    /** Fallback when no PHP method / manifest field resolves to a known value. */
+    public const DEFAULT_ACCENT = 'primary';
+
     public function name(): string;
 
     public function displayName(): string;
@@ -24,4 +30,7 @@ interface AppInterface
      * docs/07_plugins.md for the accepted forms.
      */
     public function icon(): string;
+
+    /** Tile-accent token. AppsController picks the value with PHP-method > manifest > default precedence; unknown tokens fall back silently. */
+    public function accent(): string;
 }

@@ -18,9 +18,6 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  * `frontendEntry` field (JSON). When either is present, the SPA's
  * generic `/apps/:appName` loader uses it to fetch the IIFE script from
  * `public/plugins/<slug>/<entry>`.
- *
- * The `name` stays stable so existing routes keep working; this is an
- * additive contract change.
  */
 final class AppsController
 {
@@ -54,6 +51,7 @@ final class AppsController
             'displayName' => $app->displayName(),
             'description' => $app->description(),
             'icon'        => $app->icon(),
+            'accent'      => $this->resolveAccent($app, $slug),
             'route'       => '/apps/' . $app->name(),
         ];
 
@@ -96,5 +94,31 @@ final class AppsController
         }
 
         return null;
+    }
+
+    /** PHP-method > manifest > default. Unknown values silently fall back to the default. */
+    private function resolveAccent(AppInterface $app, ?string $slug): string
+    {
+        $phpValue = $app->accent();
+        if ($this->isKnownAccent($phpValue)) {
+            return $phpValue;
+        }
+
+        if ($slug !== null && $this->pluginLoader !== null) {
+            $manifest = $this->pluginLoader->getPluginManifest($slug);
+            if (is_array($manifest)) {
+                $manifestValue = $manifest['accent'] ?? null;
+                if (is_string($manifestValue) && $this->isKnownAccent($manifestValue)) {
+                    return $manifestValue;
+                }
+            }
+        }
+
+        return AppInterface::DEFAULT_ACCENT;
+    }
+
+    private function isKnownAccent(string $value): bool
+    {
+        return in_array($value, AppInterface::ACCENT_TOKENS, true);
     }
 }

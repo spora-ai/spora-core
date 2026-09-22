@@ -6,21 +6,22 @@ namespace Tests\Fixtures;
 
 use Spora\Apps\AppInterface;
 
-final class StubSampleApp implements AppInterface
+/** `accent()` returns a value outside the known enum. */
+final class SpyAccentApp implements AppInterface
 {
     public function name(): string
     {
-        return 'sample';
+        return 'accent-spy';
     }
 
     public function displayName(): string
     {
-        return 'Sample';
+        return 'Accent Spy';
     }
 
     public function description(): string
     {
-        return 'Sample app used for fixture-only registrations';
+        return 'Fixture whose accent() returns a non-enum token.';
     }
 
     public function icon(): string
@@ -30,6 +31,6 @@ final class StubSampleApp implements AppInterface
 
     public function accent(): string
     {
-        return 'primary';
+        return 'neon-pink';
     }
 }

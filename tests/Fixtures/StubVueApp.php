@@ -36,6 +36,11 @@ final class StubVueApp implements VueAppInterface
         return 'puzzle';
     }
 
+    public function accent(): string
+    {
+        return 'emerald';
+    }
+
     public function entry(): string
     {
         return $this->entry;
@@ -67,6 +72,11 @@ final class StubVueAppEmpty implements VueAppInterface
     public function icon(): string
     {
         return 'puzzle';
+    }
+
+    public function accent(): string
+    {
+        return 'primary';
     }
 
     public function entry(): string
