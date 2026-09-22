@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Spora\Drivers\DriverFactory;
+use Spora\Services\MaxLengthValidator;
 use Spora\Services\PrincipalResolver;
 use Throwable;
 
@@ -21,9 +22,12 @@ use Throwable;
  * @property string $name
  * @property string|null $description
  * @property string|null $system_prompt
- * @property int|null $llm_driver_config_id
- * @property int|null $speech_driver_config_id
- * @property int|null $max_steps
+* @property int|null    $llm_driver_config_id
+ * @property int|null    $speech_driver_config_id
+ * @property string|null $llm_provider
+ * @property string|null $llm_model
+ * @property string|null $llm_base_url
+ * @property int|null    $max_steps
  * @property bool $is_active
  * @property bool $allow_followup
  * @property int $retry_after_minutes
@@ -82,6 +86,46 @@ final class Agent extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * Bounded string columns on `agents`. Mirror the widths declared in
+     * migrations 000003 + 0012 — keep both in sync if a future migration
+     * widens or narrows one. `llm_base_url` is the most plausible
+     * overflow source: self-hosted LLM endpoints with long hostnames
+     * can push past 255.
+     *
+     * @var array<string, int>
+     */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'name'         => 100,
+        'llm_provider' => 50,
+        'llm_model'    => 100,
+        'llm_base_url' => 255,
+    ];
+
+    /**
+     * Override pattern (instead of `static::saving` in `booted()`):
+     * Spora's standalone Capsule never wires an EventDispatcher into
+     * `Model::$dispatcher`, so static listeners silently never fire. Same
+     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
+     * {@see \Spora\Models\Principal::save()}.
+     */
+    public function save(array $options = []): bool
+    {
+        $this->assertStringColumnsFit();
+        return parent::save($options);
+    }
+
+    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
+    public function assertStringColumnsFit(): void
+    {
+        MaxLengthValidator::assertFits(
+            $this->attributes,
+            self::STRING_COLUMN_MAX_LENGTHS,
+            'agents',
+            "agent #{$this->id}",
+        );
+    }
 
     public function principal(): BelongsTo
     {

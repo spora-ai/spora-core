@@ -6,6 +6,7 @@ namespace Spora\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Spora\Services\MaxLengthValidator;
 use Spora\Services\MediaArchive\MediaType;
 
 /**
@@ -127,6 +128,53 @@ final class MediaAsset extends Model
 
     /** @var array<string, string> */
     protected $casts = self::CASTS;
+
+    /**
+     * Bounded string columns on `media_assets`. Mirror the widths declared
+     * in migrations 0051 + 0052 + 0056 — keep both in sync if a future
+     * migration widens or narrows one. `asset_url` / `source_url` (512) and
+     * `filename` (255) are the most plausible overflow sources: long CDN
+     * URLs and user-supplied filenames.
+     *
+     * @var array<string, int>
+     */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'plugin_slug'         => 64,
+        'tool_name'           => 64,
+        'media_type'          => 16,
+        'mime_type'           => 127,
+        'filename'            => 255,
+        'asset_url'           => 512,
+        'source_url'          => 512,
+        'storage_mode'        => 16,
+        'asset_token'         => 64,
+        'public_access_token' => 64,
+        'upload_source'       => 16,
+    ];
+
+    /**
+     * Override pattern (instead of `static::saving` in `booted()`):
+     * Spora's standalone Capsule never wires an EventDispatcher into
+     * `Model::$dispatcher`, so static listeners silently never fire. Same
+     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
+     * {@see \Spora\Models\Principal::save()}.
+     */
+    public function save(array $options = []): bool
+    {
+        $this->assertStringColumnsFit();
+        return parent::save($options);
+    }
+
+    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
+    public function assertStringColumnsFit(): void
+    {
+        MaxLengthValidator::assertFits(
+            $this->attributes,
+            self::STRING_COLUMN_MAX_LENGTHS,
+            'media_assets',
+            "media asset {$this->id}",
+        );
+    }
 
     public function agent(): BelongsTo
     {

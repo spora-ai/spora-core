@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Spora\Services\MaxLengthValidator;
 
 /**
  * @property int         $id
@@ -74,6 +75,47 @@ final class Task extends Model
         'lease_expires_at' => 'datetime',
         'data'             => 'array',
     ];
+
+    /**
+     * Bounded string columns on `tasks`. Mirror the widths declared in
+     * migrations 000005 + 0017 + 0042 — keep both in sync if a future
+     * migration widens or narrows one. `failure_reason` was widened from
+     * the default to 1000 in migration 0042 specifically to fix a
+     * SQLSTATE 22001 from over-long stack traces; guarding it now means
+     * future regressions on that exact column throw a clear message
+     * instead of the cryptic "Data too long for column".
+     *
+     * @var array<string, int>
+     */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'status'         => 30,
+        'failure_reason' => 1000,
+        'error_code'     => 30,
+    ];
+
+    /**
+     * Override pattern (instead of `static::saving` in `booted()`):
+     * Spora's standalone Capsule never wires an EventDispatcher into
+     * `Model::$dispatcher`, so static listeners silently never fire. Same
+     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
+     * {@see \Spora\Models\Principal::save()}.
+     */
+    public function save(array $options = []): bool
+    {
+        $this->assertStringColumnsFit();
+        return parent::save($options);
+    }
+
+    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
+    public function assertStringColumnsFit(): void
+    {
+        MaxLengthValidator::assertFits(
+            $this->attributes,
+            self::STRING_COLUMN_MAX_LENGTHS,
+            'tasks',
+            "task #{$this->id}",
+        );
+    }
 
     public function agent(): BelongsTo
     {
