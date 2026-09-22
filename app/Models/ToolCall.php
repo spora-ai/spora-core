@@ -7,6 +7,7 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Spora\Agents\ToolCallInsertGuard;
 
 /**
  * @property int              $id
@@ -74,6 +75,25 @@ final class ToolCall extends Model
         'reject_reason'          => 'string',
         'executed_at'            => 'datetime',
     ];
+
+    /**
+     * Column-aware overflow check before every save. Throws
+     * {@see ToolCallFieldOverflowException} on any string value that the
+     * database would truncate, surfacing a clear "field X is N chars;
+     * column limit is M" instead of the raw SQLSTATE 22001 MariaDB emits
+     * when the cap is silently exceeded.
+     *
+     * Override pattern (instead of `static::saving` in `booted()`):
+     * Spora runs Eloquent via Capsule without wiring the framework's
+     * EventDispatcher into `Model::$dispatcher`, so `static::saving`
+     * listeners silently never fire (same constraint that drove
+     * {@see \Spora\Models\LLMDriverConfiguration::save()} below).
+     */
+    public function save(array $options = []): bool
+    {
+        ToolCallInsertGuard::assertInsertable($this->getAttributes(), self::class);
+        return parent::save($options);
+    }
 
     public function task(): BelongsTo
     {
