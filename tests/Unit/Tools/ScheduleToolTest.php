@@ -885,11 +885,15 @@ describe('ScheduleTool — per-op defaults', function (): void {
 describe('ScheduleTool — cross-agent resolution', function (): void {
     test('read_schedule hits the visible-but-cross-owned route (not found on agent)', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
-        seedSchedule($agentId, $userId);
+        // Capture the seeded schedule's id rather than hardcoding 1 —
+        // MariaDB/MySQL preserve the AUTO_INCREMENT counter across the
+        // test transaction's rolled-back peers, so the first inserted
+        // row is not always id 1.
+        $schedule = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
-            ['action' => 'read_schedule', 'schedule_id' => 1, 'agent_id' => 0],
+            ['action' => 'read_schedule', 'schedule_id' => $schedule->id, 'agent_id' => 0],
             $agentId,
             $userId,
         );
@@ -940,11 +944,15 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
 
     test('read_*_template with cross-agent_id hits the controller-side service', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
-        seedTemplate($agentId, ['name' => 'Mine']);
+        // Capture the seeded template's id rather than hardcoding 1 —
+        // MariaDB and MySQL preserve the AUTO_INCREMENT counter across
+        // failed inserts and across the test transaction's rolled-back
+        // peers, so the first inserted row is not always id 1.
+        $template = seedTemplate($agentId, ['name' => 'Mine']);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
-            ['action' => 'read_prompt_template', 'template_id' => 1],
+            ['action' => 'read_prompt_template', 'template_id' => $template->id],
             $agentId,
             $userId,
         );
