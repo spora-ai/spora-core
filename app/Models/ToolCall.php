@@ -77,13 +77,8 @@ final class ToolCall extends Model
     ];
 
     /**
-     * Bounded string columns on `tool_calls`. Mirror the widths declared in
-     * migrations 000006 + 0019 — keep both in sync if a future migration
-     * widens or narrows one.
-     *
-     * `operation_description` was widened to TEXT in migration 0085, so
-     * it is intentionally absent from this map (TEXT is unbounded for our
-     * purposes; SQLite has no length cap on TEXT either).
+     * Mirror migrations 000006 + 0019 — keep both in sync. `operation_description`
+     * was widened to TEXT by migration 0085, so it's intentionally absent.
      *
      * @var array<string, int>
      */
@@ -97,13 +92,7 @@ final class ToolCall extends Model
         'approval_note'    => 500,
     ];
 
-    /**
-     * Override pattern (instead of `static::saving` in `booted()`):
-     * Spora's standalone Capsule never wires an EventDispatcher into
-     * `Model::$dispatcher`, so static listeners silently never fire. Same
-     * constraint that drove {@see \Spora\Models\LLMDriverConfiguration::save()}
-     * and {@see \Spora\Models\Principal::save()}.
-     */
+    /** @see \Spora\Services\MaxLengthValidator */
     public function save(array $options = []): bool
     {
         $this->assertStringColumnsFit();
@@ -111,12 +100,6 @@ final class ToolCall extends Model
     }
 
     /**
-     * Throw when any bounded string column would be silently truncated by
-     * MariaDB (1406 "Data too long for column") at INSERT time. Delegates
-     * to {@see MaxLengthValidator::assertFits()} — the same shape any
-     * other model with bounded columns can adopt by adding a matching
-     * `STRING_COLUMN_MAX_LENGTHS` const and a `save()` override.
-     *
      * Public so the bulk insert path can validate rows in tests without
      * round-tripping through Eloquent (same pattern as
      * {@see \Spora\Models\Principal::validateXor()}).

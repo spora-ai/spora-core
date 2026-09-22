@@ -130,11 +130,7 @@ final class MediaAsset extends Model
     protected $casts = self::CASTS;
 
     /**
-     * Bounded string columns on `media_assets`. Mirror the widths declared
-     * in migrations 0051 + 0052 + 0056 — keep both in sync if a future
-     * migration widens or narrows one. `asset_url` / `source_url` (512) and
-     * `filename` (255) are the most plausible overflow sources: long CDN
-     * URLs and user-supplied filenames.
+     * Mirror migrations 0051 + 0052 + 0056 — keep both in sync.
      *
      * @var array<string, int>
      */
@@ -152,20 +148,13 @@ final class MediaAsset extends Model
         'upload_source'       => 16,
     ];
 
-    /**
-     * Override pattern (instead of `static::saving` in `booted()`):
-     * Spora's standalone Capsule never wires an EventDispatcher into
-     * `Model::$dispatcher`, so static listeners silently never fire. Same
-     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
-     * {@see \Spora\Models\Principal::save()}.
-     */
+    /** @see \Spora\Services\MaxLengthValidator */
     public function save(array $options = []): bool
     {
         $this->assertStringColumnsFit();
         return parent::save($options);
     }
 
-    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
     public function assertStringColumnsFit(): void
     {
         MaxLengthValidator::assertFits(

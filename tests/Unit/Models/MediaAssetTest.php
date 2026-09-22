@@ -84,7 +84,6 @@ describe('MediaAsset::assertStringColumnsFit', function (): void {
 
     it('skips unknown / null / non-string columns silently', function (): void {
         $asset = new MediaAsset();
-        // Nulls and non-strings must not trip the guard.
         expect(fn() => $asset->assertStringColumnsFit())->not()->toThrow(InvalidArgumentException::class);
     });
 });

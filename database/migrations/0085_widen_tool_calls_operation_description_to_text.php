@@ -8,14 +8,12 @@ use Illuminate\Database\Migrations\Migration;
 /**
  * Widen `tool_calls.operation_description` from VARCHAR(500) to TEXT.
  *
- * Production trigger: `MediaTool::list_derivatives`' description (~615 chars)
- * exceeded the 500-char cap and MariaDB returned 1406 at INSERT time.
- * Forward-only — downgrading re-introduces the truncation. A companion
- * {@see \Spora\Agents\ToolCallInsertGuard} now defends every bounded
- * column on this table, so this migration only needs to drop the cap on
- * `operation_description` itself.
- *
- * SQLite is a no-op (TEXT has no length cap there).
+ * Trigger: MediaTool::list_derivatives' description (~615 chars) hit
+ * MariaDB 1406 at INSERT. Forward-only — downgrading re-introduces the
+ * truncation. {@see \Spora\Services\MaxLengthValidator} plus the
+ * per-model save() overrides now defend every bounded column on this
+ * table; this migration only needs to drop the cap on
+ * `operation_description` itself. SQLite is a no-op.
  */
 return new class extends Migration
 {

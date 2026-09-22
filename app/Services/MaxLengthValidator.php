@@ -7,20 +7,17 @@ namespace Spora\Services;
 use InvalidArgumentException;
 
 /**
- * Reusable max-length validator for any keyed payload (typically a row's
- * attribute map) destined for a table with bounded string columns.
+ * Throws {@see InvalidArgumentException} before MySQL/MariaDB silently
+ * truncate a string column with SQLSTATE 22001. Callers pass the values
+ * + the bounded-column map; the helper fails fast on the first violation.
  *
- * Centralises the loop that turns "value is N chars, column is M" into a
- * clear {@see InvalidArgumentException} before the database silently
- * truncates (MySQL/MariaDB returns 1406 "Data too long for column" at
- * INSERT/UPDATE time). Callers declare which columns are bounded and
- * how long they may be; the helper walks the payload and throws on the
- * first violation.
- *
- * Used by {@see \Spora\Models\ToolCall::save()} to defend `tool_calls`;
- * the same shape (a `STRING_COLUMN_MAX_LENGTHS` const + an override of
- * `save()` that calls {@see assertFits()}) applies to any other model
- * with bounded columns.
+ * Defended models follow the same shape: a `STRING_COLUMN_MAX_LENGTHS`
+ * const + a `save()` override that calls {@see assertFits()}. The
+ * `save()` override (rather than `static::saving` in `booted()`) is
+ * required because Spora's standalone Capsule never wires an
+ * EventDispatcher into `Model::$dispatcher` — same constraint that
+ * drove {@see \Spora\Models\Principal::save()} /
+ * {@see \Spora\Models\LLMDriverConfiguration::save()}.
  */
 final class MaxLengthValidator
 {

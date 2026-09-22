@@ -77,13 +77,11 @@ final class Task extends Model
     ];
 
     /**
-     * Bounded string columns on `tasks`. Mirror the widths declared in
-     * migrations 000005 + 0017 + 0042 — keep both in sync if a future
-     * migration widens or narrows one. `failure_reason` was widened from
-     * the default to 1000 in migration 0042 specifically to fix a
-     * SQLSTATE 22001 from over-long stack traces; guarding it now means
-     * future regressions on that exact column throw a clear message
-     * instead of the cryptic "Data too long for column".
+     * Mirror migrations 000005 + 0017 + 0042 — keep both in sync.
+     * `failure_reason` was widened from default → 1000 by migration 0042
+     * specifically to fix a SQLSTATE 22001 from over-long stack traces;
+     * guarding it now means future regressions throw a clear message
+     * instead of "Data too long for column".
      *
      * @var array<string, int>
      */
@@ -93,20 +91,13 @@ final class Task extends Model
         'error_code'     => 30,
     ];
 
-    /**
-     * Override pattern (instead of `static::saving` in `booted()`):
-     * Spora's standalone Capsule never wires an EventDispatcher into
-     * `Model::$dispatcher`, so static listeners silently never fire. Same
-     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
-     * {@see \Spora\Models\Principal::save()}.
-     */
+    /** @see \Spora\Services\MaxLengthValidator */
     public function save(array $options = []): bool
     {
         $this->assertStringColumnsFit();
         return parent::save($options);
     }
 
-    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
     public function assertStringColumnsFit(): void
     {
         MaxLengthValidator::assertFits(

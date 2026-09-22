@@ -22,7 +22,7 @@ use Throwable;
  * @property string $name
  * @property string|null $description
  * @property string|null $system_prompt
-* @property int|null    $llm_driver_config_id
+ * @property int|null    $llm_driver_config_id
  * @property int|null    $speech_driver_config_id
  * @property string|null $llm_provider
  * @property string|null $llm_model
@@ -88,11 +88,7 @@ final class Agent extends Model
     ];
 
     /**
-     * Bounded string columns on `agents`. Mirror the widths declared in
-     * migrations 000003 + 0012 — keep both in sync if a future migration
-     * widens or narrows one. `llm_base_url` is the most plausible
-     * overflow source: self-hosted LLM endpoints with long hostnames
-     * can push past 255.
+     * Mirror migrations 000003 + 0012 — keep both in sync.
      *
      * @var array<string, int>
      */
@@ -103,20 +99,13 @@ final class Agent extends Model
         'llm_base_url' => 255,
     ];
 
-    /**
-     * Override pattern (instead of `static::saving` in `booted()`):
-     * Spora's standalone Capsule never wires an EventDispatcher into
-     * `Model::$dispatcher`, so static listeners silently never fire. Same
-     * constraint that drove {@see \Spora\Models\ToolCall::save()} and
-     * {@see \Spora\Models\Principal::save()}.
-     */
+    /** @see \Spora\Services\MaxLengthValidator */
     public function save(array $options = []): bool
     {
         $this->assertStringColumnsFit();
         return parent::save($options);
     }
 
-    /** @see \Spora\Services\MaxLengthValidator::assertFits() */
     public function assertStringColumnsFit(): void
     {
         MaxLengthValidator::assertFits(
