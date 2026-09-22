@@ -8,36 +8,18 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Exceptions\ToolCallFieldOverflowException;
 
 /**
- * Column-aware guard that prevents `tool_calls` from silently truncating
- * string fields at INSERT time. The original incident: `MediaTool`'s
- * `list_derivatives` description (~615 chars) exceeded the 500-char cap on
- * `operation_description` (migration 0019) and MariaDB returned 1406
- * ("Data too long for column") — a cryptic error surfacing as
- * "System Error: SQLSTATE[22001]…".
- *
- * This guard reads the live column lengths from the schema once per process
- * (MySQL/MariaDB preserve `varchar(N)` in `getColumns()`; SQLite does not
- * and silently drops it, so for SQLite we fall back to {@see STATIC_MAX_LENGTHS}),
- * then throws {@see ToolCallFieldOverflowException} on any string value that
- * would be truncated by the database. VARCHAR(N) is checked; TEXT-family
- * types are treated as unbounded.
- *
- * Called from {@see \Spora\Models\ToolCall::save()} before delegating to
- * Eloquent's parent save — overriding `save()` is the only path that always
- * runs under Spora's standalone Capsule setup (its EventDispatcher is
- * never wired into `Model::$dispatcher`, so `static::saving` listeners
- * silently never fire; same constraint that drove the override in
- * {@see \Spora\Models\LLMDriverConfiguration::save()}).
+ * Defends `tool_calls` against silent VARCHAR truncation on save. Called
+ * from {@see \Spora\Models\ToolCall::save()} rather than a `static::saving`
+ * listener because Spora's standalone Capsule never wires an
+ * EventDispatcher into `Model::$dispatcher` — same constraint that drove
+ * {@see \Spora\Models\LLMDriverConfiguration::save()}.
  */
 final class ToolCallInsertGuard
 {
     /**
-     * Static fallback for engines that drop VARCHAR lengths from the
-     * introspection result (SQLite reports `type='varchar'` without the
-     * (N) suffix). These caps mirror the column widths declared in
-     * migrations 000006 and 0019; if a future migration changes one,
-     * update the value here in the same PR so dev (SQLite) and prod
-     * (MySQL/MariaDB) stay in sync.
+     * Fallback when live introspection drops VARCHAR widths (SQLite).
+     * Mirror the column widths from migrations 000006 + 0019; if a future
+     * migration widens or narrows one, update both in the same PR.
      *
      * @var array<string, int>
      */
@@ -54,9 +36,7 @@ final class ToolCallInsertGuard
     /** @var array<string, int|null>|null */
     private static ?array $columnMaxLengths = null;
 
-    /**
-     * @param  array<string, mixed> $fields  raw attribute map destined for `tool_calls`
-     */
+    /** @param array<string, mixed> $fields */
     public static function assertInsertable(array $fields, string $toolClass): void
     {
         foreach (self::columnMaxLengths() as $column => $maxLength) {
@@ -88,9 +68,7 @@ final class ToolCallInsertGuard
         self::$columnMaxLengths = null;
     }
 
-    /**
-     * @return array<string, int|null>  column → max character length, or null for unbounded
-     */
+    /** @return array<string, int|null> */
     private static function columnMaxLengths(): array
     {
         if (self::$columnMaxLengths !== null) {
@@ -101,15 +79,10 @@ final class ToolCallInsertGuard
         $schema = Capsule::schema();
         if ($schema->hasTable('tool_calls')) {
             foreach ($schema->getColumns('tool_calls') as $column) {
-                $name = (string) $column['name'];
-                $map[$name] = self::extractMaxLength((string) $column['type']);
+                $map[(string) $column['name']] = self::extractMaxLength((string) $column['type']);
             }
         }
 
-        // SQLite (and any future engine that drops VARCHAR widths from
-        // its introspection) sees null max lengths for bounded columns.
-        // Backfill from STATIC_MAX_LENGTHS so dev/CI catches the same
-        // regressions prod does.
         foreach (self::STATIC_MAX_LENGTHS as $column => $fallback) {
             if (($map[$column] ?? null) === null) {
                 $map[$column] = $fallback;
@@ -120,10 +93,6 @@ final class ToolCallInsertGuard
     }
 
     /**
-     * Extract the max-length suffix from a MySQL/MariaDB column-type
-     * definition. `varchar(500)` → 500, `char(10)` → 10,
-     * `text` / `bigint unsigned` / `int(11)` → null.
-     *
      * VARCHAR is character-counted on utf8mb4; mb_strlen() in
      * {@see assertInsertable()} matches that semantics.
      */

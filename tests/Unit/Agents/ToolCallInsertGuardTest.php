@@ -15,17 +15,17 @@ beforeEach(function (): void {
 
 it('passes when every bounded field fits its column', function (): void {
     expect(fn() => ToolCallInsertGuard::assertInsertable([
-        'tool_name'        => 'search',
-        'tool_class'       => 'Spora\Tools\SearchTool',
-        'tool_type'        => 'input',
-        'status'           => 'PENDING_APPROVAL',
-        'operation'        => 'default',
-        'approval_note'    => 'ok',
+        'tool_name'     => 'search',
+        'tool_class'    => 'Spora\Tools\SearchTool',
+        'tool_type'     => 'input',
+        'status'        => 'PENDING_APPROVAL',
+        'operation'     => 'default',
+        'approval_note' => 'ok',
     ], 'Spora\Tools\SearchTool'))->not()->toThrow(Throwable::class);
 });
 
 it('throws ToolCallFieldOverflowException when a VARCHAR field exceeds its cap', function (): void {
-    // `tool_name` is VARCHAR(100) on `tool_calls`.
+    // tool_name is VARCHAR(100) on `tool_calls` — 101 chars is the regression case.
     try {
         ToolCallInsertGuard::assertInsertable([
             'tool_name' => str_repeat('x', 101),
@@ -43,23 +43,21 @@ it('throws ToolCallFieldOverflowException when a VARCHAR field exceeds its cap',
 });
 
 it('accepts arbitrarily long values on TEXT-family columns', function (): void {
-    // `human_description` is MEDIUMTEXT on production, TEXT on SQLite — both
-    // are unbounded for our purposes.
+    // human_description is MEDIUMTEXT on prod, TEXT on sqlite — both unbounded.
     expect(fn() => ToolCallInsertGuard::assertInsertable([
         'human_description' => str_repeat('a', 1_000_000),
     ], 'Spora\Tools\WhateverTool'))->not()->toThrow(Throwable::class);
 });
 
 it('ignores columns it does not know about (forward compatibility)', function (): void {
-    // A future migration adding `tool_calls.extra_field VARCHAR(50)` must
-    // not regress older callers that don't know about it. The guard is
-    // best-effort: it only protects columns it sees in the live schema.
+    // Guard is best-effort: a future migration adding `tool_calls.extra_field VARCHAR(50)`
+    // must not regress older callers that haven't been updated.
     expect(fn() => ToolCallInsertGuard::assertInsertable([
         'unknown_future_field' => str_repeat('x', 10_000),
     ], 'Spora\Tools\WhateverTool'))->not()->toThrow(Throwable::class);
 });
 
-it('counts multi-byte characters using mb_strlen so it matches utf8mb4 VARCHAR semantics', function (): void {
+it('counts multi-byte characters using mb_strlen to match utf8mb4 VARCHAR semantics', function (): void {
     // 100 emoji = 100 chars under mb_strlen, fits VARCHAR(100). If the guard
     // had used strlen() it would see 400 bytes and falsely reject.
     expect(fn() => ToolCallInsertGuard::assertInsertable([
@@ -67,7 +65,7 @@ it('counts multi-byte characters using mb_strlen so it matches utf8mb4 VARCHAR s
     ], 'Spora\Tools\SearchTool'))->not()->toThrow(Throwable::class);
 });
 
-it('treats null and non-string values as inert (no length check)', function (): void {
+it('treats null and non-string values as inert', function (): void {
     expect(fn() => ToolCallInsertGuard::assertInsertable([
         'tool_name'     => null,
         'tool_type'     => 12345,
@@ -76,7 +74,7 @@ it('treats null and non-string values as inert (no length check)', function (): 
     ], 'Spora\Tools\WhateverTool'))->not()->toThrow(Throwable::class);
 });
 
-it('fires through the ToolCall Eloquent saving hook on insert', function (): void {
+it('fires through the ToolCall save() override on insert', function (): void {
     $userId = bootAuthLayer()->register('guard-insert@example.com', 'Password1!', 'Guard');
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
@@ -96,21 +94,19 @@ it('fires through the ToolCall Eloquent saving hook on insert', function (): voi
         'max_steps'       => 10,
     ]);
 
-    // tool_name is VARCHAR(100). 101 chars must trip the saving listener
-    // before the SQL INSERT ever runs.
     expect(fn() => ToolCall::create([
-        'task_id'               => $task->id,
-        'agent_id'              => $agent->id,
-        'provider_call_id'      => 'call_guard',
-        'tool_name'             => str_repeat('x', 101),
-        'tool_class'            => 'Spora\Tools\WhateverTool',
-        'tool_type'             => 'input',
-        'status'                => 'PENDING_APPROVAL',
-        'proposed_arguments'    => [],
+        'task_id'            => $task->id,
+        'agent_id'           => $agent->id,
+        'provider_call_id'   => 'call_guard',
+        'tool_name'          => str_repeat('x', 101),
+        'tool_class'         => 'Spora\Tools\WhateverTool',
+        'tool_type'          => 'input',
+        'status'             => 'PENDING_APPROVAL',
+        'proposed_arguments' => [],
     ]))->toThrow(ToolCallFieldOverflowException::class);
 });
 
-it('fires through the ToolCall Eloquent saving hook on update', function (): void {
+it('fires through the ToolCall save() override on update', function (): void {
     $userId = bootAuthLayer()->register('guard-update@example.com', 'Password1!', 'Guard');
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
@@ -141,8 +137,6 @@ it('fires through the ToolCall Eloquent saving hook on update', function (): voi
         'proposed_arguments' => [],
     ]);
 
-    // approval_note is VARCHAR(500) — 501 chars must trip the listener on
-    // the UPDATE path.
     expect(fn() => $call->update(['approval_note' => str_repeat('y', 501)]))
         ->toThrow(ToolCallFieldOverflowException::class);
 });

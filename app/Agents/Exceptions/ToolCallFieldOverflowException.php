@@ -8,13 +8,9 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Thrown when a string field on `tool_calls` would be truncated by the live
- * schema's column length. Surfaces the field name, the actual length, the
- * column's max length, and the originating tool class so the dev reading the
- * stack trace can fix the source rather than chase a SQLSTATE 22001.
- *
- * Triggered by {@see \Spora\Agents\ToolCallInsertGuard::assertInsertable()}
- * from {@see \Spora\Models\ToolCall::save()} before delegating to Eloquent.
+ * Thrown when a string field on `tool_calls` would be silently truncated
+ * by the column's declared max length. The structured fields let the dev
+ * reading the stack trace fix the source rather than chase a SQLSTATE 22001.
  */
 final class ToolCallFieldOverflowException extends RuntimeException
 {

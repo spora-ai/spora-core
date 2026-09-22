@@ -77,17 +77,10 @@ final class ToolCall extends Model
     ];
 
     /**
-     * Column-aware overflow check before every save. Throws
-     * {@see ToolCallFieldOverflowException} on any string value that the
-     * database would truncate, surfacing a clear "field X is N chars;
-     * column limit is M" instead of the raw SQLSTATE 22001 MariaDB emits
-     * when the cap is silently exceeded.
-     *
      * Override pattern (instead of `static::saving` in `booted()`):
-     * Spora runs Eloquent via Capsule without wiring the framework's
-     * EventDispatcher into `Model::$dispatcher`, so `static::saving`
-     * listeners silently never fire (same constraint that drove
-     * {@see \Spora\Models\LLMDriverConfiguration::save()} below).
+     * Spora's standalone Capsule never wires an EventDispatcher into
+     * `Model::$dispatcher`, so static listeners silently never fire. Same
+     * constraint that drove {@see \Spora\Models\LLMDriverConfiguration::save()}.
      */
     public function save(array $options = []): bool
     {
