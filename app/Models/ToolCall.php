@@ -7,7 +7,7 @@ namespace Spora\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
-use InvalidArgumentException;
+use Spora\Services\MaxLengthValidator;
 
 /**
  * @property int              $id
@@ -112,33 +112,23 @@ final class ToolCall extends Model
 
     /**
      * Throw when any bounded string column would be silently truncated by
-     * MariaDB (1406 "Data too long for column") at INSERT time. Mirrors
-     * {@see \Spora\Models\Principal::validateXor()} — public so the bulk
-     * insert path can validate rows in tests without round-tripping through
-     * Eloquent.
+     * MariaDB (1406 "Data too long for column") at INSERT time. Delegates
+     * to {@see MaxLengthValidator::assertFits()} — the same shape any
+     * other model with bounded columns can adopt by adding a matching
+     * `STRING_COLUMN_MAX_LENGTHS` const and a `save()` override.
      *
-     * @throws InvalidArgumentException
+     * Public so the bulk insert path can validate rows in tests without
+     * round-tripping through Eloquent (same pattern as
+     * {@see \Spora\Models\Principal::validateXor()}).
      */
     public function assertStringColumnsFit(): void
     {
-        foreach (self::STRING_COLUMN_MAX_LENGTHS as $column => $max) {
-            $value = $this->attributes[$column] ?? null;
-            if (!is_string($value)) {
-                continue;
-            }
-            $length = mb_strlen($value);
-            if ($length > $max) {
-                throw new InvalidArgumentException(
-                    sprintf(
-                        'tool_calls.%s for %s is %d chars; column limit is %d.',
-                        $column,
-                        (string) ($this->attributes['tool_class'] ?? 'tool call'),
-                        $length,
-                        $max,
-                    ),
-                );
-            }
-        }
+        MaxLengthValidator::assertFits(
+            $this->attributes,
+            self::STRING_COLUMN_MAX_LENGTHS,
+            'tool_calls',
+            (string) ($this->attributes['tool_class'] ?? 'tool call'),
+        );
     }
 
     public function task(): BelongsTo
