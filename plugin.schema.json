@@ -34,7 +34,7 @@
         },
         "accent": {
             "type": "string",
-            "description": "Tile accent colour for the plugin's app in the navbar drawer. Maps to a Tailwind gradient + text colour on the host SPA. Keep the enum short so the bundled Tailwind classes ship without a safelist — if a new colour is genuinely needed, add it to both this enum and the host's `tileAccent()` map in the same change.\n\nMirrors the precedence used by `frontendEntry`: the PHP app class's `accent()` method wins over this field, which wins over the default `\"primary\"`. If the value is missing, empty, or not in the enum, AppsController silently falls back to `\"primary\"`.\n\nDefaults to `\"primary\"` when omitted.",
+            "description": "Tile accent colour for the plugin's app tile. Mirror the enum in the host's `tileAccent()` map. Precedence: PHP `App::accent()` > this field > `\"primary\"`. Unknown / missing values fall back to `\"primary\"` silently.",
             "default": "primary",
             "enum": [
                 "violet",

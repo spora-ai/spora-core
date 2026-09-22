@@ -180,8 +180,6 @@ describe('AppsController', function (): void {
     });
 
     it('emits the accent returned by the PHP app class', function (): void {
-        // StubVueApp::accent() returns 'emerald' — exercises the PHP-
-        // method-wins branch of resolveAccent().
         $authService = bootAuthLayer();
         $userId = $authService->register('accent-php@example.com', 'ValidPass1!', 'AccentPhp');
         simulateLoggedInSession($userId, 'accent-php@example.com');
@@ -200,10 +198,6 @@ describe('AppsController', function (): void {
     });
 
     it('falls back to the plugin manifest accent when the PHP method returns an unknown token', function (): void {
-        // SpyAccentApp::accent() returns 'neon-pink' (not in the enum).
-        // The controller must ignore it and read the manifest's accent
-        // instead — fallback is silent so a plugin author's typo never
-        // breaks the SPA's render path.
         $authService = bootAuthLayer();
         $userId = $authService->register('accent-manifest@example.com', 'ValidPass1!', 'AccentManifest');
         simulateLoggedInSession($userId, 'accent-manifest@example.com');
@@ -239,10 +233,6 @@ describe('AppsController', function (): void {
 
         expect($response->getStatusCode())->toBe(200);
         $body = json_decode($response->getContent(), true);
-        // StubSampleApp::accent() returns 'primary' — covers the
-        // default branch directly. A future test could swap in a
-        // fixture that returns an unknown token + has no manifest
-        // to exercise the unknown → default fallback.
         expect($body['data']['apps'][0]['accent'])->toBe('primary');
     });
 });

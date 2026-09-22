@@ -6,10 +6,7 @@ namespace Tests\Fixtures;
 
 use Spora\Apps\AppInterface;
 
-/**
- * App fixture whose `accent()` returns a value outside the known enum —
- * lets AppsControllerTest prove the manifest-overrides-bad-PHP fallback.
- */
+/** `accent()` returns a value outside the known enum. */
 final class SpyAccentApp implements AppInterface
 {
     public function name(): string
