@@ -1375,3 +1375,132 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
             ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
     });
 });
+
+/**
+ * Round 5 regression: the OpenAI tool-call wire shape encodes the
+ * `arguments` field as a JSON string, so when an LLM pattern-matches
+ * the documentation "send null to clear a field" and emits
+ * `"cron_expression":"null"` (the four-character string literal),
+ * the validator receives a PHP string "null" — not the JSON null
+ * type. Pre-Round-5 the validator strict-rejected it with the
+ * "send JSON null, not the string" hint, which Round 5 callers
+ * couldn't action: the LLM produces the string, not the caller.
+ *
+ * The fix is lenient normalisation in
+ * {@see \Spora\Tools\ScheduleTool\ScheduleUpdateValidator::normalizeNullLikeStrings()}:
+ * string "null" / "NULL" / "Null" / "" / "   " for any of the five
+ * clearable fields (cron_expression, run_at, template_id,
+ * max_steps_override, max_steps) coerces to PHP null before the
+ * field-type checks run.
+ *
+ * These end-to-end tests go through ScheduleTool::execute() with the
+ * exact wire shape a Round 5 caller would send — including the
+ * JSON-string-encoded outer layer that the OpenAI driver decodes —
+ * so any future re-introduction of the strict rejection path fails
+ * loudly here.
+ */
+describe('Round 5 — wire-shape leniency for the literal string "null"', function (): void {
+    test('update_schedule with {cron_expression: "null"} clears cron end-to-end', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        // Wire shape: the LLM emits the four-character string "null"
+        // inside the schedule_patch. The OpenAI driver decodes the
+        // outer JSON-encoded `arguments` string and passes this exact
+        // PHP array to the tool — pre-Round-5 the validator rejected
+        // it with "Got string('null')" and the caller had no path
+        // forward.
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['cron_expression' => 'null'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull();
+    });
+
+    test('update_schedule with {max_steps_override: "null"} clears max_steps_override end-to-end', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression'   => '0 9 * * *',
+            'max_steps_override' => 50,
+            'timezone'          => 'UTC',
+            'is_active'         => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['max_steps_override' => 'null'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['max_steps_override'])->toBeNull();
+    });
+
+    test('update_schedule with {template_id: "null"} unbinds the template end-to-end', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $template = seedTemplate($agentId, ['name' => 'To-unbind']);
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'template_id'     => $template->id,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['template_id' => 'null'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['template_id'])->toBeNull();
+    });
+
+    test('update_prompt_template with {max_steps: "null"} clears max_steps end-to-end', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $template = seedTemplate($agentId, ['max_steps' => 25]);
+
+        $result = $tool->execute([
+            'action'          => 'update_prompt_template',
+            'template_id'     => $template->id,
+            'template_patch'  => ['max_steps' => 'null'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['template']['max_steps'])->toBeNull();
+    });
+
+    test('genuinely-invalid cron (not "null", not "", not whitespace) is still rejected', function (): void {
+        [$tool, $service] = makeScheduleToolTestFixture();
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => '0 9 * * *',
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['cron_expression' => 'totally bogus cron'],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('`cron_expression`');
+    });
+});

@@ -90,6 +90,21 @@ final class ScheduleUpdateValidator
         }
 
         /** @var array<string, mixed> $raw */
+        // LLM wire-shape leniency: treat the four-character string "null"
+        // (and "" / "NULL" / "Null" / empty) as JSON null for clearable
+        // fields. Providers like OpenAI encode tool-call `arguments` as a
+        // JSON string, so a model that emits `"cron_expression":"null"`
+        // intending null arrives at the validator as the literal PHP
+        // string "null" — strict rejection produced the misleading "send
+        // JSON null, not the string" hint that the Round 5 bug report
+        // flagged. Normalising BEFORE the field-type checks lets the
+        // existing null-aware paths (`$r['x'] !== null` short-circuits,
+        // `array_key_exists()` for the cron / run_at / template_id /
+        // max_steps_override / max_steps intent) treat these as real
+        // clears without changing the contract for genuinely-invalid
+        // strings.
+        $raw = $this->normalizeNullLikeStrings($raw, $op);
+
         if ($isSchedule) {
             $scheduleError = $this->validatePartialScheduleFields($raw);
             if ($scheduleError !== null) {
@@ -98,6 +113,38 @@ final class ScheduleUpdateValidator
         }
 
         return $this->validatePartialSharedFields($raw) ?? $raw;
+    }
+
+    /**
+     * Coerce the literal string "null" (case-insensitive) and the empty
+     * string to PHP null for every clearable patch field. The five fields
+     * listed in the Round 5 bug report — `cron_expression`, `run_at`,
+     * `template_id`, `max_steps_override` on update_schedule and
+     * `max_steps` on update_prompt_template — are the only ones touched;
+     * timezone intentionally is not normalised here because empty-string
+     * timezone already fails the IANA identifier check in the right way
+     * (it's not a clear-the-field contract).
+     *
+     * @param  array<string, mixed> $raw
+     * @return array<string, mixed>
+     */
+    private function normalizeNullLikeStrings(array $raw, string $op): array
+    {
+        $fields = $op === self::OP_UPDATE_TEMPLATE
+            ? ['max_steps']
+            : ['cron_expression', 'run_at', 'template_id', 'max_steps_override'];
+
+        foreach ($fields as $field) {
+            if (!array_key_exists($field, $raw)) {
+                continue;
+            }
+            $value = $raw[$field];
+            if (is_string($value) && in_array(trim($value), ['', 'null', 'NULL', 'Null'], true)) {
+                $raw[$field] = null;
+            }
+        }
+
+        return $raw;
     }
 
     /**

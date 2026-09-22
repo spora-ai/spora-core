@@ -86,12 +86,16 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
                 ->and($result->content)->toContain('invalid');
         });
 
-        test('empty cron_expression is rejected', function (): void {
+        test('whitespace-only cron_expression is coerced to null (clears)', function (): void {
+            // After the Round 5 leniency, `trim()`ed "" / "null" / "  "
+            // all coerce to null and clear the field. A genuinely-invalid
+            // cron like "definitely not a cron" is still rejected (see
+            // the regression test at the bottom of this describe).
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['cron_expression' => '   '],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('cron_expression');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['cron_expression' => null]);
         });
 
         test('a valid cron_expression is accepted', function (): void {
@@ -112,12 +116,12 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
                 ->and($result->content)->toContain('ISO 8601');
         });
 
-        test('run_at as empty string is rejected', function (): void {
+        test('run_at as whitespace-only string is coerced to null (clears)', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['run_at' => '   '],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('ISO 8601');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['run_at' => null]);
         });
 
         test('template_id with non-int is rejected', function (): void {
@@ -305,18 +309,31 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
     });
 
     /**
-     * Bug report: a user reported that all five "clear by null" fields
-     * (max_steps_override, template_id, max_steps, cron_expression, run_at)
-     * rejected `null`. Investigation showed real PHP null worked fine; the
-     * visibility problem was that the error message emitted the bare word
-     * "null" without quotes, which made the literal four-character string
-     * "null" indistinguishable from the JSON null type in error output.
+     * Bug report (Round 5): a user reported that all five "clear by null"
+     * fields rejected the literal four-character string "null" — what
+     * models emit on the wire when they intend JSON null.
      *
-     * These tests pin (a) the positive contract — JSON null clears each
-     * field — and (b) the new error messages that explicitly call out the
-     * "send JSON null, not the string" contract for each field.
+     * Investigation showed:
+     *   - JSON null works correctly (the previous "send JSON null, not
+     *     the string" guidance was honest, but unhelpful in practice —
+     *     LLMs don't reliably produce JSON null through the OpenAI
+     *     tool-call wire shape, where `arguments` is a JSON-encoded
+     *     string and `"cron_expression":"null"` arrives at the
+     *     validator as the PHP string "null").
+     *   - Real PHP null was already accepted.
+     *
+     * The fix is lenient normalisation: the validator coerces the
+     * literal string "null" / "NULL" / "Null" / "" to PHP null BEFORE
+     * the field-type checks, so the existing null-aware paths treat
+     * these as real clears.
+     *
+     * These tests pin both halves of the new contract for every clearable
+     * field:
+     *   (a) JSON null clears each field (the strict-positive contract).
+     *   (b) the four-character string "null" / "" / "NULL" / "Null" is
+     *       now coerced to null and clears the field too.
      */
-    describe('JSON null clears fields (string "null" is rejected with guidance)', function (): void {
+    describe('Null clears fields (JSON null and string "null" both work)', function (): void {
         test('JSON null clears max_steps_override', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_id'     => 1,
@@ -366,54 +383,60 @@ describe('ScheduleUpdateValidator — direct unit tests', function (): void {
                 ->and($result)->toBe(['max_steps' => null]);
         });
 
-        test('string "null" for max_steps_override is rejected with explicit guidance', function (): void {
+        test('string "null" for max_steps_override is coerced to null and clears', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['max_steps_override' => 'null'],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('`max_steps_override`')
-                ->and($result->content)->toContain('JSON `null`')
-                ->and($result->content)->toContain('string("null")');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['max_steps_override' => null]);
         });
 
-        test('string "null" for template_id is rejected with explicit guidance', function (): void {
+        test('string "null" for template_id is coerced to null and clears', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['template_id' => 'null'],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('`template_id`')
-                ->and($result->content)->toContain('JSON `null`')
-                ->and($result->content)->toContain('string("null")');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['template_id' => null]);
         });
 
-        test('string "null" for cron_expression is rejected with explicit guidance', function (): void {
+        test('string "null" for cron_expression is coerced to null and clears', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['cron_expression' => 'null'],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('`cron_expression`')
-                ->and($result->content)->toContain('JSON `null`')
-                ->and($result->content)->toContain('string("null")');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['cron_expression' => null]);
         });
 
-        test('string "null" for run_at is rejected with explicit guidance', function (): void {
+        test('string "null" for run_at is coerced to null and clears', function (): void {
             $result = $this->validator->validateUpdateSchedulePatch([
                 'schedule_patch' => ['run_at' => 'null'],
             ]);
-            expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('`run_at`')
-                ->and($result->content)->toContain('JSON `null`')
-                ->and($result->content)->toContain('string("null")');
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['run_at' => null]);
         });
 
-        test('string "null" for template max_steps is rejected with explicit guidance', function (): void {
+        test('string "null" for template max_steps is coerced to null and clears', function (): void {
             $result = $this->validator->validateUpdateTemplatePatch([
                 'template_patch' => ['max_steps' => 'null'],
             ]);
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['max_steps' => null]);
+        });
+
+        test('empty string is also coerced to null and clears', function (): void {
+            $result = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['cron_expression' => ''],
+            ]);
+            expect($result)->toBeArray()
+                ->and($result)->toBe(['cron_expression' => null]);
+        });
+
+        test('genuinely-invalid string is still rejected (not "null" or "")', function (): void {
+            $result = $this->validator->validateUpdateSchedulePatch([
+                'schedule_patch' => ['cron_expression' => 'definitely not a cron'],
+            ]);
             expect($result->success)->toBeFalse()
-                ->and($result->content)->toContain('`max_steps`')
-                ->and($result->content)->toContain('JSON `null`')
-                ->and($result->content)->toContain('string("null")');
+                ->and($result->content)->toContain('`cron_expression`');
         });
     });
 });
