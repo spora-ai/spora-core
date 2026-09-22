@@ -205,14 +205,39 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             return;
         }
 
-        $cron = $updateData['cron_expression'] ?? $run->cron_expression;
-        $timezone = $updateData['timezone'] ?? $run->timezone;
+        // `array_key_exists` (not `??`) so an explicit `null` clears the
+        // field instead of leaking the existing value back through.
+        $cron     = array_key_exists('cron_expression', $updateData) ? $updateData['cron_expression'] : $run->cron_expression;
+        $timezone = array_key_exists('timezone', $updateData) ? $updateData['timezone'] : $run->timezone;
 
         if (array_key_exists('run_at', $updateData) && is_string($updateData['run_at'])) {
             $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at'], $timezone);
         }
 
-        $runAt = $updateData['run_at'] ?? $run->run_at?->toDateTimeString();
+        $runAt = array_key_exists('run_at', $updateData) ? $updateData['run_at'] : $run->run_at?->toDateTimeString();
+
+        // Implicit mode-transition: patch sets ONE cadence field AND the
+        // existing run has the OTHER cadence field set — clear the other
+        // so `{run_at: <iso>}` on a cron schedule and `{cron_expression:
+        // <cron>}` on a one-shot schedule are symmetric from the caller's
+        // perspective. Explicit `{cron_expression: null, run_at: <iso>}`
+        // patches are handled by the array_key_exists lookups above; this
+        // branch only fires when the patch carries a single cadence key.
+        if (array_key_exists('cron_expression', $updateData)
+            && $cron !== null
+            && $run->run_at !== null
+        ) {
+            $updateData['run_at'] = null;
+            $runAt = null;
+        }
+        if (array_key_exists('run_at', $updateData)
+            && $updateData['run_at'] !== null
+            && $run->cron_expression !== null
+        ) {
+            $updateData['cron_expression'] = null;
+            $cron = null;
+        }
+
         $isRecurring = !empty($cron);
         $updateData['next_run_at'] = $isRecurring
             ? $this->computeNextRunAt($cron, $timezone)
@@ -226,6 +251,9 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     private function reschedulePendingEntries(int $scheduledRunId, string $nextRunAt): void
     {
         $now = gmdate(self::DB_TIMESTAMP_FORMAT);
+
+        // Audit trail: mark the superseded PENDING/CLAIMED as SKIPPED
+        // before inserting the new one.
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $scheduledRunId)
             ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
@@ -234,12 +262,23 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'completed_at' => $now,
             ]);
 
-        Capsule::table('scheduled_runs_next')->insert([
+        // Free the UNIQUE (scheduled_run_id, due_at) slot — a SKIPPED/DONE
+        // row may already exist at the new due_at from a prior reschedule
+        // cycle (cron didn't change so computeNextRunAt returned the same
+        // value). Targeted delete keeps audit rows at other due_at values
+        // intact; mirrors ScheduledRunProcessor::insertRecurringEntry.
+        Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $scheduledRunId)
+            ->where('due_at', $nextRunAt)
+            ->whereIn('status', [ScheduledRunNext::STATUS_SKIPPED, ScheduledRunNext::STATUS_DONE])
+            ->delete();
+
+        Capsule::table('scheduled_runs_next')->insertOrIgnore([
             'scheduled_run_id' => $scheduledRunId,
-            'due_at'          => $nextRunAt,
-            'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => $now,
-            'updated_at'      => $now,
+            'due_at'           => $nextRunAt,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => $now,
+            'updated_at'       => $now,
         ]);
     }
 

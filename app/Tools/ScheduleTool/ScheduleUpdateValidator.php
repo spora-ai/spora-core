@@ -90,6 +90,15 @@ final class ScheduleUpdateValidator
         }
 
         /** @var array<string, mixed> $raw */
+        // Wire-shape leniency: OpenAI/Anthropic encode tool-call
+        // `arguments` as a JSON string, so a model that intends JSON
+        // null often emits the literal four-character string "null".
+        // Coerce "null" / "" / "NULL" / "Null" to PHP null BEFORE the
+        // field-type checks so the existing null-aware paths treat
+        // these as real clears. Timezone is excluded — empty-string
+        // timezone correctly fails the IANA identifier check.
+        $raw = $this->normalizeNullLikeStrings($raw, $op);
+
         if ($isSchedule) {
             $scheduleError = $this->validatePartialScheduleFields($raw);
             if ($scheduleError !== null) {
@@ -98,6 +107,32 @@ final class ScheduleUpdateValidator
         }
 
         return $this->validatePartialSharedFields($raw) ?? $raw;
+    }
+
+    /**
+     * Coerce the literal string "null" (case-insensitive) and the empty
+     * string to PHP null for every clearable patch field.
+     *
+     * @param  array<string, mixed> $raw
+     * @return array<string, mixed>
+     */
+    private function normalizeNullLikeStrings(array $raw, string $op): array
+    {
+        $fields = $op === self::OP_UPDATE_TEMPLATE
+            ? ['max_steps']
+            : ['cron_expression', 'run_at', 'template_id', 'max_steps_override'];
+
+        foreach ($fields as $field) {
+            if (!array_key_exists($field, $raw)) {
+                continue;
+            }
+            $value = $raw[$field];
+            if (is_string($value) && in_array(trim($value), ['', 'null', 'NULL', 'Null'], true)) {
+                $raw[$field] = null;
+            }
+        }
+
+        return $raw;
     }
 
     /**
