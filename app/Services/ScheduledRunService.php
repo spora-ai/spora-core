@@ -205,14 +205,20 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             return;
         }
 
-        $cron = $updateData['cron_expression'] ?? $run->cron_expression;
-        $timezone = $updateData['timezone'] ?? $run->timezone;
+        // `??` cannot distinguish "field absent from patch" from
+        // "field explicitly nulled in patch" — both produce null on the
+        // left-hand side, so the existing run's value would leak through
+        // and a user trying to clear cron with `cron_expression: null`
+        // would silently keep the old cron. Use `array_key_exists()` for
+        // every patch-driven lookup.
+        $cron     = array_key_exists('cron_expression', $updateData) ? $updateData['cron_expression'] : $run->cron_expression;
+        $timezone = array_key_exists('timezone', $updateData) ? $updateData['timezone'] : $run->timezone;
 
         if (array_key_exists('run_at', $updateData) && is_string($updateData['run_at'])) {
             $updateData['run_at'] = $this->normalizeRunAtToUtc($updateData['run_at'], $timezone);
         }
 
-        $runAt = $updateData['run_at'] ?? $run->run_at?->toDateTimeString();
+        $runAt = array_key_exists('run_at', $updateData) ? $updateData['run_at'] : $run->run_at?->toDateTimeString();
         $isRecurring = !empty($cron);
         $updateData['next_run_at'] = $isRecurring
             ? $this->computeNextRunAt($cron, $timezone)
@@ -226,6 +232,9 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
     private function reschedulePendingEntries(int $scheduledRunId, string $nextRunAt): void
     {
         $now = gmdate(self::DB_TIMESTAMP_FORMAT);
+
+        // Step 1: Mark the current live next-firing (PENDING/CLAIMED) as
+        // SKIPPED. Preserves the audit trail of "we superseded this firing".
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $scheduledRunId)
             ->whereIn('status', [ScheduledRunNext::STATUS_PENDING, ScheduledRunNext::STATUS_CLAIMED])
@@ -234,12 +243,29 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'completed_at' => $now,
             ]);
 
-        Capsule::table('scheduled_runs_next')->insert([
+        // Step 2: Free up the (scheduled_run_id, due_at) slot. A SKIPPED or
+        // DONE row may already exist at the new `due_at` from a previous
+        // reschedule cycle (cron didn't change so `computeNextRunAt` returns
+        // the same value), and the UNIQUE constraint on
+        // (scheduled_run_id, due_at) blocks inserting a fresh PENDING row
+        // alongside it. Deleting the conflict is the worker's
+        // `insertRecurringEntry` pattern — keep the audit of OTHER due_at
+        // slots intact, only clear the slot we're about to fill.
+        Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $scheduledRunId)
+            ->where('due_at', $nextRunAt)
+            ->whereIn('status', [ScheduledRunNext::STATUS_SKIPPED, ScheduledRunNext::STATUS_DONE])
+            ->delete();
+
+        // Step 3: `insertOrIgnore` is the dialect-portable safety net for any
+        // concurrent inserter Step 2 missed — same SQLite/MariaDB/MySQL
+        // shape used by `insertRecurringEntry` in ScheduledRunProcessor.
+        Capsule::table('scheduled_runs_next')->insertOrIgnore([
             'scheduled_run_id' => $scheduledRunId,
-            'due_at'          => $nextRunAt,
-            'status'          => ScheduledRunNext::STATUS_PENDING,
-            'created_at'      => $now,
-            'updated_at'      => $now,
+            'due_at'           => $nextRunAt,
+            'status'           => ScheduledRunNext::STATUS_PENDING,
+            'created_at'       => $now,
+            'updated_at'       => $now,
         ]);
     }
 

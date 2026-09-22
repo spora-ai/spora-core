@@ -123,9 +123,12 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Patch a scheduled run identified by `schedule_id`. '
                 . '`schedule_patch` (object) with any subset of '
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
-                . '`max_steps_override`, `is_active`. Send `null` on `cron_expression` / '
-                . '`run_at` to switch a recurring schedule to one-shot (or vice versa), '
-                . 'but never both populated in the same patch — ambiguous. '
+                . '`max_steps_override`, `is_active`. To clear a nullable field '
+                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
+                . 'send the JSON `null` literal — NOT the four-character string "null". '
+                . 'Send `null` on `cron_expression` / `run_at` to switch a recurring '
+                . 'schedule to one-shot (or vice versa), but never both populated in '
+                . 'the same patch — ambiguous. '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full schedule resource after the patch.',
     enabledByDefault: false,
@@ -136,6 +139,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Patch a prompt template identified by `template_id`. '
                 . '`template_patch` (object) with any subset of `name`, `description`, '
                 . '`prompt_template`, `variables`, `max_steps`, `is_active`. '
+                . 'To clear `max_steps` send the JSON `null` literal — NOT the '
+                . 'four-character string "null". '
                 . 'Cross-agent updates accept `agent_id`; omit to target the calling '
                 . 'agent. Returns the full template resource after the patch.',
     enabledByDefault: false,
@@ -227,8 +232,11 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for `update_schedule`. Partial object with any subset of '
                 . '`template_id`, `raw_prompt`, `cron_expression`, `run_at`, `timezone`, '
-                . '`max_steps_override`, `is_active`. Send `null` on `cron_expression` / '
-                . '`run_at` to switch recurrence modes, never both populated. '
+                . '`max_steps_override`, `is_active`. To clear a nullable field '
+                . '(`template_id`, `cron_expression`, `run_at`, `max_steps_override`) '
+                . 'send the JSON `null` literal — NOT the four-character string "null". '
+                . 'Send `null` on `cron_expression` / `run_at` to switch recurrence '
+                . 'modes, never both populated. '
                 . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
@@ -237,7 +245,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'object',
     description: 'ONLY for `update_prompt_template`. Partial object with any subset of '
                 . '`name`, `description`, `prompt_template`, `variables`, `max_steps`, '
-                . '`is_active`. Ignored by every other operation.',
+                . '`is_active`. To clear `max_steps` send the JSON `null` literal — NOT '
+                . 'the four-character string "null". '
+                . self::IGNORED_BY_OTHER_OPERATIONS,
     required: false,
 )]
 final class ScheduleTool extends AbstractTool

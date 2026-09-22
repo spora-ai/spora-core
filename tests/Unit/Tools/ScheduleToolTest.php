@@ -7,6 +7,7 @@ use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
+use Spora\Models\ScheduledRunNext;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -1011,6 +1012,173 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
             ->and($result->data['scheduled_run']['run_at'])->not->toBeNull();
+    });
+
+    /**
+     * Bug 2 regression: switching cron → one-shot via the documented
+     * `cron_expression: null + run_at: <iso>` patch crashed with a UNIQUE
+     * constraint violation on `scheduled_runs_next(scheduled_run_id,
+     * due_at)` because (a) the service used `??` to fall back to the
+     * existing cron instead of respecting the explicit `null`, and (b)
+     * `reschedulePendingEntries()` marked the existing PENDING row as
+     * SKIPPED but kept it in the table — the new INSERT collided on the
+     * UNIQUE index when the cron-derived `next_run_at` matched the
+     * existing row's `due_at`.
+     *
+     * The fix is two-part:
+     *   - `array_key_exists()` everywhere so explicit nulls clear.
+     *   - `reschedulePendingEntries()` deletes any SKIPPED/DONE row at the
+     *     new `(scheduled_run_id, due_at)` before inserting the fresh
+     *     PENDING row, freeing the unique slot.
+     */
+    test('cron → one-shot transition replaces scheduled_runs_next row without UNIQUE collision', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        // createRun goes through ScheduledRunService::createRun() which
+        // inserts the first PENDING row in scheduled_runs_next — that's
+        // the row that used to collide on UNIQUE.
+        [$tool, $service] = makeScheduleToolTestFixture();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => SCHEDULE_TOOL_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        // The freshly-created recurring schedule has exactly one PENDING
+        // row in scheduled_runs_next.
+        $pendingBefore = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->where('status', ScheduledRunNext::STATUS_PENDING)
+            ->count();
+        expect($pendingBefore)->toBe(1);
+
+        // Simulate the LLM tool call: the JSON arrives as
+        // `{"cron_expression":null,"run_at":"<iso>"}` — the dispatcher
+        // parses it, and the validator sees real PHP `null`, not the
+        // string "null". Patch goes end-to-end through ScheduleTool.
+        $newRunAt = date('Y-m-d\TH:i:sP', strtotime('+5 hours'));
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => [
+                'cron_expression' => null,
+                'run_at'          => $newRunAt,
+            ],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
+            ->and($result->data['scheduled_run']['run_at'])->not->toBeNull()
+            ->and($result->data['scheduled_run']['is_active'])->toBeTrue();
+
+        // The schedule now has exactly one PENDING row in
+        // scheduled_runs_next (at the new run_at), and the old cron
+        // entry was marked SKIPPED. No UNIQUE collision, no extra
+        // duplicate rows.
+        $rows = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->orderBy('id')
+            ->get();
+        // `next_run_at` in the resource is ISO 8601 with offset;
+        // `due_at` in the DB column is `Y-m-d H:i:s`. Normalize the
+        // resource value to UTC `Y-m-d H:i:s` for the equality check.
+        $expectedDueAt = (new DateTimeImmutable($result->data['scheduled_run']['next_run_at']))
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d H:i:s');
+        expect($rows)->toHaveCount(2)
+            ->and($rows[0]->status)->toBe(ScheduledRunNext::STATUS_SKIPPED)
+            ->and($rows[1]->status)->toBe(ScheduledRunNext::STATUS_PENDING)
+            ->and($rows[1]->due_at)->toBe($expectedDueAt);
+    });
+
+    /**
+     * Bug 2 regression variant: re-applying the same patch (run_at update
+     * without changing the cron-derived next_run_at) used to collide on
+     * UNIQUE because the prior PENDING row was just marked SKIPPED but
+     * not deleted. With the delete-then-insert fix this is idempotent.
+     */
+    test('updating run_at on a one-shot schedule is idempotent (no UNIQUE collision on re-update)', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        [$tool, $service] = makeScheduleToolTestFixture();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => null,
+            'run_at'          => date('Y-m-d H:i:s', strtotime('+3 hours')),
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        // Push the same run_at again — the service should reschedule the
+        // existing PENDING row in place, not collide on UNIQUE.
+        $secondRunAt = date('Y-m-d H:i:s', strtotime('+4 hours'));
+        $first  = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['run_at' => $secondRunAt],
+        ], $agentId, $userId);
+        $second = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['run_at' => $secondRunAt],
+        ], $agentId, $userId);
+
+        expect($first->success)->toBeTrue()
+            ->and($second->success)->toBeTrue()
+            ->and($second->data['scheduled_run']['run_at'])->not->toBeNull();
+
+        // Final state: exactly two rows — the original PENDING (now
+        // SKIPPED), and one PENDING at the second run_at. No
+        // duplicates, no UNIQUE collisions.
+        $rows = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->orderBy('id')
+            ->get();
+        $expectedDueAt = (new DateTimeImmutable($second->data['scheduled_run']['next_run_at']))
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d H:i:s');
+        $pending = $rows->where('status', ScheduledRunNext::STATUS_PENDING);
+        expect($pending)->toHaveCount(1)
+            ->and($pending->first()->due_at)->toBe($expectedDueAt);
+    });
+
+    /**
+     * Bug 2 regression variant: setting `run_at` alone on a cron schedule
+     * (without nulling cron) used to crash with UNIQUE because the
+     * existing PENDING row at the cron-derived next_run_at collided with
+     * the re-inserted row at the same due_at. With the fix it
+     * reschedules cleanly: the old row is marked SKIPPED then deleted
+     * (freeing the slot), and the new row is inserted.
+     */
+    test('updating run_at on a cron schedule reschedules cleanly without UNIQUE collision', function (): void {
+        [$userId, $agentId] = makeScheduleToolOwner();
+        [$tool, $service] = makeScheduleToolTestFixture();
+        $created = $service->createRun($agentId, $userId, [
+            'cron_expression' => SCHEDULE_TOOL_CRON,
+            'timezone'        => 'UTC',
+            'is_active'       => true,
+        ]);
+        $runId = (int) $created['scheduled_run']['id'];
+
+        // Setting run_at on a cron schedule is documented as "ambiguous"
+        // — the existing cron keeps firing. The bug was that this
+        // scenario also crashed on UNIQUE. Fix: cron stays, next_run_at
+        // is recomputed from cron, but the PENDING row is rescheduled
+        // cleanly (mark SKIPPED → delete collision → insert).
+        $result = $tool->execute([
+            'action'         => 'update_schedule',
+            'schedule_id'    => $runId,
+            'schedule_patch' => ['run_at' => date('Y-m-d\TH:i:sP', strtotime('+6 hours'))],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['scheduled_run']['cron_expression'])->toBe(SCHEDULE_TOOL_CRON);
+
+        $rows = Capsule::table('scheduled_runs_next')
+            ->where('scheduled_run_id', $runId)
+            ->orderBy('id')
+            ->get();
+        $pending = $rows->where('status', ScheduledRunNext::STATUS_PENDING);
+        expect($pending)->toHaveCount(1);
     });
 
     test('delete_prompt_template rejects an unknown id', function (): void {
