@@ -36,7 +36,6 @@ use Spora\Models\Concerns\HasStringColumnLengthValidation;
  */
 final class ToolCall extends Model
 {
-    /** {@see HasStringColumnLengthValidation} */
     use HasStringColumnLengthValidation;
     /** @var string */
     protected $table = 'tool_calls';
@@ -78,23 +77,6 @@ final class ToolCall extends Model
         'executed_at'            => 'datetime',
     ];
 
-    /** @var array<string, int> operation_description was widened to TEXT by migration 0085 — intentionally absent. */
-    public const STRING_COLUMN_MAX_LENGTHS = [
-        'provider_call_id' => 100,
-        'tool_name'        => 100,
-        'tool_class'       => 200,
-        'tool_type'        => 10,
-        'status'           => 20,
-        'operation'        => 100,
-        'approval_note'    => 500,
-    ];
-
-    /** @return array{0: string, 1: string} */
-    protected function stringColumnsFitContext(): array
-    {
-        return ['tool_calls', (string) ($this->attributes['tool_class'] ?? 'tool call')];
-    }
-
     public function task(): BelongsTo
     {
         return $this->belongsTo(Task::class);
@@ -113,5 +95,22 @@ final class ToolCall extends Model
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by');
+    }
+
+    /** @var array<string, int> operation_description was widened to TEXT by migration 0085 — intentionally absent. */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'provider_call_id' => 100,
+        'tool_name'        => 100,
+        'tool_class'       => 200,
+        'tool_type'        => 10,
+        'status'           => 20,
+        'operation'        => 100,
+        'approval_note'    => 500,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['tool_calls', (string) ($this->attributes['tool_class'] ?? 'tool call')];
     }
 }

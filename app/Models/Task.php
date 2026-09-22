@@ -39,7 +39,6 @@ use Spora\Models\Concerns\HasStringColumnLengthValidation;
  */
 final class Task extends Model
 {
-    /** {@see HasStringColumnLengthValidation} */
     use HasStringColumnLengthValidation;
     /** @var string */
     protected $table = 'tasks';
@@ -77,19 +76,6 @@ final class Task extends Model
         'lease_expires_at' => 'datetime',
         'data'             => 'array',
     ];
-
-    /** @var array<string, int> */
-    public const STRING_COLUMN_MAX_LENGTHS = [
-        'status'         => 30,
-        'failure_reason' => 1000,
-        'error_code'     => 30,
-    ];
-
-    /** @return array{0: string, 1: string} */
-    protected function stringColumnsFitContext(): array
-    {
-        return ['tasks', "task #{$this->id}"];
-    }
 
     public function agent(): BelongsTo
     {
@@ -166,5 +152,18 @@ final class Task extends Model
     public function parentTask(): BelongsTo
     {
         return $this->belongsTo(Task::class, 'parent_task_id');
+    }
+
+    /** @var array<string, int> */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'status'         => 30,
+        'failure_reason' => 1000,
+        'error_code'     => 30,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['tasks', "task #{$this->id}"];
     }
 }

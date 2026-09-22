@@ -51,7 +51,6 @@ use Throwable;
  */
 final class Agent extends Model
 {
-    /** {@see HasStringColumnLengthValidation} */
     use HasStringColumnLengthValidation;
     protected $table = 'agents';
 
@@ -88,20 +87,6 @@ final class Agent extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
-
-    /** @var array<string, int> */
-    public const STRING_COLUMN_MAX_LENGTHS = [
-        'name'         => 100,
-        'llm_provider' => 50,
-        'llm_model'    => 100,
-        'llm_base_url' => 255,
-    ];
-
-    /** @return array{0: string, 1: string} */
-    protected function stringColumnsFitContext(): array
-    {
-        return ['agents', "agent #{$this->id}"];
-    }
 
     public function principal(): BelongsTo
     {
@@ -241,5 +226,19 @@ final class Agent extends Model
             return false;
         }
         return $driver->supportsImageInput();
+    }
+
+    /** @var array<string, int> */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'name'         => 100,
+        'llm_provider' => 50,
+        'llm_model'    => 100,
+        'llm_base_url' => 255,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['agents', "agent #{$this->id}"];
     }
 }

@@ -53,7 +53,6 @@ use Spora\Services\MediaArchive\MediaType;
  */
 final class MediaAsset extends Model
 {
-    /** {@see HasStringColumnLengthValidation} */
     use HasStringColumnLengthValidation;
     /**
      * Single source of truth for the columns persisted on a
@@ -131,27 +130,6 @@ final class MediaAsset extends Model
     /** @var array<string, string> */
     protected $casts = self::CASTS;
 
-    /** @var array<string, int> */
-    public const STRING_COLUMN_MAX_LENGTHS = [
-        'plugin_slug'         => 64,
-        'tool_name'           => 64,
-        'media_type'          => 16,
-        'mime_type'           => 127,
-        'filename'            => 255,
-        'asset_url'           => 512,
-        'source_url'          => 512,
-        'storage_mode'        => 16,
-        'asset_token'         => 64,
-        'public_access_token' => 64,
-        'upload_source'       => 16,
-    ];
-
-    /** @return array{0: string, 1: string} */
-    protected function stringColumnsFitContext(): array
-    {
-        return ['media_assets', "media asset {$this->id}"];
-    }
-
     public function agent(): BelongsTo
     {
         return $this->belongsTo(Agent::class);
@@ -201,5 +179,26 @@ final class MediaAsset extends Model
         $base = \Spora\Services\MediaArchive\MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $this->id;
         $ext  = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($this->mime_type);
         return $ext !== null ? $base . '.' . $ext : $base;
+    }
+
+    /** @var array<string, int> */
+    public const STRING_COLUMN_MAX_LENGTHS = [
+        'plugin_slug'         => 64,
+        'tool_name'           => 64,
+        'media_type'          => 16,
+        'mime_type'           => 127,
+        'filename'            => 255,
+        'asset_url'           => 512,
+        'source_url'          => 512,
+        'storage_mode'        => 16,
+        'asset_token'         => 64,
+        'public_access_token' => 64,
+        'upload_source'       => 16,
+    ];
+
+    /** @return array{0: string, 1: string} */
+    protected function stringColumnsFitContext(): array
+    {
+        return ['media_assets', "media asset {$this->id}"];
     }
 }
