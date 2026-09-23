@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Models;
 
+use InvalidArgumentException;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\MediaType;
 
@@ -51,6 +52,39 @@ describe('MediaAsset key configuration', function (): void {
         expect($asset->getTable())->toBe('media_assets');
         expect($asset->getKeyType())->toBe('string');
         expect($asset->getIncrementing())->toBeFalse();
+    });
+});
+
+describe('MediaAsset::assertStringColumnsFit', function (): void {
+    it('throws when filename exceeds VARCHAR(255)', function (): void {
+        $asset = new MediaAsset();
+        $asset->filename = str_repeat('f', 256);
+
+        try {
+            $asset->assertStringColumnsFit();
+            $this->fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $e) {
+            expect($e->getMessage())->toContain('media_assets.filename')
+                ->and($e->getMessage())->toContain('column limit is 255');
+        }
+    });
+
+    it('throws when asset_url exceeds VARCHAR(512)', function (): void {
+        $asset = new MediaAsset();
+        $asset->asset_url = 'https://' . str_repeat('a', 510) . '.example.com';
+
+        try {
+            $asset->assertStringColumnsFit();
+            $this->fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $e) {
+            expect($e->getMessage())->toContain('media_assets.asset_url')
+                ->and($e->getMessage())->toContain('column limit is 512');
+        }
+    });
+
+    it('skips unknown / null / non-string columns silently', function (): void {
+        $asset = new MediaAsset();
+        expect(fn() => $asset->assertStringColumnsFit())->not()->toThrow(InvalidArgumentException::class);
     });
 });
 
