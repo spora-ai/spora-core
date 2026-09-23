@@ -7,29 +7,11 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 
 /**
- * Per-call approve/reject on tool_calls: rejected_at / rejected_by / reject_reason
- * (PR #173, feat/orchestrator per-call approve/reject).
- *
- * Idempotency:
- *
- *   Every step gates on `hasColumn` / `hasForeignKeyOnColumn` so a re-run over a
- *   partially-applied schema is a no-op. The migration was originally
- *   written before the idempotency contract existed (PR #235 / migration
- *   helpers centralisation), and a production MariaDB instance hit a
- *   partial state — the columns were added but the `migrations` row was
- *   never recorded, so every subsequent `spora:install` re-attempted the
- *   ADD COLUMN and crashed with SQLSTATE 42S21 ("Column already exists:
- *   rejected_at"). Gating each ALTER on the column's presence means a
- *   future re-run over that state silently no-ops instead of failing the
- *   deploy.
- *
- *   The FK name is explicit (`tool_calls_rejected_by_foreign`) so the
- *   existence check is stable across Laravel versions. The check itself
- *   uses `hasForeignKeyOnColumn` rather than `foreignKeyExists` — the
- *   latter assumes the `fk_<table>_<column>` naming convention used by
- *   0084+, but this migration predates that convention and ships the FK
- *   under Laravel's default `<table>_<column>_foreign` name. Probing
- *   by column works regardless of how the FK was named originally.
+ * Per-call approve/reject on tool_calls. Every step gates on
+ * `hasColumn` / `hasForeignKeyOnColumn` so a re-run over a partial state
+ * (e.g. a previous deploy where the `migrations` row wasn't recorded
+ * but the columns landed) is a no-op instead of crashing with
+ * SQLSTATE 42S21 — the regression that motivated this fix.
  */
 return new class extends Migration
 {
@@ -80,12 +62,9 @@ return new class extends Migration
             return;
         }
 
-        // Drop the FK by column reference rather than by name — Laravel
-        // resolves the constraint name from the column on every supported
-        // driver, and a no-op when no FK is attached to that column. On
-        // MySQL/MariaDB the FK must be dropped before the column; on
-        // SQLite dropping the column would otherwise leave a dangling
-        // FK in the table definition and the ALTER TABLE fails.
+        // Drop FK by column reference, not by name: Laravel resolves the
+        // constraint name on every driver, and the column drop below
+        // would otherwise leave a dangling FK on SQLite.
         if ($schema->hasColumn('tool_calls', 'rejected_by')) {
             $schema->table('tool_calls', static function (Blueprint $table): void {
                 $table->dropForeign(['rejected_by']);
