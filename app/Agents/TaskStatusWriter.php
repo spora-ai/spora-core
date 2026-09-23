@@ -96,6 +96,23 @@ final class TaskStatusWriter
     }
 
     /**
+     * System-initiated abort (e.g. the step-count cap) — same row-update
+     * shape as {@see abortTransition()} but additionally writes a
+     * discriminator key into `data` so the frontend can distinguish
+     * operator-initiated aborts from automatic ones.
+     *
+     * @param string $reasonKey e.g. `max_steps_reached`; written as
+     *                          `data[$reasonKey] = $reasonValue`.
+     */
+    public function autoAbortTransition(Task $task, string $reasonKey, mixed $reasonValue): void
+    {
+        $data = is_array($task->data) ? $task->data : [];
+        $data['aborted_at'] = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT);
+        $data[$reasonKey]   = $reasonValue;
+        $this->writeTransition($task, 'ABORTED', $data);
+    }
+
+    /**
      * Apply a status flip on $task that resolves an AWAITING_INPUT → QUEUED
      * transition after the operator answered a pending question batch.
      * Mirrors {@see applyContinueTransition()} (same single-UPDATE shape)

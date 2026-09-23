@@ -472,7 +472,7 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
 // max_steps
 // ---------------------------------------------------------------------------
 
-it('task is marked FAILED when step_count reaches max_steps', function (): void {
+it('task is auto-aborted (not failed) when step_count reaches max_steps', function (): void {
     [$agentId] = seedAgent();
 
     $callNum = 0;
@@ -490,9 +490,12 @@ it('task is marked FAILED when step_count reaches max_steps', function (): void 
     claimAndTick($orch, $task->id);
 
     $task->refresh();
-    expect($task->status)->toBe('FAILED')
-        ->and($task->failure_reason)->toBe('Max steps reached.')
-        ->and($task->step_count)->toBe(3);
+    $data = is_array($task->data) ? $task->data : [];
+    expect($task->status)->toBe('ABORTED')
+        ->and($task->failure_reason)->toBeNull()
+        ->and($task->step_count)->toBe(3)
+        ->and($data['max_steps_reached'] ?? null)->toBeTrue()
+        ->and($data['aborted_at'] ?? null)->toBeString();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
