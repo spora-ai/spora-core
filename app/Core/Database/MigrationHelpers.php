@@ -10,22 +10,14 @@ use Illuminate\Database\Capsule\Manager as Capsule;
  * Driver-aware schema-existence helpers used by migrations that need to
  * drop FKs / indexes / columns safely on partial state (a re-run after
  * a previous failure, or an upgrade over an older schema variant).
- *
- * Every method reads from `Capsule::connection()` — the same connection
- * the migration itself uses — so there's no coupling to a specific
- * connection name. The MySQL / MariaDB path queries `information_schema`;
- * the SQLite path uses `PRAGMA foreign_key_list` / `PRAGMA index_list`.
- *
- * Pattern extracted from `database/migrations/0067_introduce_principals_and_groups`
- * and `database/migrations/0073_add_principal_id_and_trigger_user_id_to_tasks`,
- * where the same private methods were duplicated.
+ * MySQL/MariaDB path queries `information_schema`; SQLite uses
+ * `PRAGMA foreign_key_list` / `PRAGMA index_list`.
  */
 trait MigrationHelpers
 {
-    /** Driver-aware FK existence check used to gate re-runs of this
-     *  forward-only migration; the migration runs outside a transaction
-     *  (so `PRAGMA foreign_keys = OFF` can take effect during the
-     *  `user_id` drop) and a partial failure must be safe to replay. */
+    /** FK existence check by constraint name. SQLite path derives the
+     *  column by stripping `fk_<table>_` from the requested name (Laravel's
+     *  SQLite grammar emits FKs without CONSTRAINT names). */
     public function foreignKeyExists(string $table, string $constraintName): bool
     {
         $driver = Capsule::connection()->getDriverName();
@@ -39,12 +31,6 @@ trait MigrationHelpers
             return $row !== null;
         }
 
-        // SQLite: PRAGMA foreign_key_list returns anonymous FKs (numeric id),
-        // and Laravel's SQLite grammar emits FK declarations WITHOUT a
-        // CONSTRAINT name in the CREATE TABLE, so a name match against the
-        // table's stored DDL would always miss. Match by the `from` column
-        // that the constraint name implies — derive it by stripping the
-        // `fk_<table>_` prefix.
         $column = substr($constraintName, strlen("fk_{$table}_"));
         $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
         foreach ($fks as $fk) {
@@ -55,8 +41,7 @@ trait MigrationHelpers
         return false;
     }
 
-    /** Driver-aware index existence check — mirrors foreignKeyExists for
-     *  the index side of every guarded step. */
+    /** Index existence check by name. */
     public function indexExists(string $table, string $indexName): bool
     {
         $driver = Capsule::connection()->getDriverName();
@@ -79,8 +64,7 @@ trait MigrationHelpers
         return false;
     }
 
-    /** Driver-aware lookup for the FK that references $column on $table.
-     *  Returns the constraint name, or null if none. */
+    /** Returns the FK constraint name on $column, or null. */
     public function findForeignKeyOn(string $table, string $column): ?string
     {
         $driver = Capsule::connection()->getDriverName();
@@ -100,14 +84,13 @@ trait MigrationHelpers
             return $row?->CONSTRAINT_NAME;
         }
 
-        // SQLite: PRAGMA exposes the auto-assigned numeric FK id, not the
-        // constraint name. Returns null — the only caller (the MySQL/MariaDB
-        // user_id drop branch) never executes on SQLite.
+        // SQLite PRAGMA exposes FKs by anonymous numeric id, not name.
         return null;
     }
 
-    /** Driver-aware lookup for the index whose leftmost column is $column.
-     *  Returns the index name, or null if none. */
+    /** Returns the index name whose leftmost column is $column, or null.
+     *  SQLite path skips origin 'u'/'pk'/'f' (auto indexes) so we never
+     *  return the FK's anonymous id. */
     public function findIndexOn(string $table, string $column): ?string
     {
         $driver = Capsule::connection()->getDriverName();
@@ -124,9 +107,6 @@ trait MigrationHelpers
             return $row?->INDEX_NAME;
         }
 
-        // SQLite: PRAGMA index_list exposes origin ('c' = user-created,
-        // 'pk' = PRIMARY KEY, 'f' = FK auto-index). Skip auto indexes so
-        // we never return the FK's anonymous id.
         $rows = Capsule::select("PRAGMA index_list('{$table}')");
         foreach ($rows as $row) {
             if ($row->origin !== 'c') {
@@ -140,7 +120,7 @@ trait MigrationHelpers
         return null;
     }
 
-    /** Returns true if the named table has a PRIMARY KEY (any column).
+    /** Returns true if the table has a PRIMARY KEY on any column.
      *  MySQL/MariaDB only — callers gate by driver. */
     public function hasPrimaryKey(string $table): bool
     {
@@ -151,5 +131,27 @@ trait MigrationHelpers
             [$table],
         );
         return $row !== null;
+    }
+
+    /** FK existence check by column, regardless of constraint name.
+     *  Use this when the migration predates the `fk_<table>_<column>`
+     *  naming convention and the FK was created under Laravel's default
+     *  `<table>_<column>_foreign`. */
+    public function hasForeignKeyOnColumn(string $table, string $column): bool
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            return $this->findForeignKeyOn($table, $column) !== null;
+        }
+
+        // SQLite PRAGMA foreign_key_list: `from` is the constrained
+        // column, `table` is the referenced table. Match by `from`.
+        $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
+        foreach ($fks as $fk) {
+            if ($fk->from === $column) {
+                return true;
+            }
+        }
+        return false;
     }
 }

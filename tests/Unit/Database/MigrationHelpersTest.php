@@ -132,6 +132,35 @@ it('foreignKeyExists returns true on SQLite when a matching FK exists', function
     expect($this->foreignKeyExists('migration_helpers_test', 'fk_migration_helpers_test_parent_id'))->toBeTrue();
 });
 
+it('hasForeignKeyOnColumn returns true on SQLite when a FK is attached to the column', function (): void {
+    // Matches by `from` column regardless of the constraint name —
+    // Laravel's SQLite grammar emits FKs with anonymous numeric ids,
+    // so name-based probes always miss on this driver.
+    Capsule::statement(<<<SQL
+        CREATE TABLE migration_helpers_test_parent (
+            id INTEGER PRIMARY KEY
+        )
+    SQL);
+    Capsule::statement(<<<SQL
+        CREATE TABLE migration_helpers_test (
+            id INTEGER PRIMARY KEY,
+            parent_id INTEGER,
+            FOREIGN KEY (parent_id) REFERENCES migration_helpers_test_parent(id)
+        )
+    SQL);
+
+    expect($this->hasForeignKeyOnColumn('migration_helpers_test', 'parent_id'))->toBeTrue();
+});
+
+it('hasForeignKeyOnColumn returns false on SQLite when no FK is attached to the column', function (): void {
+    Capsule::schema()->create('migration_helpers_test', static function (Blueprint $t): void {
+        $t->id();
+        $t->unsignedBigInteger('parent_id')->nullable();
+    });
+
+    expect($this->hasForeignKeyOnColumn('migration_helpers_test', 'parent_id'))->toBeFalse();
+});
+
 it('findIndexOn skips SQLite auto-indexes (origin u/pk/f) and returns null when only auto indexes have the column', function (): void {
     // Anonymous UNIQUE / PRIMARY KEY constraints create sqlite_autoindex_*
     // entries with origin 'u' / 'pk' / 'f' that the trait's SQLite branch
@@ -194,6 +223,22 @@ it('findForeignKeyOn returns null on MariaDB when no FK matches the column', fun
     ]);
 
     expect($this->findForeignKeyOn('users', 'user_id'))->toBeNull();
+});
+
+it('hasForeignKeyOnColumn returns true on MySQL when information_schema reports a FK on the column', function (): void {
+    swapDefaultConnectionWith('mysql', [
+        'selectOne' => (object) ['CONSTRAINT_NAME' => 'fk_user_id'],
+    ]);
+
+    expect($this->hasForeignKeyOnColumn('users', 'user_id'))->toBeTrue();
+});
+
+it('hasForeignKeyOnColumn returns false on MariaDB when no FK matches the column', function (): void {
+    swapDefaultConnectionWith('mariadb', [
+        'selectOne' => null,
+    ]);
+
+    expect($this->hasForeignKeyOnColumn('users', 'user_id'))->toBeFalse();
 });
 
 it('findIndexOn returns the index name on MySQL', function (): void {
