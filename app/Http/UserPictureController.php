@@ -7,7 +7,6 @@ namespace Spora\Http;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\UserPictures\UserPictureService;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -47,7 +46,7 @@ final class UserPictureController
     /**
      * GET /api/v1/me/picture
      */
-    public function show(Request $request): JsonResponse
+    public function show(): JsonResponse
     {
         $userId = $this->requireUser();
         if ($userId instanceof JsonResponse) {
@@ -76,13 +75,13 @@ final class UserPictureController
             return $prepared;
         }
 
-        return $this->performUpload($prepared['file'], $prepared['bytes'], $userId);
+        return $this->performUpload($prepared['bytes'], $userId);
     }
 
     /**
      * DELETE /api/v1/me/picture/image
      */
-    public function deleteImage(Request $request): JsonResponse
+    public function deleteImage(): JsonResponse
     {
         $userId = $this->requireUser();
         if ($userId instanceof JsonResponse) {
@@ -121,7 +120,7 @@ final class UserPictureController
      * {@see uploadImage()} so the controller stays under the
      * SonarQube S1142 3-return ceiling.
      */
-    private function performUpload(UploadedFile $file, string $bytes, int $userId): JsonResponse
+    private function performUpload(string $bytes, int $userId): JsonResponse
     {
         $mime = $this->sniffer->sniffFromBytes($bytes);
         $picture = $this->pictures->upload(

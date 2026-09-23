@@ -8,7 +8,6 @@ use Spora\Core\Paths;
 use Spora\Http\UserPictureAssetController;
 use Spora\Models\UserPicture;
 use Spora\Services\UserPictures\UserPictureService;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Coverage tests for UserPictureAssetController — the cross-user read
@@ -63,7 +62,7 @@ afterEach(function (): void {
 
 test('GET /users/{id}/picture returns 401 when not logged in', function (): void {
     $_SESSION = [];
-    $resp = buildAssetController()->show(Request::create('/api/v1/users/1/picture', 'GET'), 1);
+    $resp = buildAssetController()->show(1);
 
     expect($resp->getStatusCode())->toBe(401);
     $body = json_decode($resp->getContent(), true);
@@ -71,7 +70,7 @@ test('GET /users/{id}/picture returns 401 when not logged in', function (): void
 });
 
 test('GET /users/{id}/picture returns 404 when the user has no picture', function (): void {
-    $resp = buildAssetController()->show(Request::create('/api/v1/users/999/picture', 'GET'), 999);
+    $resp = buildAssetController()->show(999);
 
     expect($resp->getStatusCode())->toBe(404);
 });
@@ -89,7 +88,7 @@ test('GET /users/{id}/picture returns the bytes for the caller (own picture)', f
     ]);
 
     $controller = buildAssetController();
-    $resp = $controller->show(Request::create('/api/v1/users/' . $this->userId . '/picture', 'GET'), $this->userId);
+    $resp = $controller->show($this->userId);
 
     expect($resp->getStatusCode())->toBe(200);
     expect($resp->headers->get('Content-Type'))->toBe('image/png');
@@ -124,7 +123,7 @@ test('GET /users/{id}/picture returns the bytes for any other logged-in user', f
     // Caller is the authenticated user from beforeEach — a different user
     expect($ownerId)->not->toBe($this->userId);
 
-    $resp = buildAssetController()->show(Request::create('/api/v1/users/' . $ownerId . '/picture', 'GET'), $ownerId);
+    $resp = buildAssetController()->show($ownerId);
 
     expect($resp->getStatusCode())->toBe(200);
 
@@ -143,7 +142,7 @@ test('GET /users/{id}/picture returns 404 when the row exists but the file is mi
     ]);
     // Deliberately do NOT create the on-disk file.
 
-    $resp = buildAssetController()->show(Request::create('/api/v1/users/' . $this->userId . '/picture', 'GET'), $this->userId);
+    $resp = buildAssetController()->show($this->userId);
 
     expect($resp->getStatusCode())->toBe(404);
 });

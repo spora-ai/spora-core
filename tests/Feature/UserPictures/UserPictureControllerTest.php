@@ -70,8 +70,7 @@ afterEach(function (): void {
 });
 
 test('GET /me/picture returns null profile_picture when no upload exists', function (): void {
-    $req = Request::create('/api/v1/me/picture', 'GET');
-    $resp = buildUserPictureController()->show($req);
+    $resp = buildUserPictureController()->show();
 
     expect($resp->getStatusCode())->toBe(200);
     $data = json_decode($resp->getContent(), true)['data'];
@@ -194,7 +193,7 @@ test('GET /me/picture returns the wire shape after upload', function (): void {
     $reqPost->files->set('file', new UploadedFile($tmp, 'avatar.png', 'image/png', null, true));
     buildUserPictureController()->uploadImage($reqPost);
 
-    $resp = buildUserPictureController()->show(Request::create('/api/v1/me/picture', 'GET'));
+    $resp = buildUserPictureController()->show();
 
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode($resp->getContent(), true)['data'];
@@ -213,7 +212,7 @@ test('DELETE /me/picture/image clears the row and the file', function (): void {
 
     expect(UserPicture::where('user_id', $this->userId)->exists())->toBeTrue();
 
-    $resp = buildUserPictureController()->deleteImage(Request::create('/api/v1/me/picture/image', 'DELETE'));
+    $resp = buildUserPictureController()->deleteImage();
 
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode($resp->getContent(), true)['data'];
@@ -222,7 +221,7 @@ test('DELETE /me/picture/image clears the row and the file', function (): void {
 });
 
 test('DELETE /me/picture/image is idempotent when no upload exists', function (): void {
-    $resp = buildUserPictureController()->deleteImage(Request::create('/api/v1/me/picture/image', 'DELETE'));
+    $resp = buildUserPictureController()->deleteImage();
 
     expect($resp->getStatusCode())->toBe(200);
 });

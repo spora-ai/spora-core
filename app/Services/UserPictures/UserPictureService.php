@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Services\UserPictures;
 
-use DateTime;
 use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
-use RuntimeException;
+use Illuminate\Database\QueryException;
 use Spora\Core\Paths;
 use Spora\Models\UserPicture;
+use Spora\Services\UserPictures\Exceptions\UserPictureStorageException;
 
 /**
  * Owns the byte-path + table-path for user profile pictures.
@@ -37,6 +37,12 @@ use Spora\Models\UserPicture;
  * the same filesystem, so a concurrent second upload either lands on
  * the same final path or waits on the rename — never produces a
  * half-written file at the served URL.
+ *
+ * Atomicity on the row: `updateOrCreate()` keyed on `user_id`
+ * (UNIQUE) plus a one-shot retry on a UNIQUE violation covers the race
+ * where two concurrent first-time uploads both miss the row lookup.
+ * The second writer hits the DB-level UNIQUE; on `23000` we retry,
+ * and the retry finds the row the winner just inserted and updates it.
  */
 final class UserPictureService
 {
@@ -65,53 +71,33 @@ final class UserPictureService
         $tmpPath = self::joinPath($dir, $userId . '.' . bin2hex(random_bytes(8)) . '.tmp');
 
         if (file_put_contents($tmpPath, $bytes, LOCK_EX) === false) {
-            throw new RuntimeException("Failed to write user picture to {$tmpPath}");
+            throw UserPictureStorageException::onWrite($tmpPath);
         }
         chmod($tmpPath, 0644); // NOSONAR — world-readable like other asset paths
         if (!rename($tmpPath, $finalPath)) {
             @unlink($tmpPath);
-            throw new RuntimeException("Failed to move user picture into place at {$finalPath}");
+            throw UserPictureStorageException::onRename($tmpPath, $finalPath);
         }
         chmod($finalPath, 0644); // NOSONAR
 
         $relativePath = self::STORAGE_SUBDIR . '/' . $userId . '.' . $extension;
-
-        // Update-or-insert keyed on user_id (UNIQUE). Returning the row
-        // is enough — the controller fetches the same record again via
-        // `findForUser()` so callers see the persisted timestamps.
-        $now = date('Y-m-d H:i:s');
-        $existing = UserPicture::where('user_id', $userId)->first();
-        if ($existing instanceof UserPicture) {
-            $stalePath = self::joinPath($dir, basename($existing->media_path));
-            if ($stalePath !== $finalPath && is_file($stalePath)) {
-                @unlink($stalePath);
-            }
-            $existing->media_path = $relativePath;
-            $existing->mime = $mime;
-            $existing->size_bytes = $sizeBytes;
-            // Eloquent's `datetime` cast expects a DateTimeInterface; the
-            // string literal above would be coerced at save() time but
-            // PHPStan can't see through the cast. Build a DateTime so the
-            // assignment is statically typed correctly.
-            $existing->updated_at = new DateTime($now);
-            $existing->save();
-            return $existing;
-        }
-
-        $id = Capsule::table('user_pictures')->insertGetId([
-            'user_id'    => $userId,
+        $attributes = [
             'media_path' => $relativePath,
             'mime'       => $mime,
             'size_bytes' => $sizeBytes,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
+        ];
 
-        $created = UserPicture::find($id);
-        if ($created === null) {
-            throw new RuntimeException("Failed to load inserted user_pictures row {$id}");
+        // UNIQUE on user_id turns the race between two first-time uploads
+        // into one writer winning the insert and the other catching a
+        // 23000 we retry — the retry's lookup now finds the row.
+        try {
+            return UserPicture::updateOrCreate(['user_id' => $userId], $attributes);
+        } catch (QueryException $e) {
+            if ($e->getCode() !== '23000') {
+                throw $e;
+            }
+            return UserPicture::updateOrCreate(['user_id' => $userId], $attributes);
         }
-        return $created;
     }
 
     public function delete(int $userId): void
@@ -182,7 +168,7 @@ final class UserPictureService
     {
         $dir = self::joinPath($this->paths->storage(), self::STORAGE_SUBDIR);
         if (!is_dir($dir) && !@mkdir($dir, 0755, recursive: true) && !is_dir($dir)) {
-            throw new RuntimeException("Failed to create user-pictures directory: {$dir}");
+            throw UserPictureStorageException::onMkdir($dir);
         }
         chmod($dir, 0755); // NOSONAR
         return $dir;

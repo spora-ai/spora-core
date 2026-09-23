@@ -9,7 +9,6 @@ use Spora\Models\UserPicture;
 use Spora\Services\UserPictures\UserPictureService;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -42,20 +41,16 @@ final class UserPictureAssetController
         private readonly UserPictureService $pictures,
     ) {}
 
-    public function show(Request $request, int $id): Response
+    public function show(int $id): Response
     {
         if ($this->auth->currentUserId() === null) {
             return $this->unauthenticated();
         }
 
         $picture = UserPicture::where('user_id', $id)->first();
-        if (!$picture instanceof UserPicture) {
-            return $this->notFound();
-        }
-
-        $path = $this->pictures->absolutePathFor($picture);
+        $path = $picture instanceof UserPicture ? $this->pictures->absolutePathFor($picture) : null;
         if ($path === null) {
-            // Row exists but the file is missing on disk — surface 404
+            // Missing row *or* row whose bytes are gone — surface 404
             // with the same envelope so the SPA can treat it as
             // "no picture" rather than a server error.
             return $this->notFound();

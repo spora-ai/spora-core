@@ -42,9 +42,10 @@ use Illuminate\Database\Schema\Blueprint;
  *     serving controller can set `Content-Type` and `Content-Length`
  *     without re-decoding the bytes.
  *   - UNIQUE on `user_id` enforces the 1:1 invariant at the DB level
- *     so a race between two concurrent uploads lands on the same row
- *     (the second write becomes an `updateOrCreate` upsert, not a
- *     duplicate).
+ *     so a race between two concurrent first-time uploads is atomic:
+ *     `UserPictureService::upload()` uses `updateOrCreate()` keyed on
+ *     `user_id`, and a 23000 UNIQUE violation from the loser triggers
+ *     a single retry whose lookup now finds the winner's row.
  *   - CASCADE on `users.id` delete keeps the row in sync when a user
  *     is removed by {@see \Spora\Services\UserService::deleteUser()}.
  *
