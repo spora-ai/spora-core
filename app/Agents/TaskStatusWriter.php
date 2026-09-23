@@ -59,6 +59,15 @@ final class TaskStatusWriter
             unset($data['aborted_at']);
         }
 
+        // Clear the auto-abort reason on every continue: the user is
+        // taking action with a fresh prompt and the step counter is about
+        // to reset to 0, so "max steps reached" no longer describes the
+        // task. Without this, a continued task that the operator later
+        // manually aborts would keep the stale flag from the previous
+        // auto-abort and the chat banner would mislabel a manual pause
+        // as a system one.
+        unset($data['max_steps_reached']);
+
         // Drop the auto-retry chain markers and the failure columns —
         // mirrors Orchestrator::retry() so an aborted → continued task
         // is claimable by the main worker loop (`retry_of_task_id IS
