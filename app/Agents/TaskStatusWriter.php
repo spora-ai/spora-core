@@ -59,13 +59,8 @@ final class TaskStatusWriter
             unset($data['aborted_at']);
         }
 
-        // Clear the auto-abort reason on every continue: the user is
-        // taking action with a fresh prompt and the step counter is about
-        // to reset to 0, so "max steps reached" no longer describes the
-        // task. Without this, a continued task that the operator later
-        // manually aborts would keep the stale flag from the previous
-        // auto-abort and the chat banner would mislabel a manual pause
-        // as a system one.
+        // Cleared on every continue so a later manual abort doesn't inherit
+        // the flag and mislabel itself in the chat banner.
         unset($data['max_steps_reached']);
 
         // Drop the auto-retry chain markers and the failure columns —
@@ -105,13 +100,11 @@ final class TaskStatusWriter
     }
 
     /**
-     * System-initiated abort (e.g. the step-count cap) — same row-update
-     * shape as {@see abortTransition()} but additionally writes a
-     * discriminator key into `data` so the frontend can distinguish
-     * operator-initiated aborts from automatic ones.
+     * System-initiated abort. Writes `data[$reasonKey] = $reasonValue`
+     * alongside the ABORTED status flip so the frontend can distinguish
+     * operator aborts from automatic ones.
      *
-     * @param string $reasonKey e.g. `max_steps_reached`; written as
-     *                          `data[$reasonKey] = $reasonValue`.
+     * @param string $reasonKey e.g. `max_steps_reached`.
      */
     public function autoAbortTransition(Task $task, string $reasonKey, mixed $reasonValue): void
     {
