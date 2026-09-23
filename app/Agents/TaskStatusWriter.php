@@ -59,6 +59,10 @@ final class TaskStatusWriter
             unset($data['aborted_at']);
         }
 
+        // Cleared on every continue so a later manual abort doesn't inherit
+        // the flag and mislabel itself in the chat banner.
+        unset($data['max_steps_reached']);
+
         // Drop the auto-retry chain markers and the failure columns —
         // mirrors Orchestrator::retry() so an aborted → continued task
         // is claimable by the main worker loop (`retry_of_task_id IS
@@ -92,6 +96,21 @@ final class TaskStatusWriter
     {
         $data = is_array($task->data) ? $task->data : [];
         $data['aborted_at'] = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT);
+        $this->writeTransition($task, 'ABORTED', $data);
+    }
+
+    /**
+     * System-initiated abort. Writes `data[$reasonKey] = $reasonValue`
+     * alongside the ABORTED status flip so the frontend can distinguish
+     * operator aborts from automatic ones.
+     *
+     * @param string $reasonKey e.g. `max_steps_reached`.
+     */
+    public function autoAbortTransition(Task $task, string $reasonKey, mixed $reasonValue): void
+    {
+        $data = is_array($task->data) ? $task->data : [];
+        $data['aborted_at'] = gmdate(Orchestrator::DB_TIMESTAMP_FORMAT);
+        $data[$reasonKey]   = $reasonValue;
         $this->writeTransition($task, 'ABORTED', $data);
     }
 

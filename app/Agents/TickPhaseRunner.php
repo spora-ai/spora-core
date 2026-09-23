@@ -325,9 +325,9 @@ final class TickPhaseRunner
             }
 
             if ($task->step_count >= $task->max_steps) {
-                $task->status         = 'FAILED';
-                $task->failure_reason = Utf8Sanitizer::scrubString('Max steps reached.');
-                $task->save();
+                // The step cap is an automatic pause, not a failure — status
+                // mirrors a manual abort so the follow-up flow covers continuation.
+                $this->orchestrator->statusWriter->autoAbortTransition($task, 'max_steps_reached', true);
                 return;
             }
 

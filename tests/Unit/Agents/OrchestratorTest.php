@@ -472,7 +472,7 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
 // max_steps
 // ---------------------------------------------------------------------------
 
-it('task is marked FAILED when step_count reaches max_steps', function (): void {
+it('task is auto-aborted (not failed) when step_count reaches max_steps', function (): void {
     [$agentId] = seedAgent();
 
     $callNum = 0;
@@ -490,9 +490,46 @@ it('task is marked FAILED when step_count reaches max_steps', function (): void 
     claimAndTick($orch, $task->id);
 
     $task->refresh();
-    expect($task->status)->toBe('FAILED')
-        ->and($task->failure_reason)->toBe('Max steps reached.')
-        ->and($task->step_count)->toBe(3);
+    $data = is_array($task->data) ? $task->data : [];
+    expect($task->status)->toBe('ABORTED')
+        ->and($task->failure_reason)->toBeNull()
+        ->and($task->step_count)->toBe(3)
+        ->and($data['max_steps_reached'] ?? null)->toBeTrue()
+        ->and($data['aborted_at'] ?? null)->toBeString();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('continuing an auto-aborted task clears the max_steps_reached flag', function (): void {
+    [$agentId] = seedAgent();
+
+    $callNum = 0;
+    $mock    = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturnUsing(static function () use (&$callNum) {
+        $callNum++;
+
+        return new LLMResponse(null, [new DriverToolCall("call_{$callNum}", 'stub_input', [])], 5, 3, "cmp_{$callNum}");
+    });
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'Infinite loop', maxSteps: 3);
+    claimAndTick($orch, $task->id);
+
+    // Sanity-check the auto-abort happened.
+    $task->refresh();
+    $data = is_array($task->data) ? $task->data : [];
+    expect($task->status)->toBe('ABORTED')
+        ->and($data['max_steps_reached'] ?? null)->toBeTrue();
+
+    // Operator continues with a fresh prompt. The auto-abort reason
+    // must be cleared — otherwise a subsequent manual abort would
+    // mislabel itself as auto-aborted in the chat banner.
+    $orch->continue($task->id, 'Try again with this hint');
+
+    $task->refresh();
+    $data = is_array($task->data) ? $task->data : [];
+    expect($data['max_steps_reached'] ?? null)->toBeNull()
+        ->and($data['aborted_at'] ?? null)->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 // ---------------------------------------------------------------------------
