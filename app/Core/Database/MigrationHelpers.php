@@ -152,4 +152,31 @@ trait MigrationHelpers
         );
         return $row !== null;
     }
+
+    /** Driver-agnostic check for any FK attached to $column on $table.
+     *  Unlike `foreignKeyExists`, this does not depend on the FK name
+     *  matching `fk_<table>_<column>` — it just probes whether a
+     *  constraint exists. On MySQL/MariaDB it goes through
+     *  information_schema; on SQLite it scans PRAGMA foreign_key_list
+     *  (the only path that exposes FKs in SQLite, since
+     *  `information_schema` was added late and Laravel's SQLite grammar
+     *  emits FKs with anonymous ids, not names). */
+    public function hasForeignKeyOnColumn(string $table, string $column): bool
+    {
+        $driver = Capsule::connection()->getDriverName();
+        if ($driver === 'mysql' || $driver === 'mariadb') {
+            return $this->findForeignKeyOn($table, $column) !== null;
+        }
+
+        // SQLite: PRAGMA foreign_key_list exposes FKs as anonymous
+        // numeric-id rows, with `from` = the constrained column and
+        // `table` = the referenced table. Match by `from`.
+        $fks = Capsule::select("PRAGMA foreign_key_list('{$table}')");
+        foreach ($fks as $fk) {
+            if ($fk->from === $column) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
