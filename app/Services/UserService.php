@@ -8,6 +8,7 @@ use Delight\Auth\Role;
 use Illuminate\Support\Carbon;
 use Spora\Models\User;
 use Spora\Models\UserLocation;
+use Spora\Services\UserPictures\UserPictureService;
 
 /**
  * Service for user and profile management.
@@ -22,6 +23,15 @@ final class UserService implements UserServiceInterface
         'COORDINATOR' => Role::COORDINATOR,
         'MODERATOR'   => Role::MODERATOR,
     ];
+
+    /**
+     * `$userPictures` is nullable so {@see UserService} stays
+     * constructible in tests that don't care about the avatar column —
+     * `serializeUser()` skips the lookup when it is null.
+     */
+    public function __construct(
+        private readonly ?UserPictureService $userPictures = null,
+    ) {}
 
     /**
      * Flat envelope (`users` + pagination keys at top level) — matches the
@@ -302,6 +312,12 @@ final class UserService implements UserServiceInterface
             'verified' => (bool) $user->verified,
             'registered' => (int) $user->registered,
             'is_admin' => in_array('ADMIN', $roles, true),
+            // Embedded so every `getUser`/`getUsers` consumer (admin
+            // list, `/auth/me`, `/auth/login`) emits the picture in
+            // the same shape without each caller re-fetching.
+            'profile_picture' => $this->userPictures !== null
+                ? $this->userPictures->toWireShape($this->userPictures->findForUser((int) $user->id))
+                : null,
         ];
     }
 }

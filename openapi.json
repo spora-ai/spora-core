@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.26.0"
+        "version": "0.27.0"
     },
     "servers": [
         {
@@ -4015,6 +4015,95 @@
                     },
                     {
                         "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/me/picture": {
+            "get": {
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Show UserPicture",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/me/picture/image": {
+            "post": {
+                "tags": [
+                    "Me"
+                ],
+                "summary": "UploadImage UserPicture",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Me"
+                ],
+                "summary": "DeleteImage UserPicture",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/users/{id}/picture": {
+            "get": {
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Show UserPictureAsset",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
                     }
                 ]
             }

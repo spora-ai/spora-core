@@ -493,6 +493,85 @@ Clear the group picture and reset to the default archetype (`collaborative / nul
 
 **Auth:** session + CSRF.
 
+## User picture — multipart
+
+Caller-scoped write surface (`/me/picture*`) plus a global-within-auth read surface (`/users/{id}/picture`). Unlike the Media Archive (`GET /api/v1/assets/{uuid}`), the user-picture endpoint is not principal-scoped — any authenticated user can fetch any other user's picture by `user_id`. No admin role required.
+
+Picture bytes land at `<storage>/user-pictures/<user_id>.<ext>`; the `<user_id>` key is the URL component the read endpoint resolves. There is no archetype half (no SVG fallback) — when the user has no upload, the SPA renders initials.
+
+### `GET /api/v1/me/picture`
+
+Returns the caller's wire shape.
+
+**Auth:** session + CSRF.
+
+### 200 — response
+
+```json
+{
+  "data": {
+    "profile_picture": null
+  }
+}
+```
+
+Or, after an upload:
+
+```json
+{
+  "data": {
+    "profile_picture": {
+      "kind": "image",
+      "archetype": null,
+      "variant_key": null,
+      "palette_key": null,
+      "fg_color": null,
+      "bg_color": null,
+      "image_url": "/api/v1/users/12/picture",
+      "image_updated_at": "2026-09-23T10:00:00+00:00"
+    }
+  }
+}
+```
+
+### `POST /api/v1/me/picture/image`
+
+Multipart avatar upload (≤ 1 MiB; `image/png | image/jpeg | image/webp` allowlist; byte-decode verified). Bytes land at `<storage>/user-pictures/<user_id>.<ext>`; the row in `user_pictures` is `updateOrCreate`-keyed on `user_id` (UNIQUE constraint), so a second upload replaces the first instead of inserting a duplicate row. The previous file is unlinked as part of the replace.
+
+**Auth:** session + CSRF.
+
+### 201 — response
+
+Same shape as `GET /api/v1/me/picture`.
+
+### Errors
+
+- `400 BAD_REQUEST` — no file uploaded under the `file` field
+- `401 UNAUTHENTICATED`
+- `413 PAYLOAD_TOO_LARGE` — body > 1 MiB
+- `415 UNSUPPORTED_MEDIA_TYPE` — bytes don't decode as an image, or the sniffed MIME isn't in the allowlist
+
+### `DELETE /api/v1/me/picture/image`
+
+Drop the upload and revert to the initials fallback. Idempotent — returns 200 with `profile_picture: null` whether or not a row existed.
+
+**Auth:** session + CSRF.
+
+### `GET /api/v1/users/{id}/picture`
+
+Stream the bytes of `{id}`'s uploaded picture. **Any authenticated user** can fetch any other user's picture — this is deliberately not principal-scoped. The bytes are served from `<storage>/user-pictures/<user_id>.<ext>` with `Content-Type` from the row's `mime` and `Cache-Control: private, max-age=86400`. No CSRF (the URL is hit from `<img src>` and can't carry headers).
+
+**Auth:** session only.
+
+### 200 — response
+
+The image bytes directly (not a JSON envelope). Returns the `Content-Type` from the row (e.g. `image/png`).
+
+### Errors
+
+- `401 UNAUTHENTICATED`
+- `404 user_picture_not_found` — no upload for this user OR the row's file is missing on disk
+
 ## Agent transfer
 
 ### `POST /api/v1/agents/{id}/transfer`
