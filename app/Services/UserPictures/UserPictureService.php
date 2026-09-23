@@ -76,7 +76,7 @@ final class UserPictureService
         chmod($tmpPath, 0644); // NOSONAR — world-readable like other asset paths
         if (!rename($tmpPath, $finalPath)) {
             @unlink($tmpPath);
-            throw UserPictureStorageException::onRename($tmpPath, $finalPath);
+            throw UserPictureStorageException::onRename($finalPath);
         }
         chmod($finalPath, 0644); // NOSONAR
 
@@ -143,10 +143,6 @@ final class UserPictureService
         ];
     }
 
-    /**
-     * Build the relative path the controller serves from disk. Lives
-     * here so tests can assert it without booting a request.
-     */
     public function publicUrlFor(UserPicture $picture): string
     {
         return '/api/v1/users/' . $picture->user_id . '/picture';

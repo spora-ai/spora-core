@@ -151,7 +151,6 @@ test('POST /me/picture/image accepts a valid PNG and persists the user_pictures 
 });
 
 test('POST /me/picture/image replaces an existing picture atomically', function (): void {
-    // First upload
     $tmp1 = tempnam(sys_get_temp_dir(), 'spora-user-pic-first');
     file_put_contents($tmp1, base64_decode(USER_PICTURE_VALID_PNG_BASE64));
     $req1 = Request::create('/api/v1/me/picture/image', 'POST');
@@ -203,7 +202,6 @@ test('GET /me/picture returns the wire shape after upload', function (): void {
 });
 
 test('DELETE /me/picture/image clears the row and the file', function (): void {
-    // Seed an upload
     $tmp = tempnam(sys_get_temp_dir(), 'spora-user-pic-delete');
     file_put_contents($tmp, base64_decode(USER_PICTURE_VALID_PNG_BASE64));
     $reqPost = Request::create('/api/v1/me/picture/image', 'POST');

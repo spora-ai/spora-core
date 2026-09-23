@@ -894,11 +894,6 @@ final class ContainerDefinitions
 
             GroupPictureService::class => static fn(): GroupPictureService => new GroupPictureService(),
 
-            // User pictures carry no archetype half and never go through
-            // MediaArchive (see {@see \Spora\Models\UserPicture} class
-            // docblock), so this is a standalone service rather than a
-            // ProfilePictureService subclass. Single dependency: the
-            // shared {@see Paths} so tests can boot a tmp storage dir.
             UserPictureService::class => static function (ContainerInterface $c): UserPictureService {
                 return new UserPictureService($c->get(Paths::class));
             },

@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * The bytes are served by {@see \Spora\Http\UserPictureAssetController}
  * to any logged-in user — visibility is deliberately not principal-
  * scoped, which is what motivated routing through a separate table
- * rather than reusing `media_assets` (see 0086_create_user_pictures_table
+ * rather than reusing `media_assets` (see 0090_create_user_pictures_table
  * for the full rationale).
  *
  * Columns are populated by {@see \Spora\Services\UserPictures\UserPictureService};

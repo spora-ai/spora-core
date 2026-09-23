@@ -84,6 +84,5 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Forward-only — see class docblock.
     }
 };

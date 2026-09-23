@@ -21,14 +21,9 @@ final class UserPictureStorageException extends RuntimeException
         return new self("Failed to write user picture to {$path}");
     }
 
-    public static function onRename(string $src, string $dst): self
+    public static function onRename(string $dst): self
     {
         return new self("Failed to move user picture into place at {$dst}");
-    }
-
-    public static function onInsertLookup(int $id): self
-    {
-        return new self("Failed to load inserted user_pictures row {$id}");
     }
 
     public static function onMkdir(string $dir): self

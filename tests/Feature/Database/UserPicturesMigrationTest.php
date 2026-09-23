@@ -17,7 +17,7 @@ beforeEach(function (): void {
     TestDatabaseFactory::freshDatabase();
 });
 
-test('0086 migration creates the user_pictures table with the documented columns', function (): void {
+test('0090 migration creates the user_pictures table with the documented columns', function (): void {
     expect(Capsule::schema()->hasTable('user_pictures'))->toBeTrue();
 
     $columns = Capsule::schema()->getColumnListing('user_pictures');
@@ -26,7 +26,7 @@ test('0086 migration creates the user_pictures table with the documented columns
     }
 });
 
-test('0086 migration enforces UNIQUE on user_id — second insert with the same user throws', function (): void {
+test('0090 migration enforces UNIQUE on user_id — second insert with the same user throws', function (): void {
     // First row goes in fine. We use the AuthService::register helper
     // so the password NOT NULL is satisfied the same way the rest of
     // the test suite does it.
@@ -40,7 +40,6 @@ test('0086 migration enforces UNIQUE on user_id — second insert with the same 
         'size_bytes' => 100,
     ]);
 
-    // Second row for the same user must violate the UNIQUE constraint.
     expect(static fn(): UserPicture => UserPicture::create([
         'user_id'    => $userId,
         'media_path' => 'user-pictures/' . $userId . '.jpg',
@@ -49,7 +48,7 @@ test('0086 migration enforces UNIQUE on user_id — second insert with the same 
     ]))->toThrow(Illuminate\Database\QueryException::class);
 });
 
-test('0086 migration cascades on user delete', function (): void {
+test('0090 migration cascades on user delete', function (): void {
     $auth = bootAuthLayer();
     $userId = $auth->register('cascade-test@example.com', 'Password1!', 'Cascade Test');
 

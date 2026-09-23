@@ -50,9 +50,6 @@ final class UserPictureAssetController
         $picture = UserPicture::where('user_id', $id)->first();
         $path = $picture instanceof UserPicture ? $this->pictures->absolutePathFor($picture) : null;
         if ($path === null) {
-            // Missing row *or* row whose bytes are gone — surface 404
-            // with the same envelope so the SPA can treat it as
-            // "no picture" rather than a server error.
             return $this->notFound();
         }
 
