@@ -48,6 +48,8 @@ use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
+use Spora\Http\UserPictureAssetController;
+use Spora\Http\UserPictureController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 use Spora\Http\WorkerController;
@@ -393,6 +395,16 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/me/locations', [UserProfileController::class, 'postLocation'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/me/locations/{id}', [UserProfileController::class, 'putLocation'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', '/api/v1/me/locations/{id}', [UserProfileController::class, 'deleteLocation'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // User profile picture — caller-scoped write surface (`/me/picture`)
+        // plus a global-within-auth read surface (`/users/{id}/picture`).
+        // The read endpoint is intentionally not CSRF-gated because the
+        // browser hits it from `<img src>` (no headers), matching the
+        // other asset endpoints in `registerAssetRoutes()`.
+        $r->addRoute('GET', '/api/v1/me/picture', [UserPictureController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/me/picture/image', [UserPictureController::class, 'uploadImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/me/picture/image', [UserPictureController::class, 'deleteImage'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', '/api/v1/users/{id}/picture', [UserPictureAssetController::class, 'show'], [AuthMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/sse/status', [SseController::class, 'status'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', '/api/v1/sse/auth', [SseController::class, 'auth'], [AuthMiddleware::class, CsrfMiddleware::class]);

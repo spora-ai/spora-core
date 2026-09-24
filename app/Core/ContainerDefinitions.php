@@ -86,6 +86,8 @@ use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
+use Spora\Http\UserPictureAssetController;
+use Spora\Http\UserPictureController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 use Spora\Plugins\PluginLoader;
@@ -158,6 +160,7 @@ use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
+use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Spora\Skills\SkillScanner;
@@ -891,6 +894,10 @@ final class ContainerDefinitions
 
             GroupPictureService::class => static fn(): GroupPictureService => new GroupPictureService(),
 
+            UserPictureService::class => static function (ContainerInterface $c): UserPictureService {
+                return new UserPictureService($c->get(Paths::class));
+            },
+
             // Principal materialisation + agent-transfer path. Split out of
             // AgentService so the umbrella stays under the SonarCloud
             // S1448 20-method-per-class ceiling. ToolConfigService is
@@ -924,7 +931,9 @@ final class ContainerDefinitions
                 );
             },
 
-            UserServiceInterface::class => static fn(): UserServiceInterface => new UserService(),
+            UserServiceInterface::class => static function (ContainerInterface $c): UserServiceInterface {
+                return new UserService($c->get(UserPictureService::class));
+            },
         ];
     }
 
@@ -996,6 +1005,21 @@ final class ContainerDefinitions
                 return new UserProfileController(
                     $c->get(AuthService::class),
                     $c->get(UserServiceInterface::class),
+                );
+            },
+
+            UserPictureController::class => static function (ContainerInterface $c): UserPictureController {
+                return new UserPictureController(
+                    $c->get(AuthService::class),
+                    $c->get(UserPictureService::class),
+                    $c->get(MimeSniffer::class),
+                );
+            },
+
+            UserPictureAssetController::class => static function (ContainerInterface $c): UserPictureAssetController {
+                return new UserPictureAssetController(
+                    $c->get(AuthService::class),
+                    $c->get(UserPictureService::class),
                 );
             },
         ];
