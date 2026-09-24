@@ -31,6 +31,7 @@ final class ToolCallSerializer
      */
     public function __construct(
         private readonly array $toolInstances = [],
+        private readonly ?ToolIconResolver $iconResolver = null,
     ) {}
 
     /**
@@ -61,7 +62,17 @@ final class ToolCallSerializer
             $payload['parameter_schema'] = $schema;
         }
 
+        $payload['icon'] = $this->resolveIcon($tc->tool_class);
+
         return $payload;
+    }
+
+    private function resolveIcon(?string $toolClass): ?string
+    {
+        if ($toolClass === null || $toolClass === '' || $this->iconResolver === null) {
+            return null;
+        }
+        return $this->iconResolver->resolve($toolClass);
     }
 
     /**
