@@ -8,6 +8,7 @@ use Carbon\Carbon as BaseCarbon;
 use Illuminate\Support\Carbon;
 use Spora\Models\ToolCall;
 use Spora\Services\ToolCallSerializer;
+use Spora\Services\ToolIconResolver;
 
 /**
  * Build a ToolCall model without booting Eloquent — we only read attributes,
@@ -72,6 +73,7 @@ it('preserves all existing tool_call fields', function (): void {
         'result_content',
         'executed_at',
         'parameter_schema',
+        'icon',
     ]);
 });
 
@@ -108,4 +110,43 @@ it('parameter_schema property order matches declaration order', function (): voi
 
     // Schema declared: action (synthesized), q. UI must render in that order.
     expect(array_keys($payload['parameter_schema']['properties']))->toBe(['action', 'q']);
+});
+
+it('emits icon resolved from the ToolIconResolver when tool_class is set', function (): void {
+    $resolver = new class extends ToolIconResolver {
+        public function __construct() {}
+
+        public function resolve(string $toolClass): ?string
+        {
+            return match ($toolClass) {
+                ToolCallSerializerFixtureTool::class => 'puzzle',
+                default => null,
+            };
+        }
+    };
+
+    $serializer = new ToolCallSerializer([new ToolCallSerializerFixtureTool()], $resolver);
+
+    expect($serializer->toArray(makeToolCall())['icon'])->toBe('puzzle');
+});
+
+it('emits icon: null when no ToolIconResolver is supplied', function (): void {
+    $serializer = new ToolCallSerializer([new ToolCallSerializerFixtureTool()]);
+
+    expect($serializer->toArray(makeToolCall())['icon'])->toBeNull();
+});
+
+it('emits icon: null when tool_class is null even if a resolver is supplied', function (): void {
+    $resolver = new class extends ToolIconResolver {
+        public function __construct() {}
+
+        public function resolve(string $toolClass): ?string
+        {
+            return null;
+        }
+    };
+
+    $serializer = new ToolCallSerializer([], $resolver);
+
+    expect($serializer->toArray(makeToolCall(['tool_class' => null]))['icon'])->toBeNull();
 });

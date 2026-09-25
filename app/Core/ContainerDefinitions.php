@@ -1462,6 +1462,7 @@ final class ContainerDefinitions
             ToolCallSerializer::class => static function (ContainerInterface $c): ToolCallSerializer {
                 return new ToolCallSerializer(
                     toolInstances: $c->get('tool_instances'),
+                    iconResolver: $c->get(ToolIconResolver::class),
                 );
             },
 

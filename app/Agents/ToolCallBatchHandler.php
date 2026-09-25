@@ -315,6 +315,8 @@ final class ToolCallBatchHandler
             return;
         }
 
+        // Injected serializer is already wired with the icon resolver (see
+        // ContainerDefinitions) — the fallback below therefore runs without one.
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
 
         $historyRows = $task->taskHistory()->orderBy('sequence')->get();
