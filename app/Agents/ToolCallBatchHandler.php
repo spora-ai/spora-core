@@ -315,11 +315,8 @@ final class ToolCallBatchHandler
             return;
         }
 
-        // Best-effort fallback: an injected serializer is already wired
-        // with the container's ToolIconResolver (see ContainerDefinitions),
-        // so a fallback construction only happens when no serializer was
-        // injected at all — the resulting payloads will carry `icon: null`,
-        // which the frontend's <Icon> already handles as 'puzzle'.
+        // Injected serializer is already wired with the icon resolver (see
+        // ContainerDefinitions) — the fallback below therefore runs without one.
         $serializer = $this->toolCallSerializer ?? new ToolCallSerializer($this->toolInstances);
 
         $historyRows = $task->taskHistory()->orderBy('sequence')->get();
