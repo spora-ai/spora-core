@@ -54,6 +54,19 @@ final class Skill
         return (string) ($this->frontmatter['name'] ?? '');
     }
 
+    /**
+     * Directory-basename slug. Always equal to {@see name()} for skills that
+     * pass validation ({@see SkillValidator} enforces NAME_DIR_MISMATCH
+     * otherwise); surfaced as a stable identifier so consumers — the strict
+     * mode validator, the dashboard allowlist, and the LLM-facing summary —
+     * can compare against `#[Tool(recommendsSkills: ...)]` slugs without
+     * re-deriving `basename($dir)` themselves.
+     */
+    public function slug(): string
+    {
+        return basename($this->dir);
+    }
+
     public function description(): string
     {
         return (string) ($this->frontmatter['description'] ?? '');

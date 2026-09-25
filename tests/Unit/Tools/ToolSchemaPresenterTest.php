@@ -23,6 +23,7 @@ describe('ToolSchemaPresenter', function (): void {
             ->and($summary['icon'])->toBeNull() // No resolver passed.
             ->and($summary['description'])->toBeString()
             ->and($summary['description'])->not->toBe('')
+            ->and($summary['recommends_skills'])->toBe([]) // TimeTool declares none.
             ->and($summary['operations'])->toBeArray();
     });
 
@@ -35,6 +36,7 @@ describe('ToolSchemaPresenter', function (): void {
             ->and($summary['description'])->toBe('')
             ->and($summary['category'])->toBe('general')
             ->and($summary['icon'])->toBeNull()
+            ->and($summary['recommends_skills'])->toBe([])
             ->and($summary['operations'])->toBe([]);
     });
 
@@ -43,4 +45,25 @@ describe('ToolSchemaPresenter', function (): void {
 
         expect($summary['icon'])->toBe('clock');
     });
+
+    test('exposes recommendsSkills as the wire-format recommends_skills list', function (): void {
+        // Synthetic tool class inline so the test pins the attribute → presenter
+        // wiring without coupling to a real tool's product behaviour.
+        $summary = ToolSchemaPresenter::summarize(SummaryFixtureSkillTool::class);
+
+        expect($summary['recommends_skills'])->toBe(['time-arithmetic']);
+    });
 });
+
+#[Spora\Tools\Attributes\Tool(
+    name: 'summary_fixture_skill',
+    description: 'Synthetic tool for the ToolSchemaPresenter fixture test.',
+    recommendsSkills: ['time-arithmetic'],
+)]
+final class SummaryFixtureSkillTool
+{
+    public function name(): string
+    {
+        return 'summary_fixture_skill';
+    }
+}
