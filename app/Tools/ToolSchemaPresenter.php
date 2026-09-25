@@ -11,7 +11,8 @@ use Spora\Tools\Traits\HasOperations;
 /**
  * Stateless reflection helper that builds the public "tool summary" payload
  * (`tool_class`, `tool_name`, `display_name`, `category`, `icon`,
- * `operations`) from a tool's `#[Tool]` and `#[ToolOperation]` attributes.
+ * `operations`, `recommends_skills`) from a tool's `#[Tool]` and
+ * `#[ToolOperation]` attributes.
  *
  * Shared by {@see \Spora\Http\ToolController} (which adds settings schema on
  * top) and {@see AgentTool} (which enriches a per-agent status
@@ -29,6 +30,7 @@ final class ToolSchemaPresenter
      *   description: string,
      *   category: string,
      *   icon: string|null,
+     *   recommends_skills: list<string>,
      *   operations: list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
      * }
      */
@@ -38,13 +40,14 @@ final class ToolSchemaPresenter
             // No class to reflect against — short-classname fallback so the
             // payload still parses on the consumer side.
             return [
-                'tool_class'   => $toolClass,
-                'tool_name'    => basename(str_replace('\\', '/', $toolClass)),
-                'display_name' => basename(str_replace('\\', '/', $toolClass)),
-                'description'  => '',
-                'category'     => 'general',
-                'icon'         => $icon,
-                'operations'   => [],
+                'tool_class'        => $toolClass,
+                'tool_name'         => basename(str_replace('\\', '/', $toolClass)),
+                'display_name'      => basename(str_replace('\\', '/', $toolClass)),
+                'description'       => '',
+                'category'          => 'general',
+                'icon'              => $icon,
+                'recommends_skills' => [],
+                'operations'        => [],
             ];
         }
 
@@ -81,13 +84,14 @@ final class ToolSchemaPresenter
         }
 
         return [
-            'tool_class'   => $toolClass,
-            'tool_name'    => $toolName,
-            'display_name' => $displayName,
-            'description'  => $description,
-            'category'     => $category,
-            'icon'         => $icon,
-            'operations'   => $operations,
+            'tool_class'        => $toolClass,
+            'tool_name'         => $toolName,
+            'display_name'      => $displayName,
+            'description'       => $description,
+            'category'          => $category,
+            'icon'              => $icon,
+            'recommends_skills' => $toolAttr?->getRecommendsSkills() ?? [],
+            'operations'        => $operations,
         ];
     }
 }
