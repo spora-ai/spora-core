@@ -70,7 +70,7 @@ Every op returns the full new state — read `data.items[i].id` from the result 
     {"op": "set_status", "id": "run-migration", "status": "completed"}
     {"op": "read"}
 TEXT,
-    displayName: 'Task List',
+    displayName: 'Task List (todo)',
     category: 'meta',
     icon: 'list-checks',
 )]
