@@ -435,6 +435,30 @@ describe('ScheduleTool::create_schedule', function (): void {
             ->and($result->content)->toContain('raw_prompt');
     });
 
+    test('rejects when both template_id and raw_prompt are provided (mutually exclusive)', function (): void {
+        // Sending both used to fall through to the service, which silently
+        // dropped raw_prompt in favour of template_id — a quiet data-loss
+        // bug. The validator now rejects upfront so the LLM can correct the
+        // payload before the schedule is created.
+        [$userId, $agentId] = makeScheduleToolOwner();
+        $tpl = seedTemplate($agentId, ['name' => 'Conflict']);
+        [$tool] = makeScheduleToolTestFixture();
+
+        $result = $tool->execute([
+            'action'          => 'create_schedule',
+            'schedule_payload' => [
+                'cron_expression' => SCHEDULE_TOOL_CRON,
+                'template_id'     => $tpl->id,
+                'raw_prompt'      => 'which wins?',
+            ],
+        ], $agentId, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('template_id')
+            ->and($result->content)->toContain('raw_prompt')
+            ->and($result->content)->toContain('mutually exclusive');
+    });
+
     test('rejects an invalid cron_expression', function (): void {
         [$userId, $agentId] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();

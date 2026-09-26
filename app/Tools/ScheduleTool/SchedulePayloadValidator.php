@@ -147,8 +147,9 @@ final class SchedulePayloadValidator
 
     /**
      * Either `template_id` (int) or `raw_prompt` (non-empty string) must be
-     * supplied. Mutually exclusive with itself: both empty (fail), one of
-     * each — type-check on the next pass.
+     * supplied — exactly one, never both. Sending both is rejected at
+     * validation time so the LLM fails fast instead of silently letting
+     * the service drop `raw_prompt` when `template_id` is set.
      *
      * @param array<string, mixed> $raw
      */
@@ -161,6 +162,12 @@ final class SchedulePayloadValidator
         if (!$hasTemplateId && !$hasRawPrompt) {
             $error = ToolResult::fail(
                 self::OP_CREATE_SCHEDULE . ': either `template_id` (int) or `raw_prompt` (string) is required.',
+            );
+        } elseif ($hasTemplateId && $hasRawPrompt) {
+            $error = ToolResult::fail(
+                self::OP_CREATE_SCHEDULE . ': `template_id` and `raw_prompt` are mutually exclusive. '
+                . 'Send exactly one — `template_id` to bind to a saved template, '
+                . '`raw_prompt` for a literal string.',
             );
         } elseif ($hasTemplateId && $this->coercePositiveInt($raw['template_id']) === null) {
             $error = ToolResult::fail(

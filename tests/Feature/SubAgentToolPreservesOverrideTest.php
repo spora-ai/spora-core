@@ -72,7 +72,7 @@ it('does not modify the agent_tool_overrides row when the SubAgentTool is invoke
     ]);
 
     $result = $tool->execute(
-        arguments: ['target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
+        arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         userId: $userId,
         taskId: $source->id,

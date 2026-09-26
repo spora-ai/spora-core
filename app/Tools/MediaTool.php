@@ -94,9 +94,10 @@ use Symfony\Component\HttpFoundation\Request;
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, share, and produce media library content. `get_media` echoes a markdown embed and lists the asset\'s derivatives; `get_embed_code` returns the embed alone; `get_public_url` mints a shareable link; `get_source` reads bytes; `list_derivatives` enumerates an asset\'s derivatives; `create_derivative` generates a fresh derivative via a registered producer.',
+    description: 'Search, retrieve, embed, share, and produce media library content (images, audio, video, documents). See the media-library skill for operation matrix, scope rules, and asset_id chaining.',
     category: 'data',
     icon: 'image',
+    recommendsSkills: ['media-library'],
 )]
 #[ToolSetting(
     key: 'scope',
@@ -112,74 +113,43 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'search',
-    description: 'List media_assets matching the given filters. Returns paginated metadata.',
+    description: 'List media_assets matching the given filters; returns paginated metadata.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + a markdown embed (image / audio / video / link) for a single asset. The LLM should echo the embed verbatim so the chat UI renders it inline.',
+    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders inline.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'get_public_url',
-    description: 'Mint or fetch a public shareable URL for a single asset. Off by default — must be enabled in the tool config.',
+    description: 'Mint or fetch a public shareable URL. Off by default — enable first.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'get_embed_code',
-    description: 'Return a markdown snippet (image / audio / video) for a single '
-               . 'asset that the assistant can include in its reply. Uses the '
-               . 'local archive URL by default.',
+    description: 'Return a clean markdown snippet only (no asset header, no extracted text).',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'get_source',
-    description: 'Return the source of a single asset so the LLM can iterate on it '
-               . '(e.g. read a .typ file, re-ingest an extracted document). Text-shaped '
-               . 'mimes (text/*, application/json, application/xml, application/yaml, '
-               . 'application/x-yaml, application/svg+xml, application/csv, '
-               . 'application/x-typst) return the bytes inline, capped at '
-               . '{@see self::GET_SOURCE_TEXT_MAX}. Binary mimes do NOT return raw '
-               . 'bytes; instead the asset\'s extracted `markdown_content` is '
-               . 'surfaced (truncated to {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) '
-               . 'when available. When no markdown_content exists, fail with a hint '
-               . 'pointing at `get_media` / `list_derivatives`. External assets '
-               . '(storage_mode=external) have no Spora-side payload — fail with a '
-               . 'hint to use `get_media` for the source URL. Off by default; each '
-               . 'call requires operator approval.',
+    description: 'Read source bytes (text mimes) or extracted markdown preview (binary mimes). See skill for mime handling.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'list_derivatives',
-    description: 'List the derivative rows of a parent asset (e.g. every PDF/PNG/SVG render '
-               . 'of a .typ source, every thumbnail/format conversion of an uploaded image). '
-               . 'Pass an optional `format` filter (e.g. "png") to narrow to one derivative '
-               . 'kind. Each row carries `media_id`, `format`, `asset_url`, `label`, '
-               . '`producer_plugin`, `producer_operation`, and `created_at` — the same shape '
-               . 'the operator dashboard renders on the VersionsStrip, so the LLM and the '
-               . 'operator see identical rows. Empty list when the parent has no derivatives. '
-               . 'Auto-approved read.',
+    description: "List a parent asset's derivative rows; optional `format` filter narrows to one kind.",
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'create_derivative',
-    description: 'Generate a fresh derivative of a parent asset via the registered '
-               . 'derivative producer that matches the parent\'s MIME/extension and the '
-               . 'requested `format` (e.g. render a .typ source to PNG, convert an uploaded '
-               . 'image to a WebP thumbnail). The natural key `(parent_id, format, '
-               . 'producer_plugin, producer_operation)` makes the operation idempotent — '
-               . 're-rendering returns the same derivative id. Optional `options` carries '
-               . 'producer-specific knobs (e.g. {"page": 0, "ppi": 144} for typst). Returns '
-               . 'the new derivative\'s id + asset_url + producer attribution. Each call '
-               . 'requires operator approval because the producer may take seconds and '
-               . 'always writes a fresh `media_assets` row, but the operation is exposed '
-               . 'by default so agents can propose renders without an enable step.',
+    description: 'Render a fresh derivative via a registered producer; idempotent on (parent, format, producer_plugin, producer_operation). Per-call approval.',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
