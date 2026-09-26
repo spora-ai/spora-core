@@ -22,7 +22,7 @@ use Spora\Tools\ValueObjects\ToolResult;
  * Lets the agent inspect and manage the schedules and prompt templates
  * attached to its host agent.
  *
- * Bundled into one tool (12 operations) because schedule + template
+ * Bundled into one tool (11 operations) because schedule + template
  * are a tight pair: an LLM creating a schedule almost always
  * references a template, and pushing template authoring into a
  * separate tool would force the LLM to switch surfaces mid-flow.
@@ -96,9 +96,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'create_schedule',
     description: 'Create a new scheduled run from a slim payload: `schedule_payload` '
-                . '(object) with `template_id` or `raw_prompt` (one required), and '
-                . 'either `cron_expression` (recurring) or `run_at` (ISO 8601 one-shot, '
-                . 'mutually exclusive). Optional `timezone` (IANA, defaults "UTC"), '
+                . '(object) with `template_id` (int) XOR `raw_prompt` (string, exactly one '
+                . '— sending both is rejected), and either `cron_expression` '
+                . '(5-field cron, recurring) or `run_at` (ISO 8601 one-shot, mutually '
+                . 'exclusive). Optional `timezone` (IANA, defaults "UTC"), '
                 . '`max_steps_override` (int 1..100, nullable), `is_active` (defaults true). '
                 . 'Pass `agent_id` (numeric pk) to target a different agent; omit to '
                 . 'attach the schedule to the calling agent. Returns the full schedule '
@@ -173,8 +174,10 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'trigger_schedule',
     description: 'Immediately fire the scheduled run identified by `schedule_id` '
-                . 'regardless of its cron / `run_at` cadence. '
-                . 'Returns the new `task_id` and the (now-deactivated) schedule resource '
+                . 'regardless of its cron / `run_at` cadence. Writes a fresh `task` row '
+                . '(returns `task_id`), flips the next PENDING entry in `scheduled_runs_next` '
+                . 'to DONE, and updates the existing schedule row. Returns the new '
+                . '`task_id` and the (now-deactivated) schedule resource '
                 . 'for one-shot runs; recurring schedules remain active and pick up at '
                 . 'the next cron tick. Use this for "run it now" without disabling the '
                 . 'recurrence. Cross-agent triggers accept `agent_id`.',

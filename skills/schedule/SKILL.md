@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: "Create, list, update, delete and trigger scheduled runs (cron or one-shot) and prompt templates attached to this agent. Trigger on: 'schedule this', 'remind me tomorrow at 8', 'set up a daily check', 'every Monday at 9am', 'save this prompt as a template', 'what's on my schedule', 'trigger the X job now'. Critical: when a schedule fires later, the agent is spawned with the `raw_prompt` (or the template's rendered prompt) AS THE ONLY INPUT — there is no operator, no chat history, and no live state. The prompt must be self-contained end-to-end: goal, data sources to consult, output format, and what 'done' means."
+description: "Create, list, update, delete and trigger scheduled runs (cron or one-shot) and prompt templates attached to this agent. Trigger on: 'schedule this', 'remind me tomorrow at 8', 'set up a daily check', 'every Monday at 9am', 'save this prompt as a template', 'what's on my schedule', 'trigger the X job now'. When a schedule fires later, the prompt is the only task-specific input — the agent's system prompt and tool allowlist are inherited from the agent row, but there is no operator, no chat history, no attachments, and no live state at fire time. The prompt must be self-contained end-to-end: goal, data sources to consult, output format, and what 'done' means."
 license: Apache-2.0
 compatibility: "Designed for Spora agents with the `schedule` tool enabled."
 metadata:
@@ -10,7 +10,7 @@ metadata:
 
 # Schedule
 
-Twelve operations on a single `schedule` tool. Six are for scheduled runs, six for prompt templates — the template operations live on the same tool because a schedule almost always references a template, and splitting the surface would force the LLM to switch tools mid-flow.
+Eleven operations on a single `schedule` tool. Six are for scheduled runs, five for prompt templates — the template operations live on the same tool because a schedule almost always references a template, and splitting the surface would force the LLM to switch tools mid-flow.
 
 ## Operations split
 
@@ -31,9 +31,9 @@ Prompt template operations:
 - `update_prompt_template` — patch any subset of a template's fields.
 - `delete_prompt_template` — permanently delete a template.
 
-## The prompt is the entire input — readability-first protocol
+## The prompt is the entire task-specific input — readability-first protocol
 
-When the schedule fires — a cron tick lands or a `run_at` instant arrives — the agent runs with ONLY the prompt. There is no operator, no chat history, no live state, no follow-up channel. State this in your reasoning every time you write or update a schedule.
+When the schedule fires — a cron tick lands or a `run_at` instant arrives — the prompt is the only task-specific input. The agent's system prompt and tool allowlist are inherited from the agent row, so do NOT try to stuff system-prompt-shaped instructions into `raw_prompt` — those are already set. There is no operator, no chat history, no attachments, no live state, no follow-up channel. State this in your reasoning every time you write or update a schedule.
 
 The prompt must:
 
@@ -46,25 +46,25 @@ If you cannot fill in all four, the prompt is incomplete and the schedule will f
 
 ## `raw_prompt` vs `template_id`
 
-`create_schedule` accepts EITHER `template_id` (bind to a saved template) OR `raw_prompt` (the literal string). They are mutually exclusive — sending both is rejected. Use a template when you'll reuse the same prompt across schedules or when the prompt needs versioning; use `raw_prompt` when it's a one-off or exploratory.
+`create_schedule` accepts EITHER `template_id` (bind to a saved template) OR `raw_prompt` (the literal string). They are mutually exclusive — sending both is rejected at validation time, before the schedule is created. Use a template when you'll reuse the same prompt across schedules or when the prompt needs versioning; use `raw_prompt` when it's a one-off or exploratory.
 
 Templates are first-class: `list_prompt_templates` / `read_prompt_template` / `create_prompt_template` / `update_prompt_template` all work independently of any schedule. A template becomes useful the moment a `create_schedule` binds to it by `template_id`.
 
 ## Recurring vs one-shot
 
-`cron_expression` (5- or 6-field cron string) for recurring schedules, `run_at` (ISO 8601 instant) for one-shots. Mutually exclusive — sending both is rejected. `timezone` is IANA, defaults to "UTC".
+`cron_expression` (5-field cron string — Minute Hour DayOfMonth Month DayOfWeek) for recurring schedules, `run_at` (ISO 8601 instant) for one-shots. Mutually exclusive — sending both is rejected. `timezone` is IANA, defaults to "UTC".
 
 Switching recurrence modes via `update_schedule`: setting ONE cadence field on a schedule that has the OTHER cadence set implicitly clears the other. `{run_at: <iso>}` switches a recurring schedule to one-shot; `{cron_expression: <cron>}` switches a one-shot to recurring. Never populate both in the same patch.
 
 ## `trigger_schedule`
 
-Fires a schedule immediately, independent of cron / `run_at`. Useful for testing a draft schedule before letting it run unattended. Each call is operator-approved (writes a fresh run row). Returns the new `task_id` and the (now-deactivated, for one-shots) schedule resource.
+Fires a schedule immediately, independent of cron / `run_at`. Useful for testing a draft schedule before letting it run unattended. Each call is operator-approved: it writes a fresh **task** row (returns `task_id`); flips the next PENDING entry to DONE and updates the existing schedule row. The schedule row itself is never created — only the task. For one-shots, the existing schedule is also deactivated (`is_active = 0`).
 
 ## Cross-agent reads/writes
 
 Any op accepts an optional `agent_id` (numeric pk) for cross-agent access. Omitted `agent_id` resolves to the calling agent. Cross-user ids return a uniform "not found" — existence is hidden between users.
 
-For `list_*` and reads: visibility widens to principal-membership (any user who can see the agent can see its schedules / templates).
+For `list_*` and reads: visibility widens to principal-membership (any user who can see the agent can see its schedules / templates). Note: slim list rows (`list_schedules`, `list_prompt_templates`) omit `agent_id`; correlate via the `agent_id` you passed to the op, or the calling agent when you didn't.
 
 For writes, deletes, and triggers: the caller must control the agent's principal (owner or admin). The tool re-validates; never silently falls back to the calling agent when an explicit `agent_id` is supplied.
 
