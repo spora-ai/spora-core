@@ -51,6 +51,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                 . 'Use `list_schedules` and `list_prompt_templates` to discover row ids '
                 . 'across turn boundaries, and `read_schedule` / `read_prompt_template` '
                 . 'to confirm what was actually committed.',
+    recommendsSkills: ['schedule'],
 )]
 #[ToolOperation(
     name: 'list_schedules',
