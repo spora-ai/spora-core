@@ -14,10 +14,9 @@ use InvalidArgumentException;
  *   #[Tool(
  *       name: 'my_tool',
  *       description: 'Does something useful',
- *       displayName: 'My Tool',         // optional
- *                                       //   operator-facing UI label; append
- *                                       //   " (wire_name)" when the label alone
- *                                       //   is ambiguous (e.g. 'Task List (todo)')
+ *       displayName: 'My Tool',         // optional — operator-facing UI label;
+ *                                       //   append the wire name in parens when
+ *                                       //   the bare label would be ambiguous
  *       category: 'general',             // optional; defaults to 'general'
  *       icon: 'puzzle',                  // optional; bundled icon key
  *                                        //   (e.g. 'calendar', 'mail', 'search')
@@ -36,7 +35,8 @@ final class Tool
         public readonly string $name,
         /** Sent to LLM as function description */
         public readonly string $description,
-        /** Human-readable name for UI display, e.g. "Tavily Search" or "Task List (todo)".
+        /** Human-readable name for UI display, e.g. "Tavily Search". When the bare
+         *  label is ambiguous, append the wire name in parens (see class docblock).
          *  Falls back to name if omitted. */
         public readonly ?string $displayName = null,
         /** Category for grouping tools in the Settings UI, e.g. "research", "communication". Falls back to "general". */
