@@ -39,11 +39,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'sub_agent',
     displayName: 'Sub-Agent',
     category: 'agent',
-    description: 'Hand off a task or spawn a sub-agent. '
-               . '`handover` closes the source chat and starts a new task on the target agent; '
-               . '`sub_agent` spawns a child task on the target agent, waits for it to finish, '
-               . 'then returns its output to the parent.',
+    description: 'Delegate to another agent (`sub_agent`, default, waits and returns) or close the source chat and hand off (handover). See the sub-agent skill — the prompt is the ENTIRETY of what the target sees.',
     icon: 'arrow-right',
+    recommendsSkills: ['sub-agent'],
 )]
 #[ToolSetting(
     key: 'allowed_target_agents',
@@ -60,7 +58,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'handover',
-    description: 'Hand over the source task to the target agent (closes the source chat).',
+    description: 'Hand over the source task to the target — source chat closes. Use ONLY when the parent does not need to hear back.',
     enabledByDefault: true,
     // Source task is closed as a side-effect, hence the approval gate.
     requiresApprovalByDefault: true,
@@ -68,7 +66,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'sub_agent',
-    description: 'Spawn a child task on the target agent and wait for the result (parent stays open).',
+    description: 'Spawn a child task on the target agent and wait for its result. Default go-to for delegation.',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
     discriminatorKey: 'op',
@@ -86,7 +84,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'string',
     description: 'Self-contained first user message for the new task. The target has NO access to '
                . 'source history, so include the goal, key facts, decisions, pending items, and any '
-               . 'verbatim quotes to preserve. Anything not in this message is lost.',
+               . 'verbatim quotes to preserve. Anything not in this message is lost. '
+               . 'No follow-up is possible from the target; the prompt must include every fact, decision, and verbatim quote the target needs.',
     required: true,
 )]
 final class SubAgentTool extends AbstractTool
