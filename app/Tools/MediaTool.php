@@ -149,7 +149,7 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'create_derivative',
-    description: 'Render a fresh derivative via a registered producer; idempotent on (parent, format, producer). Per-call approval.',
+    description: 'Render a fresh derivative via a registered producer; idempotent on (parent, format, producer_plugin, producer_operation). Per-call approval.',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]

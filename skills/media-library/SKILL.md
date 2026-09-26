@@ -20,7 +20,7 @@ Seven operations on a single `media` tool: `search`, `get_media`, `get_embed_cod
 | `get_media` | true | false | Metadata + markdown embed for one asset |
 | `get_embed_code` | true | false | Clean embed snippet, no header |
 | `list_derivatives` | true | false | Derivative rows for a parent asset |
-| `create_derivative` | true | true | Fresh derivative, idempotent on (parent, format, producer) |
+| `create_derivative` | true | true | Fresh derivative, idempotent on (parent, format, producer_plugin, producer_operation) |
 | `get_public_url` | false | true | Mint or fetch shareable URL |
 | `get_source` | false | true | Read text bytes or extracted markdown |
 
@@ -30,11 +30,21 @@ The LLM must not enable an op the operator has not opted into. `get_public_url` 
 
 Walk the intent through this decision tree in prose, not as a flowchart.
 
-Want to **show** a previously-created asset in chat? Use `get_media`. The response is a markdown embed (image / audio / video / link) preceded by a one-line header (`Media asset <id>: `) and followed by the extracted text preview. Echo the embed block verbatim so the chat UI renders inline; drop the header line and the extracted-text block from your final reply.
+Want to **show** a previously-created asset in chat? Use `get_media`. The response is a markdown embed (image / audio / video / link) preceded by a one-line header (`Media asset <id>: <​filename>`) and followed by the extracted text preview. Echo the embed block verbatim so the chat UI renders inline; drop the header line and the extracted-text block from your final reply.
 
 Want a **clean** markdown snippet only — no asset header, no extracted text? Use `get_embed_code`. Same embed, but the response is the bare markdown string. Use this when the parent is composing a structured reply that should not carry the asset's prose context.
 
-Want to **browse the archive**? Use `search`. Filters: `mime_type` (case-insensitive LIKE on `media_assets.mime_type`), `plugin_slug` (exact match), `limit` (default 24, capped at 100), `offset`. **Derivatives are filtered out of `search`** — `search` returns only "primary" assets, so the listing is not drowned by PNG/PDF/SVG renders of the same source. To fetch a derivative of a known parent, call `get_media(asset_id: <parent_id>)` and read `derivatives[]` off the result; do NOT call `search` to re-locate the derivative.
+Want to **browse the archive**? Use `search`. Filters: `mime_type` (bucketed by mime prefix — see below), `plugin_slug` (exact match), `limit` (default 24, capped at 100), `offset`. **`task_id` is currently reserved-but-unused on `search`; don't rely on it as a filter.** **Derivatives are filtered out of `search`** — `search` returns only "primary" assets, so the listing is not drowned by PNG/PDF/SVG renders of the same source. To fetch a derivative of a known parent, call `get_media(asset_id: <parent_id>)` and read `derivatives[]` off the result; do NOT call `search` to re-locate the derivative.
+
+### `mime_type` is a coarse bucket, not a LIKE
+
+`search` does NOT do a LIKE on `media_assets.mime_type`. The argument is mapped through `MediaType::fromMime($mime)` to one of the five coarse buckets (`image`, `audio`, `video`, `document`, `unknown`) and applied via `WHERE media_type = '<bucket>'`. So:
+
+- `mime_type: "image/png"` → returns every row whose `media_type` bucket is `image`. It does NOT narrow to PNG specifically.
+- `mime_type: "text/html"` → returns the `document` bucket, which covers all `text/*` and most `application/*` mimes.
+- An unrecognised mime → returns the `unknown` bucket.
+
+Pick the bucket that matches what you're after; don't expect exact-mime filtering.
 
 Want a **shareable external link**? Use `get_public_url`. Mints a public access token on first call (persists a token on the asset row), then returns the stable URL. Off by default, always operator-approved. The URL uses the operator-configured `app_url`, not the per-request host — so it's stable across requests and not vulnerable to Host-header spoofing.
 
@@ -50,7 +60,19 @@ Want to **render a source** into a fresh derivative? Use `create_derivative`. Pi
 
 ## Returned assets — never lose the id
 
-Every `media` op that produces or surfaces an asset returns its `asset_id` (UUID). Downstream calls — versions, source bytes, public URL, derivative renders, parent lookup — take that same id. The LLM must keep the id verbatim in its memory and pass it back; do NOT re-issue a `search` to refind an asset id that was just handed back. `search` returns 24 rows at a time and you have no guarantee the asset you just saw is on the next page.
+Every `media` op that produces or surfaces an asset returns its id on the wire. The wire key is NOT always `asset_id` — it varies per op:
+
+| Op | Wire key |
+| --- | --- |
+| `search` per row | `items[].id` |
+| `get_media` | `data.id` (also the markdown header `Media asset <id>: <​filename>`) |
+| `get_public_url` | `data.asset_id` |
+| `get_embed_code` | `data.asset_id` |
+| `get_source` | `data.asset_id` |
+| `list_derivatives` | `data.parent_id` (parent) + `derivatives[].media_id` (children) |
+| `create_derivative` | `data.derivative_id` |
+
+Always pass the id from the same op that returned it; do not assume the key is `asset_id` everywhere. Downstream calls — versions, source bytes, public URL, derivative renders, parent lookup — take that same id. The LLM must keep the id verbatim in its memory and pass it back; do NOT re-issue a `search` to refind an asset id that was just handed back. `search` returns 24 rows at a time and you have no guarantee the asset you just saw is on the next page.
 
 Two specific chains worth memorising:
 
