@@ -31,7 +31,7 @@ final class ToolSchemaPresenter
      *   category: string,
      *   icon: string|null,
      *   recommends_skills: list<string>,
-     *   operations: list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
+     *   operations: list<array{name: string, description: string, operator_description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
      * }
      */
     public static function summarize(string $toolClass, ?string $icon = null): array
@@ -76,6 +76,7 @@ final class ToolSchemaPresenter
                 $operations[] = [
                     'name'                        => $op->name,
                     'description'                 => $op->description,
+                    'operator_description'        => self::resolveOperatorDescription($op),
                     'enabledByDefault'            => $op->enabledByDefault,
                     'requiresApprovalByDefault'   => $op->requiresApprovalByDefault,
                     'discriminatorKey'            => $op->discriminatorKey,
@@ -93,5 +94,37 @@ final class ToolSchemaPresenter
             'recommends_skills' => $toolAttr?->getRecommendsSkills() ?? [],
             'operations'        => $operations,
         ];
+    }
+
+    /**
+     * Pick the operator-facing description for an op.
+     *
+     * Prefer the explicit `operatorDescription` attribute value when the
+     * tool author provided one. Otherwise fall back to the first sentence
+     * of `description` (split on `. `, kebab/casing irrelevant). The
+     * fallback keeps existing tools useful in the operator UI without
+     * forcing every tool author to add a second field — and the LLM
+     * still gets the full description for dispatch.
+     *
+     * Returns '' when both inputs are empty.
+     */
+    private static function resolveOperatorDescription(Attributes\ToolOperation $op): string
+    {
+        if ($op->operatorDescription !== null && trim($op->operatorDescription) !== '') {
+            return trim($op->operatorDescription);
+        }
+
+        $llm = trim($op->description);
+        if ($llm === '') {
+            return '';
+        }
+
+        $sentence = strstr($llm, '. ', true);
+        if ($sentence === false) {
+            return $llm;
+        }
+        // Trim a trailing period so the rendered sentence reads cleanly
+        // (the first sentence of `"Foo. Bar."` becomes `"Foo"`, not `"Foo."`).
+        return rtrim($sentence, '.');
     }
 }
