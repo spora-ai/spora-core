@@ -215,13 +215,14 @@ final class ToolController
         }
 
         return [
-            'tool_class'      => $summary['tool_class'],
-            'tool_name'       => $summary['tool_name'],
-            'display_name'    => $summary['display_name'],
-            'category'        => $summary['category'],
-            'icon'            => $summary['icon'],
-            'settings_schema' => $schema,
-            'operations'      => $summary['operations'],
+            'tool_class'        => $summary['tool_class'],
+            'tool_name'         => $summary['tool_name'],
+            'display_name'      => $summary['display_name'],
+            'category'          => $summary['category'],
+            'icon'              => $summary['icon'],
+            'settings_schema'   => $schema,
+            'operations'        => $summary['operations'],
+            'recommends_skills' => $summary['recommends_skills'],
         ];
     }
 
