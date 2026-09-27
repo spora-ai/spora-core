@@ -17,6 +17,19 @@ use Attribute;
  * {@see \Spora\Tools\ToolSchemaPresenter::summarize()} falls back to the first
  * sentence of `description`, so existing tools keep rendering as before but stop
  * flooding the operator's tools page with the LLM-targeted prose.
+ *
+ * Usage:
+ *   #[ToolOperation(
+ *       name: 'list_assets',
+ *       description: 'Returns a paginated list of media assets scoped to a
+ *                     bucket. Supports `page` / `per_page`; results include
+ *                     signed URLs valid for 5 minutes.',
+ *       operatorDescription: 'List media assets in a bucket', // optional — short
+ *                                                              //   operator-UI label;
+ *                                                              //   falls back to
+ *                                                              //   the first sentence
+ *                                                              //   of `description`
+ *   )]
  */
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class ToolOperation
