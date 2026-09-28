@@ -82,7 +82,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     ]);
 
     $result = $tool->execute(
-        arguments: ['target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
+        arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         userId: $userId,
         taskId: $source->id,

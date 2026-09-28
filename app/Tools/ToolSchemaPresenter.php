@@ -11,7 +11,8 @@ use Spora\Tools\Traits\HasOperations;
 /**
  * Stateless reflection helper that builds the public "tool summary" payload
  * (`tool_class`, `tool_name`, `display_name`, `category`, `icon`,
- * `operations`) from a tool's `#[Tool]` and `#[ToolOperation]` attributes.
+ * `operations`, `recommends_skills`) from a tool's `#[Tool]` and
+ * `#[ToolOperation]` attributes.
  *
  * Shared by {@see \Spora\Http\ToolController} (which adds settings schema on
  * top) and {@see AgentTool} (which enriches a per-agent status
@@ -29,7 +30,8 @@ final class ToolSchemaPresenter
      *   description: string,
      *   category: string,
      *   icon: string|null,
-     *   operations: list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
+     *   recommends_skills: list<string>,
+     *   operations: list<array{name: string, description: string, operator_description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}>
      * }
      */
     public static function summarize(string $toolClass, ?string $icon = null): array
@@ -38,13 +40,14 @@ final class ToolSchemaPresenter
             // No class to reflect against — short-classname fallback so the
             // payload still parses on the consumer side.
             return [
-                'tool_class'   => $toolClass,
-                'tool_name'    => basename(str_replace('\\', '/', $toolClass)),
-                'display_name' => basename(str_replace('\\', '/', $toolClass)),
-                'description'  => '',
-                'category'     => 'general',
-                'icon'         => $icon,
-                'operations'   => [],
+                'tool_class'        => $toolClass,
+                'tool_name'         => basename(str_replace('\\', '/', $toolClass)),
+                'display_name'      => basename(str_replace('\\', '/', $toolClass)),
+                'description'       => '',
+                'category'          => 'general',
+                'icon'              => $icon,
+                'recommends_skills' => [],
+                'operations'        => [],
             ];
         }
 
@@ -73,6 +76,7 @@ final class ToolSchemaPresenter
                 $operations[] = [
                     'name'                        => $op->name,
                     'description'                 => $op->description,
+                    'operator_description'        => self::resolveOperatorDescription($op),
                     'enabledByDefault'            => $op->enabledByDefault,
                     'requiresApprovalByDefault'   => $op->requiresApprovalByDefault,
                     'discriminatorKey'            => $op->discriminatorKey,
@@ -81,13 +85,44 @@ final class ToolSchemaPresenter
         }
 
         return [
-            'tool_class'   => $toolClass,
-            'tool_name'    => $toolName,
-            'display_name' => $displayName,
-            'description'  => $description,
-            'category'     => $category,
-            'icon'         => $icon,
-            'operations'   => $operations,
+            'tool_class'        => $toolClass,
+            'tool_name'         => $toolName,
+            'display_name'      => $displayName,
+            'description'       => $description,
+            'category'          => $category,
+            'icon'              => $icon,
+            'recommends_skills' => $toolAttr?->getRecommendsSkills() ?? [],
+            'operations'        => $operations,
         ];
+    }
+
+    /**
+     * Pick the operator-facing description for an op.
+     *
+     * Prefer the explicit `operatorDescription` attribute value when the
+     * tool author provided one. Otherwise fall back to the first sentence
+     * of `description` (split on `. `, kebab/casing irrelevant). The
+     * fallback keeps existing tools useful in the operator UI without
+     * forcing every tool author to add a second field — and the LLM
+     * still gets the full description for dispatch.
+     *
+     * Returns '' when both inputs are empty.
+     */
+    private static function resolveOperatorDescription(Attributes\ToolOperation $op): string
+    {
+        $explicit = trim((string) ($op->operatorDescription ?? ''));
+        if ($explicit !== '') {
+            return $explicit;
+        }
+
+        $llm = trim($op->description);
+        if ($llm === '') {
+            return '';
+        }
+
+        $sentence = strstr($llm, '. ', true);
+        // Trim a trailing period so the rendered sentence reads cleanly
+        // (the first sentence of `"Foo. Bar."` becomes `"Foo"`, not `"Foo."`).
+        return $sentence === false ? $llm : rtrim($sentence, '.');
     }
 }

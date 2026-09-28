@@ -8,6 +8,7 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
+use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ToolSettingSchema;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -28,11 +29,24 @@ final class ToolController
         private readonly ToolConfigService $toolConfigService,
         private readonly array $toolClasses = [],
         private readonly ?ToolIconResolver $toolIconResolver = null,
+        private readonly ?ToolsRecommendsSkillsValidator $recommendsSkillsValidator = null,
     ) {}
 
     public function index(): JsonResponse
     {
-
+        $violations = $this->recommendsSkillsValidator?->validate() ?? [];
+        if ($violations !== []) {
+            return new JsonResponse([
+                'error' => [
+                    'code'    => 'TOOLS_RECOMMENDS_SKILLS_MISSING',
+                    'message' => sprintf(
+                        '%d tool(s) declare recommendsSkills slugs that are not on disk. See details for offenders.',
+                        count($violations),
+                    ),
+                    'details' => ['violations' => $violations],
+                ],
+            ], 500);
+        }
 
         $tools = array_map(fn(string $class) => $this->toolSchemaResource($class), $this->toolClasses);
 
@@ -201,13 +215,14 @@ final class ToolController
         }
 
         return [
-            'tool_class'      => $summary['tool_class'],
-            'tool_name'       => $summary['tool_name'],
-            'display_name'    => $summary['display_name'],
-            'category'        => $summary['category'],
-            'icon'            => $summary['icon'],
-            'settings_schema' => $schema,
-            'operations'      => $summary['operations'],
+            'tool_class'        => $summary['tool_class'],
+            'tool_name'         => $summary['tool_name'],
+            'display_name'      => $summary['display_name'],
+            'category'          => $summary['category'],
+            'icon'              => $summary['icon'],
+            'settings_schema'   => $schema,
+            'operations'        => $summary['operations'],
+            'recommends_skills' => $summary['recommends_skills'],
         ];
     }
 

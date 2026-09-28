@@ -136,7 +136,7 @@ describe('SubAgentTool::execute (handover op)', function (): void {
             ->andThrow(new InvalidArgumentException('Source task not found.'));
 
         $result = $tool->execute(
-            ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
             SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
@@ -158,7 +158,7 @@ describe('SubAgentTool::execute (handover op)', function (): void {
             ->andReturn($newTask);
 
         $result = $tool->execute(
-            ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
             SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
@@ -269,6 +269,36 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         expect($result->success)->toBeFalse()
             ->and($result->content)->toBe('Parent task not found.');
     });
+
+    test('omitted `op` falls back to sub_agent (default go-to for delegation)', function (): void {
+        // `sub_agent` is declared first on the ToolOperation list, so the
+        // runtime fallback when `op` is omitted lands here. The skill
+        // describes sub_agent as "Default go-to for delegation"; this test
+        // pins that fallback so a future attribute reorder can't silently
+        // flip it back to handover.
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+
+        $child = new Task();
+        $child->id = SUB_AGENT_SUB_CHILD_ID;
+        $subAgent->allows('spawn')
+            ->with(SUB_AGENT_TASK_ID, SUB_AGENT_TARGET_AGENT, 'ctx', SUB_AGENT_USER_ID)
+            ->andReturn($child);
+
+        $result = $tool->execute(
+            ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_USER_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['op'])->toBe('sub_agent')
+            ->and($result->data['spawned_sub_task_ids'])->toBe([SUB_AGENT_SUB_CHILD_ID])
+            ->and($result->content)->toContain('Sub-agent task #' . SUB_AGENT_SUB_CHILD_ID);
+    });
 });
 
 describe('SubAgentTool::describeAction', function (): void {
@@ -276,7 +306,7 @@ describe('SubAgentTool::describeAction', function (): void {
     test('renders the target agent id for the handover op', function (): void {
         [$tool] = makeSubAgentTool();
 
-        expect($tool->describeAction(['target_agent_id' => SUB_AGENT_TARGET_AGENT]))
+        expect($tool->describeAction(['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT]))
             ->toBe('Hand over the task to agent #' . SUB_AGENT_TARGET_AGENT . '.');
     });
 
@@ -297,7 +327,7 @@ describe('SubAgentTool::getParametersSchema', function (): void {
 
         expect($schema['required'])->toContain('op')
             ->and($schema['required'])->toContain('prompt')
-            ->and($schema['properties']['op']['enum'])->toBe(['handover', 'sub_agent'])
+            ->and($schema['properties']['op']['enum'])->toBe(['sub_agent', 'handover'])
             ->and($schema['properties']['target_agent_id'])->toBeArray()
             ->and($schema['properties']['prompt'])->toBeArray();
     });
@@ -376,7 +406,12 @@ describe('SubAgentTool back-compat: single-op agents may omit `op`', function ()
         $schema = $tool->getParametersSchema();
 
         // Mirrors the runtime call site: SchemaValidator::validate($args, $schema, $operationName).
-        // HasOperations::getOperationName() resolves the missing op to the first declared op.
+        // When OperationSchemaFilter has narrowed the allowed ops down to
+        // a single one (here `handover` only), the orchestrator routes the
+        // call through SchemaValidator with that op name — even though the
+        // ToolOperation fallback (first-declared wins) now lands on
+        // `sub_agent`, the single-op filter makes the op unambiguous so
+        // the schema accept path doesn't depend on that fallback.
         Spora\Agents\SchemaValidator::validate(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'x'],
             $schema,
@@ -414,7 +449,7 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         // The schema's enum is the resolved label "SubAgent Target Agent (#5)";
         // that's the wire format an LLM would send.
         $result = $tool->execute(
-            ['target_agent_id' => 'SubAgent Target Agent (#' . SUB_AGENT_TARGET_AGENT . ')', 'prompt' => 'ctx'],
+            ['op' => 'handover', 'target_agent_id' => 'SubAgent Target Agent (#' . SUB_AGENT_TARGET_AGENT . ')', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
             SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
@@ -436,7 +471,7 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
             ->andReturn(new Task(['id' => SUB_AGENT_NEW_TASK_ID]));
 
         $result = $tool->execute(
-            ['target_agent_id' => '#' . SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            ['op' => 'handover', 'target_agent_id' => '#' . SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
             SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
@@ -564,7 +599,7 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         );
 
         $result = $tool->execute(
-            ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
+            ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
             SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,

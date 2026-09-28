@@ -160,6 +160,7 @@ use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
+use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
@@ -589,6 +590,24 @@ final class ContainerDefinitions
                         ))),
                     ),
                     $c->get(PluginLoader::class),
+                );
+            },
+
+            // Strict-mode validator: every tool's `#[Tool(recommendsSkills: ...)]`
+            // slug must resolve to an on-disk skill. SkillScanner is guarded
+            // because some build/test contexts resolve the controller graph
+            // without a full skill scan; production always provides it via
+            // OrchestratorContainerBindings::orchestratorDefinitions().
+            ToolsRecommendsSkillsValidator::class => static function (ContainerInterface $c): ToolsRecommendsSkillsValidator {
+                return new ToolsRecommendsSkillsValidator(
+                    new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        array_values(array_unique(array_merge(
+                            $c->get('tool_classes'),
+                            $c->get(PluginLoader::class)->toolClasses(),
+                        ))),
+                    ),
+                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
                 );
             },
         ];
@@ -1193,6 +1212,7 @@ final class ContainerDefinitions
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
                     $c->get(ToolIconResolver::class),
+                    $c->get(ToolsRecommendsSkillsValidator::class),
                 );
             },
         ];

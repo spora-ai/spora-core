@@ -56,12 +56,14 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '. '
                . 'Pass `agent_id` (numeric pk returned by `create_agent` / `list_agents`) to target a '
                . 'specific agent; omit to patch the calling agent.',
+    operatorDescription: 'Update editable agent fields (name, description, system_prompt, …). Notes go through write_notes, not here.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'read_notes',
     description: 'Read the markdown notes attached to the calling agent.',
+    operatorDescription: 'Read the markdown notes attached to this agent.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -71,6 +73,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'Segments are joined with a blank line. The destructive `overwrite` '
                . 'mode is a separate `write_notes_overwrite` operation that requires '
                . 'operator approval.',
+    operatorDescription: 'Append (default) or prepend markdown notes.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -80,6 +83,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'operator-curated notes. Disabled by default and requires explicit '
                . 'operator approval per call so an LLM cannot wipe notes without '
                . 'operator sign-off.',
+    operatorDescription: 'Replace the agent notes wholesale. Destructive; per-call approval.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -92,6 +96,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'become activatable are flagged via `ready_to_enable: false`. '
                . 'Use this to plan a sub-agent via `create_agent`. When planning a sub-agent, '
                . 'also read the agent-creation skill (skill action: read, name: agent-creation).',
+    operatorDescription: 'List every registered tool as a compact JSON payload.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
@@ -107,6 +112,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'reserved for the operator-upload endpoint at '
                . 'POST /api/v1/agent-templates/import and will be rejected on this surface. '
                . 'Read the agent-creation skill first ' . self::AGENT_CREATION_SKILL_HINT . '.',
+    operatorDescription: 'Create a new agent from a slim payload. Tools go through configure_tools after.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -125,6 +131,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'follow-up `read_agent` call. See the agent-creation skill '
                . '(skill action: read, name: agent-creation, filename: SKILL.md) '
                . 'for the slim two-phase flow.',
+    operatorDescription: 'Enable or disable tools and per-op overrides on an agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -138,6 +145,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'Omit `agent_id` to read the calling agent (same as the deprecated '
                . '`read_agent_configuration` operation). For the slim two-phase agent-creation '
                . 'flow, see the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
+    operatorDescription: 'Read the full configuration of a specific agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
@@ -151,6 +159,7 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'a turn boundary. Archived and pinned state is preserved (call '
                . '`read_agent` for the full manifest). Empty when the user has no agents. '
                . 'See the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
+    operatorDescription: 'List every agent owned by the current user (slim payload).',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
