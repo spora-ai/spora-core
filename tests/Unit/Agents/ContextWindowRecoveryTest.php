@@ -154,13 +154,9 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
     it('leaves the replayed history pairable when the summarised range splits an assistant/tool pair', function (): void {
         [$agent, $task] = seedCompactionTask();
 
-        // keepCount is 5, so with 8 rows the range 0-2 is absorbed. The
-        // assistant at seq 2 declares a tool call whose result lives at
-        // seq 3 — the boundary lands exactly between them, evicting the
-        // declaration while keeping the result. The replayed history is
-        // then a bare `tool` row with no preceding assistant, which every
-        // provider rejects (error 2013) until the pairing reconciler
-        // rewrites it as user text.
+        // 8 rows with keepCount 5 evicts seq 0-2, splitting the assistant at
+        // seq 2 from its result at seq 3 — a bare `tool` row that providers
+        // reject (2013) until the reconciler rewrites it as user text.
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q0']);
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
         TaskHistory::create([
@@ -205,13 +201,64 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
 
         expect(toolCallPairingFaults($messages))->toBe([]);
 
-        // The evicted declaration is gone, so the surviving result is
-        // rewritten as user text rather than left as an unmatchable tool row.
+        // The declaration is gone, so the surviving result becomes user text
+        // rather than an unmatchable tool row.
         $roles = array_column($messages, 'role');
         expect($roles)->not->toContain('tool')
             ->and(implode("\n", array_map(
                 static fn(array $m): string => (string) ($m['content'] ?? ''),
                 $messages,
             )))->toContain('read_url');
+    });
+
+    it('never sends role:summary to the summarizer on a second compaction round', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        // A first compaction leaves a `summary` row. A second round then
+        // summarizes that row again, and forwarding its role verbatim put
+        // `role: summary` on the wire — the same rejection the read path now
+        // avoids. It has to sit at the lowest sequence to be re-summarized.
+        TaskHistory::create([
+            'task_id'                   => $task->id,
+            'sequence'                  => 0,
+            'role'                      => 'summary',
+            'content'                   => 'First round summary.',
+            'summarized_sequence_range' => '0-0',
+        ]);
+        for ($i = 1; $i <= 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 1 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $capturedRef = null;
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturnUsing(static function (LLMRequest $req) use (&$capturedRef): LLMResponse {
+            $capturedRef = $req;
+            return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
+        });
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        $recovery = new ContextWindowRecovery(
+            new Orchestrator($factory, new OrchestratorConfig(toolInstances: [])),
+            $factory,
+        );
+        (new ReflectionClass($recovery))->getMethod('compactHistory')
+            ->invoke($recovery, $task->id, 4096, 0.2, $agent);
+
+        expect($capturedRef)->not->toBeNull();
+        $sent = $capturedRef->messages;
+        expect($sent)->not->toBeEmpty();
+
+        foreach ($sent as $msg) {
+            expect($msg['role'])->toBeIn(['user', 'assistant', 'system']);
+        }
     });
 });

@@ -256,16 +256,11 @@ function resetSporaConfigKeyPath(): void
 }
 
 /**
- * Oracle for the tool-call pairing rule every OpenAI-compatible provider
- * enforces. A `tool` message is only legal immediately after an assistant
- * message that declared the same `tool_call_id`, before any other role
- * intervenes. Violations surface upstream as HTTP 400 error 2013
- * ("tool call result does not follow tool call").
- *
- * Strict about contiguity, not merely about declaration: a lone `tool`
- * row whose id appears somewhere earlier in the transcript is still a
- * fault, which is the shape summary compaction leaves behind when its
- * range boundary splits an assistant/tool pair.
+ * Oracle for the tool-call pairing rule: a `tool` message is only legal
+ * immediately after the assistant message that declared the same
+ * `tool_call_id`. Contiguity is strict — a lone `tool` row whose id was
+ * declared earlier in the transcript is still a fault, which is the shape
+ * compaction leaves when its range boundary splits an assistant/tool pair.
  *
  * @param  list<array<string, mixed>>  $messages
  * @return list<string>  Empty when the list satisfies the rule.

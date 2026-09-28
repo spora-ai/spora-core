@@ -108,20 +108,33 @@ final class ContextWindowRecovery
             $content = $row->content ?? '';
             // Strip base64 data URIs BEFORE sending to the summarizer.
             // Even a single multi-MB image could overflow the
-            // summarizer's own context window. Then rephrase `role:'tool'`
-            // → `role:'user'` with a `[tool:name]` prefix — the upstream
-            // API rejects tool messages without tool_call_id pairing
-            // ("tool result's tool id() not found", error 2013) because
-            // the summarizer request has no prior `tool_calls` to anchor
-            // against. The summarizer only needs the textual content, not
-            // the structured tool-call pairing, so the rephrase is safe.
+            // summarizer's own context window.
             $content = ScrubDataUrls::scrub($content);
+
+            // Rephrase `role:'tool'` → `role:'user'` with a `[tool:name]`
+            // prefix: the summarizer request has no prior `tool_calls` to
+            // anchor against, so an unpaired tool message is rejected with
+            // error 2013. It only needs the text, not the pairing.
             if ($row->role === 'tool') {
-                $content = '[tool:' . ($row->tool_name ?? '?') . '] ' . $content;
-                $summaryMessages[] = ['role' => 'user', 'content' => $content];
-            } elseif ($content !== '') {
-                $summaryMessages[] = ['role' => $row->role, 'content' => $content];
+                $summaryMessages[] = [
+                    'role'    => 'user',
+                    'content' => '[tool:' . ($row->tool_name ?? '?') . '] ' . $content,
+                ];
+                continue;
             }
+
+            if ($content === '') {
+                continue;
+            }
+
+            // On a second compaction round the earlier summary row sits at the
+            // lowest sequence and is summarized again. `summary` and
+            // `attachment` are not roles the summarizer accepts, so only
+            // `assistant` passes through verbatim.
+            $summaryMessages[] = [
+                'role'    => $row->role === 'assistant' ? 'assistant' : 'user',
+                'content' => $content,
+            ];
         }
 
         if ($summaryMessages === []) {

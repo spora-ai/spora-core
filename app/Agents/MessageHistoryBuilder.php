@@ -23,10 +23,8 @@ use Spora\Models\TaskHistory;
  * thinking, images) are rendered through the block list so the provider
  * sees the original signed payload on the next outbound turn.
  *
- * The result is passed through {@see ToolCallPairingReconciler} so a tick
- * interrupted part-way through a tool batch cannot replay an unpaired
- * declaration to the provider, and compaction rows leave the builder as
- * `role: user` — `summary` is internal bookkeeping, not a wire role.
+ * The result passes through {@see ToolCallPairingReconciler}, which repairs
+ * tool batches left unpaired by an interrupted tick.
  *
  * The internal `content` shape is `['type'=>'text'|'image', 'text'|'mediaType'|'base64', …]`;
  * the per-provider wire shape is built by the matching `LLMDriverInterface`
@@ -49,9 +47,8 @@ final class MessageHistoryBuilder
 
         $messages = $this->applySummaryCompaction($rows);
 
-        // After compaction: compaction is itself a source of unpaired rows,
-        // so reconciling earlier would let a synthetic row be evicted while
-        // the real orphan survived.
+        // After compaction: compaction orphans tool results, so reconciling
+        // earlier would evict the synthetic repair and keep the real orphan.
         $messages = (new ToolCallPairingReconciler())->reconcile($messages);
 
         $this->stripScaffoldingKeys($messages);
@@ -210,8 +207,9 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Removes non-summary messages whose `_seq` is inside the summarised range.
-     * Summary rows keep their own `_seq` and are always preserved.
+     * Removes messages whose `_seq` falls inside the summarised range.
+     * Compaction rows are exempt via their `_compaction` sentinel — they used
+     * to be exempt by role, which no longer distinguishes them on the wire.
      *
      * @param  list<array<string, mixed>>  $messages
      * @return int  The new $lastSummarySeqEnd value (the largest range end seen).
@@ -231,13 +229,9 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * A compaction row is a user-side statement about the conversation, so
-     * it leaves the builder as `role: user`. `summary` is internal bookkeeping
-     * and every provider rejects it on the wire.
-     *
-     * `_compaction` carries the eviction exemption for {@see evictCompactedRows()}
-     * now that the role no longer does, and is removed with the rest of the
-     * scaffolding by {@see stripScaffoldingKeys()}.
+     * Compaction rows leave as `role: user` — `summary` is internal
+     * bookkeeping that every provider rejects on the wire. `_compaction`
+     * carries the eviction exemption that the role used to.
      *
      * @return array{role: string, content: string|null, _compaction: true, _seq: int}
      */
@@ -285,10 +279,16 @@ final class MessageHistoryBuilder
             ];
         } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
-                'role' => 'assistant',
+                'role'    => 'assistant',
                 'content' => $content,
-                'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
+
+            // Omitted rather than emitted empty: an undecodable payload must
+            // not leave `tool_calls: []` on the wire.
+            $calls = $this->decodeToolCallPayload($row->tool_call_payload);
+            if ($calls !== []) {
+                $message['tool_calls'] = $calls;
+            }
         }
 
         return $message;
@@ -328,28 +328,37 @@ final class MessageHistoryBuilder
      * strict providers (OpenAI, MiniMax, LM Studio) reject `[]` for the
      * tool-call `arguments` field.
      *
+     * Non-array entries are dropped: a payload that decodes to a list of
+     * scalars would otherwise be forwarded as `tool_calls`, which no
+     * provider accepts.
+     *
      * @return list<array<string, mixed>>
      */
     private function decodeToolCallPayload(string $payload): array
     {
         $decoded = json_decode($payload, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
-        foreach ($decoded as $i => $tc) {
-            if (!isset($tc['function']['arguments'])) {
+        $calls = [];
+        foreach ($decoded as $tc) {
+            if (! is_array($tc)) {
                 continue;
             }
 
-            $args         = $tc['function']['arguments'];
-            $decodedArgs  = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
-            if ($decodedArgs === []) {
-                $decoded[$i]['function']['arguments'] = '{}';
+            if (isset($tc['function']['arguments'])) {
+                $args        = $tc['function']['arguments'];
+                $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
+                if ($decodedArgs === []) {
+                    $tc['function']['arguments'] = '{}';
+                }
             }
+
+            $calls[] = $tc;
         }
 
-        return array_values($decoded);
+        return $calls;
     }
 
     /**
@@ -367,32 +376,27 @@ final class MessageHistoryBuilder
 }
 
 /**
- * Repairs the tool-call pairing rule on the read path.
- *
- * Providers accept a `tool` message only when it immediately follows the
- * assistant message that declared its `tool_call_id`, before any other role
- * intervenes. Anything else is rejected upstream as HTTP 400 error 2013
- * ("tool call result does not follow tool call"). Persisted history breaks
- * that rule whenever a tick is interrupted part-way through a tool batch —
- * a worker death, a manual abort, the `max_steps` auto-abort, a provider
- * error — and the next tick replays the broken shape verbatim.
- *
- * Rather than trying to predict every interruption, this pass repairs
- * whatever it is handed. For each declared call it either finds the
- * matching result or removes the declaration and states the failure as
- * user text, so the model learns the call never landed instead of either
- * seeing nothing or getting a 400. Internal to
- * {@see MessageHistoryBuilder} — invoked by {@see MessageHistoryBuilder::build()}.
+ * Repairs provider tool-call pairing (HTTP 400 error 2013) on the read path:
+ * a `tool` message is only legal directly after the assistant message that
+ * declared its id, before any other role intervenes. An interrupted tick
+ * leaves unpaired rows in persisted history, so every declared call is either
+ * matched to its result or dropped and restated as user text. Read path only —
+ * invoked by {@see MessageHistoryBuilder::build()}.
  */
 final class ToolCallPairingReconciler
 {
     /**
-     * Cap on the argument preview carried in a repair marker. The marker's
-     * job is to record that a call never returned, not to restate the
-     * request — a multi-KB argument blob would cost more context than it
-     * is worth.
+     * The marker records that a call never returned, not the request itself —
+     * a multi-KB argument blob would cost more context than it is worth.
      */
     private const MAX_ARGUMENT_PREVIEW_CHARS = 200;
+
+    /**
+     * Stands in for an assistant turn whose every tool call was dropped. The
+     * turn still happened, and providers require `content` on an assistant
+     * message that carries no `tool_calls`.
+     */
+    private const EMPTY_TURN_PLACEHOLDER = '[interrupted]';
 
     /**
      * @param  list<array<string, mixed>>  $messages
@@ -404,10 +408,8 @@ final class ToolCallPairingReconciler
         $deferred = [];
 
         /**
-         * The batch awaiting results, as `['index' => position in $out,
-         * 'calls' => unanswered calls keyed by id]`. The calls are removed
-         * from the map as their results arrive, so whatever remains when the
-         * batch closes is exactly what needs repairing.
+         * The open batch: position in `$out` plus the calls not yet answered.
+         * Whatever remains when the batch closes is what needs repairing.
          *
          * @var array{index: int, calls: array<string, array<string, mixed>>}|null
          */
@@ -423,16 +425,14 @@ final class ToolCallPairingReconciler
                     continue;
                 }
 
-                // No batch is waiting for this id — it arrived out of order,
-                // duplicates an earlier result, or its declaration was
-                // dropped by compaction. Held back so it cannot be mistaken
-                // for a result of the batch that is currently open.
+                // No batch awaits this id: out of order, a duplicate, or its
+                // declaration was evicted. Deferred so it cannot answer the
+                // batch now open.
                 $deferred[] = $this->orphanedResultMessage($msg);
                 continue;
             }
 
-            // Any non-tool message ends the open batch: providers require the
-            // whole run to be contiguous.
+            // Any non-tool message ends the open batch: the run must stay contiguous.
             if ($pending !== null) {
                 $this->closeBatch($pending, $out);
                 $pending = null;
@@ -464,12 +464,17 @@ final class ToolCallPairingReconciler
     }
 
     /**
-     * Drops the unanswered calls from the assistant that declared them and
-     * appends one marker per dropped call.
+     * Drops unanswered calls from the declaring assistant, appending one
+     * marker for the batch. Stripping the declaration is load-bearing: an
+     * added `user` row alone would leave the assistant advertising a call
+     * nothing answers.
      *
-     * Stripping the declaration is the load-bearing step: leaving it in place
-     * and merely adding a `user` row would leave the assistant advertising a
-     * call nothing answers, which is the original violation.
+     * Two shapes have to stay valid once the calls are gone. An assistant
+     * left with no `tool_calls` and no `content` is rejected by the
+     * Chat Completions contract, which requires `content` unless
+     * `tool_calls` is set — so it gets a placeholder rather than a null.
+     * And the batch produces a single `user` row, not one per call, so the
+     * repair cannot leave two consecutive same-role turns.
      *
      * @param  array{index: int, calls: array<string, array<string, mixed>>}  $pending
      * @param  list<array<string, mixed>>  $out
@@ -484,24 +489,31 @@ final class ToolCallPairingReconciler
         $answered  = [];
 
         foreach ((array) ($assistant['tool_calls'] ?? []) as $call) {
-            if (! is_array($call) || ! array_key_exists((string) ($call['id'] ?? ''), $pending['calls'])) {
+            if (is_array($call) && ! array_key_exists((string) ($call['id'] ?? ''), $pending['calls'])) {
                 $answered[] = $call;
             }
         }
 
         if ($answered === []) {
             unset($assistant['tool_calls']);
+            $content = $assistant['content'] ?? null;
+            if (! is_string($content) || trim($content) === '') {
+                $assistant['content'] = self::EMPTY_TURN_PLACEHOLDER;
+            }
         } else {
             $assistant['tool_calls'] = $answered;
         }
         unset($assistant);
 
+        $markers = [];
         foreach ($pending['calls'] as $call) {
-            $out[] = [
-                'role'    => 'user',
-                'content' => $this->abandonedCallMessage($call),
-            ];
+            $markers[] = $this->abandonedCallMessage($call);
         }
+
+        $out[] = [
+            'role'    => 'user',
+            'content' => implode("\n", $markers),
+        ];
     }
 
     /**
@@ -578,9 +590,11 @@ final class ToolCallPairingReconciler
             return '';
         }
 
+        $suffix = '… [truncated]';
+
         return strlen($text) <= self::MAX_ARGUMENT_PREVIEW_CHARS
             ? $text
-            : substr($text, 0, self::MAX_ARGUMENT_PREVIEW_CHARS) . '… [truncated]';
+            : substr($text, 0, self::MAX_ARGUMENT_PREVIEW_CHARS - strlen($suffix)) . $suffix;
     }
 }
 

@@ -209,10 +209,8 @@ describe('MessageHistoryBuilder', function (): void {
 });
 
 /**
- * Build the message list for a task seeded with the given transcript.
- * Rows are passed in `sequence` order without an explicit `sequence` key
- * — the array index is the sequence, so each shape reads as the
- * conversation it represents.
+ * Build the message list for a task seeded with `$rows` in order; the array
+ * index is the sequence, so each dataset case reads as its conversation.
  *
  * @param  list<array<string, mixed>>  $rows
  * @return list<array<string, mixed>>
@@ -269,11 +267,8 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
     it('repairs the task-465 shape where a worker died before persisting a tool batch', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // Verbatim from the task-465 export: seq 12 declared two read_url
-        // calls that never got results, and the next provider turn (seq 13)
-        // declared two tavily_search calls answered at seq 14-15. The
-        // consecutive assistant messages are what produced
-        // "invalid params, tool call result does not follow tool call (2013)".
+        // Verbatim from the task-465 export: a worker died between two
+        // assistant batches, producing error 2013 on the next provider turn.
         $messages = buildTranscript($agentId, [
             historyUser('Research Deloitte 2026'),
             historyToolCalls(null, [
@@ -290,22 +285,80 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
 
         expect(toolCallPairingFaults($messages))->toBe([]);
 
-        // The abandoned assistant no longer advertises unanswered calls.
-        expect($messages[1])->not->toHaveKey('tool_calls');
+        expect($messages[1])->not->toHaveKey('tool_calls')
+            ->and($messages[1]['content'])->not->toBeNull();
 
-        // Both abandoned calls are surfaced as text, carrying enough of the
-        // original request for the model to know the fetches never landed.
-        expect($messages[2]['role'])->toBe('user')
-            ->and($messages[2]['content'])->toContain('[tool:read_url]')
+        expect($messages)->toHaveCount(6)
+            ->and($messages[2]['role'])->toBe('user')
+            ->and(substr_count((string) $messages[2]['content'], '[tool:read_url]'))->toBe(2)
             ->and($messages[2]['content'])->toContain('deloitte.com/insights');
-        expect($messages[3]['role'])->toBe('user')
-            ->and($messages[3]['content'])->toContain('[tool:read_url]');
 
-        // The healthy batch is passed through completely untouched.
-        expect($messages[4]['tool_calls'][0]['id'])->toBe('call_function_pogxq3sr277c_1')
-            ->and($messages[4]['tool_calls'][1]['id'])->toBe('call_function_pogxq3sr277c_2')
-            ->and($messages[5])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_1', 'name' => 'tavily_search', 'content' => 'results one'])
-            ->and($messages[6])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_2', 'name' => 'tavily_search', 'content' => 'results two']);
+        expect($messages[3]['tool_calls'][0]['id'])->toBe('call_function_pogxq3sr277c_1')
+            ->and($messages[3]['tool_calls'][1]['id'])->toBe('call_function_pogxq3sr277c_2')
+            ->and($messages[4])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_1', 'name' => 'tavily_search', 'content' => 'results one'])
+            ->and($messages[5])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_2', 'name' => 'tavily_search', 'content' => 'results two']);
+    });
+
+    it('leaves an emptied assistant turn valid for the provider', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // Stripping `tool_calls` from a pure tool-call turn used to leave
+        // {role: assistant, content: null}, which the Chat Completions
+        // contract rejects because `content` is required when `tool_calls`
+        // is absent — trading error 2013 for a different 400.
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+        ]);
+
+        expect($messages[1]['role'])->toBe('assistant')
+            ->and($messages[1])->not->toHaveKey('tool_calls')
+            ->and($messages[1]['content'])->toBeString()
+            ->and($messages[1]['content'])->not->toBe('');
+    });
+
+    it('keeps real assistant text when a batch is partially stripped', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls('Let me fetch both.', [call('A', 'read_url'), call('B', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+        ]);
+
+        // One answered (A), one dropped (B): the assistant keeps its prose
+        // and advertises only the call that actually has a result.
+        expect($messages[1]['content'])->toBe('Let me fetch both.')
+            ->and($messages[1]['tool_calls'])->toHaveCount(1)
+            ->and($messages[1]['tool_calls'][0]['id'])->toBe('A')
+            ->and(toolCallPairingFaults($messages))->toBe([]);
+    });
+
+    it('emits one user row per repaired batch, never two in a row', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'read_url'), call('C', 'read_url')]),
+        ]);
+
+        expect(array_column($messages, 'role'))->toBe(['user', 'assistant', 'user'])
+            ->and(substr_count((string) $messages[2]['content'], 'did not return a result'))->toBe(3);
+    });
+
+    it('drops non-array tool_call entries rather than forwarding them to the wire', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // A payload decoding to a list of scalars yields tool_calls entries
+        // that are not arrays — neither answerable nor valid on the wire.
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            ['role' => 'assistant', 'content' => 'hmm', 'tool_call_payload' => '[1, 2]'],
+        ]);
+
+        foreach ($messages as $msg) {
+            expect($msg)->not->toHaveKey('tool_calls');
+        }
     });
 
     it('satisfies the pairing invariant for adversarial transcript shapes', function (array $rows): void {
@@ -508,8 +561,8 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
     it('preserves every compaction row across a second compaction round', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // Both summaries must survive: `evictCompactedRows` exempts them by
-        // the `_compaction` sentinel, not by their role.
+        // `evictCompactedRows` exempts summaries by the `_compaction`
+        // sentinel, not by their role.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             ['role' => 'summary', 'content' => 'First summary', 'summarized_sequence_range' => '0-0'],
@@ -529,10 +582,8 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
     it('keeps a compaction row alive when a later range covers its sequence', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // The second range spans 0-3, which includes the first summary's row.
-        // Compaction rows are exempt from eviction — the sentinel is what
-        // carries that exemption now that they no longer announce themselves
-        // through `role`.
+        // Range 0-3 covers the first summary's row, but compaction rows are
+        // exempt from eviction — the sentinel carries that exemption.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             historyUser('Second'),
