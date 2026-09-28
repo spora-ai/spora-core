@@ -110,8 +110,9 @@ final class ToolSchemaPresenter
      */
     private static function resolveOperatorDescription(Attributes\ToolOperation $op): string
     {
-        if ($op->operatorDescription !== null && trim($op->operatorDescription) !== '') {
-            return trim($op->operatorDescription);
+        $explicit = trim((string) ($op->operatorDescription ?? ''));
+        if ($explicit !== '') {
+            return $explicit;
         }
 
         $llm = trim($op->description);
@@ -120,11 +121,8 @@ final class ToolSchemaPresenter
         }
 
         $sentence = strstr($llm, '. ', true);
-        if ($sentence === false) {
-            return $llm;
-        }
         // Trim a trailing period so the rendered sentence reads cleanly
         // (the first sentence of `"Foo. Bar."` becomes `"Foo"`, not `"Foo."`).
-        return rtrim($sentence, '.');
+        return $sentence === false ? $llm : rtrim($sentence, '.');
     }
 }
