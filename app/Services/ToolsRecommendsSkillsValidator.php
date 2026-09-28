@@ -67,26 +67,18 @@ final class ToolsRecommendsSkillsValidator
      */
     private function missingSlugsFor(string $class, array $knownSlugs): array
     {
-        if (!class_exists($class)) {
-            return [];
-        }
-
-        $reflection = new ReflectionClass($class);
-        $attrs      = $reflection->getAttributes(Tool::class);
-        if ($attrs === []) {
-            return [];
-        }
-
-        /** @var Tool $tool */
-        $tool = $attrs[0]->newInstance();
-        if ($tool->recommendsSkills === []) {
-            return [];
-        }
-
         $missing = [];
-        foreach ($tool->recommendsSkills as $slug) {
-            if (!isset($knownSlugs[strtolower($slug)])) {
-                $missing[] = $slug;
+        if (class_exists($class)) {
+            $reflection = new ReflectionClass($class);
+            $attrs      = $reflection->getAttributes(Tool::class);
+            if ($attrs !== []) {
+                /** @var Tool $tool */
+                $tool = $attrs[0]->newInstance();
+                foreach ($tool->recommendsSkills as $slug) {
+                    if (!isset($knownSlugs[strtolower($slug)])) {
+                        $missing[] = $slug;
+                    }
+                }
             }
         }
         return $missing;
