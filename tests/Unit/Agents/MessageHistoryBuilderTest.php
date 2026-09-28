@@ -349,8 +349,7 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
     it('drops non-array tool_call entries rather than forwarding them to the wire', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // A payload decoding to a list of scalars yields tool_calls entries
-        // that are not arrays — neither answerable nor valid on the wire.
+        // Non-array entries are neither answerable nor valid on the wire.
         $messages = buildTranscript($agentId, [
             historyUser('Go'),
             ['role' => 'assistant', 'content' => 'hmm', 'tool_call_payload' => '[1, 2]'],
@@ -561,8 +560,7 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
     it('preserves every compaction row across a second compaction round', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // `evictCompactedRows` exempts summaries by the `_compaction`
-        // sentinel, not by their role.
+        // Exempt from eviction via the `_compaction` sentinel, not by role.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             ['role' => 'summary', 'content' => 'First summary', 'summarized_sequence_range' => '0-0'],
@@ -582,8 +580,7 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
     it('keeps a compaction row alive when a later range covers its sequence', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // Range 0-3 covers the first summary's row, but compaction rows are
-        // exempt from eviction — the sentinel carries that exemption.
+        // Range 0-3 covers the summary's own row, yet it survives eviction.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             historyUser('Second'),

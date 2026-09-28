@@ -47,8 +47,7 @@ final class MessageHistoryBuilder
 
         $messages = $this->applySummaryCompaction($rows);
 
-        // After compaction: compaction orphans tool results, so reconciling
-        // earlier would evict the synthetic repair and keep the real orphan.
+        // Must run after compaction, which orphans tool results itself.
         $messages = (new ToolCallPairingReconciler())->reconcile($messages);
 
         $this->stripScaffoldingKeys($messages);
@@ -207,12 +206,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Removes messages whose `_seq` falls inside the summarised range.
-     * Compaction rows are exempt via their `_compaction` sentinel — they used
-     * to be exempt by role, which no longer distinguishes them on the wire.
-     *
      * @param  list<array<string, mixed>>  $messages
-     * @return int  The new $lastSummarySeqEnd value (the largest range end seen).
+     * @return int  The largest range end seen.
      */
     private function evictCompactedRows(array &$messages, int $rangeEnd, int $lastSummarySeqEnd): int
     {
@@ -229,9 +224,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Compaction rows leave as `role: user` — `summary` is internal
-     * bookkeeping that every provider rejects on the wire. `_compaction`
-     * carries the eviction exemption that the role used to.
+     * `summary` is internal bookkeeping that every provider rejects on the wire;
+     * `_compaction` carries the eviction exemption that the role used to.
      *
      * @return array{role: string, content: string|null, _compaction: true, _seq: int}
      */
@@ -246,11 +240,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * The `attachment` branch is the load-bearing guard: regardless of
-     * whether `$row->attachments` is non-empty, we always route through
-     * {@see attachmentMessage()} which returns a `user` message. The
-     * legacy fallthrough `{role: 'attachment', content: ...}` was a 400
-     * `invalid role: attachment` waiting to happen on every provider.
+     * `attachment` has no valid wire role, so it must never fall through to a
+     * literal `{role: 'attachment'}` — every provider rejects that with a 400.
      *
      * @return array<string, mixed>
      */
@@ -283,8 +274,7 @@ final class MessageHistoryBuilder
                 'content' => $content,
             ];
 
-            // Omitted rather than emitted empty: an undecodable payload must
-            // not leave `tool_calls: []` on the wire.
+            // Omitted rather than empty: no provider accepts `tool_calls: []`.
             $calls = $this->decodeToolCallPayload($row->tool_call_payload);
             if ($calls !== []) {
                 $message['tool_calls'] = $calls;
@@ -324,13 +314,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Rewrites empty `arguments` arrays to the literal `'{}'` string —
-     * strict providers (OpenAI, MiniMax, LM Studio) reject `[]` for the
-     * tool-call `arguments` field.
-     *
-     * Non-array entries are dropped: a payload that decodes to a list of
-     * scalars would otherwise be forwarded as `tool_calls`, which no
-     * provider accepts.
+     * Empty `arguments` become the literal `'{}'`: strict providers reject `[]`.
+     * Non-array entries are dropped rather than forwarded as `tool_calls`.
      *
      * @return list<array<string, mixed>>
      */
@@ -376,26 +361,17 @@ final class MessageHistoryBuilder
 }
 
 /**
- * Repairs provider tool-call pairing (HTTP 400 error 2013) on the read path:
- * a `tool` message is only legal directly after the assistant message that
- * declared its id, before any other role intervenes. An interrupted tick
- * leaves unpaired rows in persisted history, so every declared call is either
- * matched to its result or dropped and restated as user text. Read path only —
- * invoked by {@see MessageHistoryBuilder::build()}.
+ * Repairs provider tool-call pairing (HTTP 400 error 2013) on the read path: a
+ * `tool` message is legal only directly after the assistant message declaring
+ * its id, before any other role intervenes. Each declared call is either
+ * matched to its result or dropped and restated as user text.
  */
 final class ToolCallPairingReconciler
 {
-    /**
-     * The marker records that a call never returned, not the request itself —
-     * a multi-KB argument blob would cost more context than it is worth.
-     */
+    /** A multi-KB argument blob would cost more context than the marker is worth. */
     private const MAX_ARGUMENT_PREVIEW_CHARS = 200;
 
-    /**
-     * Stands in for an assistant turn whose every tool call was dropped. The
-     * turn still happened, and providers require `content` on an assistant
-     * message that carries no `tool_calls`.
-     */
+    /** Providers require `content` on an assistant message carrying no `tool_calls`. */
     private const EMPTY_TURN_PLACEHOLDER = '[interrupted]';
 
     /**
@@ -407,12 +383,7 @@ final class ToolCallPairingReconciler
         $out      = [];
         $deferred = [];
 
-        /**
-         * The open batch: position in `$out` plus the calls not yet answered.
-         * Whatever remains when the batch closes is what needs repairing.
-         *
-         * @var array{index: int, calls: array<string, array<string, mixed>>}|null
-         */
+        /** @var array{index: int, calls: array<string, array<string, mixed>>}|null $pending */
         $pending = null;
 
         foreach ($messages as $msg) {
@@ -425,14 +396,12 @@ final class ToolCallPairingReconciler
                     continue;
                 }
 
-                // No batch awaits this id: out of order, a duplicate, or its
-                // declaration was evicted. Deferred so it cannot answer the
-                // batch now open.
+                // Out of order, a duplicate, or its declaration was evicted.
                 $deferred[] = $this->orphanedResultMessage($msg);
                 continue;
             }
 
-            // Any non-tool message ends the open batch: the run must stay contiguous.
+            // The run must stay contiguous, so any non-tool message closes it.
             if ($pending !== null) {
                 $this->closeBatch($pending, $out);
                 $pending = null;
@@ -464,17 +433,9 @@ final class ToolCallPairingReconciler
     }
 
     /**
-     * Drops unanswered calls from the declaring assistant, appending one
-     * marker for the batch. Stripping the declaration is load-bearing: an
-     * added `user` row alone would leave the assistant advertising a call
-     * nothing answers.
-     *
-     * Two shapes have to stay valid once the calls are gone. An assistant
-     * left with no `tool_calls` and no `content` is rejected by the
-     * Chat Completions contract, which requires `content` unless
-     * `tool_calls` is set — so it gets a placeholder rather than a null.
-     * And the batch produces a single `user` row, not one per call, so the
-     * repair cannot leave two consecutive same-role turns.
+     * Stripping the declaration is load-bearing: a marker row alone would leave
+     * the assistant advertising a call nothing answers. The whole batch becomes
+     * one `user` row so the repair cannot leave two consecutive same-role turns.
      *
      * @param  array{index: int, calls: array<string, array<string, mixed>>}  $pending
      * @param  list<array<string, mixed>>  $out
@@ -516,10 +477,6 @@ final class ToolCallPairingReconciler
         ];
     }
 
-    /**
-     * @param  array<string, mixed>  $msg
-     * @return list<array<string, mixed>>
-     */
     private function declaredCalls(array $msg): array
     {
         if (($msg['role'] ?? '') !== 'assistant') {
@@ -534,10 +491,6 @@ final class ToolCallPairingReconciler
         return array_values(array_filter($calls, is_array(...)));
     }
 
-    /**
-     * @param  list<array<string, mixed>>  $calls
-     * @return array<string, array<string, mixed>>
-     */
     private function callsById(array $calls): array
     {
         $byId = [];
@@ -548,9 +501,6 @@ final class ToolCallPairingReconciler
         return $byId;
     }
 
-    /**
-     * @param  array<string, mixed>  $call
-     */
     private function abandonedCallMessage(array $call): string
     {
         $function = is_array($call['function'] ?? null) ? $call['function'] : [];

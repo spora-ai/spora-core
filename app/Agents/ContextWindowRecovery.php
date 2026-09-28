@@ -106,15 +106,11 @@ final class ContextWindowRecovery
         $summaryMessages = [];
         foreach ($toSummarizeRows as $row) {
             $content = $row->content ?? '';
-            // Strip base64 data URIs BEFORE sending to the summarizer.
-            // Even a single multi-MB image could overflow the
-            // summarizer's own context window.
+            // Even one multi-MB image can overflow the summarizer's own context window.
             $content = ScrubDataUrls::scrub($content);
 
-            // Rephrase `role:'tool'` → `role:'user'` with a `[tool:name]`
-            // prefix: the summarizer request has no prior `tool_calls` to
-            // anchor against, so an unpaired tool message is rejected with
-            // error 2013. It only needs the text, not the pairing.
+            // The summarizer request carries no prior `tool_calls` to anchor
+            // against, so an unpaired tool message is rejected with error 2013.
             if ($row->role === 'tool') {
                 $summaryMessages[] = [
                     'role'    => 'user',
@@ -127,10 +123,8 @@ final class ContextWindowRecovery
                 continue;
             }
 
-            // On a second compaction round the earlier summary row sits at the
-            // lowest sequence and is summarized again. `summary` and
-            // `attachment` are not roles the summarizer accepts, so only
-            // `assistant` passes through verbatim.
+            // A second round re-summarizes the earlier `summary` row; only
+            // `assistant` is a role the summarizer accepts verbatim.
             $summaryMessages[] = [
                 'role'    => $row->role === 'assistant' ? 'assistant' : 'user',
                 'content' => $content,

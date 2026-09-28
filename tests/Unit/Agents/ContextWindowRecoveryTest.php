@@ -154,9 +154,8 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
     it('leaves the replayed history pairable when the summarised range splits an assistant/tool pair', function (): void {
         [$agent, $task] = seedCompactionTask();
 
-        // 8 rows with keepCount 5 evicts seq 0-2, splitting the assistant at
-        // seq 2 from its result at seq 3 — a bare `tool` row that providers
-        // reject (2013) until the reconciler rewrites it as user text.
+        // The range boundary splits an assistant from its result, leaving a
+        // bare `tool` row that providers reject with 2013.
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q0']);
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
         TaskHistory::create([
@@ -201,8 +200,7 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
 
         expect(toolCallPairingFaults($messages))->toBe([]);
 
-        // The declaration is gone, so the surviving result becomes user text
-        // rather than an unmatchable tool row.
+        // The declaration is gone, so the result becomes user text.
         $roles = array_column($messages, 'role');
         expect($roles)->not->toContain('tool')
             ->and(implode("\n", array_map(
@@ -214,10 +212,7 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
     it('never sends role:summary to the summarizer on a second compaction round', function (): void {
         [$agent, $task] = seedCompactionTask();
 
-        // A first compaction leaves a `summary` row. A second round then
-        // summarizes that row again, and forwarding its role verbatim put
-        // `role: summary` on the wire — the same rejection the read path now
-        // avoids. It has to sit at the lowest sequence to be re-summarized.
+        // Must sit at the lowest sequence to fall inside the summarized range.
         TaskHistory::create([
             'task_id'                   => $task->id,
             'sequence'                  => 0,

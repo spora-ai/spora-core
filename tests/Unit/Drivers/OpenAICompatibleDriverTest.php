@@ -188,8 +188,7 @@ test('complete prepends the system prompt as the first message', function (): vo
 });
 
 test('a compacted task never places a role:summary message on the wire', function (): void {
-    // A compaction row used to ride out as `role: 'summary'`, which every
-    // endpoint rejects; asserting on the captured body covers the full wire path.
+    // Asserting on the captured body covers the full wire path.
     $userId = bootAuthLayer()->register('wire@example.com', 'Password1!', 'Wire');
     $config = Spora\Models\LLMDriverConfiguration::create([
         'principal_id'      => null,
