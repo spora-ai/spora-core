@@ -571,24 +571,16 @@ final class ToolCallPairingReconciler
 
     private function argumentPreview(mixed $arguments): string
     {
-        if (is_array($arguments)) {
-            $arguments = json_encode($arguments, JSON_UNESCAPED_SLASHES);
-        }
+        $arguments = is_array($arguments) ? json_encode($arguments, JSON_UNESCAPED_SLASHES) : $arguments;
+        $text      = is_string($arguments) ? trim($arguments) : '';
 
-        if (! is_string($arguments)) {
-            return '';
-        }
-
-        $text = trim($arguments);
         if ($text === '' || $text === '{}' || $text === '[]') {
             return '';
         }
 
-        if (strlen($text) <= self::MAX_ARGUMENT_PREVIEW_CHARS) {
-            return $text;
-        }
-
-        return substr($text, 0, self::MAX_ARGUMENT_PREVIEW_CHARS) . '… [truncated]';
+        return strlen($text) <= self::MAX_ARGUMENT_PREVIEW_CHARS
+            ? $text
+            : substr($text, 0, self::MAX_ARGUMENT_PREVIEW_CHARS) . '… [truncated]';
     }
 }
 
