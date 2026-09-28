@@ -86,7 +86,7 @@ describe('MessageHistoryBuilder', function (): void {
         $messages = (new MessageHistoryBuilder())->build($task->id);
 
         expect($messages)->toHaveCount(2);
-        expect($messages[0])->toMatchArray(['role' => 'summary', 'content' => 'Compacted first two turns.']);
+        expect($messages[0])->toMatchArray(['role' => 'user', 'content' => 'Compacted first two turns.']);
         expect($messages[1])->toMatchArray(['role' => 'user', 'content' => 'Q3']);
     });
 
@@ -103,6 +103,14 @@ describe('MessageHistoryBuilder', function (): void {
             'tool_call_payload' => json_encode([
                 ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => []]],
             ]),
+        ]);
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_1',
+            'tool_name'    => 'stub_input',
+            'content'      => 'done',
         ]);
 
         $messages = (new MessageHistoryBuilder())->build($task->id);
@@ -126,6 +134,14 @@ describe('MessageHistoryBuilder', function (): void {
                 ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'send_email', 'arguments' => $originalArgs]],
             ]),
         ]);
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_1',
+            'tool_name'    => 'send_email',
+            'content'      => 'sent',
+        ]);
 
         $messages = (new MessageHistoryBuilder())->build($task->id);
 
@@ -140,8 +156,17 @@ describe('MessageHistoryBuilder', function (): void {
 
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
         TaskHistory::create([
+            'task_id'           => $task->id,
+            'sequence'          => 1,
+            'role'              => 'assistant',
+            'content'           => null,
+            'tool_call_payload' => json_encode([
+                ['id' => 'call_xyz', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => []]],
+            ]),
+        ]);
+        TaskHistory::create([
             'task_id'      => $task->id,
-            'sequence'     => 1,
+            'sequence'     => 2,
             'role'         => 'tool',
             'content'      => 'tool output content',
             'tool_call_id' => 'call_xyz',
@@ -150,8 +175,8 @@ describe('MessageHistoryBuilder', function (): void {
 
         $messages = (new MessageHistoryBuilder())->build($task->id);
 
-        expect($messages)->toHaveCount(2);
-        expect($messages[1])->toMatchArray([
+        expect($messages)->toHaveCount(3);
+        expect($messages[2])->toMatchArray([
             'role'         => 'tool',
             'tool_call_id' => 'call_xyz',
             'name'         => 'stub_input',
@@ -180,5 +205,345 @@ describe('MessageHistoryBuilder', function (): void {
         foreach ($messages as $msg) {
             expect($msg)->not->toHaveKey('_seq');
         }
+    });
+});
+
+/**
+ * Build the message list for a task seeded with the given transcript.
+ * Rows are passed in `sequence` order without an explicit `sequence` key
+ * — the array index is the sequence, so each shape reads as the
+ * conversation it represents.
+ *
+ * @param  list<array<string, mixed>>  $rows
+ * @return list<array<string, mixed>>
+ */
+function buildTranscript(int $agentId, array $rows): array
+{
+    $task = makeHistoryTask($agentId);
+    foreach ($rows as $sequence => $row) {
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => $sequence] + $row);
+    }
+
+    return (new MessageHistoryBuilder())->build($task->id);
+}
+
+function historyUser(string $content): array
+{
+    return ['role' => 'user', 'content' => $content];
+}
+
+function historyAssistant(?string $content = null): array
+{
+    return ['role' => 'assistant', 'content' => $content];
+}
+
+function historyToolCalls(?string $content = null, array $calls = []): array
+{
+    return [
+        'role'              => 'assistant',
+        'content'           => $content,
+        'tool_call_payload' => $calls === [] ? null : json_encode($calls),
+    ];
+}
+
+function historyToolResult(string $id, string $name, string $content = 'ok'): array
+{
+    return [
+        'role'         => 'tool',
+        'tool_call_id' => $id,
+        'tool_name'    => $name,
+        'content'      => $content,
+    ];
+}
+
+function call(string $id, string $name, array|string $arguments = []): array
+{
+    return [
+        'id'       => $id,
+        'type'     => 'function',
+        'function' => ['name' => $name, 'arguments' => $arguments],
+    ];
+}
+
+describe('MessageHistoryBuilder tool-call pairing', function (): void {
+    it('repairs the task-465 shape where a worker died before persisting a tool batch', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // Verbatim from the task-465 export: seq 12 declared two read_url
+        // calls that never got results, and the next provider turn (seq 13)
+        // declared two tavily_search calls answered at seq 14-15. The
+        // consecutive assistant messages are what produced
+        // "invalid params, tool call result does not follow tool call (2013)".
+        $messages = buildTranscript($agentId, [
+            historyUser('Research Deloitte 2026'),
+            historyToolCalls(null, [
+                call('call_a1eba934aeaa4edfb756f12a', 'read_url', ['op' => 'fetch', 'url' => 'https://www.deloitte.com/insights']),
+                call('call_cae96da47c7b4f0eadb192c6', 'read_url', ['op' => 'fetch', 'url' => 'https://www2.deloitte.com/content']),
+            ]),
+            historyToolCalls(null, [
+                call('call_function_pogxq3sr277c_1', 'tavily_search', ['query' => 'Deloitte AI']),
+                call('call_function_pogxq3sr277c_2', 'tavily_search', ['query' => 'Deloitte governance']),
+            ]),
+            historyToolResult('call_function_pogxq3sr277c_1', 'tavily_search', 'results one'),
+            historyToolResult('call_function_pogxq3sr277c_2', 'tavily_search', 'results two'),
+        ]);
+
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        // The abandoned assistant no longer advertises unanswered calls.
+        expect($messages[1])->not->toHaveKey('tool_calls');
+
+        // Both abandoned calls are surfaced as text, carrying enough of the
+        // original request for the model to know the fetches never landed.
+        expect($messages[2]['role'])->toBe('user')
+            ->and($messages[2]['content'])->toContain('[tool:read_url]')
+            ->and($messages[2]['content'])->toContain('deloitte.com/insights');
+        expect($messages[3]['role'])->toBe('user')
+            ->and($messages[3]['content'])->toContain('[tool:read_url]');
+
+        // The healthy batch is passed through completely untouched.
+        expect($messages[4]['tool_calls'][0]['id'])->toBe('call_function_pogxq3sr277c_1')
+            ->and($messages[4]['tool_calls'][1]['id'])->toBe('call_function_pogxq3sr277c_2')
+            ->and($messages[5])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_1', 'name' => 'tavily_search', 'content' => 'results one'])
+            ->and($messages[6])->toBe(['role' => 'tool', 'tool_call_id' => 'call_function_pogxq3sr277c_2', 'name' => 'tavily_search', 'content' => 'results two']);
+    });
+
+    it('satisfies the pairing invariant for adversarial transcript shapes', function (array $rows): void {
+        [$agentId] = seedHistoryAgent();
+
+        expect(toolCallPairingFaults(buildTranscript($agentId, $rows)))->toBe([]);
+    })->with([
+        'clean single call' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'clean parallel calls' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'tavily_search')]),
+            historyToolResult('A', 'read_url'),
+            historyToolResult('B', 'tavily_search'),
+        ]],
+
+        'parallel batch with one answer missing' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'consecutive assistant batches' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyToolCalls(null, [call('B', 'tavily_search'), call('C', 'tavily_search')]),
+            historyToolResult('B', 'tavily_search'),
+            historyToolResult('C', 'tavily_search'),
+        ]],
+
+        'tool result preceding its assistant' => [[
+            historyUser('Go'),
+            historyToolResult('A', 'read_url'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+        ]],
+
+        'orphan tool result with no assistant anywhere' => [[
+            historyUser('Go'),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'duplicate tool result' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'dangling batch at end of history' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+        ]],
+
+        'dangling batch interrupted by a user message' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyUser('Are you there?'),
+        ]],
+
+        'dangling batch interrupted by an attachment-derived user message' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            ['role' => 'attachment', 'content' => 'the attached file'],
+            historyUser('Summarise it'),
+        ]],
+
+        'dangling batch interrupted by a compaction row' => [[
+            ['role' => 'summary', 'content' => 'Earlier turns.', 'summarized_sequence_range' => '0-0'],
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyUser('Continue'),
+        ]],
+
+        'three consecutive dangling assistant batches' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyToolCalls(null, [call('B', 'read_url')]),
+            historyToolCalls(null, [call('C', 'read_url')]),
+        ]],
+
+        'undecodable tool_call_payload is not treated as a batch' => [[
+            historyUser('Go'),
+            ['role' => 'assistant', 'content' => 'ok', 'tool_call_payload' => 'not-json'],
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'assistant text between a batch and its results' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyAssistant('one moment'),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'partially answered batch followed by a complete one' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+            historyToolCalls(null, [call('C', 'tavily_search')]),
+            historyToolResult('C', 'tavily_search'),
+        ]],
+
+        'tool result split from its assistant by a compaction row' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            ['role' => 'summary', 'content' => 'Compacted.', 'summarized_sequence_range' => '1-1'],
+            historyToolResult('A', 'read_url'),
+        ]],
+    ]);
+
+    it('leaves a well-formed transcript byte-identical', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $rows = [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'tavily_search')]),
+            historyToolResult('A', 'read_url', 'page one'),
+            historyToolResult('B', 'tavily_search', 'page two'),
+            historyAssistant('All done.'),
+        ];
+
+        expect(buildTranscript($agentId, $rows))->toEqual([
+            ['role' => 'user', 'content' => 'Go'],
+            [
+                'role'       => 'assistant',
+                'content'    => null,
+                'tool_calls' => [
+                    ['id' => 'A', 'type' => 'function', 'function' => ['name' => 'read_url', 'arguments' => '{}']],
+                    ['id' => 'B', 'type' => 'function', 'function' => ['name' => 'tavily_search', 'arguments' => '{}']],
+                ],
+            ],
+            ['role' => 'tool', 'tool_call_id' => 'A', 'name' => 'read_url', 'content' => 'page one'],
+            ['role' => 'tool', 'tool_call_id' => 'B', 'name' => 'tavily_search', 'content' => 'page two'],
+            ['role' => 'assistant', 'content' => 'All done.'],
+        ]);
+    });
+
+    it('is deterministic across repeated builds of the same transcript', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $rows = [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('B', 'read_url')]),
+            historyToolCalls(null, [call('C', 'tavily_search')]),
+            historyToolResult('C', 'tavily_search'),
+        ];
+
+        expect(buildTranscript($agentId, $rows))
+            ->toEqual(buildTranscript($agentId, $rows));
+    });
+
+    it('truncates oversized arguments in the repair marker so it cannot flood the context window', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url', ['url' => str_repeat('https://example.test/', 200)])]),
+        ]);
+
+        expect(toolCallPairingFaults($messages))->toBe([]);
+        expect(strlen((string) $messages[2]['content']))->toBeLessThan(400);
+    });
+
+    it('never leaks scaffolding keys from the repair step', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url')]),
+            historyUser('Continue'),
+        ]);
+
+        foreach ($messages as $msg) {
+            expect($msg)->not->toHaveKey('_seq')
+                ->and($msg)->not->toHaveKey('_compaction');
+        }
+    });
+});
+
+describe('MessageHistoryBuilder compaction row role', function (): void {
+    it('emits compaction rows as role:user because no provider accepts role:summary', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Q1'),
+            historyAssistant('A1'),
+            ['role' => 'summary', 'content' => 'Compacted first two turns.', 'summarized_sequence_range' => '0-1'],
+            historyUser('Q3'),
+        ]);
+
+        expect($messages)->toHaveCount(2)
+            ->and($messages[0]['role'])->toBe('user')
+            ->and($messages[0]['content'])->toBe('Compacted first two turns.')
+            ->and($messages[1])->toBe(['role' => 'user', 'content' => 'Q3']);
+    });
+
+    it('preserves every compaction row across a second compaction round', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // Both summaries must survive: `evictCompactedRows` exempts them by
+        // the `_compaction` sentinel, not by their role.
+        $messages = buildTranscript($agentId, [
+            historyUser('First'),
+            ['role' => 'summary', 'content' => 'First summary', 'summarized_sequence_range' => '0-0'],
+            historyUser('Second'),
+            ['role' => 'summary', 'content' => 'Second summary', 'summarized_sequence_range' => '2-2'],
+            historyUser('Recent'),
+        ]);
+
+        expect($messages)->toHaveCount(3)
+            ->and($messages[0]['role'])->toBe('user')
+            ->and($messages[0]['content'])->toBe('First summary')
+            ->and($messages[1]['role'])->toBe('user')
+            ->and($messages[1]['content'])->toBe('Second summary')
+            ->and($messages[2])->toBe(['role' => 'user', 'content' => 'Recent']);
+    });
+
+    it('keeps a compaction row alive when a later range covers its sequence', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // The second range spans 0-3, which includes the first summary's row.
+        // Compaction rows are exempt from eviction — the sentinel is what
+        // carries that exemption now that they no longer announce themselves
+        // through `role`.
+        $messages = buildTranscript($agentId, [
+            historyUser('First'),
+            historyUser('Second'),
+            ['role' => 'summary', 'content' => 'Old summary', 'summarized_sequence_range' => '0-1'],
+            ['role' => 'summary', 'content' => 'New summary', 'summarized_sequence_range' => '0-3'],
+            historyUser('Recent'),
+        ]);
+
+        expect($messages)->toHaveCount(3)
+            ->and($messages[0]['content'])->toBe('Old summary')
+            ->and($messages[1]['content'])->toBe('New summary')
+            ->and($messages[2]['content'])->toBe('Recent');
     });
 });

@@ -1157,6 +1157,14 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
             ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => '[]']],
         ]),
     ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 2,
+        'role'         => 'tool',
+        'tool_call_id' => 'call_1',
+        'tool_name'    => 'stub_input',
+        'content'      => 'done',
+    ]);
 
     // Capture what buildMessages produces
     /** @var list<array<string,mixed>> $capturedMessages */
@@ -1234,7 +1242,7 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
     // The original 3 rows (sequences 0-2) should be skipped
     expect(count($capturedMessages))->toBe(2);
 
-    expect($capturedMessages[0]['role'])->toBe('summary');
+    expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('User asked about time. Assistant responded.');
 
     expect($capturedMessages[1]['role'])->toBe('user');
@@ -1282,9 +1290,9 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
     // it removes messages with sequence <= 2. summary-1 (seq 1) is NOT in range 2-2, so it is preserved.
     // Result: First summary + Second summary + Recent = 3 messages.
     expect(count($capturedMessages))->toBe(3);
-    expect($capturedMessages[0]['role'])->toBe('summary');
+    expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('First summary');
-    expect($capturedMessages[1]['role'])->toBe('summary');
+    expect($capturedMessages[1]['role'])->toBe('user');
     expect($capturedMessages[1]['content'])->toBe('Second summary');
     expect($capturedMessages[2]['role'])->toBe('user');
     expect($capturedMessages[2]['content'])->toBe('Recent');
@@ -3874,7 +3882,7 @@ describe('Orchestrator::buildMessages — summary substitution', function (): vo
         //   [1] = Q3 (post-summary user message)
         expect($capturedMessages)->toHaveCount(2);
         expect($capturedMessages[0])->toMatchArray([
-            'role'    => 'summary',
+            'role'    => 'user',
             'content' => 'Compacted first two turns.',
         ]);
         expect($capturedMessages[1])->toMatchArray([
@@ -3909,6 +3917,14 @@ describe('Orchestrator::buildMessages — assistant tool_call payload', function
             'tool_call_payload' => json_encode([
                 ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => []]],
             ]),
+        ]);
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_1',
+            'tool_name'    => 'stub_input',
+            'content'      => 'done',
         ]);
 
         $capturedMessages = null;
@@ -3952,6 +3968,14 @@ describe('Orchestrator::buildMessages — assistant tool_call payload', function
                 ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => 'send_email', 'arguments' => $originalArgs]],
             ]),
         ]);
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 2,
+            'role'         => 'tool',
+            'tool_call_id' => 'call_1',
+            'tool_name'    => 'send_email',
+            'content'      => 'sent',
+        ]);
 
         $capturedMessages = null;
         $mock             = Mockery::mock(LLMDriverInterface::class);
@@ -3986,8 +4010,17 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
 
         TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
         TaskHistory::create([
+            'task_id'           => $task->id,
+            'sequence'          => 1,
+            'role'              => 'assistant',
+            'content'           => null,
+            'tool_call_payload' => json_encode([
+                ['id' => 'call_xyz', 'type' => 'function', 'function' => ['name' => 'stub_input', 'arguments' => []]],
+            ]),
+        ]);
+        TaskHistory::create([
             'task_id'      => $task->id,
-            'sequence'     => 1,
+            'sequence'     => 2,
             'role'         => 'tool',
             'content'      => 'tool output content',
             'tool_call_id' => 'call_xyz',
@@ -4005,11 +4038,11 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
         $orch = makeOrchestrator(mockDriverFactory($mock));
         $orch->tick($task->id);
 
-        // Expect 2 messages: user + tool.
-        expect($capturedMessages)->toHaveCount(2);
+        // Expect 3 messages: user + assistant(tool_calls) + tool.
+        expect($capturedMessages)->toHaveCount(3);
 
         // The tool message has the OpenAI-compatible shape.
-        $toolMsg = $capturedMessages[1];
+        $toolMsg = $capturedMessages[2];
         expect($toolMsg)->toMatchArray([
             'role'         => 'tool',
             'tool_call_id' => 'call_xyz',

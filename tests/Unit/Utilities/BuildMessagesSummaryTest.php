@@ -118,7 +118,7 @@ final class BuildMessagesSummaryTest extends TestCase
         $messages = $this->callBuildMessages($task);
 
         $this->assertCount(2, $messages);
-        $this->assertEquals('summary', $messages[0]['role']);
+        $this->assertEquals('user', $messages[0]['role']);
         $this->assertEquals('User asked about time', $messages[0]['content']);
         $this->assertEquals('user', $messages[1]['role']);
         $this->assertEquals('Thanks', $messages[1]['content']);
@@ -154,9 +154,9 @@ final class BuildMessagesSummaryTest extends TestCase
         // summary-1 (seq 1) is NOT in range 2-2, so it is preserved.
         // Final: First summary + Second summary + Recent = 3 messages.
         $this->assertCount(3, $messages);
-        $this->assertEquals('summary', $messages[0]['role']);
+        $this->assertEquals('user', $messages[0]['role']);
         $this->assertEquals('First summary', $messages[0]['content']);
-        $this->assertEquals('summary', $messages[1]['role']);
+        $this->assertEquals('user', $messages[1]['role']);
         $this->assertEquals('Second summary', $messages[1]['content']);
         $this->assertEquals('user', $messages[2]['role']);
         $this->assertEquals('Recent', $messages[2]['content']);

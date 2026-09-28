@@ -23,6 +23,11 @@ use Spora\Models\TaskHistory;
  * thinking, images) are rendered through the block list so the provider
  * sees the original signed payload on the next outbound turn.
  *
+ * The result is passed through {@see ToolCallPairingReconciler} so a tick
+ * interrupted part-way through a tool batch cannot replay an unpaired
+ * declaration to the provider, and compaction rows leave the builder as
+ * `role: user` — `summary` is internal bookkeeping, not a wire role.
+ *
  * The internal `content` shape is `['type'=>'text'|'image', 'text'|'mediaType'|'base64', …]`;
  * the per-provider wire shape is built by the matching `LLMDriverInterface`
  * implementation (OpenAI, Anthropic, …).
@@ -43,6 +48,12 @@ final class MessageHistoryBuilder
             ->get();
 
         $messages = $this->applySummaryCompaction($rows);
+
+        // After compaction: compaction is itself a source of unpaired rows,
+        // so reconciling earlier would let a synthetic row be evicted while
+        // the real orphan survived.
+        $messages = (new ToolCallPairingReconciler())->reconcile($messages);
+
         $this->stripScaffoldingKeys($messages);
 
         return $messages;
@@ -213,21 +224,30 @@ final class MessageHistoryBuilder
 
         $messages = array_values(array_filter(
             $messages,
-            static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['role'] ?? '') === 'summary',
+            static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['_compaction'] ?? false) === true,
         ));
 
         return max($lastSummarySeqEnd, $rangeEnd);
     }
 
     /**
-     * @return array{role: string, content: string|null, _seq?: int}
+     * A compaction row is a user-side statement about the conversation, so
+     * it leaves the builder as `role: user`. `summary` is internal bookkeeping
+     * and every provider rejects it on the wire.
+     *
+     * `_compaction` carries the eviction exemption for {@see evictCompactedRows()}
+     * now that the role no longer does, and is removed with the rest of the
+     * scaffolding by {@see stripScaffoldingKeys()}.
+     *
+     * @return array{role: string, content: string|null, _compaction: true, _seq: int}
      */
     private function summaryMessage(TaskHistory $row): array
     {
         return [
-            'role'    => 'summary',
-            'content' => $row->content,
-            '_seq'    => $row->sequence,
+            'role'        => 'user',
+            'content'     => $row->content,
+            '_compaction' => true,
+            '_seq'        => $row->sequence,
         ];
     }
 
@@ -340,9 +360,235 @@ final class MessageHistoryBuilder
     private function stripScaffoldingKeys(array &$messages): void
     {
         foreach ($messages as &$msg) {
-            unset($msg['_seq']);
+            unset($msg['_seq'], $msg['_compaction']);
         }
         unset($msg);
+    }
+}
+
+/**
+ * Repairs the tool-call pairing rule on the read path.
+ *
+ * Providers accept a `tool` message only when it immediately follows the
+ * assistant message that declared its `tool_call_id`, before any other role
+ * intervenes. Anything else is rejected upstream as HTTP 400 error 2013
+ * ("tool call result does not follow tool call"). Persisted history breaks
+ * that rule whenever a tick is interrupted part-way through a tool batch —
+ * a worker death, a manual abort, the `max_steps` auto-abort, a provider
+ * error — and the next tick replays the broken shape verbatim.
+ *
+ * Rather than trying to predict every interruption, this pass repairs
+ * whatever it is handed. For each declared call it either finds the
+ * matching result or removes the declaration and states the failure as
+ * user text, so the model learns the call never landed instead of either
+ * seeing nothing or getting a 400. Internal to
+ * {@see MessageHistoryBuilder} — invoked by {@see MessageHistoryBuilder::build()}.
+ */
+final class ToolCallPairingReconciler
+{
+    /**
+     * Cap on the argument preview carried in a repair marker. The marker's
+     * job is to record that a call never returned, not to restate the
+     * request — a multi-KB argument blob would cost more context than it
+     * is worth.
+     */
+    private const MAX_ARGUMENT_PREVIEW_CHARS = 200;
+
+    /**
+     * @param  list<array<string, mixed>>  $messages
+     * @return list<array<string, mixed>>
+     */
+    public function reconcile(array $messages): array
+    {
+        $out      = [];
+        $deferred = [];
+
+        /**
+         * The batch awaiting results, as `['index' => position in $out,
+         * 'calls' => unanswered calls keyed by id]`. The calls are removed
+         * from the map as their results arrive, so whatever remains when the
+         * batch closes is exactly what needs repairing.
+         *
+         * @var array{index: int, calls: array<string, array<string, mixed>>}|null
+         */
+        $pending = null;
+
+        foreach ($messages as $msg) {
+            if (($msg['role'] ?? '') === 'tool') {
+                $id = (string) ($msg['tool_call_id'] ?? '');
+
+                if ($pending !== null && array_key_exists($id, $pending['calls'])) {
+                    unset($pending['calls'][$id]);
+                    $out[] = $msg;
+                    continue;
+                }
+
+                // No batch is waiting for this id — it arrived out of order,
+                // duplicates an earlier result, or its declaration was
+                // dropped by compaction. Held back so it cannot be mistaken
+                // for a result of the batch that is currently open.
+                $deferred[] = $this->orphanedResultMessage($msg);
+                continue;
+            }
+
+            // Any non-tool message ends the open batch: providers require the
+            // whole run to be contiguous.
+            if ($pending !== null) {
+                $this->closeBatch($pending, $out);
+                $pending = null;
+            }
+            foreach ($deferred as $orphan) {
+                $out[] = $orphan;
+            }
+            $deferred = [];
+
+            $calls = $this->declaredCalls($msg);
+            $out[]  = $msg;
+
+            if ($calls !== []) {
+                $pending = [
+                    'index' => (int) array_key_last($out),
+                    'calls' => $this->callsById($calls),
+                ];
+            }
+        }
+
+        if ($pending !== null) {
+            $this->closeBatch($pending, $out);
+        }
+        foreach ($deferred as $orphan) {
+            $out[] = $orphan;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Drops the unanswered calls from the assistant that declared them and
+     * appends one marker per dropped call.
+     *
+     * Stripping the declaration is the load-bearing step: leaving it in place
+     * and merely adding a `user` row would leave the assistant advertising a
+     * call nothing answers, which is the original violation.
+     *
+     * @param  array{index: int, calls: array<string, array<string, mixed>>}  $pending
+     * @param  list<array<string, mixed>>  $out
+     */
+    private function closeBatch(array $pending, array &$out): void
+    {
+        if ($pending['calls'] === []) {
+            return;
+        }
+
+        $assistant = &$out[$pending['index']];
+        $answered  = [];
+
+        foreach ((array) ($assistant['tool_calls'] ?? []) as $call) {
+            if (! is_array($call) || ! array_key_exists((string) ($call['id'] ?? ''), $pending['calls'])) {
+                $answered[] = $call;
+            }
+        }
+
+        if ($answered === []) {
+            unset($assistant['tool_calls']);
+        } else {
+            $assistant['tool_calls'] = $answered;
+        }
+        unset($assistant);
+
+        foreach ($pending['calls'] as $call) {
+            $out[] = [
+                'role'    => 'user',
+                'content' => $this->abandonedCallMessage($call),
+            ];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $msg
+     * @return list<array<string, mixed>>
+     */
+    private function declaredCalls(array $msg): array
+    {
+        if (($msg['role'] ?? '') !== 'assistant') {
+            return [];
+        }
+
+        $calls = $msg['tool_calls'] ?? null;
+        if (! is_array($calls)) {
+            return [];
+        }
+
+        return array_values(array_filter($calls, is_array(...)));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $calls
+     * @return array<string, array<string, mixed>>
+     */
+    private function callsById(array $calls): array
+    {
+        $byId = [];
+        foreach ($calls as $call) {
+            $byId[(string) ($call['id'] ?? '')] = $call;
+        }
+
+        return $byId;
+    }
+
+    /**
+     * @param  array<string, mixed>  $call
+     */
+    private function abandonedCallMessage(array $call): string
+    {
+        $function = is_array($call['function'] ?? null) ? $call['function'] : [];
+        $label    = sprintf('[tool:%s] tool call did not return a result.', (string) ($function['name'] ?? 'unknown'));
+
+        $preview = $this->argumentPreview($function['arguments'] ?? null);
+
+        return $preview === '' ? $label : $label . ' arguments: ' . $preview;
+    }
+
+    /**
+     * @param  array<string, mixed>  $msg
+     * @return array<string, mixed>
+     */
+    private function orphanedResultMessage(array $msg): array
+    {
+        $label = sprintf(
+            '[tool:%s] result recorded for a call that does not immediately precede it (id=%s).',
+            (string) ($msg['name'] ?? 'unknown'),
+            (string) ($msg['tool_call_id'] ?? ''),
+        );
+
+        $content = $msg['content'] ?? null;
+
+        return [
+            'role'    => 'user',
+            'content' => is_string($content) && $content !== '' ? $label . ' ' . $content : $label,
+        ];
+    }
+
+    private function argumentPreview(mixed $arguments): string
+    {
+        if (is_array($arguments)) {
+            $arguments = json_encode($arguments, JSON_UNESCAPED_SLASHES);
+        }
+
+        if (! is_string($arguments)) {
+            return '';
+        }
+
+        $text = trim($arguments);
+        if ($text === '' || $text === '{}' || $text === '[]') {
+            return '';
+        }
+
+        if (strlen($text) <= self::MAX_ARGUMENT_PREVIEW_CHARS) {
+            return $text;
+        }
+
+        return substr($text, 0, self::MAX_ARGUMENT_PREVIEW_CHARS) . '… [truncated]';
     }
 }
 
