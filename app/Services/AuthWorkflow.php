@@ -8,7 +8,6 @@ use DateTime;
 use Delight\Auth\AuthException;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
-use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
@@ -151,8 +150,13 @@ final class AuthWorkflow
      * Map a failed login to its error response. Kept apart from
      * {@see performLogin()} so the catch arms collapse into a single
      * multi-catch and stay under the S1142 (≤3 returns) limit.
+     *
+     * The parameter is the exact union caught in {@see performLogin()}, not
+     * `RuntimeException`, so the trailing fall-through can only ever mean
+     * "bad credentials" — widening the catch without widening this signature
+     * would silently mislabel the new type instead of failing loudly.
      */
-    private function mapLoginFailure(RuntimeException $e): JsonResponse
+    private function mapLoginFailure(InvalidCredentialsException|AccountUnverifiedException|TooManyRequestsException $e): JsonResponse
     {
         if ($e instanceof TooManyRequestsException) {
             $response = $this->validator->error('TOO_MANY_REQUESTS', 'Too many login attempts. Please try again later.', Response::HTTP_TOO_MANY_REQUESTS);
