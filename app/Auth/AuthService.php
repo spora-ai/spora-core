@@ -8,11 +8,13 @@ use Delight\Auth\Auth;
 use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\InvalidPasswordException;
+use Delight\Auth\TooManyRequestsException as DelightTooManyRequestsException;
 use Delight\Auth\UserAlreadyExistsException;
 use InvalidArgumentException;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Auth\Exceptions\TooManyRequestsException;
 use Spora\Models\User;
 use Spora\Services\MailerInterface;
 
@@ -98,6 +100,7 @@ class AuthService
      *
      * @throws InvalidCredentialsException  if the email or password is incorrect
      * @throws AccountUnverifiedException   if the account requires email verification
+     * @throws TooManyRequestsException     if the email or IP login budget is exhausted
      */
     public function login(string $email, string $password, bool $rememberMe = false): void
     {
@@ -109,6 +112,9 @@ class AuthService
             throw new InvalidCredentialsException('The email address or password is incorrect.');
         } catch (EmailNotVerifiedException) {
             throw new AccountUnverifiedException('Please verify your email address before logging in.');
+        } catch (DelightTooManyRequestsException $e) {
+            // delight-im passes the estimated wait in seconds as the exception code.
+            throw new TooManyRequestsException((int) $e->getCode());
         }
     }
 

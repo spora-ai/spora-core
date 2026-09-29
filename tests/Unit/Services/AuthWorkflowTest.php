@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Unit\Services;
 
 use Illuminate\Database\Capsule\Manager as DB;
+use Mockery;
 use Spora\Auth\AuthService;
+use Spora\Auth\Exceptions\TooManyRequestsException;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
@@ -71,6 +73,32 @@ final class TransportThrowingMailerStub implements MailerInterface
         return true;
     }
 }
+
+test('performLogin returns 429 with Retry-After when the login budget is exhausted', function (): void {
+    $authService = Mockery::mock(AuthService::class);
+    $authService->shouldReceive('login')
+        ->andThrow(new TooManyRequestsException(891));
+
+    $workflow = new AuthWorkflow(
+        $authService,
+        new UserService(),
+        new CsrfTokenService(),
+        new AuthValidator(),
+    );
+
+    $request = jsonRequest('POST', '/api/v1/auth/login', [
+        'email'    => 'throttled@example.com',
+        'password' => 'ValidPass1!',
+    ]);
+
+    $response = $workflow->handleLogin($request, '10.0.0.1');
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_TOO_MANY_REQUESTS);
+    expect($response->headers->get('Retry-After'))->toBe('891');
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['error']['code'])->toBe('TOO_MANY_REQUESTS');
+});
 
 test('performEmailChangeRequest returns 502 EMAIL_SEND_FAILED when the SMTP callback throws', function (): void {
     [$workflow, $authService] = makeWorkflow();

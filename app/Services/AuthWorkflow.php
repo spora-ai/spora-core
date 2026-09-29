@@ -12,6 +12,7 @@ use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Auth\Exceptions\TooManyRequestsException;
 use Spora\Security\CsrfTokenService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -132,6 +133,11 @@ final class AuthWorkflow
             return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
         } catch (AccountUnverifiedException) {
             return $this->validator->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
+        } catch (TooManyRequestsException $e) {
+            $response = $this->validator->error('TOO_MANY_REQUESTS', 'Too many login attempts. Please try again later.', Response::HTTP_TOO_MANY_REQUESTS);
+            $response->headers->set('Retry-After', (string) $e->retryAfterSeconds());
+
+            return $response;
         }
 
         $userId = $this->authService->currentUserId();
