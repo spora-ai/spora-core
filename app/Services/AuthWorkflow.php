@@ -8,6 +8,7 @@ use DateTime;
 use Delight\Auth\AuthException;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
@@ -129,15 +130,8 @@ final class AuthWorkflow
         try {
             $this->authService->login((string) $body['email'], (string) $body['password'], (bool) ($body['remember_me'] ?? false));
             RateLimiter::clear($clientIp);
-        } catch (InvalidCredentialsException) {
-            return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
-        } catch (AccountUnverifiedException) {
-            return $this->validator->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
-        } catch (TooManyRequestsException $e) {
-            $response = $this->validator->error('TOO_MANY_REQUESTS', 'Too many login attempts. Please try again later.', Response::HTTP_TOO_MANY_REQUESTS);
-            $response->headers->set('Retry-After', (string) $e->retryAfterSeconds());
-
-            return $response;
+        } catch (InvalidCredentialsException|AccountUnverifiedException|TooManyRequestsException $e) {
+            return $this->mapLoginFailure($e);
         }
 
         $userId = $this->authService->currentUserId();
@@ -151,6 +145,27 @@ final class AuthWorkflow
             ]],
             Response::HTTP_OK,
         );
+    }
+
+    /**
+     * Map a failed login to its error response. Kept apart from
+     * {@see performLogin()} so the catch arms collapse into a single
+     * multi-catch and stay under the S1142 (≤3 returns) limit.
+     */
+    private function mapLoginFailure(RuntimeException $e): JsonResponse
+    {
+        if ($e instanceof TooManyRequestsException) {
+            $response = $this->validator->error('TOO_MANY_REQUESTS', 'Too many login attempts. Please try again later.', Response::HTTP_TOO_MANY_REQUESTS);
+            $response->headers->set('Retry-After', (string) $e->retryAfterSeconds());
+
+            return $response;
+        }
+
+        if ($e instanceof AccountUnverifiedException) {
+            return $this->validator->error('ACCOUNT_UNVERIFIED', 'Please verify your email address before logging in.', Response::HTTP_FORBIDDEN);
+        }
+
+        return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
     }
 
     public function buildMeResponse(int $userId): JsonResponse
