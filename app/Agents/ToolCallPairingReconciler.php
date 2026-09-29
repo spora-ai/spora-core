@@ -50,10 +50,7 @@ final class ToolCallPairingReconciler
                 $this->closeBatch($pending, $out);
                 $pending = null;
             }
-            foreach ($deferred as $orphan) {
-                $out[] = $orphan;
-            }
-            $deferred = [];
+            $this->flushOrphans($deferred, $out);
 
             $declaration = $this->declaredCalls($msg);
             $index       = count($out);
@@ -77,11 +74,26 @@ final class ToolCallPairingReconciler
         if ($pending !== null) {
             $this->closeBatch($pending, $out);
         }
+        $this->flushOrphans($deferred, $out);
+
+        return $out;
+    }
+
+    /**
+     * An orphan marker is held back until the run that produced it ends, so a
+     * result arriving out of order is restated after the declaration it could
+     * not join rather than before it.
+     *
+     * @param  list<array<string, mixed>>  $deferred
+     * @param  list<array<string, mixed>>  $out
+     */
+    private function flushOrphans(array &$deferred, array &$out): void
+    {
         foreach ($deferred as $orphan) {
             $out[] = $orphan;
         }
 
-        return $out;
+        $deferred = [];
     }
 
     /**
