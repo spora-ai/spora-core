@@ -581,8 +581,15 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
             ],
         ]);
 
+        // A JSON column does not promise key order — MySQL normalises object
+        // keys on write, so the blocks come back with the same pairs in a
+        // different order. Compare the list as a set, then assert the two
+        // facts the fix is actually about: the signed thinking survived, and
+        // the placeholder was not substituted.
         expect($messages[1])->not->toHaveKey('tool_calls')
-            ->and($messages[1]['content'])->toBe($blocks)
+            ->and($messages[1]['content'])->toEqual($blocks)
+            ->and($messages[1]['content'][0]['signature'])->toBe('sig-1')
+            ->and($messages[1]['content'][1]['text'])->toBe('I will fetch both URLs.')
             ->and($messages[1]['content'])->not->toBe('[interrupted]');
     });
 
