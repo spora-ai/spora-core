@@ -23,6 +23,9 @@ use Spora\Models\TaskHistory;
  * thinking, images) are rendered through the block list so the provider
  * sees the original signed payload on the next outbound turn.
  *
+ * The result passes through {@see ToolCallPairingReconciler}, which repairs
+ * tool batches left unpaired by an interrupted tick.
+ *
  * The internal `content` shape is `['type'=>'text'|'image', 'text'|'mediaType'|'base64', …]`;
  * the per-provider wire shape is built by the matching `LLMDriverInterface`
  * implementation (OpenAI, Anthropic, …).
@@ -43,6 +46,10 @@ final class MessageHistoryBuilder
             ->get();
 
         $messages = $this->applySummaryCompaction($rows);
+
+        // Must run after compaction, which orphans tool results itself.
+        $messages = (new ToolCallPairingReconciler())->reconcile($messages);
+
         $this->stripScaffoldingKeys($messages);
 
         return $messages;
@@ -199,11 +206,8 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Removes non-summary messages whose `_seq` is inside the summarised range.
-     * Summary rows keep their own `_seq` and are always preserved.
-     *
      * @param  list<array<string, mixed>>  $messages
-     * @return int  The new $lastSummarySeqEnd value (the largest range end seen).
+     * @return int  The largest range end seen.
      */
     private function evictCompactedRows(array &$messages, int $rangeEnd, int $lastSummarySeqEnd): int
     {
@@ -213,30 +217,31 @@ final class MessageHistoryBuilder
 
         $messages = array_values(array_filter(
             $messages,
-            static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['role'] ?? '') === 'summary',
+            static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['_compaction'] ?? false) === true,
         ));
 
         return max($lastSummarySeqEnd, $rangeEnd);
     }
 
     /**
-     * @return array{role: string, content: string|null, _seq?: int}
+     * `summary` is internal bookkeeping that every provider rejects on the wire;
+     * `_compaction` carries the eviction exemption that the role used to.
+     *
+     * @return array{role: string, content: string|null, _compaction: true, _seq: int}
      */
     private function summaryMessage(TaskHistory $row): array
     {
         return [
-            'role'    => 'summary',
-            'content' => $row->content,
-            '_seq'    => $row->sequence,
+            'role'        => 'user',
+            'content'     => $row->content,
+            '_compaction' => true,
+            '_seq'        => $row->sequence,
         ];
     }
 
     /**
-     * The `attachment` branch is the load-bearing guard: regardless of
-     * whether `$row->attachments` is non-empty, we always route through
-     * {@see attachmentMessage()} which returns a `user` message. The
-     * legacy fallthrough `{role: 'attachment', content: ...}` was a 400
-     * `invalid role: attachment` waiting to happen on every provider.
+     * `attachment` has no valid wire role, so it must never fall through to a
+     * literal `{role: 'attachment'}` — every provider rejects that with a 400.
      *
      * @return array<string, mixed>
      */
@@ -265,10 +270,15 @@ final class MessageHistoryBuilder
             ];
         } elseif ($row->role === 'assistant' && $row->tool_call_payload !== null) {
             $message = [
-                'role' => 'assistant',
+                'role'    => 'assistant',
                 'content' => $content,
-                'tool_calls' => $this->decodeToolCallPayload($row->tool_call_payload),
             ];
+
+            // Omitted rather than empty: no provider accepts `tool_calls: []`.
+            $calls = $this->decodeToolCallPayload($row->tool_call_payload);
+            if ($calls !== []) {
+                $message['tool_calls'] = $calls;
+            }
         }
 
         return $message;
@@ -304,43 +314,47 @@ final class MessageHistoryBuilder
     }
 
     /**
-     * Rewrites empty `arguments` arrays to the literal `'{}'` string —
-     * strict providers (OpenAI, MiniMax, LM Studio) reject `[]` for the
-     * tool-call `arguments` field.
+     * Empty `arguments` become the literal `'{}'`: strict providers reject `[]`.
+     * Non-array entries are dropped rather than forwarded as `tool_calls`.
      *
      * @return list<array<string, mixed>>
      */
     private function decodeToolCallPayload(string $payload): array
     {
         $decoded = json_decode($payload, true);
-        if (!is_array($decoded)) {
+        if (! is_array($decoded)) {
             return [];
         }
 
-        foreach ($decoded as $i => $tc) {
-            if (!isset($tc['function']['arguments'])) {
+        $calls = [];
+        foreach ($decoded as $tc) {
+            if (! is_array($tc)) {
                 continue;
             }
 
-            $args         = $tc['function']['arguments'];
-            $decodedArgs  = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
-            if ($decodedArgs === []) {
-                $decoded[$i]['function']['arguments'] = '{}';
+            if (isset($tc['function']['arguments'])) {
+                $args        = $tc['function']['arguments'];
+                $decodedArgs = is_string($args) ? (json_decode($args, true) ?? []) : (array) $args;
+                if ($decodedArgs === []) {
+                    $tc['function']['arguments'] = '{}';
+                }
             }
+
+            $calls[] = $tc;
         }
 
-        return array_values($decoded);
+        return $calls;
     }
 
     /**
-     * Scaffolding key — stripped before the wire payload is built.
+     * Scaffolding keys — stripped before the wire payload is built.
      *
      * @param  list<array<string, mixed>>  $messages
      */
     private function stripScaffoldingKeys(array &$messages): void
     {
         foreach ($messages as &$msg) {
-            unset($msg['_seq']);
+            unset($msg['_seq'], $msg['_compaction']);
         }
         unset($msg);
     }

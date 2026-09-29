@@ -187,6 +187,67 @@ test('complete prepends the system prompt as the first message', function (): vo
         ->and($capturedBody['messages'][1])->toBe(['role' => 'user', 'content' => 'Hello']);
 });
 
+test('a compacted task never places a role:summary message on the wire', function (): void {
+    // Asserting on the captured body covers the full wire path.
+    $userId = bootAuthLayer()->register('wire@example.com', 'Password1!', 'Wire');
+    $config = Spora\Models\LLMDriverConfiguration::create([
+        'principal_id'      => null,
+        'name'              => 'Wire Test Config',
+        'driver_class'      => OpenAICompatibleDriver::class,
+        'settings'          => json_encode(['api_key' => 'test']),
+        'is_global'         => true,
+        'is_default'        => true,
+        'context_window'    => 128000,
+        'max_tokens_output' => 4096,
+    ]);
+    $agent = Spora\Models\Agent::create([
+        'principal_id'        => createUserPrincipalPublic($userId),
+        'name'                => 'Wire Test Agent',
+        'llm_driver_config_id' => $config->id,
+        'max_steps'           => 10,
+        'is_active'           => true,
+    ]);
+    $task = Spora\Models\Task::create([
+        'agent_id'        => $agent->id,
+        'principal_id'    => (int) $agent->principal_id,
+        'trigger_user_id' => $userId,
+        'status'          => 'RUNNING',
+        'user_prompt'     => 'wire test',
+        'step_count'      => 0,
+        'max_steps'       => 10,
+    ]);
+
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q1']);
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
+    Spora\Models\TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 2,
+        'role'                      => 'summary',
+        'content'                   => 'Compacted first two turns.',
+        'summarized_sequence_range' => '0-1',
+    ]);
+    Spora\Models\TaskHistory::create(['task_id' => $task->id, 'sequence' => 3, 'role' => 'user', 'content' => 'Q3']);
+
+    $capturedBody = [];
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
+        $capturedBody = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'      => 'cmp',
+            'choices' => [['finish_reason' => 'stop', 'message' => ['content' => 'ok']]],
+            'usage'   => ['prompt_tokens' => 1, 'completion_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    makeOpenAIDriver($client)->complete(new LLMRequest(
+        systemPrompt: 'Be concise.',
+        messages: (new Spora\Agents\MessageHistoryBuilder())->build($task->id),
+        tools: [],
+    ));
+
+    expect(array_column($capturedBody['messages'], 'role'))->toBe(['system', 'user', 'user']);
+});
+
 // Timeout configuration
 
 test('complete uses the timeout value passed at construction', function (): void {

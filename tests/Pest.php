@@ -254,3 +254,62 @@ function resetSporaConfigKeyPath(): void
         file_put_contents($configPath, $updated);
     }
 }
+
+/**
+ * Oracle for the tool-call pairing rule: a `tool` message is only legal
+ * immediately after the assistant message that declared the same
+ * `tool_call_id`. Contiguity is strict — a lone `tool` row whose id was
+ * declared earlier in the transcript is still a fault, which is the shape
+ * compaction leaves when its range boundary splits an assistant/tool pair.
+ *
+ * Declarations are held as a list, not keyed by id: an assistant row naming
+ * the same id twice needs two results, so a collapsed duplicate cannot hide.
+ *
+ * @param  list<array<string, mixed>>  $messages
+ * @return list<string>  Empty when the list satisfies the rule.
+ */
+function toolCallPairingFaults(array $messages): array
+{
+    $faults = [];
+
+    /** @var list<string> $open  Declared ids still awaiting their own result. */
+    $open = [];
+
+    foreach ($messages as $i => $msg) {
+        $role  = (string) ($msg['role'] ?? '');
+        $calls = $role === 'assistant' ? ($msg['tool_calls'] ?? null) : null;
+
+        if (is_array($calls) && $calls !== []) {
+            if ($open !== []) {
+                $faults[] = sprintf('unanswered tool_calls at index %d interrupted by a new assistant message', $i);
+            }
+            $open = [];
+            foreach ($calls as $call) {
+                $open[] = (string) ($call['id'] ?? '');
+            }
+            continue;
+        }
+
+        if ($role === 'tool') {
+            $id = (string) ($msg['tool_call_id'] ?? '');
+            $at = array_search($id, $open, true);
+            if ($at === false) {
+                $faults[] = sprintf('tool result at index %d (id=%s) does not follow a matching tool_call', $i, $id);
+                continue;
+            }
+            unset($open[$at]);
+            $open = array_values($open);
+            continue;
+        }
+
+        if ($open !== []) {
+            $faults[] = sprintf('unanswered tool_calls interrupted by role=%s at index %d', $role, $i);
+        }
+    }
+
+    foreach ($open as $id) {
+        $faults[] = sprintf('tool_call %s never receives a tool result', $id);
+    }
+
+    return $faults;
+}

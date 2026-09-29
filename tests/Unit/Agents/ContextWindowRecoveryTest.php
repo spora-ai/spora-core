@@ -150,4 +150,110 @@ describe('ContextWindowRecovery::compactHistory', function (): void {
             ->and($summaryRow->content)->toBe('compacted.')
             ->and($summaryRow->summarized_sequence_range)->toBe('0-2');
     });
+
+    it('leaves the replayed history pairable when the summarised range splits an assistant/tool pair', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        // The range boundary splits an assistant from its result, leaving a
+        // bare `tool` row that providers reject with 2013.
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q0']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
+        TaskHistory::create([
+            'task_id'           => $task->id,
+            'sequence'          => 2,
+            'role'              => 'assistant',
+            'content'           => null,
+            'tool_call_payload' => json_encode([
+                ['id' => 'call_split', 'type' => 'function', 'function' => ['name' => 'read_url', 'arguments' => ['url' => 'https://example.test']]],
+            ]),
+        ]);
+        TaskHistory::create([
+            'task_id'       => $task->id,
+            'sequence'      => 3,
+            'role'          => 'tool',
+            'tool_call_id'  => 'call_split',
+            'tool_name'     => 'read_url',
+            'content'       => 'fetched page',
+        ]);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Q4']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 5, 'role' => 'assistant', 'content' => 'A5']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 6, 'role' => 'user', 'content' => 'Q6']);
+        TaskHistory::create(['task_id' => $task->id, 'sequence' => 7, 'role' => 'assistant', 'content' => 'A7']);
+
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')
+            ->andReturn(new LLMResponse('compacted.', [], 10, 5, 'cmp_summary'));
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        $recovery = new ContextWindowRecovery(
+            new Orchestrator($factory, new OrchestratorConfig(toolInstances: [])),
+            $factory,
+        );
+        (new ReflectionClass($recovery))->getMethod('compactHistory')
+            ->invoke($recovery, $task->id, 4096, 0.2, $agent);
+
+        $messages = (new Spora\Agents\MessageHistoryBuilder())->build($task->id);
+
+        expect(toolCallPairingFaults($messages))->toBe([]);
+
+        // The declaration is gone, so the result becomes user text.
+        $roles = array_column($messages, 'role');
+        expect($roles)->not->toContain('tool')
+            ->and(implode("\n", array_map(
+                static fn(array $m): string => (string) ($m['content'] ?? ''),
+                $messages,
+            )))->toContain('read_url');
+    });
+
+    it('never sends role:summary to the summarizer on a second compaction round', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        // Must sit at the lowest sequence to fall inside the summarized range.
+        TaskHistory::create([
+            'task_id'                   => $task->id,
+            'sequence'                  => 0,
+            'role'                      => 'summary',
+            'content'                   => 'First round summary.',
+            'summarized_sequence_range' => '0-0',
+        ]);
+        for ($i = 1; $i <= 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 1 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $capturedRef = null;
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturnUsing(static function (LLMRequest $req) use (&$capturedRef): LLMResponse {
+            $capturedRef = $req;
+            return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
+        });
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        $recovery = new ContextWindowRecovery(
+            new Orchestrator($factory, new OrchestratorConfig(toolInstances: [])),
+            $factory,
+        );
+        (new ReflectionClass($recovery))->getMethod('compactHistory')
+            ->invoke($recovery, $task->id, 4096, 0.2, $agent);
+
+        expect($capturedRef)->not->toBeNull();
+        $sent = $capturedRef->messages;
+        expect($sent)->not->toBeEmpty();
+
+        foreach ($sent as $msg) {
+            expect($msg['role'])->toBeIn(['user', 'assistant', 'system']);
+        }
+    });
 });
