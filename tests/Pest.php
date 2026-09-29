@@ -262,16 +262,21 @@ function resetSporaConfigKeyPath(): void
  * declared earlier in the transcript is still a fault, which is the shape
  * compaction leaves when its range boundary splits an assistant/tool pair.
  *
+ * Declarations are held as a list, not keyed by id: an assistant row naming
+ * the same id twice needs two results, so a collapsed duplicate cannot hide.
+ *
  * @param  list<array<string, mixed>>  $messages
  * @return list<string>  Empty when the list satisfies the rule.
  */
 function toolCallPairingFaults(array $messages): array
 {
     $faults = [];
-    $open   = [];
+
+    /** @var list<string> $open  Declared ids still awaiting their own result. */
+    $open = [];
 
     foreach ($messages as $i => $msg) {
-        $role = (string) ($msg['role'] ?? '');
+        $role  = (string) ($msg['role'] ?? '');
         $calls = $role === 'assistant' ? ($msg['tool_calls'] ?? null) : null;
 
         if (is_array($calls) && $calls !== []) {
@@ -280,18 +285,20 @@ function toolCallPairingFaults(array $messages): array
             }
             $open = [];
             foreach ($calls as $call) {
-                $open[(string) ($call['id'] ?? '')] = true;
+                $open[] = (string) ($call['id'] ?? '');
             }
             continue;
         }
 
         if ($role === 'tool') {
             $id = (string) ($msg['tool_call_id'] ?? '');
-            if (! array_key_exists($id, $open)) {
+            $at = array_search($id, $open, true);
+            if ($at === false) {
                 $faults[] = sprintf('tool result at index %d (id=%s) does not follow a matching tool_call', $i, $id);
                 continue;
             }
-            unset($open[$id]);
+            unset($open[$at]);
+            $open = array_values($open);
             continue;
         }
 
@@ -300,7 +307,7 @@ function toolCallPairingFaults(array $messages): array
         }
     }
 
-    foreach (array_keys($open) as $id) {
+    foreach ($open as $id) {
         $faults[] = sprintf('tool_call %s never receives a tool result', $id);
     }
 

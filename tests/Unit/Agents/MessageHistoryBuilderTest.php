@@ -469,6 +469,17 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
             ['role' => 'summary', 'content' => 'Compacted.', 'summarized_sequence_range' => '1-1'],
             historyToolResult('A', 'read_url'),
         ]],
+
+        'duplicate tool_call_id in one batch, answered once' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('A', 'read_url')]),
+            historyToolResult('A', 'read_url'),
+        ]],
+
+        'duplicate tool_call_id in one batch, unanswered' => [[
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url'), call('A', 'read_url'), call('B', 'read_url')]),
+        ]],
     ]);
 
     it('leaves a well-formed transcript byte-identical', function (): void {
@@ -522,6 +533,77 @@ describe('MessageHistoryBuilder tool-call pairing', function (): void {
 
         expect(toolCallPairingFaults($messages))->toBe([]);
         expect(strlen((string) $messages[2]['content']))->toBeLessThan(400);
+    });
+
+    it('cuts a multibyte argument preview on a character boundary so the wire encode cannot throw', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // A raw `arguments` string survives decodeToolCallPayload() untouched,
+        // so the cut lands on real UTF-8. A byte-wise cut splits the surrogate
+        // pair apart and Symfony's JSON_THROW_ON_ERROR turns the marker into an
+        // uncaught JsonException before the request is even sent.
+        $rawArgs = '{"url":"' . str_repeat('👍', 60) . '"}';
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url', $rawArgs)]),
+        ]);
+
+        $marker  = (string) $messages[2]['content'];
+        $offset  = mb_strpos($marker, 'arguments: ');
+        $preview = $offset === false ? $marker : mb_substr($marker, $offset + 11);
+
+        expect(mb_check_encoding($marker, 'UTF-8'))->toBeTrue()
+            ->and(mb_strlen($preview))->toBeLessThanOrEqual(200)
+            ->and(toolCallPairingFaults($messages))->toBe([]);
+
+        // Exactly what OpenAICompatibleDriver hands to Symfony's HttpClient.
+        expect(json_encode($messages, JSON_THROW_ON_ERROR))->toBeString();
+    });
+
+    it('keeps stored content_blocks when the repair empties the batch', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // Anthropic thinking is only replayable through the block list; the
+        // placeholder must not overwrite signed prose the provider must see.
+        $blocks = [
+            ['type' => 'thinking', 'thinking' => 'Two URLs to fetch.', 'signature' => 'sig-1'],
+            ['type' => 'text', 'text' => 'I will fetch both URLs.'],
+        ];
+
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            [
+                'role'              => 'assistant',
+                'content'           => null,
+                'content_blocks'    => $blocks,
+                'tool_call_payload' => json_encode([call('A', 'read_url')]),
+            ],
+        ]);
+
+        expect($messages[1])->not->toHaveKey('tool_calls')
+            ->and($messages[1]['content'])->toBe($blocks)
+            ->and($messages[1]['content'])->not->toBe('[interrupted]');
+    });
+
+    it('restates a duplicated tool_call_id instead of forwarding an unanswerable declaration', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // Only one `tool` row can ever consume a given id, so the second
+        // declaration is unreachable: it is dropped from the wire payload and
+        // restated as a marker rather than shipped as a 400.
+        $messages = buildTranscript($agentId, [
+            historyUser('Go'),
+            historyToolCalls(null, [call('A', 'read_url', ['url' => 'https://one.test']), call('A', 'read_url', ['url' => 'https://two.test'])]),
+            historyToolResult('A', 'read_url'),
+        ]);
+
+        expect($messages[1]['tool_calls'])->toHaveCount(1)
+            ->and($messages[1]['tool_calls'][0]['function']['arguments'])->toBe(['url' => 'https://one.test'])
+            ->and(substr_count((string) $messages[3]['content'], 'did not return a result'))->toBe(1)
+            ->and($messages[3]['content'])->toContain('https://two.test')
+            ->and($messages[3]['content'])->not->toContain('one.test')
+            ->and(toolCallPairingFaults($messages))->toBe([]);
     });
 
     it('never leaks scaffolding keys from the repair step', function (): void {
