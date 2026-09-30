@@ -23,6 +23,7 @@ use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
+use Spora\Console\Commands\AuditOperationOverridesCommand;
 use Spora\Console\Commands\MailTemplatesSyncCommand;
 use Spora\Console\Commands\MediaArchiveGcCommand;
 use Spora\Console\Commands\MediaArchiveListCommand;
@@ -158,6 +159,7 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
@@ -573,7 +575,10 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
-                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    // Guarded because some build/test contexts resolve this
+                    // graph without the orchestrator slice; null yields an
+                    // empty skills map, matching a bare `new` call site.
+                    $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
                     $c->get(PrincipalService::class),
                     (bool) ($config['tools_group_cascade_enabled'] ?? false),
                     $c->get(PrincipalResolver::class),
@@ -1691,6 +1696,10 @@ final class ContainerDefinitions
 
             RepairAdminCommand::class => static function (ContainerInterface $c): RepairAdminCommand {
                 return new RepairAdminCommand($c->get(Database::class));
+            },
+
+            AuditOperationOverridesCommand::class => static function (ContainerInterface $c): AuditOperationOverridesCommand {
+                return new AuditOperationOverridesCommand($c->get(Database::class));
             },
 
             MailTemplatesSyncCommand::class => static function (ContainerInterface $c): MailTemplatesSyncCommand {

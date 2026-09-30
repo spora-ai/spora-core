@@ -245,6 +245,15 @@ final class AgentManifest
      * to the declared default. Always emits a row in declared-operation order
      * so callers can compare manifests without sort-induced diff churn.
      *
+     * Fifth of the six readers of `agent_tool_operation_overrides`. It takes
+     * the *resolved* effective state as an argument rather than querying
+     * itself, so its only fallback is "the caller supplied no row for this
+     * operation" → the attribute default. That differs from
+     * {@see \Spora\Agents\Orchestrator::resolveRequiresApproval()}, which
+     * throws for a tool without `HasOperations`; the divergence is unobservable
+     * here because `$declared` is empty for such a tool, so the method returns
+     * `[]` before reaching the merge.
+     *
      * @param list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}> $declared
      * @param list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}> $effective
      * @return list<array{name: string, enabled: bool, requires_approval: bool}>

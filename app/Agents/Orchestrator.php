@@ -589,6 +589,26 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
+    /**
+     * Whether the current call must await operator approval.
+     *
+     * Precedence, per operation: the agent's
+     * `agent_tool_operation_overrides.default_requires_approval` row, then the
+     * operation's `#[ToolOperation(requiresApprovalByDefault:)]` class
+     * default. **`requiresApprovalByDefault` is only the activation-time
+     * default** — once an operator stores a row, that row is the
+     * configuration and is never clamped back toward the attribute.
+     *
+     * A non-`HasOperations` tool **throws** here. That is deliberately not the
+     * same as {@see AgentToolOperationsResolver::resolveOperationEffectiveRequiresApproval()},
+     * which returns `true` for the same input: a malformed call must *refuse
+     * and tell the LLM why*, whereas the resolver serves read-only API
+     * responses where `true` (approve) is the safe default. Collapsing the two
+     * turns the throw into `AwaitingApproval` — the call then executes as soon
+     * as an operator approves, which is the opposite of refusing.
+     * {@see AgentToolOperationsPrecedenceTest} pins both the agreement on the
+     * states they share and this divergence.
+     */
     public function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
     {
         if (is_object($arguments)) {
@@ -627,6 +647,21 @@ final class Orchestrator implements OrchestratorInterface
         throw new ToolContractException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
+    /**
+     * Whether the agent has the operation switched on.
+     *
+     * Precedence: the agent's `agent_tool_operation_overrides.enabled` row,
+     * then `#[ToolOperation(enabledByDefault:)]`. Same override-wins rule as
+     * {@see resolveRequiresApproval()} — the attribute is only an
+     * activation-time default.
+     *
+     * Unlike {@see resolveRequiresApproval()} this performs **no**
+     * `HasOperations` check; the branch is unreachable in practice because
+     * every current tool uses the trait, and the resolver's `enabled` axis
+     * ({@see AgentToolOperationsResolver::resolveOperationEffectiveEnabled()})
+     * falls back to `true` for such a tool. Pinned by
+     * {@see AgentToolOperationsPrecedenceTest}.
+     */
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
         $toolClass = get_class($toolInstance);

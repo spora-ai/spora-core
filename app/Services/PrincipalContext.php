@@ -26,12 +26,44 @@ namespace Spora\Services;
  */
 final readonly class PrincipalContext
 {
+    /**
+     * @param int $principalId Must resolve to a live `principals` row. A
+     *                         context that does not is a sentinel from
+     *                         {@see PrincipalResolver::resolveForToolExecute()},
+     *                         which has **two** distinct shapes: `0` when the
+     *                         agent row is missing, and the agent's own
+     *                         (dangling) `principal_id` when the principal
+     *                         row is missing. `0` is therefore one signal of
+     *                         unresolvability, not the only one — a guard that
+     *                         tests `$principalId === 0` alone lets the second
+     *                         case through. Tenant-scoped code should call
+     *                         {@see isResolvable()} instead of comparing
+     *                         against `0`.
+     */
     public function __construct(
         public int    $principalId,
         public string $type,
         public ?int   $ownerUserId,
         public ?int   $runnerUserId,
     ) {}
+
+    /**
+     * Whether the principal is plausibly resolvable.
+     *
+     * This is a structural check, not a lookup: it catches the non-positive
+     * sentinel and nothing more. It deliberately cannot detect the dangling
+     * non-zero id that {@see PrincipalResolver::resolveForToolExecute()}
+     * returns for an agent whose principal row is gone — proving that id is
+     * dead needs a `principals` query, and this value object has no
+     * database. Callers needing certainty must verify the id themselves; the
+     * method exists so tenant-scoped tools opt into one named check rather
+     * than each inventing a `<= 0` comparison that only half covers the
+     * sentinels.
+     */
+    public function isResolvable(): bool
+    {
+        return $this->principalId > 0;
+    }
 
     /**
      * @return array{

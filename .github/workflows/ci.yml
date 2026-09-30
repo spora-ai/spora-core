@@ -231,6 +231,40 @@ jobs:
             exit 1
           fi
 
+      # Markdown link check, scoped to the relative paths inside the files a
+      # PR touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
+      # 0fcdaf71, but AGENTS.md kept pointing at the deleted files for months
+      # and no gate noticed. Only in-repo links are resolvable here; the
+      # absolute docs.spora-ai.com URLs need network access and are skipped.
+      - name: Check markdown links
+        if: github.event_name == 'pull_request'
+        run: |
+          changed=$(git diff --name-only --diff-filter=ACMRT HEAD~ HEAD -- '*.md')
+          if [ -z "$changed" ]; then
+            echo "No markdown files changed; skipping link check."
+            exit 0
+          fi
+          # Collect every relative markdown link target from the changed files.
+          targets=$(grep -ohE '\]\(([^)#]+)\)' $changed \
+            | sed -E 's/^\]\((.*)\)$/\1/' \
+            | grep -vE '^(https?:|mailto:|#)' || true)
+          status=0
+          for target in $targets; do
+            # Resolve each target relative to every directory containing a
+            # changed file, since the same relative path can be valid in one
+            # and dead in another.
+            found=0
+            for base in $(dirname $changed | sort -u); do
+              if [ -e "$base/$target" ]; then found=1; break; fi
+            done
+            if [ -e "$target" ]; then found=1; fi
+            if [ "$found" -eq 0 ]; then
+              echo "Dead link in changed markdown: $target"
+              status=1
+            fi
+          done
+          exit $status
+
   sonar:
     name: SonarCloud scan
     needs: test

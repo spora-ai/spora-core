@@ -242,9 +242,25 @@ final class OrchestratorContainerBindings
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
+            // The skills map is populated here, not left empty. It is the only
+            // data `formatSkillList()` reads, and it resolves the
+            // `resolveAs: 'skill'` settings the LLM sees on every tick — an
+            // empty map renders every agent's `allowed_skills` as
+            // "(not configured)" while the tool's own authorisation still
+            // works, which is the exact silent failure this wiring prevents.
+            //
+            // Injecting this instance into ToolConfigService therefore has to
+            // move the scan too, not just the object: the map is a
+            // constructor snapshot, so a hand-built empty array here would
+            // propagate the bug rather than fix it.
             ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
+                $skillsByName = [];
+                foreach ($c->get(SkillScanner::class)->scan() as $skill) {
+                    $skillsByName[$skill->name()] = $skill;
+                }
+
                 return new ToolConfigSchemaInspector(
-                    [],
+                    $skillsByName,
                     $c->get(PrincipalResolver::class),
                 );
             },

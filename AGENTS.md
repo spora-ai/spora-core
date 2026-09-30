@@ -71,23 +71,23 @@ in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
 - `APP_ENV` — Environment (`dev`, `prod`)
 
 ### CI
-GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `php-lint` (PHPStan), `php-test` (Pest), `frontend-lint` (ESLint + tsc), `frontend-test` (Vitest), `build-docker`, `push-ghcr`.
+GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `test` (Pest, default PHP), `test-85` (Pest, PHP 8.5), `test-mysql` and `test-mariadb` (Pest against a real engine), `static-analysis` (PHPStan + CS-Fixer + OpenAPI drift + merge-marker checks), `sonar`.
 
 ### SonarQube (MCP)
 - Project key `spora-ai_Spora` (see `sonar-project.properties`).
 - For PRs use the `pullRequest` key from `list_pull_requests`; for long-lived branches use `branch`. Never pass a git branch name to `pullRequest`.
 - Tool names vary by MCP server version — read the server's tool list, don't memorise.
 
-> **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in [docs/01_architecture.md](docs/01_architecture.md) and [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md).
+> **Architecture deep-dive:** The Orchestrator loop, tick phases, worker modes, and plugin system are documented in the [architecture](https://docs.spora-ai.com/reference/concepts/architecture.html) and [agent loop / async](https://docs.spora-ai.com/reference/concepts/agent-loop-async.html) pages.
 
 ### Testing
 - Backend: **always run `composer test:parallel` for verification (~22s on a typical PR).** Never run `composer test` or `vendor/bin/pest` (serial) for the full suite — they take ~270s. Serial Pest is reserved for debugging one specific failing test. A parallel run may report 0–12 `risky` tests across reruns (well-known parallel-isolation flake); if `passed + risky == total` and there are no `failed`, the suite is clean — proceed.
 - **Per-engine testing.** Set `SPORA_TEST_DB_DRIVER=mysql|mariadb` to run the suite against a real engine (default `sqlite`). On MySQL/MariaDB, every Pest parallel worker creates its own `spora_test_w<PID>_<RAND>` database, installs the schema once, and drops it on exit. Override the server via `SPORA_TEST_DB_HOST`/`_PORT`/`_USER`/`_PASSWORD` (defaults: `127.0.0.1:3306 root:root`). CI runs against MySQL 9.7 and MariaDB 12.3 on every PR.
 - Frontend unit: `composer frontend:test` (Vitest)
-- E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [docs/09_frontend.md](docs/09_frontend.md))
+- E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [frontend architecture](https://docs.spora-ai.com/reference/concepts/frontend-architecture.html))
 
 ### Code Comments
-See [docs/14_code_documentation.md](docs/14_code_documentation.md) for comment standards (DELETE noise, KEEP rationale, ADD docblocks).
+See the [code documentation standards](https://docs.spora-ai.com/reference/concepts/code-documentation.html) for comment intent (DELETE noise, KEEP rationale, ADD docblocks).
 
 ---
 
@@ -187,7 +187,7 @@ Start: `docker compose -f docker/docker-compose.yml up`
 
 For plugin-based tools, place the class in your plugin directory and use the `PluginLoader` hook system.
 
-> **Full tool system docs:** Naming conventions, `#[Tool]` attribute, `#[ToolSetting]`, `#[ToolParameter]`, `InputToolInterface` vs `OutputToolInterface`, and the settings key convention are in [docs/06_tools.md](docs/06_tools.md).
+> **Full tool system docs:** Naming conventions, `#[Tool]` attribute, `#[ToolSetting]`, `#[ToolParameter]`, `InputToolInterface` vs `OutputToolInterface`, and the settings key convention are on the [tools](https://docs.spora-ai.com/reference/concepts/tools.html) page.
 
 ### Agent `notes` field vs `AgentTool`
 
@@ -208,18 +208,18 @@ operator-approved — the destructive path cannot ride on the safe default.
 
 ## Feature Overview
 
-For a complete list of what's implemented, see the [Documentation Index](docs/00_index.md).
+For a complete list of what's implemented, see the [documentation index](https://docs.spora-ai.com/).
 
-Key areas:
-- **Orchestrator loop, config priority, plugin system, recipes** → [docs/01_architecture.md](docs/01_architecture.md)
-- **Database schema and migrations** → [docs/02_schema.md](docs/02_schema.md)
-- **REST API reference** → [docs/04_api.md](docs/04_api.md)
-- **LLM drivers** → [docs/05_drivers.md](docs/05_drivers.md)
-- **Tool system and settings** → [docs/06_tools.md](docs/06_tools.md)
-- **Plugin system** → [docs/07_plugins.md](docs/07_plugins.md)
-- **Async workers and deployment** → [docs/11_agent_loop_async.md](docs/11_agent_loop_async.md)
-- **Frontend architecture** → [docs/09_frontend.md](docs/09_frontend.md)
+Key areas (all on [docs.spora-ai.com](https://docs.spora-ai.com/)):
+- **Orchestrator loop, config priority, plugin system, recipes** → [architecture](https://docs.spora-ai.com/reference/concepts/architecture.html)
+- **Database schema and migrations** → [schema](https://docs.spora-ai.com/reference/concepts/schema.html)
+- **REST API reference** → [docs/04_api.md](docs/04_api.md) (in-repo)
+- **LLM drivers** → [drivers](https://docs.spora-ai.com/reference/concepts/drivers.html)
+- **Tool system and settings** → [tools](https://docs.spora-ai.com/reference/concepts/tools.html)
+- **Plugin system** → [plugin system](https://docs.spora-ai.com/reference/concepts/plugins-system.html)
+- **Async workers and deployment** → [agent loop / async](https://docs.spora-ai.com/reference/concepts/agent-loop-async.html)
+- **Frontend architecture** → [frontend architecture](https://docs.spora-ai.com/reference/concepts/frontend-architecture.html)
 
 ## Backlog
 
-See [docs/backlog.md](docs/backlog.md) for detailed descriptions, implementation notes, and dependencies.
+See the [develop section](https://docs.spora-ai.com/develop/) for detailed descriptions, implementation notes, and dependencies.

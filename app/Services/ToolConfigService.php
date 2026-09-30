@@ -11,7 +11,6 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
-use Spora\Skills\SkillScanner;
 
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
@@ -57,29 +56,28 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     /**
      * @param list<string> $toolClasses
+     * @param ToolConfigSchemaInspector|null $schema The single shared inspector.
+     *        Injecting it is what keeps the skills map consistent across
+     *        consumers — the container builds it once from the scanner
+     *        ({@see OrchestratorContainerBindings}). Null (every test call site)
+     *        yields an empty skills map, which is why the LLM-facing
+     *        `allowed_skills` projection is empty under test and only ever
+     *        populated in the DI runtime. A test that needs a real skill list
+     *        must hand-build an inspector, not rely on this default.
      */
     public function __construct(
         SecurityManagerInterface $security,
         LoggerInterface $logger,
         array $toolClasses = [],
-        ?SkillScanner $skillScanner = null,
+        ?ToolConfigSchemaInspector $schema = null,
         ?PrincipalService $principalService = null,
         bool $groupCascadeEnabled = false,
         ?PrincipalResolver $principalResolver = null,
     ) {
-        $skillsByName = [];
-        if ($skillScanner !== null) {
-            // Index the scanner's result by skill name so the inspector can
-            // resolve multi-select `allowed_skills` slugs to {name, description}
-            // pairs without re-scanning.
-            foreach ($skillScanner->scan() as $skill) {
-                $skillsByName[$skill->name()] = $skill;
-            }
-        }
         // Without the resolver the inspector's LLM-facing `allowed_target_agents`
         // enumerates "#id" placeholders; null is fine for tests, the DI runtime
         // always passes the resolver.
-        $this->schema = new ToolConfigSchemaInspector($skillsByName, $principalResolver);
+        $this->schema = $schema ?? new ToolConfigSchemaInspector([], $principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
         $this->cascade = new ToolConfigPrincipalCascade(

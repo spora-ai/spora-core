@@ -45,12 +45,15 @@ final class ToolConfigSchemaInspector
      *                                             inspector is constructed
      *                                             once per request lifetime
      *                                             with a snapshot of available
-     *                                             skills; long-running workers
-     *                                             (SSE / queue listeners) must
-     *                                             rebuild via
-     *                                             {@see ToolConfigService::reload()}
-     *                                             or accept the snapshot's
-     *                                             staleness window.
+     *                                             skills; a long-running worker
+     *                                             (SSE / queue listener) that
+     *                                             picks up a skill written
+     *                                             mid-run must restart its
+     *                                             container, since there is no
+     *                                             reload path. The single
+     *                                             production construction site
+     *                                             is {@see \Spora\Core\OrchestratorContainerBindings},
+     *                                             which owns the scan.
      */
     public function __construct(
         array $skillsByName = [],
