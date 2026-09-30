@@ -21,7 +21,7 @@ function inspectorWithSkills(array $skills): ToolConfigSchemaInspector
         $provider->add($name, [], 'body', $description);
     }
 
-    return new ToolConfigSchemaInspector(new SkillProviderRegistry([$provider]));
+    return new ToolConfigSchemaInspector(new Spora\Services\SkillListProjector(new SkillProviderRegistry([$provider])));
 }
 
 // Pure schema inspection: no DB, no security, no logger needed.

@@ -186,49 +186,71 @@ final class SkillTool extends AbstractTool
             );
         }
 
-        $listed = null;
-        foreach ($files as $entry) {
-            if ($entry['path'] === $sanitized) {
-                $listed = $entry['bytes'];
-
-                break;
-            }
-        }
+        $listed = $this->listedBytes($files, $sanitized);
         if ($listed === null) {
             return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$name}'.");
         }
 
         $contents = $this->skills->getSkillFile($name, $sanitized, $principalId);
-        if ($contents === null) {
-            // The path is a member, so "not part of skill" would be a lie. The
-            // listing still knows the size, which is what makes the difference
-            // between "too big" and "unreadable" — and telling the model a file
-            // it can see in the listing does not exist sends it looking for a
-            // different path instead.
-            return $listed > SkillProviderInterface::MAX_FILE_BYTES
-                ? new ToolResult(
-                    false,
-                    "File '{$sanitized}' is {$listed} bytes; skill reads are capped at "
-                        . SkillProviderInterface::MAX_FILE_BYTES . ' bytes.',
-                )
-                : new ToolResult(false, "Could not read '{$sanitized}'.");
+        $rejection = $this->readRejection($sanitized, $listed, $contents);
+
+        return $rejection ?? [$sanitized, (string) $contents];
+    }
+
+    /**
+     * The advertised size of `$path`, or null when the provider does not list
+     * it. The listing is the caller's own answer to "is this a member?", taken
+     * before any read is attempted.
+     *
+     * @param list<array{path: string, bytes: int}> $files
+     */
+    private function listedBytes(array $files, string $path): ?int
+    {
+        foreach ($files as $entry) {
+            if ($entry['path'] === $path) {
+                return $entry['bytes'];
+            }
         }
 
-        // Re-assert the cap on what actually arrived. The provider is required
-        // to enforce it before materialising, but this is the boundary where
-        // untrusted content enters the model's context, and a provider bug must
-        // not be able to widen it from the other side.
-        if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
+        return null;
+    }
+
+    /**
+     * The failure a completed read can still warrant, or null when the content
+     * is good to use.
+     *
+     * Two distinctions matter to the model, and conflating either sends it
+     * looking for the wrong thing:
+     *
+     * - A **null** read of a *listed* path is not "not part of skill" — the
+     *   listing is the caller's own proof it is a member. The advertised size
+     *   is what separates "too big" from "unreadable".
+     * - Content that arrived **over** the cap is re-checked here, because the
+     *   provider is required to enforce the cap before materialising, but this
+     *   is the boundary where untrusted content enters the model's context and
+     *   a provider bug must not be able to widen it from the other side.
+     */
+    private function readRejection(string $path, int $listedBytes, ?string $contents): ?ToolResult
+    {
+        $bytes = $contents === null ? $listedBytes : strlen($contents);
+
+        if ($contents === null && $bytes <= SkillProviderInterface::MAX_FILE_BYTES) {
+            return new ToolResult(false, "Could not read '{$path}'.");
+        }
+
+        if ($contents === null || $bytes > SkillProviderInterface::MAX_FILE_BYTES) {
             return new ToolResult(
                 false,
-                "File '{$sanitized}' is " . strlen($contents) . ' bytes; skill reads are capped at '
+                "File '{$path}' is {$bytes} bytes; skill reads are capped at "
                     . SkillProviderInterface::MAX_FILE_BYTES . ' bytes.',
             );
         }
 
-        return [$sanitized, $contents];
+        return null;
     }
 
+    // Re-assert the cap on what actually arrived. The provider is required
+    // to enforce it before materialising, but this is the boundary where
     /**
      * @param list<array{path: string, bytes: int}> $files
      */

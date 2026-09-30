@@ -83,6 +83,25 @@ final class FilesystemSkillProvider implements SkillProviderInterface
 
     public function getSkillFile(string $name, string $path, ?int $principalId): ?string
     {
+        $real = $this->readableFile($name, $path);
+        if ($real === null) {
+            return null;
+        }
+
+        $contents = @file_get_contents($real);
+
+        return $contents === false ? null : $contents;
+    }
+
+    /**
+     * Absolute path of a file that is listed, contained and within the cap —
+     * or null for any of those failing.
+     *
+     * The size check sits on the stat and not on the read: checking afterwards
+     * would already have paid the memory the cap exists to avoid.
+     */
+    private function readableFile(string $name, string $path): ?string
+    {
         $skill = $this->index()[$name] ?? null;
         if ($skill === null) {
             return null;
@@ -93,16 +112,9 @@ final class FilesystemSkillProvider implements SkillProviderInterface
             return null;
         }
 
-        // Cap on the stat, before the read: checking afterwards would already
-        // have paid the memory the cap exists to avoid.
         $size = @filesize($real);
-        if ($size === false || $size > self::MAX_FILE_BYTES) {
-            return null;
-        }
 
-        $contents = @file_get_contents($real);
-
-        return $contents === false ? null : $contents;
+        return ($size === false || $size > self::MAX_FILE_BYTES) ? null : $real;
     }
 
     /**

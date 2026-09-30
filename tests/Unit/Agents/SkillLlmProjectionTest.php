@@ -34,7 +34,7 @@ function skillProjectionService(SkillProviderRegistry $registry): ToolConfigServ
         $security,
         new Monolog\Logger('test'),
         [SkillTool::class],
-        new ToolConfigSchemaInspector($registry, new PrincipalResolver()),
+        new ToolConfigSchemaInspector(new Spora\Services\SkillListProjector($registry), new PrincipalResolver()),
     );
 }
 

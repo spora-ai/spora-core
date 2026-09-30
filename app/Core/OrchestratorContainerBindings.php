@@ -50,6 +50,7 @@ use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SkillListProjector;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
@@ -251,9 +252,18 @@ final class OrchestratorContainerBindings
             // unreachable, and neither failure produces an error.
             ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
                 return new ToolConfigSchemaInspector(
-                    $c->get(SkillProviderRegistry::class),
+                    $c->get(SkillListProjector::class),
                     $c->get(PrincipalResolver::class),
                 );
+            },
+
+            // The inspector's `resolveAs: 'skill'` axis, over the same registry
+            // the `skill` tool authorises against. That identity is the point:
+            // if these two ever read different sources, a skill can be reachable
+            // but never suggested, or suggested but unreachable, and neither
+            // failure produces an error.
+            SkillListProjector::class => static function (ContainerInterface $c): SkillListProjector {
+                return new SkillListProjector($c->get(SkillProviderRegistry::class));
             },
 
             // Skills are scanned in priority order: project, then framework,
