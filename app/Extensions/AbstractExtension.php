@@ -90,4 +90,10 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
+
+    /** @return list<class-string<\Spora\Skills\SkillProviderInterface>> */
+    public function skillProviders(): array
+    {
+        return [];
+    }
 }

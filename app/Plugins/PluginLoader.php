@@ -216,6 +216,38 @@ final class PluginLoader
     }
 
     /**
+     * All {@see \Spora\Skills\SkillProviderInterface} classes contributed by
+     * loaded plugins. Mirrors {@see speechToTextProviderClasses()} and returns
+     * a **static class list**, not instances or a mutable registry.
+     *
+     * The container reads this once, at build time, and resolves the classes
+     * itself. A mutable registry populated from `boot()` would arrive too late
+     * to matter — the registry that reads it is constructed during the same
+     * build — and would need a second owner for the set. Keeping this a plain
+     * data hook means the class list has exactly one home and the precedence
+     * order lives in one readable array.
+     *
+     * This is also why the provider seam is a data hook at all rather than a
+     * fourth PSR-14 event: an event fired from `boot()` reaches subscribers
+     * wired before the boot, and nothing wires subscribers before the
+     * container is built.
+     *
+     * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
+     */
+    public function skillProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->skillProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *

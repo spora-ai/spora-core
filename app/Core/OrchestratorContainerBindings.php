@@ -55,6 +55,8 @@ use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -291,6 +293,32 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SkillScanner($roots);
+            },
+
+            // Core's skill provider is listed first and the plugin classes are
+            // appended, so a plugin can never shadow a shipped skill by
+            // reusing its name. A single SkillProviderRegistry owns the merged
+            // list; the `skill_provider_classes` data array is the only place
+            // the order is expressed, and the merge below is the only place it
+            // is applied.
+            'skill_provider_classes' => [
+                FilesystemSkillProvider::class,
+            ],
+
+            'skill_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('skill_provider_classes'),
+                    $c->get(PluginLoader::class)->skillProviderClasses(),
+                )));
+            },
+
+            SkillProviderRegistry::class => static function (ContainerInterface $c): SkillProviderRegistry {
+                $providers = [];
+                foreach ($c->get('skill_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SkillProviderRegistry($providers);
             },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
