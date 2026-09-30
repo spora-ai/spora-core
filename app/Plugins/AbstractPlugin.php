@@ -138,16 +138,10 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
-     * Skill provider classes this plugin contributes.
-     *
-     * Returns `[]` by default. Override only for skills that do not live on
-     * disk — a shipped skill is a directory plus `skillPaths()` and needs no
-     * provider. See
-     * {@see \Spora\Extensions\SporaExtensionInterface::skillProviders()} for
-     * the contract; the short version is that the container builds one
-     * {@see \Spora\Skills\SkillProviderRegistry} from these class names, with
-     * core's filesystem provider first so a plugin can never shadow a shipped
-     * skill by name.
+     * Skill provider classes this plugin contributes. Override only for skills
+     * that do not live on disk — a shipped skill is a directory plus
+     * `skillPaths()` and needs no provider. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::skillProviders()}.
      *
      * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
      */

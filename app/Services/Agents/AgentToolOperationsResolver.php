@@ -198,19 +198,17 @@ final class AgentToolOperationsResolver
     /**
      * Read-only counterpart of {@see \Spora\Agents\Orchestrator::resolveRequiresApproval()}.
      *
-     * Precedence is identical: the agent's
-     * `agent_tool_operation_overrides.default_requires_approval` row, then the
-     * operation's `#[ToolOperation(requiresApprovalByDefault:)]` default. The
-     * attribute is **only** the activation-time default — a stored override is
-     * the configuration and is returned verbatim, in either direction.
+     * Precedence is identical: the agent's `agent_tool_operation_overrides` row,
+     * then the operation's `#[ToolOperation(requiresApprovalByDefault:)]` value.
+     * That attribute is **only** the activation-time default — a stored override
+     * is the configuration and is returned verbatim, in either direction.
      *
-     * The one deliberate divergence: a `HasOperations`-less or unresolvable
-     * tool returns `true` here, where `Orchestrator` throws a
-     * `ToolContractException`. This method serves API reads, so a safe default
-     * is right; the Orchestrator path is deciding whether to execute, where
-     * "cannot tell" must mean refuse. The two agree on every state they can
-     * both express, which {@see \Spora\Tests\Unit\Agents\AgentToolOperationsPrecedenceTest}
-     * asserts alongside the divergence itself.
+     * The one divergence: a `HasOperations`-less or unresolvable tool returns
+     * `true` here, where `Orchestrator` throws. This method serves API reads,
+     * where a safe default is right; the Orchestrator path decides whether to
+     * execute, where "cannot tell" must mean refuse.
+     * {@see \Spora\Tests\Unit\Agents\AgentToolOperationsPrecedenceTest} asserts
+     * both the agreement and the divergence.
      */
     private function resolveOperationEffectiveRequiresApproval(string $toolClass, string $operation, int $agentId): bool
     {

@@ -17,19 +17,14 @@ use Symfony\Component\HttpFoundation\Request;
  * multi-select (via GET /api/v1/skills → data_source) and the admin
  * UI's skill-detail view (via GET /api/v1/skills/{slug}).
  *
- * `?principal_id=N` narrows the listing to one principal. The SPA sends it
- * already (`ToolSettingField` appends it to the data_source URL) and derives it
- * per editor mode — the agent's own principal when configuring an agent, the
- * group's principal when configuring a group default, the caller's own
- * user-principal for a personal default — so honouring it is what stops a group
- * admin's personal skills from appearing in the group's picker.
+ * `?principal_id=N` narrows the listing to one principal. The SPA already sends
+ * it and derives it per editor mode (agent / group / personal), so honouring it
+ * is what stops a group admin's personal skills appearing in the group's picker.
+ * Without it the listing is the union over every principal the caller can see,
+ * which is the previous behaviour. Shipped skills appear either way.
  *
- * Without the parameter the listing is the **union** over every principal the
- * caller can see, which is what the previous unscoped behaviour was. Shipped
- * skills are principal-independent and appear either way.
- *
- * A name the caller cannot see is a **404**, not a 403: a 403 would confirm the
- * skill exists, which is a cross-tenant existence oracle.
+ * A name the caller cannot see is a **404**, not a 403: a 403 confirms the skill
+ * exists, which is a cross-tenant existence oracle.
  */
 final class SkillController
 {
@@ -105,10 +100,9 @@ final class SkillController
      * The `?principal_id=` the caller asked for, or null when absent.
      *
      * A malformed or non-positive value is treated as absent rather than
-     * rejected: the parameter is a narrowing hint, and answering with the
-     * caller's own union is the same answer they would have got by leaving it
-     * out. A 400 here would break the SPA's picker for a value it should never
-     * send.
+     * rejected: the parameter is a narrowing hint, so falling back to the
+     * caller's union is the answer they would have got by omitting it. A 400
+     * would break the SPA's picker for a value it should never send.
      */
     private function requestedPrincipalId(Request $request): ?int
     {

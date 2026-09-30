@@ -30,18 +30,17 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - 'files' — return the recursive file listing as
  *               `[{path, bytes}]`.
  *
- * **Two gates, in this order, and the order is the point.** `name` must be in
- * the agent's `allowed_skills`, *and* the skill must be visible to the
- * execution's principal. A skill allowlisted on a group agent whose provider
- * scopes by principal is rejected by the second gate, which is what keeps one
- * tenant's `allowed_skills` from becoming a read primitive across tenants.
+ * **Two gates, in this order, and the order is the point.** `name` must be in the
+ * agent's `allowed_skills`, *and* visible to the execution's principal. A skill
+ * allowlisted on a group agent whose provider scopes by principal fails the
+ * second gate, which is what keeps one tenant's `allowed_skills` from becoming a
+ * cross-tenant read primitive.
  *
- * The `filename` is checked against the provider's own listing before the read
- * is attempted, and the size cap is re-asserted on the content that comes back.
- * Both are deliberate: the provider is a plugin-supplied implementation, and a
- * membership check the caller cannot enforce on the callee is not a check.
- * {@see SkillToolProviderTest} pins the case with a provider that deliberately
- * answers for a path it does not list.
+ * `filename` is checked against the provider's own listing before the read, and
+ * the size cap is re-asserted on what comes back. Both are deliberate: the
+ * provider is plugin-supplied code, and a check the caller cannot enforce on the
+ * callee is not a check. {@see SkillToolProviderTest} pins the case with a
+ * provider that answers for a path it does not list.
  */
 #[Tool(
     name: 'skill',
@@ -152,14 +151,12 @@ final class SkillTool extends AbstractTool
     /**
      * The principal whose skills this call may see.
      *
-     * The execution's context when there is one, else the agent's own
-     * principal. **`$userId` is never used**: it is the runner — whoever
-     * clicked — not the owner, and a group agent triggered by one member would
-     * otherwise resolve against that member's personal skills. The resolver
-     * fallback is what keeps a scheduled run working: there is no runner, but
-     * there is an agent, and its principal is the right scope.
-     *
-     * An unresolvable principal becomes `null` so a provider fails closed.
+     * The execution's context, else the agent's own principal. **`$userId` is
+     * never used** — it is the runner, not the owner, so a group agent triggered
+     * by one member would otherwise resolve against that member's personal
+     * skills. The resolver fallback is what keeps a scheduled run working: there
+     * is no runner, but there is an agent. An unresolvable principal becomes
+     * `null` so a provider fails closed.
      */
     private function resolvePrincipalId(int $agentId, ?PrincipalContext $context): ?int
     {
@@ -217,18 +214,15 @@ final class SkillTool extends AbstractTool
 
     /**
      * The failure a completed read can still warrant, or null when the content
-     * is good to use.
+     * is usable. Two distinctions matter to the model, and conflating either
+     * sends it looking for the wrong thing:
      *
-     * Two distinctions matter to the model, and conflating either sends it
-     * looking for the wrong thing:
-     *
-     * - A **null** read of a *listed* path is not "not part of skill" — the
-     *   listing is the caller's own proof it is a member. The advertised size
-     *   is what separates "too big" from "unreadable".
-     * - Content that arrived **over** the cap is re-checked here, because the
-     *   provider is required to enforce the cap before materialising, but this
-     *   is the boundary where untrusted content enters the model's context and
-     *   a provider bug must not be able to widen it from the other side.
+     * - A null read of a *listed* path is not "not part of skill" — the listing
+     *   is the caller's own proof it is a member, and the advertised size is
+     *   what separates "too big" from "unreadable".
+     * - Content arriving over the cap is re-checked here. The provider is
+     *   required to enforce it, but this is the boundary where untrusted content
+     *   enters the model's context and a provider bug must not widen it.
      */
     private function readRejection(string $path, int $listedBytes, ?string $contents): ?ToolResult
     {
@@ -249,8 +243,6 @@ final class SkillTool extends AbstractTool
         return null;
     }
 
-    // Re-assert the cap on what actually arrived. The provider is required
-    // to enforce it before materialising, but this is the boundary where
     /**
      * @param list<array{path: string, bytes: int}> $files
      */

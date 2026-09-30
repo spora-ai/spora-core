@@ -134,17 +134,16 @@ final class CatalogPresenter
 
     /**
      * Sixth reader of `agent_tool_operation_overrides`, and the only one that
-     * also emits the operation's `description`. It takes the resolved effective
-     * state as an argument, so its sole fallback is "no row supplied for this
-     * operation" → the attribute default — the same shape as
-     * {@see \Spora\Services\AgentManifest::mergeOperations()}, of which this is
-     * the description-carrying twin.
+     * also emits each operation's `description`. Takes the resolved state as an
+     * argument, so its sole fallback is "no row supplied" → the attribute
+     * default — the shape of {@see \Spora\Services\AgentManifest::mergeOperations()},
+     * of which this is the description-carrying twin.
      *
-     * The catalog is what the LLM reads, so a divergence from
+     * The catalog is what the LLM reads, so diverging from
      * {@see \Spora\Agents\Orchestrator::resolveRequiresApproval()} would let a
      * call present as requiring approval and then execute unapproved. The
      * declared list is empty for a `HasOperations`-less tool, so the return-[]'
-     * guard keeps that input out of reach rather than substituting a default.
+     * guard keeps that input out of reach.
      *
      * @param list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}> $declaredOperations
      * @param list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}> $effectiveOperations

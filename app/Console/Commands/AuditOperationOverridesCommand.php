@@ -11,23 +11,20 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * Read-only report of rows that reference a tool class which no longer
- * exists.
+ * Read-only report of rows referencing a tool class that no longer exists.
  *
- * Two tables accumulate these, and they compound: an
+ * Two tables accumulate these and they compound: an
  * `agent_tool_operation_overrides` row is meaningless without its
- * `agent_tool_overrides` sibling, and an `agent_tools` row is meaningless
- * without either. Auditing only the first reports half the problem.
+ * `agent_tool_overrides` sibling, and an `agent_tools` row without either.
+ * Auditing only the first reports half the problem.
  *
- * Nothing fatals on these today — every reader that can see a DB-supplied
- * `tool_class` already guards with `class_exists`. The defect is quieter than
- * that: `getOperationOverride()` does not throw, it silently reports
- * `effective_enabled: true, effective_requires_approval: true` for a row that
- * governs nothing. Surfacing that needs a field in its return shape, which is
- * an API response change, so this command reports instead of fixing.
+ * Nothing fatals on these today — every reader already guards a DB-supplied
+ * `tool_class` with `class_exists`. The defect is quieter: `getOperationOverride()`
+ * silently reports `effective_enabled: true, effective_requires_approval: true`
+ * for a row governing nothing. Surfacing that needs a field in its return shape,
+ * an API change, so this command reports rather than fixes.
  *
- * The command is deliberately read-only: no route, no middleware, no write.
- * Exits non-zero when orphans are found so it can gate a future migration.
+ * Exits non-zero when orphans are found, so it can gate a future migration.
  */
 final class AuditOperationOverridesCommand extends Command
 {

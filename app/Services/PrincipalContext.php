@@ -50,15 +50,12 @@ final readonly class PrincipalContext
     /**
      * Whether the principal is plausibly resolvable.
      *
-     * This is a structural check, not a lookup: it catches the non-positive
-     * sentinel and nothing more. It deliberately cannot detect the dangling
-     * non-zero id that {@see PrincipalResolver::resolveForToolExecute()}
-     * returns for an agent whose principal row is gone — proving that id is
-     * dead needs a `principals` query, and this value object has no
-     * database. Callers needing certainty must verify the id themselves; the
-     * method exists so tenant-scoped tools opt into one named check rather
-     * than each inventing a `<= 0` comparison that only half covers the
-     * sentinels.
+     * Structural, not a lookup: it catches the non-positive sentinel and
+     * nothing more. It cannot detect the dangling non-zero id — proving that
+     * one is dead needs a `principals` query this value object cannot make, so
+     * callers needing certainty must verify the id themselves. It exists so
+     * tenant-scoped tools share one named check instead of each inventing a
+     * `<= 0` comparison that only half covers the sentinels.
      */
     public function isResolvable(): bool
     {

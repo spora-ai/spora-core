@@ -4,32 +4,23 @@ declare(strict_types=1);
 
 namespace Spora\Skills;
 
-use Spora\Skills\Providers\FilesystemSkillProvider;
-
 /**
  * The single read path for skills, over an ordered list of
  * {@see SkillProviderInterface} implementations.
  *
- * Built once by the container from a **static** class list — core's
- * {@see FilesystemSkillProvider} first, then whatever plugins declare through
- * `SporaExtensionInterface::skillProviders()`. Two properties follow from that
- * ordering and both are load-bearing:
+ * Built once from a **static** class list — core first, then plugin
+ * `skillProviders()`. Two consequences, both load-bearing:
  *
- * - **Core wins every collision.** A plugin cannot shadow a shipped skill by
- *   reusing its name, so installing a plugin can never change what an existing
- *   agent's `allowed_skills` resolves to.
+ * - **Core wins every collision**, so installing a plugin can never change what
+ *   an existing agent's `allowed_skills` resolves to.
  * - **Duplicates across providers are dropped; duplicates inside one provider
- *   are not.** A provider surfacing two skills with the same name is reporting
- *   a real defect in that provider (the filesystem scanner already turns the
- *   on-disk case into a `SKILL_NAME_CONFLICT` warning), so hiding it here would
- *   discard the evidence. Cross-provider duplicates are a different thing — a
- *   genuine precedence decision — so the earlier provider takes them.
+ *   are not.** A provider surfacing two skills with one name is reporting a real
+ *   defect in itself, and hiding it would discard the evidence. Cross-provider
+ *   duplicates are a genuine precedence decision instead.
  *
- * The registry owns no state beyond its provider list. It deliberately does not
- * cache lookups: providers differ in how expensive a lookup is and how long it
- * stays fresh, and each already knows which of those applies to it. Caching here
- * would impose one policy on both and, for a database-backed provider, would
- * hide a skill written mid-worker-run.
+ * No lookup cache: providers differ in lookup cost and freshness and each knows
+ * which applies to it, and caching here would hide a database-backed skill
+ * written mid-worker-run.
  */
 final readonly class SkillProviderRegistry
 {
@@ -55,9 +46,8 @@ final readonly class SkillProviderRegistry
         $out = [];
 
         foreach ($this->providers as $provider) {
-            // Names this provider contributed. Tracked separately from
-            // $claimed so a provider's own duplicates survive — only a name
-            // already held by an *earlier* provider is suppressed.
+            // Tracked apart from $claimed so a provider's own duplicates
+            // survive; only a name held by an *earlier* provider is suppressed.
             /** @var array<string, true> $mine */
             $mine = [];
 
@@ -109,12 +99,10 @@ final readonly class SkillProviderRegistry
     /**
      * The provider that owns `$name`, or null when no provider has it.
      *
-     * Ownership is resolved by asking each provider for the listing rather than
-     * for the summary, so that a provider which knows the name but stores no
-     * files (every one of them, for a `[]` listing) still wins it. Routing both
+     * Resolved by asking for the listing rather than the summary, so a provider
+     * that knows the name but stores no files still wins it. Routing both
      * `getSkillFiles()` and `getSkillFile()` through one owner is what keeps a
-     * membership check and the read that follows it from landing in different
-     * providers.
+     * membership check and the read after it from landing in different providers.
      */
     private function ownerOf(string $name, ?int $principalId): ?SkillProviderInterface
     {

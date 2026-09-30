@@ -11,20 +11,17 @@ use Spora\Skills\SkillScanner;
 use Spora\Skills\SkillSummary;
 
 /**
- * Serves every skill that exists on disk: the project root, the framework
- * bundle, and each plugin's `skillPaths()` root, in that priority order.
+ * Serves every skill on disk: the project root, the framework bundle, and each
+ * plugin's `skillPaths()` root, in that priority order.
  *
- * **The principal is ignored here, on purpose.** Shipped skills are
- * operator-authored and identical for everyone; scoping them per principal
- * would mean one copy per user of a file the operator already controls. A
- * principal-scoped provider is a *different* implementation, not a different
- * argument to this one.
+ * **The principal is ignored, on purpose.** Shipped skills are operator-authored
+ * and identical for everyone; scoping them per principal would mean a copy per
+ * user of a file the operator already controls. A principal-scoped provider is a
+ * different implementation, not a different argument to this one.
  *
- * The scan is memoised for the process. Skill directories are mutable on disk,
- * so the memo is paired with {@see flush()}: a long-running worker picks up a
- * new skill when it re-reads, and {@see flush()} is what an operator-facing
- * "rescan" path calls. A `static` cache was the alternative and is worse — it
- * survives the container and cannot be invalidated from here.
+ * The scan is memoised with an explicit {@see flush()} rather than a `static`:
+ * skill directories are mutable, and a `static` would survive the container with
+ * no way to invalidate it from here.
  */
 final class FilesystemSkillProvider implements SkillProviderInterface
 {
@@ -94,10 +91,8 @@ final class FilesystemSkillProvider implements SkillProviderInterface
     }
 
     /**
-     * Absolute path of a file that is listed, contained and within the cap —
-     * or null for any of those failing.
-     *
-     * The size check sits on the stat and not on the read: checking afterwards
+     * Absolute path of a file that is listed, contained and within the cap, or
+     * null. The size check sits on the stat, not the read: checking afterwards
      * would already have paid the memory the cap exists to avoid.
      */
     private function readableFile(string $name, string $path): ?string
@@ -118,15 +113,13 @@ final class FilesystemSkillProvider implements SkillProviderInterface
     }
 
     /**
-     * Resolve `$path` to an absolute path proven to sit inside the skill
-     * directory, or null.
+     * Resolve `$path` to an absolute path proven inside the skill directory.
      *
      * Two independent checks, both required. The scanned listing is the cheap
      * one: `SkillScanner::collectFiles()` does not follow symlinks, so a link
      * planted inside a skill directory never appears in it. `realpath()`
-     * containment is the expensive one and catches everything the listing
-     * misses — including a skill directory that is itself a link, and a file
-     * swapped for one after the scan.
+     * containment is the expensive one and catches what the listing misses — a
+     * skill directory that is itself a link, and a file swapped after the scan.
      */
     private function resolveContained(Skill $skill, string $path): ?string
     {
@@ -181,8 +174,8 @@ final class FilesystemSkillProvider implements SkillProviderInterface
 
         $byName = [];
         foreach ($this->scanner->scan() as $skill) {
-            // First entry wins, mirroring the scanner's own root precedence:
-            // a project skill must not be replaced by a same-named plugin one.
+            // First entry wins, mirroring the scanner's root precedence: a
+            // project skill must not be replaced by a same-named plugin one.
             $byName[$skill->name()] ??= $skill;
         }
 

@@ -13,15 +13,14 @@ use Spora\Skills\SkillSummary;
  *
  * Split out of {@see ToolConfigSchemaInspector} because it is the one setting
  * whose projection is principal-dependent, and keeping it there made the
- * inspector own both the schema reflection and a tenant-boundary decision.
+ * inspector own both schema reflection and a tenant-boundary decision.
  *
  * The resolution is a **registry lookup, not a stored map**, and that is the
- * whole point: an eager snapshot taken once per process from the filesystem
- * would omit every provider-supplied skill, so such a skill would be
- * authorised by the `skill` tool and simultaneously invisible in the tool
- * definition that would suggest it. The agent could call it; nothing would
- * ever tell it the skill existed. That failure has no error, no log, and no
- * failing test.
+ * point: an eager snapshot from the filesystem would omit every
+ * provider-supplied skill, leaving it authorised by the `skill` tool yet
+ * invisible in the definition that would suggest it. The agent could call it;
+ * nothing would ever tell it the skill existed. No error, no log, no failing
+ * test.
  */
 final readonly class SkillListProjector
 {
@@ -59,10 +58,10 @@ final readonly class SkillListProjector
     /**
      * The skills this execution's principal can see, keyed by name.
      *
-     * A null or unresolvable principal resolves **nothing** principal-scoped.
-     * Operator-default and template previews call this path with no principal
-     * in scope, and widening there would put one tenant's skills in another's
-     * preview. Shipped skills are principal-independent and still resolve.
+     * A null or unresolvable principal resolves **nothing** principal-scoped:
+     * operator-default and template previews have no principal in scope, and
+     * widening there would put one tenant's skills in another's preview. Shipped
+     * skills are principal-independent and still resolve.
      *
      * @return array<string, SkillSummary>
      */
