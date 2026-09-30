@@ -7,6 +7,8 @@ namespace Tests\Unit\Tools;
 use Psr\Log\NullLogger;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\AgentTool;
 use Spora\Tools\AskUserQuestionTool;
@@ -53,11 +55,13 @@ test('all spora-core tools declare recommendsSkills slugs that exist on disk', f
         $this->markTestSkipped("Framework skills directory not present at {$frameworkSkills}.");
     }
 
-    $scanner = new SkillScanner([
-        ['path' => $frameworkSkills, 'source' => 'core'],
+    $registry = new SkillProviderRegistry([
+        new FilesystemSkillProvider(new SkillScanner([
+            ['path' => $frameworkSkills, 'source' => 'core'],
+        ])),
     ]);
     $resolver = new ToolConfigNameResolver(new NullLogger(), $toolClasses);
-    $validator = new ToolsRecommendsSkillsValidator($resolver, $scanner);
+    $validator = new ToolsRecommendsSkillsValidator($resolver, $registry);
 
     expect($validator->validate())->toBe([]);
 });

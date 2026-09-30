@@ -3,37 +3,31 @@
 declare(strict_types=1);
 
 use Spora\Services\ToolConfigSchemaInspector;
-use Spora\Skills\Skill;
+use Spora\Skills\SkillProviderRegistry;
 use Tests\Fixtures\InheritedSettingChildTool;
+use Tests\Fixtures\Skills\StubSkillProvider;
 use Tests\Fixtures\TestTool;
 
 /**
- * Build an inspector with a stub `skillsByName` map for `resolveAs: 'skill'`
- * tests.
+ * Build an inspector whose `resolveAs: 'skill'` projection resolves through a
+ * stub provider — the same seam production uses.
+ *
+ * @param list<array{0: string, 1: string}> $skills name/description pairs
  */
 function inspectorWithSkills(array $skills): ToolConfigSchemaInspector
 {
-    $map = [];
-    foreach ($skills as $s) {
-        $map[$s->name()] = $s;
+    $provider = new StubSkillProvider('stub');
+    foreach ($skills as [$name, $description]) {
+        $provider->add($name, [], 'body', $description);
     }
-    return new ToolConfigSchemaInspector($map);
-}
 
-function skillForTest(string $name, string $description): Skill
-{
-    return new Skill(
-        frontmatter: ['name' => $name, 'description' => $description],
-        body: 'body',
-        dir: '/tmp/' . $name,
-        files: [],
-    );
+    return new ToolConfigSchemaInspector(new SkillProviderRegistry([$provider]));
 }
 
 // Pure schema inspection: no DB, no security, no logger needed.
 
 test('getPasswordKeys returns only the keys declared with type password', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $keys = $inspector->getPasswordKeys(TestTool::class);
 
@@ -42,7 +36,7 @@ test('getPasswordKeys returns only the keys declared with type password', functi
 });
 
 test('getSchemaDefaults returns only the keys that have a non-null default', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $defaults = $inspector->getSchemaDefaults(TestTool::class);
 
@@ -55,13 +49,13 @@ test('getSchemaDefaults returns only the keys that have a non-null default', fun
 });
 
 test('getSchemaDefaults returns empty array for an unknown tool class', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     expect($inspector->getSchemaDefaults('NonExistent\\Tool'))->toBe([]);
 });
 
 test('getMissingRequiredSettings returns empty for TestTool (no required fields)', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     expect($inspector->getMissingRequiredSettings(TestTool::class, [
         'api_key'     => null,
@@ -70,14 +64,14 @@ test('getMissingRequiredSettings returns empty for TestTool (no required fields)
 });
 
 test('getMissingRequiredSettings returns empty array for an unknown tool class', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     expect($inspector->getMissingRequiredSettings('NonExistent\\Tool', ['api_key' => null]))
         ->toBe([]);
 });
 
 test('maskForApi replaces non-empty password value with ***', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $masked = $inspector->maskForApi([
         'api_key'     => 'super-secret',
@@ -89,7 +83,7 @@ test('maskForApi replaces non-empty password value with ***', function (): void 
 });
 
 test('maskForApi leaves null and empty password fields as-is', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     expect($inspector->maskForApi(['api_key' => null, 'max_results' => '5'], TestTool::class)['api_key'])
         ->toBeNull();
@@ -98,7 +92,7 @@ test('maskForApi leaves null and empty password fields as-is', function (): void
 });
 
 test('getLlmToolSettings only annotates exposeToLlm keys with their label and value', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     // TestTool has no exposeToLlm fields other than allowed_target_agents.
     $result = $inspector->getLlmToolSettings(TestTool::class, [
@@ -113,7 +107,7 @@ test('getLlmToolSettings only annotates exposeToLlm keys with their label and va
 });
 
 test('multi-select: getSchemaDefaults returns [] when no default is declared', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $defaults = $inspector->getSchemaDefaults(TestTool::class);
 
@@ -122,7 +116,7 @@ test('multi-select: getSchemaDefaults returns [] when no default is declared', f
 });
 
 test('multi-select: getMultiSelectKeys returns the keys declared with type multi-select', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $keys = $inspector->getMultiSelectKeys(TestTool::class);
 
@@ -132,7 +126,7 @@ test('multi-select: getMultiSelectKeys returns the keys declared with type multi
 });
 
 test('multi-select: maskForApi returns array values as-is (no password masking)', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $masked = $inspector->maskForApi([
         'api_key'               => 'secret',
@@ -147,7 +141,7 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
     $authService = bootAuthLayer();
     $userId = $authService->register('inspector-multiselect@example.com', 'Password1!', 'Inspector');
 
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $agentA = Spora\Models\Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
@@ -215,7 +209,7 @@ test('multi-select: getLlmToolSettings scopes names to the source agent\'s group
         'is_active'      => true,
     ]);
 
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     // Pass the user-principal agent AND a foreign agent through the
     // allowlist. Only the same-group agents should resolve to a name;
@@ -239,7 +233,7 @@ test('multi-select: getLlmToolSettings returns [] for an empty multi-select valu
     $authService = bootAuthLayer();
     $authService->register('inspector-empty@example.com', 'Password1!', 'Empty');
 
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $result = $inspector->getLlmToolSettings(TestTool::class, [
         'allowed_target_agents' => [],
@@ -252,7 +246,7 @@ test('multi-select: getLlmToolSettings falls back to "#id" when agent cannot be 
     $authService = bootAuthLayer();
     $authService->register('inspector-fallback@example.com', 'Password1!', 'Fallback');
 
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $result = $inspector->getLlmToolSettings(TestTool::class, [
         'allowed_target_agents' => [9999],
@@ -262,7 +256,7 @@ test('multi-select: getLlmToolSettings falls back to "#id" when agent cannot be 
 });
 
 test('inheritance: getPasswordKeys sees parent password settings', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $keys = $inspector->getPasswordKeys(InheritedSettingChildTool::class);
 
@@ -270,7 +264,7 @@ test('inheritance: getPasswordKeys sees parent password settings', function (): 
 });
 
 test('inheritance: getSchemaDefaults sees parent defaults', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
 
@@ -281,7 +275,7 @@ test('inheritance: getSchemaDefaults sees parent defaults', function (): void {
 });
 
 test('inheritance: getMissingRequiredSettings flags empty parent required fields', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $missing = $inspector->getMissingRequiredSettings(InheritedSettingChildTool::class, [
         'child_only' => 'value',
@@ -291,7 +285,7 @@ test('inheritance: getMissingRequiredSettings flags empty parent required fields
 });
 
 test('inheritance: getMissingRequiredSettings passes when parent required field is set', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $missing = $inspector->getMissingRequiredSettings(InheritedSettingChildTool::class, [
         'parent_required' => 'configured',
@@ -301,7 +295,7 @@ test('inheritance: getMissingRequiredSettings passes when parent required field 
 });
 
 test('inheritance: maskForApi masks parent password fields', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $masked = $inspector->maskForApi([
         'parent_secret' => 'super-secret',
@@ -313,7 +307,7 @@ test('inheritance: maskForApi masks parent password fields', function (): void {
 });
 
 test('inheritance: getMultiSelectKeys sees parent multi-select settings', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $keys = $inspector->getMultiSelectKeys(InheritedSettingChildTool::class);
 
@@ -322,7 +316,7 @@ test('inheritance: getMultiSelectKeys sees parent multi-select settings', functi
 });
 
 test('inheritance: normalizeMultiSelectValues coerces parent multi-select JSON to int[]', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $normalized = $inspector->normalizeMultiSelectValues(
         InheritedSettingChildTool::class,
@@ -333,7 +327,7 @@ test('inheritance: normalizeMultiSelectValues coerces parent multi-select JSON t
 });
 
 test('inheritance: getLlmToolSettings includes parent exposeToLlm settings', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $result = $inspector->getLlmToolSettings(InheritedSettingChildTool::class, [
         'parent_visible' => 'yes',
@@ -347,7 +341,7 @@ test('inheritance: getLlmToolSettings includes parent exposeToLlm settings', fun
 });
 
 test('inheritance: subclass redeclaration of a parent key wins (no duplicates, child value)', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
     expect($defaults)->toHaveKey('shared_key')
@@ -358,7 +352,7 @@ test('inheritance: subclass redeclaration of a parent key wins (no duplicates, c
 });
 
 test('inheritance: getSchemaDefaults uses child value when child redeclares a parent key', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $defaults = $inspector->getSchemaDefaults(InheritedSettingChildTool::class);
 
@@ -368,7 +362,7 @@ test('inheritance: getSchemaDefaults uses child value when child redeclares a pa
 // resolveAs: 'skill' — new ToolSetting branch for Skills feature.
 
 test('normalizeMultiSelectValues with resolveAs=agent coerces to int[] (SubAgentTool default)', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $normalized = $inspector->normalizeMultiSelectValues(
         Spora\Tools\SubAgentTool::class,
@@ -379,9 +373,7 @@ test('normalizeMultiSelectValues with resolveAs=agent coerces to int[] (SubAgent
 });
 
 test('normalizeMultiSelectValues with resolveAs=skill coerces to string[] of validated slugs', function (): void {
-    $inspector = inspectorWithSkills([
-        skillForTest('git', 'Git skill.'),
-    ]);
+    $inspector = inspectorWithSkills([['git', 'Git skill.']]);
 
     $normalized = $inspector->normalizeMultiSelectValues(
         Spora\Tools\SkillTool::class,
@@ -395,7 +387,7 @@ test('normalizeMultiSelectValues with resolveAs=skill coerces to string[] of val
 });
 
 test('normalizeMultiSelectValues with resolveAs=agent (SubAgentTool default) coerces to int[]', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     // resolveAs defaults to 'agent' on SubAgentTool; strings round-trip through
     // int casting. The `raw` branch is reserved for tools that explicitly
@@ -411,8 +403,8 @@ test('normalizeMultiSelectValues with resolveAs=agent (SubAgentTool default) coe
 
 test('getLlmToolSettings with resolveAs=skill returns "name: short description" entries', function (): void {
     $inspector = inspectorWithSkills([
-        skillForTest('git', 'Guides the agent through safe git operations, commit hygiene, and PR conventions.'),
-        skillForTest('pdf', 'Extract PDF text, fill forms, merge files.'),
+        ['git', 'Guides the agent through safe git operations, commit hygiene, and PR conventions.'],
+        ['pdf', 'Extract PDF text, fill forms, merge files.'],
     ]);
 
     $out = $inspector->getLlmToolSettings(
@@ -428,7 +420,7 @@ test('getLlmToolSettings with resolveAs=skill returns "name: short description" 
 
 test('getLlmToolSettings truncates long descriptions to 80 chars', function (): void {
     $long = str_repeat('a', 200);
-    $inspector = inspectorWithSkills([skillForTest('long', $long)]);
+    $inspector = inspectorWithSkills([['long', $long]]);
 
     $out = $inspector->getLlmToolSettings(
         Spora\Tools\SkillTool::class,
@@ -440,21 +432,24 @@ test('getLlmToolSettings truncates long descriptions to 80 chars', function (): 
     expect($value)->toHaveLength(6 + 77 + 3);
 });
 
-test('getLlmToolSettings silently drops slugs that no longer exist on disk', function (): void {
-    $inspector = inspectorWithSkills([
-        skillForTest('git', 'Git skill.'),
-    ]);
+test('getLlmToolSettings annotates a name that no longer resolves as unavailable', function (): void {
+    $inspector = inspectorWithSkills([['git', 'Git skill.']]);
 
     $out = $inspector->getLlmToolSettings(
         Spora\Tools\SkillTool::class,
         ['allowed_skills' => ['git', 'deleted-skill']],
     );
 
-    expect($out['allowed_skills']['value'])->toHaveCount(1);
+    expect($out['allowed_skills']['value'])->toBe([
+        'git: Git skill.',
+        // Not silently dropped: a vanished skill otherwise shortens the list
+        // with no signal that the agent's configuration went stale.
+        '(unavailable: deleted-skill)',
+    ]);
 });
 
 test('getLlmToolSettings with resolveAs=agent still resolves to "Name (#id)" strings (default behaviour)', function (): void {
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
 
     $out = $inspector->getLlmToolSettings(
         Spora\Tools\SubAgentTool::class,

@@ -219,17 +219,68 @@ jobs:
         if: github.event_name == 'pull_request'
         run: composer openapi:check
 
-      # `git diff --check` inspects the working tree for unresolved
-      # conflict markers. We restrict to tracked files so the hook never
-      # fails on a deleted-staged entry or an untracked comment; an empty
-      # match is the success path.
+      # Unresolved conflict markers in the *committed* changeset.
+      #
+      # Two mistakes this replaces, both of which made the guard a silent
+      # no-op rather than a failing check:
+      #
+      #   1. `git diff --check <paths>` compares the working tree against the
+      #      INDEX. On a clean CI checkout those are identical, so a marker
+      #      committed in the PR — the only kind that can exist — was never
+      #      inspected. The revision pair is mandatory:
+      #      `git diff --check <base>...HEAD`.
+      #   2. The diff was taken from `HEAD~`, which does not exist in a
+      #      depth-1 checkout (`static-analysis` has no `fetch-depth: 0`,
+      #      unlike the `test` job), and points at the previous *commit*
+      #      rather than the PR's base. GitHub supplies the real base sha.
+      #
+      # The merge-base form (`A...B`) scopes the check to this branch's
+      # commits, so a marker that is already on main is not re-reported.
       - name: Check for merge-conflict markers
         if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if ! git diff --check $(git diff --name-only --diff-filter=ACMRT HEAD~ HEAD); then
+          if ! git diff --check "$BASE_SHA...HEAD"; then
             echo "Unresolved merge-conflict markers detected in the changeset."
             exit 1
           fi
+
+      # Markdown link check, scoped to the relative paths inside the files a
+      # PR touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
+      # 0fcdaf71, but AGENTS.md kept pointing at the deleted files for months
+      # and no gate noticed. Only in-repo links are resolvable here; the
+      # absolute docs.spora-ai.com URLs need network access and are skipped.
+      - name: Check markdown links
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA...HEAD" -- '*.md')
+          if [ -z "$changed" ]; then
+            echo "No markdown files changed; skipping link check."
+            exit 0
+          fi
+          # Collect every relative markdown link target from the changed files.
+          targets=$(grep -ohE '\]\(([^)#]+)\)' $changed \
+            | sed -E 's/^\]\((.*)\)$/\1/' \
+            | grep -vE '^(https?:|mailto:|#)' || true)
+          status=0
+          for target in $targets; do
+            # Resolve each target relative to every directory containing a
+            # changed file, since the same relative path can be valid in one
+            # and dead in another.
+            found=0
+            for base in $(dirname $changed | sort -u); do
+              if [ -e "$base/$target" ]; then found=1; break; fi
+            done
+            if [ -e "$target" ]; then found=1; fi
+            if [ "$found" -eq 0 ]; then
+              echo "Dead link in changed markdown: $target"
+              status=1
+            fi
+          done
+          exit $status
 
   sonar:
     name: SonarCloud scan

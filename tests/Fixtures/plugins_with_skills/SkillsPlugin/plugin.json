@@ -1,0 +1,4 @@
+{
+    "slug": "skills-plugin",
+    "class": "Tests\\Fixtures\\Plugins\\SkillsPlugin\\Plugin"
+}

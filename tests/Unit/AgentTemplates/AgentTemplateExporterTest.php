@@ -35,6 +35,10 @@ function makeExporterWithConfig(?PluginLoader $pluginLoader = null): array
 
 beforeEach(function (): void {
     $this->userId = bootAuth(bootAuthLayer(), 'template-exporter@example.com');
+    // The P6 helpers below are plain functions, not closures, so they cannot
+    // read `$this`. A file-level global is the least-ceremony bridge; Pest's
+    // parallel runner isolates per file, and beforeEach re-seeds it each test.
+    $GLOBALS['__exporterTestUserId'] = $this->userId;
 });
 
 test('export() NEVER includes a settings key at any level', function (): void {
@@ -525,4 +529,165 @@ test('export() default omits settings and opt-in omits inline info when no expor
     expect($default['template']->raw()['tools'][0])->not->toHaveKey('settings')
         ->and($optIn['template']->raw()['tools'][0])->not->toHaveKey('settings')
         ->and($optIn)->not->toHaveKey('inline_info');
+});
+
+// ---------------------------------------------------------------------------
+// P6 — the full operation-override round-trip matrix.
+//
+// The existing two-hop test only covers "both columns set". These cover every
+// state the exporter can emit, plus the three-hop form, plus the one real
+// lossiness hole in the validator.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param array<string, mixed> $source
+ * @return array<string, mixed>
+ */
+function roundTripOverrideEntry(array $source): array
+{
+    $entry = ['name' => 'default'];
+    if (array_key_exists('enabled', $source)) {
+        $entry['enabled'] = $source['enabled'];
+    }
+    if (array_key_exists('auto_approve', $source)) {
+        $entry['auto_approve'] = $source['auto_approve'];
+    }
+    return $entry;
+}
+
+/**
+ * `makeImporter()` (tests/Support/AgentTemplateTestSupport.php) registers only
+ * core tools, so importing a TestTool payload skips it with
+ * TOOL_PLUGIN_MISSING. The fixture plugin loader is what makes TestTool a
+ * registered tool for the import half of the round-trip.
+ */
+function makeTestToolImporter(): AgentTemplateImporter
+{
+    $loader = makeToolsPluginLoader();
+    $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $toolConfig = new Spora\Services\ToolConfigService(
+        $security,
+        new Monolog\Logger('test'),
+        [Spora\Tools\TimeTool::class, Spora\Tools\CalculatorTool::class, TestTool::class],
+    );
+
+    return new AgentTemplateImporter(
+        $toolConfig,
+        $loader,
+        new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
+        new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+    );
+}
+
+/**
+ * @param array<string, bool|null> $override
+ * @return array<string, mixed>
+ */
+function exportThenImportOverride(array $override, string $toolClass = TestTool::class): array
+{
+    global $__exporterTestUserId;
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($__exporterTestUserId),
+        'name'         => 'Matrix Agent',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id'   => $agent->id,
+        'tool_class' => $toolClass,
+        'tool_name'  => 'test',
+    ]);
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agent->id,
+        'tool_class'                => $toolClass,
+        'operation'                 => 'default',
+        'enabled'                   => $override['enabled'] ?? null,
+        'default_requires_approval' => isset($override['auto_approve'])
+            ? ($override['auto_approve'] ? 0 : 1)
+            : null,
+    ]);
+
+    $payload = makeExporter()->export($agent)['template']->raw();
+    $imported = makeTestToolImporter()->importPayload($GLOBALS['__exporterTestUserId'], $payload);
+
+    $reExported = makeExporter()->export($imported->agent)['template']->raw();
+    $tool = collect($reExported['tools'])->firstWhere('tool_class', $toolClass);
+
+    return $tool['operations'][0] ?? [];
+}
+
+it('round-trips an enabled-only override', function (): void {
+    expect(roundTripOverrideEntry(exportThenImportOverride(['enabled' => true])))
+        ->toBe(['name' => 'default', 'enabled' => true]);
+});
+
+it('round-trips a disabled-only override', function (): void {
+    expect(roundTripOverrideEntry(exportThenImportOverride(['enabled' => false])))
+        ->toBe(['name' => 'default', 'enabled' => false]);
+});
+
+it('round-trips an auto-approve-only override', function (): void {
+    expect(roundTripOverrideEntry(exportThenImportOverride(['auto_approve' => true])))
+        ->toBe(['name' => 'default', 'auto_approve' => true]);
+});
+
+it('round-trips a require-approval-only override', function (): void {
+    // The inverse of the attribute default (TestTool declares
+    // requiresApprovalByDefault: false), which is the case any clamp toward
+    // the attribute would silently swallow.
+    expect(roundTripOverrideEntry(exportThenImportOverride(['auto_approve' => false])))
+        ->toBe(['name' => 'default', 'auto_approve' => false]);
+});
+
+it('round-trips both axes set, in both directions', function (): void {
+    expect(roundTripOverrideEntry(exportThenImportOverride(['enabled' => false, 'auto_approve' => false])))
+        ->toBe(['name' => 'default', 'enabled' => false, 'auto_approve' => false]);
+
+    expect(roundTripOverrideEntry(exportThenImportOverride(['enabled' => true, 'auto_approve' => true])))
+        ->toBe(['name' => 'default', 'enabled' => true, 'auto_approve' => true]);
+});
+
+it('export → import → export is idempotent on a third hop', function (): void {
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($this->userId),
+        'name'         => 'Three Hop',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    Spora\Models\AgentTool::create([
+        'agent_id'   => $agent->id,
+        'tool_class' => TestTool::class,
+        'tool_name'  => 'test',
+    ]);
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agent->id,
+        'tool_class'                => TestTool::class,
+        'operation'                 => 'default',
+        'enabled'                   => 0,
+        'default_requires_approval' => 1,
+    ]);
+
+    $hop1 = makeExporter()->export($agent)['template']->raw();
+    $importer = makeTestToolImporter();
+    $hop2 = $importer->importPayload($this->userId, $hop1);
+    $hop2Raw = makeExporter()->export($hop2->agent)['template']->raw();
+    $hop3 = $importer->importPayload($this->userId, $hop2Raw);
+    $hop3Raw = makeExporter()->export($hop3->agent)['template']->raw();
+
+    $ops = static function (array $raw): array {
+        $tool = collect($raw['tools'])->firstWhere('tool_class', TestTool::class);
+        return $tool['operations'][0];
+    };
+
+    // The third hop must equal the second: the two encodings
+    // (`enabled`/`auto_approve` ↔ `enabled`/`default_requires_approval`) are a
+    // bijection, so a drift would compound rather than settle.
+    expect($ops($hop2Raw))->toBe($ops($hop3Raw))
+        ->and($ops($hop3Raw))->toBe(['name' => 'default', 'enabled' => false, 'auto_approve' => false]);
+});
+
+it('a null override on both columns exports no operations entry at all', function (): void {
+    expect(roundTripOverrideEntry(exportThenImportOverride([])))
+        ->toBe(['name' => 'default']);
 });

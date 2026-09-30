@@ -90,4 +90,27 @@ interface SporaExtensionInterface
      * @return list<class-string<\Spora\Speech\SpeechToTextProviderInterface>>
      */
     public function speechToTextProviders(): array;
+
+    /**
+     * Skill provider classes this extension contributes.
+     *
+     * A *data* hook, not a lifecycle hook, and deliberately a static class
+     * list rather than a mutable registry: the container builds a
+     * {@see \Spora\Skills\SkillProviderRegistry} once from these class names
+     * plus core's own {@see \Spora\Skills\Providers\FilesystemSkillProvider},
+     * which sits first so a plugin can never shadow a shipped skill by reusing
+     * its name.
+     *
+     * Distinct from {@see skillPaths()}, which is how an extension ships
+     * skills **on disk** under a directory of `SKILL.md` folders. A provider is
+     * for skills with no directory — user-authored, tenant-scoped, or otherwise
+     * synthesised. Shipping a directory is still the right answer whenever the
+     * content is a static part of the release.
+     *
+     * A provider receives a `?int` principal on every lookup and must return
+     * `[]` for `null` and for any id that is not a live principal.
+     *
+     * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
+     */
+    public function skillProviders(): array;
 }

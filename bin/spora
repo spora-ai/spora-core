@@ -15,6 +15,7 @@ require_once BASE_PATH . '/vendor/autoload.php';
 
 use Spora\Core\Kernel;
 use Symfony\Component\Console\Application;
+use Spora\Console\Commands\AuditOperationOverridesCommand;
 use Spora\Console\Commands\SetupCommand;
 use Spora\Console\Commands\InstallCommand;
 use Spora\Console\Commands\DbResetCommand;
@@ -52,6 +53,7 @@ $application->addCommand($container->get(PluginInstallCommand::class));
 $application->addCommand($container->get(PluginListCommand::class));
 $application->addCommand($container->get(PluginUninstallCommand::class));
 $application->addCommand($container->get(PluginUpdateCommand::class));
+$application->addCommand($container->get(AuditOperationOverridesCommand::class));
 $application->addCommand($container->get(TaskRunCommand::class));
 $application->addCommand($container->get(ToolSettingsMigrationCommand::class));
 $application->addCommand($container->get(WorkerRunCommand::class));

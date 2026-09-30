@@ -55,6 +55,8 @@ use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -242,9 +244,14 @@ final class OrchestratorContainerBindings
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
+            // The inspector resolves `resolveAs: 'skill'` settings against the
+            // same registry the `skill` tool authorises against. That identity
+            // is the point: if these two ever read different sources, a skill
+            // can be reachable but never suggested, or suggested but
+            // unreachable, and neither failure produces an error.
             ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
                 return new ToolConfigSchemaInspector(
-                    [],
+                    $c->get(SkillProviderRegistry::class),
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -275,6 +282,32 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SkillScanner($roots);
+            },
+
+            // Core's skill provider is listed first and the plugin classes are
+            // appended, so a plugin can never shadow a shipped skill by
+            // reusing its name. A single SkillProviderRegistry owns the merged
+            // list; the `skill_provider_classes` data array is the only place
+            // the order is expressed, and the merge below is the only place it
+            // is applied.
+            'skill_provider_classes' => [
+                FilesystemSkillProvider::class,
+            ],
+
+            'skill_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('skill_provider_classes'),
+                    $c->get(PluginLoader::class)->skillProviderClasses(),
+                )));
+            },
+
+            SkillProviderRegistry::class => static function (ContainerInterface $c): SkillProviderRegistry {
+                $providers = [];
+                foreach ($c->get('skill_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SkillProviderRegistry($providers);
             },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {

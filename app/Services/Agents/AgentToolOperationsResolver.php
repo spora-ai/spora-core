@@ -158,6 +158,21 @@ final class AgentToolOperationsResolver
         return $this->getOperationOverride($agentId, $userId, $toolClass, $operation);
     }
 
+    /**
+     * Read-only counterpart of {@see \Spora\Agents\Orchestrator::isOperationEnabled()}.
+     *
+     * Precedence is identical: the agent's override row, then the attribute
+     * default. The fallbacks differ for inputs both can receive, and both
+     * differences are deliberate:
+     *
+     * - A `HasOperations`-less tool, or a `class_exists`-negative one, returns
+     *   `true` (enabled) here. This method answers API reads, where reporting
+     *   the operation as present is correct; `Orchestrator` has no such
+     *   fallback on the approval axis because there a permissive default
+     *   would mean executing an unapproved call.
+     * - An instance that cannot be resolved still yields the attribute default
+     *   when the trait is present.
+     */
     private function resolveOperationEffectiveEnabled(string $toolClass, string $operation, int $agentId): bool
     {
         $override = AgentToolOperationOverride::where('agent_id', $agentId)
@@ -180,6 +195,23 @@ final class AgentToolOperationsResolver
         return true;
     }
 
+    /**
+     * Read-only counterpart of {@see \Spora\Agents\Orchestrator::resolveRequiresApproval()}.
+     *
+     * Precedence is identical: the agent's
+     * `agent_tool_operation_overrides.default_requires_approval` row, then the
+     * operation's `#[ToolOperation(requiresApprovalByDefault:)]` default. The
+     * attribute is **only** the activation-time default — a stored override is
+     * the configuration and is returned verbatim, in either direction.
+     *
+     * The one deliberate divergence: a `HasOperations`-less or unresolvable
+     * tool returns `true` here, where `Orchestrator` throws a
+     * `ToolContractException`. This method serves API reads, so a safe default
+     * is right; the Orchestrator path is deciding whether to execute, where
+     * "cannot tell" must mean refuse. The two agree on every state they can
+     * both express, which {@see \Spora\Tests\Unit\Agents\AgentToolOperationsPrecedenceTest}
+     * asserts alongside the divergence itself.
+     */
     private function resolveOperationEffectiveRequiresApproval(string $toolClass, string $operation, int $agentId): bool
     {
         $override = AgentToolOperationOverride::where('agent_id', $agentId)
