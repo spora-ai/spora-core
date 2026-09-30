@@ -166,7 +166,7 @@ use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
-use Spora\Skills\SkillScanner;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
@@ -599,9 +599,9 @@ final class ContainerDefinitions
             },
 
             // Strict-mode validator: every tool's `#[Tool(recommendsSkills: ...)]`
-            // slug must resolve to an on-disk skill. SkillScanner is guarded
+            // slug must resolve to a shipped skill. The registry is guarded
             // because some build/test contexts resolve the controller graph
-            // without a full skill scan; production always provides it via
+            // without the orchestrator slice; production always provides it via
             // OrchestratorContainerBindings::orchestratorDefinitions().
             ToolsRecommendsSkillsValidator::class => static function (ContainerInterface $c): ToolsRecommendsSkillsValidator {
                 return new ToolsRecommendsSkillsValidator(
@@ -612,7 +612,7 @@ final class ContainerDefinitions
                             $c->get(PluginLoader::class)->toolClasses(),
                         ))),
                     ),
-                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
                 );
             },
         ];
@@ -1565,8 +1565,9 @@ final class ContainerDefinitions
 
             SkillTool::class => static function (ContainerInterface $c): SkillTool {
                 return new SkillTool(
-                    $c->get(SkillScanner::class),
+                    $c->get(SkillProviderRegistry::class),
                     $c->get(ToolConfigService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 

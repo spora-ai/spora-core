@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolConfigServiceInterface;
-use Spora\Skills\Skill;
-use Spora\Skills\SkillScanner;
+use Spora\Skills\SkillProviderInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
@@ -28,9 +30,18 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - 'files' — return the recursive file listing as
  *               `[{path, bytes}]`.
  *
- * Security: the LLM's choice of `name` and `filename` is re-validated
- * server-side — `name` must be in the agent's `allowed_skills`; the
- * `filename` is path-traversal-hardened before any FS read.
+ * **Two gates, in this order, and the order is the point.** `name` must be in
+ * the agent's `allowed_skills`, *and* the skill must be visible to the
+ * execution's principal. A skill allowlisted on a group agent whose provider
+ * scopes by principal is rejected by the second gate, which is what keeps one
+ * tenant's `allowed_skills` from becoming a read primitive across tenants.
+ *
+ * The `filename` is checked against the provider's own listing before the read
+ * is attempted, and the size cap is re-asserted on the content that comes back.
+ * Both are deliberate: the provider is a plugin-supplied implementation, and a
+ * membership check the caller cannot enforce on the callee is not a check.
+ * {@see SkillToolProviderTest} pins the case with a provider that deliberately
+ * answers for a path it does not list.
  */
 #[Tool(
     name: 'skill',
@@ -46,8 +57,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'multi-select',
     description: 'Skills the agent may load. The LLM sees the name and short description of each in the tool definition.',
     required: true,
-    // 'skill' stores string[] slugs and resolves them via the SkillScanner
-    // to "name: short description" pairs for the LLM-facing projection.
+    // 'skill' stores string[] slugs and resolves them via the skill providers to
+    // "name: short description" pairs for the LLM-facing projection.
     // Path is relative to /api/v1 (the api client prepends it); an absolute
     // path here would double up to `/api/v1/api/v1/skills` and 404.
     resolveAs: 'skill',
@@ -87,12 +98,12 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 final class SkillTool extends AbstractTool
 {
-    private const FILE_SIZE_HARD_LIMIT = 50_000;
     private const SKILL_ENTRY_FILE = 'SKILL.md';
 
     public function __construct(
-        private readonly SkillScanner $scanner,
+        private readonly SkillProviderRegistry $skills,
         private readonly ToolConfigServiceInterface $config,
+        private readonly PrincipalResolver $principals,
     ) {}
 
     public function execute(
@@ -100,17 +111,28 @@ final class SkillTool extends AbstractTool
         int $agentId,
         ?int $userId = null,
         ?int $taskId = null,
-        ?\Spora\Services\PrincipalContext $context = null,
+        ?PrincipalContext $context = null,
     ): ToolResult {
-        $auth = $this->resolveAndAuthorize($arguments, $agentId, $userId);
-        if ($auth instanceof ToolResult) {
-            return $auth;
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+
+        $authError = $this->authorizationErrorFor($name, $agentId, $userId);
+        if ($authError !== null) {
+            return $authError;
         }
-        $skill = $auth;
+
+        $principalId = $this->resolvePrincipalId($agentId, $context);
+
+        $files = $this->skills->getSkillFiles($name, $principalId);
+        if ($files === null) {
+            // "Not available" rather than "not on disk": a provider need not be
+            // backed by a filesystem, and telling the model otherwise teaches it
+            // to retry a path that does not exist.
+            return new ToolResult(false, "Skill '{$name}' is not available.");
+        }
 
         return match ($this->getOperationName($arguments)) {
-            'read'  => $this->doRead($skill, $arguments),
-            'files' => $this->doFiles($skill),
+            'read'  => $this->doRead($name, $files, $principalId, $arguments),
+            'files' => $this->doFiles($name, $files),
             default => new ToolResult(false, "Unknown operation '{$this->getOperationName($arguments)}'."),
         };
     }
@@ -128,21 +150,144 @@ final class SkillTool extends AbstractTool
     }
 
     /**
-     * Validate `name` (non-empty, in allowed_skills, on disk) and return
-     * the resolved Skill, or a failure ToolResult.
+     * The principal whose skills this call may see.
      *
-     * @param array<string, mixed> $arguments
+     * The execution's context when there is one, else the agent's own
+     * principal. **`$userId` is never used**: it is the runner — whoever
+     * clicked — not the owner, and a group agent triggered by one member would
+     * otherwise resolve against that member's personal skills. The resolver
+     * fallback is what keeps a scheduled run working: there is no runner, but
+     * there is an agent, and its principal is the right scope.
+     *
+     * An unresolvable principal becomes `null` so a provider fails closed.
      */
-    private function resolveAndAuthorize(array $arguments, int $agentId, ?int $userId): Skill|ToolResult
+    private function resolvePrincipalId(int $agentId, ?PrincipalContext $context): ?int
     {
-        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
-        $authError = $this->authorizationErrorFor($name, $agentId, $userId);
-        if ($authError !== null) {
-            return $authError;
+        $resolved = $context ?? $this->principals->resolveForToolExecute($agentId);
+
+        return $resolved->isResolvable() ? $resolved->principalId : null;
+    }
+
+    /**
+     * @param list<array{path: string, bytes: int}> $files
+     * @return array{0: string, 1: string}|ToolResult
+     */
+    private function resolveReadableFile(
+        string $name,
+        array $files,
+        ?int $principalId,
+        string $filename,
+    ): array|ToolResult {
+        $sanitized = $this->sanitizeRelativePath($filename);
+        if ($sanitized === null) {
+            return new ToolResult(
+                false,
+                "Invalid filename '{$filename}'. Paths must be relative, must not contain '..' or null bytes, and must be present in the skill's file listing.",
+            );
         }
 
-        $skill = $this->findSkill($name);
-        return $skill ?? new ToolResult(false, "Skill '{$name}' is not currently available on disk.");
+        $listed = null;
+        foreach ($files as $entry) {
+            if ($entry['path'] === $sanitized) {
+                $listed = $entry['bytes'];
+
+                break;
+            }
+        }
+        if ($listed === null) {
+            return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$name}'.");
+        }
+
+        $contents = $this->skills->getSkillFile($name, $sanitized, $principalId);
+        if ($contents === null) {
+            // The path is a member, so "not part of skill" would be a lie. The
+            // listing still knows the size, which is what makes the difference
+            // between "too big" and "unreadable" — and telling the model a file
+            // it can see in the listing does not exist sends it looking for a
+            // different path instead.
+            return $listed > SkillProviderInterface::MAX_FILE_BYTES
+                ? new ToolResult(
+                    false,
+                    "File '{$sanitized}' is {$listed} bytes; skill reads are capped at "
+                        . SkillProviderInterface::MAX_FILE_BYTES . ' bytes.',
+                )
+                : new ToolResult(false, "Could not read '{$sanitized}'.");
+        }
+
+        // Re-assert the cap on what actually arrived. The provider is required
+        // to enforce it before materialising, but this is the boundary where
+        // untrusted content enters the model's context, and a provider bug must
+        // not be able to widen it from the other side.
+        if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
+            return new ToolResult(
+                false,
+                "File '{$sanitized}' is " . strlen($contents) . ' bytes; skill reads are capped at '
+                    . SkillProviderInterface::MAX_FILE_BYTES . ' bytes.',
+            );
+        }
+
+        return [$sanitized, $contents];
+    }
+
+    /**
+     * @param list<array{path: string, bytes: int}> $files
+     */
+    private function doRead(string $name, array $files, ?int $principalId, array $arguments): ToolResult
+    {
+        $resolved = $this->resolveReadableFile(
+            $name,
+            $files,
+            $principalId,
+            (string) ($arguments['filename'] ?? self::SKILL_ENTRY_FILE),
+        );
+        if ($resolved instanceof ToolResult) {
+            return $resolved;
+        }
+        [$sanitized, $contents] = $resolved;
+
+        // SKILL.md frontmatter is stripped — the LLM already saw
+        // name+description in the tool definition (Stage 1).
+        $body = $sanitized === self::SKILL_ENTRY_FILE
+            ? $this->stripFrontmatter($contents)
+            : $contents;
+
+        return new ToolResult(
+            true,
+            $body,
+            [
+                'name'     => $name,
+                'filename' => $sanitized,
+                'bytes'    => strlen($contents),
+            ],
+        );
+    }
+
+    /**
+     * @param list<array{path: string, bytes: int}> $files
+     */
+    private function doFiles(string $name, array $files): ToolResult
+    {
+        if ($files === []) {
+            return new ToolResult(
+                true,
+                "Skill '{$name}' has no files listed.",
+                ['name' => $name, 'files' => []],
+            );
+        }
+
+        $lines = ["Files in skill '{$name}':"];
+        foreach ($files as $entry) {
+            $lines[] = sprintf('  - %s (%d bytes)', $entry['path'], $entry['bytes']);
+        }
+
+        return new ToolResult(
+            true,
+            implode("\n", $lines),
+            [
+                'name'  => $name,
+                'files' => $files,
+            ],
+        );
     }
 
     private function authorizationErrorFor(string $name, int $agentId, ?int $userId): ?ToolResult
@@ -172,151 +317,14 @@ final class SkillTool extends AbstractTool
         return false;
     }
 
-    private function findSkill(string $name): ?Skill
-    {
-        foreach ($this->scanner->scan() as $skill) {
-            if ($skill->name() === $name) {
-                return $skill;
-            }
-        }
-        return null;
-    }
-
-    private function doRead(Skill $skill, array $arguments): ToolResult
-    {
-        $resolved = $this->resolveReadableFile($skill, (string) ($arguments['filename'] ?? self::SKILL_ENTRY_FILE));
-        if ($resolved instanceof ToolResult) {
-            return $resolved;
-        }
-        [$sanitized, $contents] = $resolved;
-
-        // SKILL.md frontmatter is stripped — the LLM already saw
-        // name+description in the tool definition (Stage 1).
-        $body = $sanitized === self::SKILL_ENTRY_FILE
-            ? $this->stripFrontmatter($contents)
-            : $contents;
-
-        return new ToolResult(
-            true,
-            $body,
-            [
-                'name'     => $skill->name(),
-                'filename' => $sanitized,
-                'bytes'    => strlen($contents),
-            ],
-        );
-    }
-
-    /**
-     * Locate, sanitise, contain, stat-size-cap, and read the requested
-     * file. Returns a [sanitised, contents] tuple on success or a
-     * failure ToolResult.
-     *
-     * @return array{0: string, 1: string}|ToolResult
-     */
-    private function resolveReadableFile(Skill $skill, string $filename): array|ToolResult
-    {
-        $sanitized = $this->sanitizeRelativePath($filename);
-        if ($sanitized === null) {
-            return new ToolResult(
-                false,
-                "Invalid filename '{$filename}'. Paths must be relative, must not contain '..' or null bytes, and must be present in the skill's file listing.",
-            );
-        }
-
-        $real = $this->resolveAndValidatePath($skill, $sanitized);
-        if ($real instanceof ToolResult) {
-            return $real;
-        }
-
-        $contents = $this->readContentsAt($real, $sanitized);
-        return $contents instanceof ToolResult ? $contents : [$sanitized, $contents];
-    }
-
-    /**
-     * Resolve the skill-relative path to its realpath on disk, or return
-     * a failure ToolResult. Defense-in-depth containment check (realpath
-     * inside the skill dir) lives here.
-     */
-    private function resolveAndValidatePath(Skill $skill, string $sanitized): string|ToolResult
-    {
-        try {
-            $absolute = $skill->resolveFilePath($sanitized);
-        } catch (\Spora\Skills\Exceptions\SkillNotFoundException) {
-            return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
-        }
-
-        $real = realpath($absolute);
-        $rootReal = realpath($skill->dir());
-        if ($real === false || $rootReal === false || !str_starts_with($real, $rootReal . DIRECTORY_SEPARATOR)) {
-            return new ToolResult(false, "File '{$sanitized}' is not part of skill '{$skill->name()}'.");
-        }
-
-        return $real;
-    }
-
-    private function readContentsAt(string $real, string $sanitized): string|ToolResult
-    {
-        $sizeError = $this->sizeCapErrorFor($real, $sanitized);
-        if ($sizeError !== null) {
-            return $sizeError;
-        }
-
-        $contents = @file_get_contents($real);
-        return $contents === false
-            ? new ToolResult(false, "Could not read '{$sanitized}'.")
-            : $contents;
-    }
-
-    private function sizeCapErrorFor(string $real, string $sanitized): ?ToolResult
-    {
-        $size = @filesize($real);
-        if ($size === false) {
-            return new ToolResult(false, "Could not stat '{$sanitized}'.");
-        }
-        if ($size > self::FILE_SIZE_HARD_LIMIT) {
-            return new ToolResult(
-                false,
-                "File '{$sanitized}' is {$size} bytes; skill_read is capped at " . self::FILE_SIZE_HARD_LIMIT . ' bytes.',
-            );
-        }
-        return null;
-    }
-
-    private function doFiles(Skill $skill): ToolResult
-    {
-        $files = $skill->files();
-        if ($files === []) {
-            return new ToolResult(
-                true,
-                "Skill '{$skill->name()}' has no files listed.",
-                ['name' => $skill->name(), 'files' => []],
-            );
-        }
-
-        $lines = ["Files in skill '{$skill->name()}':"];
-        foreach ($files as $entry) {
-            $lines[] = sprintf('  - %s (%d bytes)', $entry['path'], $entry['bytes']);
-        }
-
-        return new ToolResult(
-            true,
-            implode("\n", $lines),
-            [
-                'name'  => $skill->name(),
-                'files' => $files,
-            ],
-        );
-    }
-
     /**
      * Reject path-traversal attempts and other unsafe inputs. Returns
      * the sanitised path on success or null on rejection.
      *
      * - No leading slash (must be relative to the skill root).
      * - No null bytes.
-     * - No `..` segments (the resolved realpath check is the final
-     *   defence, but we filter obvious attempts here too).
+     * - No `..` segments (the provider re-validates containment
+     *   independently — this filter is the cheap first pass, not the defence).
      */
     private function sanitizeRelativePath(string $path): ?string
     {

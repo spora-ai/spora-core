@@ -19,14 +19,28 @@ use Spora\Skills\SkillSummary;
  */
 final class StubSkillProvider implements SkillProviderInterface
 {
-    /** @var list<array{summary: SkillSummary, body: string, files: list<array{path: string, bytes: int}>, contents: array<string, string>}> */
+    /** @var list<array{summary: SkillSummary, body: string, files: list<array{path: string, bytes: int}>, contents: array<string, string>, owner: ?int}> */
     private array $skills = [];
 
     public ?int $lastPrincipalId = null;
 
     public bool $answerUnlistedPaths = false;
 
+    /**
+     * Return content over {@see SkillProviderInterface::MAX_FILE_BYTES} for a
+     * listed path, while the listing still advertises a small one. Models a
+     * provider that skips the cap it is required to enforce.
+     */
+    public bool $ignoreSizeCap = false;
+
     public int $listCalls = 0;
+
+    /**
+     * When set, the provider becomes principal-scoped: it answers only for this
+     * principal, and returns nothing at all for a null one. Left null the stub
+     * behaves like a shipped-skill provider and ignores the principal.
+     */
+    public ?int $onlyVisibleTo = null;
 
     public function __construct(
         private readonly string $label = 'stub',
@@ -39,13 +53,26 @@ final class StubSkillProvider implements SkillProviderInterface
 
     /**
      * @param list<string> $paths
+     * @param int|null     $owner        Principal this skill belongs to; null
+     *                                    means principal-independent.
+     * @param array<string, int>|null $pathBytes Per-path byte sizes to
+     *                                    advertise in the listing, overriding
+     *                                    the 4-byte default. Lets a test model
+     *                                    a file the provider refuses to serve
+     *                                    because it is over the cap.
      */
-    public function add(string $name, array $paths = [], string $body = 'body', ?string $description = null): self
-    {
+    public function add(
+        string $name,
+        array $paths = [],
+        string $body = 'body',
+        ?string $description = null,
+        ?int $owner = null,
+        ?array $pathBytes = null,
+    ): self {
         $files = [];
         $contents = [];
         foreach ($paths as $path) {
-            $files[] = ['path' => $path, 'bytes' => 4];
+            $files[] = ['path' => $path, 'bytes' => $pathBytes[$path] ?? 4];
             $contents[$path] = "content of {$path}";
         }
 
@@ -61,6 +88,7 @@ final class StubSkillProvider implements SkillProviderInterface
             'body'     => $body,
             'files'    => $files,
             'contents' => $contents,
+            'owner'    => $owner,
         ];
 
         return $this;
@@ -71,13 +99,20 @@ final class StubSkillProvider implements SkillProviderInterface
         $this->lastPrincipalId = $principalId;
         $this->listCalls++;
 
-        return array_map(static fn(array $s): SkillSummary => $s['summary'], $this->skills);
+        $out = [];
+        foreach ($this->skills as $skill) {
+            if ($this->visibleTo($skill, $principalId)) {
+                $out[] = $skill['summary'];
+            }
+        }
+
+        return $out;
     }
 
     public function getSkillDetails(string $name, ?int $principalId): ?SkillDescriptor
     {
         $this->lastPrincipalId = $principalId;
-        $skill = $this->firstNamed($name);
+        $skill = $this->firstNamed($name, $principalId);
         if ($skill === null) {
             return null;
         }
@@ -93,13 +128,13 @@ final class StubSkillProvider implements SkillProviderInterface
     {
         $this->lastPrincipalId = $principalId;
 
-        return $this->firstNamed($name)['files'] ?? null;
+        return $this->firstNamed($name, $principalId)['files'] ?? null;
     }
 
     public function getSkillFile(string $name, string $path, ?int $principalId): ?string
     {
         $this->lastPrincipalId = $principalId;
-        $skill = $this->firstNamed($name);
+        $skill = $this->firstNamed($name, $principalId);
         if ($skill === null) {
             return null;
         }
@@ -108,16 +143,46 @@ final class StubSkillProvider implements SkillProviderInterface
             return 'leaked ' . $path;
         }
 
+        if ($this->ignoreSizeCap && ($skill['contents'][$path] ?? null) !== null) {
+            return str_repeat('a', SkillProviderInterface::MAX_FILE_BYTES + 1);
+        }
+
+        // A compliant provider refuses an over-cap file before materialising
+        // it, which is what `ignoreSizeCap = false` models.
+        foreach ($skill['files'] as $entry) {
+            if ($entry['path'] === $path && $entry['bytes'] > SkillProviderInterface::MAX_FILE_BYTES) {
+                return null;
+            }
+        }
+
         return $skill['contents'][$path] ?? null;
     }
 
     /**
-     * @return array{summary: SkillSummary, body: string, files: list<array{path: string, bytes: int}>, contents: array<string, string>}|null
+     * Fail closed for a scoped provider: an unresolvable principal sees nothing,
+     * and a resolvable one sees only what it owns.
+     *
+     * @param array{summary: SkillSummary, body: string, files: list<array{path: string, bytes: int}>, contents: array<string, string>, owner: ?int} $skill
      */
-    private function firstNamed(string $name): ?array
+    private function visibleTo(array $skill, ?int $principalId): bool
+    {
+        if ($this->onlyVisibleTo === null) {
+            return true;
+        }
+        if ($principalId === null) {
+            return false;
+        }
+
+        return $skill['owner'] === $principalId;
+    }
+
+    /**
+     * @return array{summary: SkillSummary, body: string, files: list<array{path: string, bytes: int}>, contents: array<string, string>, owner: ?int}|null
+     */
+    private function firstNamed(string $name, ?int $principalId): ?array
     {
         foreach ($this->skills as $skill) {
-            if ($skill['summary']->name === $name) {
+            if ($skill['summary']->name === $name && $this->visibleTo($skill, $principalId)) {
                 return $skill;
             }
         }
