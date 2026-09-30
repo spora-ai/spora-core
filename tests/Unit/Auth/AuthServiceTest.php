@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use Delight\Auth\Auth as DelightAuth;
 use Delight\Auth\Role;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
+use Spora\Auth\Exceptions\TooManyRequestsException;
 use Spora\Models\User;
 use Spora\Services\MailerInterface;
 use Spora\Services\SystemMailer;
@@ -430,6 +433,36 @@ describe('AuthService typed exception flow', function (): void {
 
         expect(fn() => $service->login('bad-creds@example.com', 'WrongPassword1!'))
             ->toThrow(InvalidCredentialsException::class);
+    });
+
+    test('login translates delight-im throttling into TooManyRequestsException', function (): void {
+        // Delight\Auth\Auth is final, so drive a real instance with throttling
+        // enabled and exhaust the IP bucket instead of mocking it. The bucket is
+        // supply 4 / interval 3600 / burstiness 5 => capacity 20, drained one
+        // token per failed attempt.
+        $pdo  = Capsule::connection()->getPdo();
+        $auth = new DelightAuth($pdo, '203.0.113.7', null, true);
+
+        $service = new AuthService($auth);
+        $email   = 'throttled@example.com';
+        $service->register($email, 'ValidPass1!', 'Throttled', true);
+
+        for ($attempt = 0; $attempt < 20; $attempt++) {
+            try {
+                $service->login($email, 'WrongPassword1!');
+            } catch (InvalidCredentialsException) {
+                // expected — each miss spends one token
+            }
+        }
+
+        // The bucket is empty, so the next attempt is rejected before the
+        // password is ever checked — even though it is correct.
+        try {
+            $service->login($email, 'ValidPass1!');
+            $this->fail('Expected TooManyRequestsException was not thrown.');
+        } catch (TooManyRequestsException $e) {
+            expect($e->retryAfterSeconds())->toBeGreaterThan(0);
+        }
     });
 });
 
