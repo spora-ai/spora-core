@@ -24,7 +24,9 @@ use Symfony\Component\HttpFoundation\Request;
  * which is the previous behaviour. Shipped skills appear either way.
  *
  * A name the caller cannot see is a **404**, not a 403: a 403 confirms the skill
- * exists, which is a cross-tenant existence oracle.
+ * exists, which is a cross-tenant existence oracle. That only holds within the
+ * set the caller is entitled to, so an id outside it is discarded before it
+ * reaches a provider — see {@see requestedPrincipalId()}.
  */
 final class SkillController
 {
@@ -43,10 +45,8 @@ final class SkillController
             return $this->unauthenticated();
         }
 
-        $requested = $this->requestedPrincipalId($request);
-        $ids = $requested === null
-            ? $this->principals->visiblePrincipalIdsFor($userId)
-            : [$requested];
+        $visible = $this->principals->visiblePrincipalIdsFor($userId);
+        $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
 
         $seen = [];
         $summaries = [];
@@ -76,10 +76,8 @@ final class SkillController
         // /api/v1/skills/Git and /api/v1/skills/git are equivalent.
         $name = strtolower(trim((string) $request->attributes->get('slug', '')));
 
-        $requested = $this->requestedPrincipalId($request);
-        $ids = $requested === null
-            ? $this->principals->visiblePrincipalIdsFor($userId)
-            : [$requested];
+        $visible = $this->principals->visiblePrincipalIdsFor($userId);
+        $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
 
         foreach ($ids as $principalId) {
             $descriptor = $this->skills->getSkillDetails($name, $principalId);
@@ -97,14 +95,25 @@ final class SkillController
     }
 
     /**
-     * The `?principal_id=` the caller asked for, or null when absent.
+     * A one-element list holding the `?principal_id=` the caller asked for, or
+     * null when it is absent, malformed, or not theirs. A list rather than a
+     * bare id so the caller can substitute it for the visible set as-is.
      *
      * A malformed or non-positive value is treated as absent rather than
      * rejected: the parameter is a narrowing hint, so falling back to the
      * caller's union is the answer they would have got by omitting it. A 400
      * would break the SPA's picker for a value it should never send.
+     *
+     * The visibility test is the load-bearing part. `principal_id` arrives from
+     * the query string, and a skill provider scopes by principal id with no
+     * notion of the HTTP caller — it trusts whatever id it is handed. Honouring
+     * the parameter unchecked therefore turns this endpoint into a cross-tenant
+     * read of another principal's skills, bodies included, via {@see show()}.
+     * Discarding an out-of-set id here, before it can reach a provider, is what
+     * prevents that; the 404-not-403 rule below only holds *within* a set the
+     * caller is entitled to.
      */
-    private function requestedPrincipalId(Request $request): ?int
+    private function requestedPrincipalId(Request $request, array $visiblePrincipalIds): ?array
     {
         $raw = $request->query->get('principal_id');
         if ($raw === null || $raw === '' || !is_numeric($raw)) {
@@ -113,7 +122,7 @@ final class SkillController
 
         $id = (int) $raw;
 
-        return $id > 0 ? $id : null;
+        return $id > 0 && in_array($id, $visiblePrincipalIds, true) ? [$id] : null;
     }
 
     /**

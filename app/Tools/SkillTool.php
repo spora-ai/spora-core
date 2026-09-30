@@ -114,7 +114,7 @@ final class SkillTool extends AbstractTool
     ): ToolResult {
         $name = strtolower(trim((string) ($arguments['name'] ?? '')));
 
-        $authError = $this->authorizationErrorFor($name, $agentId, $userId);
+        $authError = $this->authorizationErrorFor($name, $agentId, $userId, $context);
         if ($authError !== null) {
             return $authError;
         }
@@ -304,20 +304,30 @@ final class SkillTool extends AbstractTool
         );
     }
 
-    private function authorizationErrorFor(string $name, int $agentId, ?int $userId): ?ToolResult
+    private function authorizationErrorFor(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): ?ToolResult
     {
         if ($name === '') {
             return new ToolResult(false, 'name is required.');
         }
-        if (!$this->isSkillAllowed($name, $agentId, $userId)) {
+        if (!$this->isSkillAllowed($name, $agentId, $userId, $context)) {
             return new ToolResult(false, "Skill '{$name}' is not in the allowed_skills list for this agent.");
         }
         return null;
     }
 
-    private function isSkillAllowed(string $name, int $agentId, ?int $userId): bool
+    /**
+     * Read the allowlist through the execution's context.
+     *
+     * `$context` is forwarded for the same reason gate 2 uses it: the setting
+     * being read is the *agent's*, so it has to be resolved against the agent's
+     * principal. Omitting it lets the cascade fall back to the runner's
+     * principals, which is a different set — a group agent's group-level
+     * `allowed_skills` is then invisible and a legitimately configured skill is
+     * refused, and a scheduled run with no runner resolves nothing at all.
+     */
+    private function isSkillAllowed(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): bool
     {
-        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId, $context);
         $allowed  = $settings['allowed_skills'] ?? [];
 
         if (!is_array($allowed)) {

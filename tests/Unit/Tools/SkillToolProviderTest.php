@@ -287,3 +287,42 @@ it('reports a fileless skill as empty rather than failing', function (): void {
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('has no files listed');
 });
+
+describe('gate 1 and gate 2 resolve the same principal', function (): void {
+    it('reads the allowlist through the execution context, not the runner', function (): void {
+        $principalId = 10;
+        $provider = (new StubSkillProvider('custom'))->add('my-skill', ['SKILL.md'], 'Body.', null, $principalId);
+        $provider->onlyVisibleTo = $principalId;
+
+        // The allowlist is stored against the agent's principal. A cascade
+        // resolved from the runner instead would not find it — a group agent's
+        // group-level `allowed_skills`, or any scheduled run with no runner.
+        $seenContext = null;
+        $config = Mockery::mock(ToolConfigServiceInterface::class);
+        $config->shouldReceive('getEffectiveSettings')
+            ->andReturnUsing(function (string $class, int $agentId, ?int $userId, ?PrincipalContext $context = null) use (&$seenContext, $principalId): array {
+                $seenContext = $context;
+
+                return $context?->principalId === $principalId
+                    ? ['allowed_skills' => ['my-skill']]
+                    : ['allowed_skills' => []];
+            });
+
+        $tool = new SkillTool(new SkillProviderRegistry([$provider]), $config, new PrincipalResolver());
+
+        // A runner who is *not* the owner — the divergence a runner-scoped
+        // cascade produces.
+        $result = $tool->execute(
+            ['action' => 'read', 'name' => 'my-skill'],
+            1,
+            999,
+            null,
+            providerContext($principalId),
+        );
+
+        expect($seenContext)->toBeInstanceOf(PrincipalContext::class)
+            ->and($seenContext->principalId)->toBe($principalId)
+            ->and($result->success)->toBeTrue()
+            ->and($result->content)->toContain('content of SKILL.md');
+    });
+});

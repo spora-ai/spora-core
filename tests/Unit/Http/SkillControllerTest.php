@@ -206,16 +206,49 @@ test('a principal-scoped skill another principal owns is a 404, not a 403', func
     [$controller, $cleanup, , $ownPrincipal] = makeSkillControllerFixture();
 
     try {
-        // A principal that owns nothing, but that the caller can name.
-        $request = Request::create('/api/v1/skills/my-notes', 'GET', ['principal_id' => $ownPrincipal + 1000]);
-        $request->attributes->set('slug', 'my-notes');
+        // Named a principal the caller cannot see. That id is discarded, so the
+        // lookup falls back to the caller's own set — where `team-playbook` does
+        // not exist, and answering 403 would confirm that it does somewhere.
+        $request = Request::create('/api/v1/skills/team-playbook', 'GET', ['principal_id' => $ownPrincipal + 1000]);
+        $request->attributes->set('slug', 'team-playbook');
 
         $response = $controller->show($request);
 
-        // 403 would confirm the skill exists — a cross-tenant existence oracle.
         expect($response->getStatusCode())->toBe(404)
             ->and(json_decode((string) $response->getContent(), true)['error']['code'])
             ->toBe('SKILL_NOT_FOUND');
+    } finally {
+        $cleanup();
+    }
+});
+
+test('a principal_id the caller cannot see is discarded, not honoured', function (): void {
+    $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('skillidor@example.com');
+    [$controller, $cleanup, , $ownPrincipal] = makeSkillControllerFixture();
+    $foreign = $ownPrincipal + 1000;
+
+    try {
+        // `team-playbook` is owned by `$foreign`. A provider scopes by the id
+        // it is handed and has no notion of the HTTP caller, so honouring this
+        // parameter unchecked hands the caller another tenant's skill body.
+        $show = Request::create('/api/v1/skills/team-playbook', 'GET', ['principal_id' => $foreign]);
+        $show->attributes->set('slug', 'team-playbook');
+        $detail = $controller->show($show);
+
+        $listing = json_decode(
+            (string) $controller->index(
+                Request::create('/api/v1/skills', 'GET', ['principal_id' => $foreign]),
+            )->getContent(),
+            true,
+        );
+        $names = array_column($listing['data']['skills'], 'name');
+
+        expect($detail->getStatusCode())->toBe(404)
+            ->and(json_decode((string) $detail->getContent(), true)['error']['code'])->toBe('SKILL_NOT_FOUND')
+            ->and($names)->not->toContain('team-playbook')
+            // The caller's own skills are still served, so this is a narrowing
+            // rejection and not an empty response.
+            ->and($names)->toContain('my-notes');
     } finally {
         $cleanup();
     }
