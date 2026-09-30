@@ -193,7 +193,13 @@ jobs:
     name: PHPStan
     runs-on: ubuntu-latest
     steps:
+      # Full history, matching the `test` job. The two diff-based steps below
+      # compare against the PR's base sha, and a depth-1 checkout does not
+      # contain that object — `git diff <base>...HEAD` fails with "Invalid
+      # symmetric difference expression" rather than reporting a clean tree.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
