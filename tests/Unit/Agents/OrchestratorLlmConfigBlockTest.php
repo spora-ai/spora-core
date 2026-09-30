@@ -105,7 +105,7 @@ it('renders a real SubAgentTool LLM projection end-to-end', function (): void {
     }
     Capsule::table('agents')->where('id', $agent->id)->update(['user_id' => $userId]);
 
-    $inspector = new ToolConfigSchemaInspector([], new Spora\Services\PrincipalResolver());
+    $inspector = new ToolConfigSchemaInspector(principalResolver: new Spora\Services\PrincipalResolver());
     $llm = $inspector->getLlmToolSettings(
         SubAgentTool::class,
         ['allowed_target_agents' => [$agent->id]],

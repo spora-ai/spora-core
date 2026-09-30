@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
-use Spora\Skills\Skill;
+use Spora\Skills\SkillProviderRegistry;
+use Spora\Skills\SkillSummary;
 use Spora\Tools\ToolSettingSchema;
 
 /**
@@ -30,37 +31,17 @@ use Spora\Tools\ToolSettingSchema;
 final class ToolConfigSchemaInspector
 {
     /**
-     * Skill name → Skill map, populated by the container from the
-     * SkillScanner. Used to resolve `resolveAs: 'skill'` multi-select
-     * settings at LLM-exposure time.
-     *
-     * @var array<string, Skill>
-     */
-    private readonly array $skillsByName;
-
-    /**
-     * @param array<string, Skill> $skillsByName Skill name → Skill map used to
-     *                                             resolve `resolveAs: 'skill'`
-     *                                             multi-select settings. The
-     *                                             inspector is constructed
-     *                                             once per request lifetime
-     *                                             with a snapshot of available
-     *                                             skills; a long-running worker
-     *                                             (SSE / queue listener) that
-     *                                             picks up a skill written
-     *                                             mid-run must restart its
-     *                                             container, since there is no
-     *                                             reload path. The single
-     *                                             production construction site
-     *                                             is {@see \Spora\Core\OrchestratorContainerBindings},
-     *                                             which owns the scan.
+     * @param SkillProviderRegistry $skills Resolves `resolveAs: 'skill'`
+     *        multi-select settings at LLM-exposure time. A registry rather
+     *        than a name→Skill map: the projection is rebuilt on **every
+     *        tick**, and a provider-supplied skill must appear in it, not
+     *        just be authorised. The only production construction site is
+     *        {@see \Spora\Core\OrchestratorContainerBindings}.
      */
     public function __construct(
-        array $skillsByName = [],
+        private readonly SkillProviderRegistry $skills = new SkillProviderRegistry(),
         private readonly ?PrincipalResolver $principalResolver = null,
-    ) {
-        $this->skillsByName = $skillsByName;
-    }
+    ) {}
 
     /**
      * Return keys of all #[ToolSetting] attributes where type === 'password'.
@@ -259,14 +240,27 @@ final class ToolConfigSchemaInspector
      *                                          with no source agent) returns
      *                                          "#id" placeholders — same
      *                                          safe-by-default as before.
+     * @param  PrincipalContext|null $context  Ownership of the execution. Only
+     *                                          the `resolveAs: 'skill'` axis
+     *                                          reads it, to scope which skills
+     *                                          the model is shown; a null
+     *                                          context resolves *no*
+     *                                          principal-scoped skill, which is
+     *                                          the fail-closed direction.
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, array $effectiveSettings, ?int $userId = null, ?int $agentId = null): array
-    {
+    public function getLlmToolSettings(
+        string $toolClass,
+        array $effectiveSettings,
+        ?int $userId = null,
+        ?int $agentId = null,
+        ?PrincipalContext $context = null,
+    ): array {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
         $resolveAsByKey = $this->getResolveAsByKey($toolClass);
         $resolvedAgentNames = $this->resolveAgentNames($effectiveSettings, $multiKeys, $resolveAsByKey, $userId, $agentId);
+        $skillsByName = $this->visibleSkills($context);
 
         $result = [];
         foreach ($labels as $key => $label) {
@@ -274,7 +268,7 @@ final class ToolConfigSchemaInspector
             if (isset($multiKeys[$key])) {
                 $resolveAs = $resolveAsByKey[$key] ?? 'agent';
                 $value = match ($resolveAs) {
-                    'skill' => $this->formatSkillList($value),
+                    'skill' => $this->formatSkillList($value, $skillsByName),
                     'raw'   => is_array($value) ? array_values($value) : [],
                     default => $this->formatAgentIdList($value, $resolvedAgentNames),
                 };
@@ -406,34 +400,75 @@ final class ToolConfigSchemaInspector
     }
 
     /**
-     * Resolve a list of skill slugs to a list of "name: short description"
-     * strings for LLM exposure. Description is truncated to ~80 chars
-     * with an ellipsis; the full body is available on demand via
-     * `skill_read`. Slugs that no longer exist on disk (renamed or
-     * removed after selection) are silently skipped.
+     * The skills this execution's principal can see, keyed by name.
      *
-     * @param  mixed $value
+     * A **registry lookup, not a stored map**, and that is the whole point of
+     * this change: the previous eager snapshot was taken once per process from
+     * the filesystem, so any skill a provider serves — a user-authored one, say
+     * — would be authorised by the `skill` tool and simultaneously invisible in
+     * the tool definition. The agent could call it, but nothing would ever
+     * suggest it. That failure has no error, no log, and no failing test.
+     *
+     * Null context resolves nothing principal-scoped. Operator-default and
+     * template previews call this path with no principal in scope, and
+     * widening there would put one tenant's skills in another's preview.
+     * Shipped skills are principal-independent and still resolve.
+     *
+     * @return array<string, SkillSummary>
+     */
+    private function visibleSkills(?PrincipalContext $context): array
+    {
+        $principalId = $context !== null && $context->isResolvable() ? $context->principalId : null;
+
+        $byName = [];
+        foreach ($this->skills->getSkills($principalId) as $summary) {
+            $byName[$summary->name] ??= $summary;
+        }
+
+        return $byName;
+    }
+
+    /**
+     * Resolve a list of skill names to a list of "name: short description"
+     * strings for LLM exposure. Description is truncated to ~80 chars
+     * with an ellipsis; the full body is available on demand via the
+     * `skill` tool.
+     *
+     * A name that no longer resolves is rendered as `(unavailable: <name>)`
+     * rather than dropped. Dropping it made a skill disappear from the tool
+     * definition the moment it was renamed or deleted, with no signal that the
+     * agent's configuration had become stale — the model simply saw a shorter
+     * list. Saying so is also safe: the name is already in the agent's own
+     * configuration, so the annotation leaks nothing the caller did not write.
+     *
+     * @param  mixed                       $value
+     * @param  array<string, SkillSummary> $skillsByName
      * @return list<string>
      */
-    private function formatSkillList(mixed $value): array
+    private function formatSkillList(mixed $value, array $skillsByName): array
     {
         if (!is_array($value)) {
             return [];
         }
         $out = [];
-        foreach ($value as $slug) {
-            $slug = (string) $slug;
-            if ($slug === '' || !isset($this->skillsByName[$slug])) {
+        foreach ($value as $name) {
+            $name = (string) $name;
+            if ($name === '') {
                 continue;
             }
-            $skill = $this->skillsByName[$slug];
-            $description = $skill->description();
+            $skill = $skillsByName[$name] ?? null;
+            if ($skill === null) {
+                $out[] = "(unavailable: {$name})";
+
+                continue;
+            }
+            $description = $skill->description;
             $truncated = mb_strlen($description) > 80
                 ? mb_substr($description, 0, 77) . '...'
                 : $description;
             $out[] = $truncated === ''
-                ? $skill->name()
-                : "{$skill->name()}: {$truncated}";
+                ? $skill->name
+                : "{$skill->name}: {$truncated}";
         }
         return $out;
     }

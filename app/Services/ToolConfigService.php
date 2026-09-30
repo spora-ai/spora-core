@@ -57,13 +57,14 @@ class ToolConfigService implements ToolConfigServiceInterface
     /**
      * @param list<string> $toolClasses
      * @param ToolConfigSchemaInspector|null $schema The single shared inspector.
-     *        Injecting it is what keeps the skills map consistent across
-     *        consumers — the container builds it once from the scanner
-     *        ({@see OrchestratorContainerBindings}). Null (every test call site)
-     *        yields an empty skills map, which is why the LLM-facing
-     *        `allowed_skills` projection is empty under test and only ever
-     *        populated in the DI runtime. A test that needs a real skill list
-     *        must hand-build an inspector, not rely on this default.
+     *        Injecting it is what keeps the LLM-facing `allowed_skills`
+     *        projection consistent with what the `skill` tool will authorise
+     *        — the container builds it once over the same skill registry
+     *        ({@see OrchestratorContainerBindings}). Null (every test call
+     *        site) yields an empty registry, so the projection is empty under
+     *        test and only ever populated in the DI runtime. A test that needs
+     *        a real skill list must hand-build an inspector over a registry,
+     *        not rely on this default.
      */
     public function __construct(
         SecurityManagerInterface $security,
@@ -77,7 +78,7 @@ class ToolConfigService implements ToolConfigServiceInterface
         // Without the resolver the inspector's LLM-facing `allowed_target_agents`
         // enumerates "#id" placeholders; null is fine for tests, the DI runtime
         // always passes the resolver.
-        $this->schema = $schema ?? new ToolConfigSchemaInspector([], $principalResolver);
+        $this->schema = $schema ?? new ToolConfigSchemaInspector(principalResolver: $principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
         $this->cascade = new ToolConfigPrincipalCascade(
@@ -507,6 +508,10 @@ class ToolConfigService implements ToolConfigServiceInterface
     {
         $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId, $context);
 
-        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId, $agentId);
+        // `$context` is forwarded, not dropped. The settings cascade has
+        // already used it; the `resolveAs: 'skill'` projection needs it too, or
+        // a provider-supplied skill is authorised by the `skill` tool and
+        // simultaneously absent from the tool definition that would suggest it.
+        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId, $agentId, $context);
     }
 }
