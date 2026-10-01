@@ -151,7 +151,7 @@ it('enforces the read cap before returning content', function (): void {
     }
 });
 
-it('memoises the scan and rescans after flush', function (): void {
+it('sees a skill added on disk on the very next read', function (): void {
     [$provider, $root, , $cleanup] = fsProviderFixture();
 
     try {
@@ -161,13 +161,9 @@ it('memoises the scan and rescans after flush', function (): void {
         mkdir($late, 0o755, true);
         file_put_contents($late . '/SKILL.md', "---\nname: late\ndescription: Added later\n---\n\nBody\n");
 
-        // The memo is process-lifetime, so a new skill is invisible until the
-        // cache is dropped. Stating that here is what makes the staleness
-        // window a decision rather than a surprise.
-        expect($provider->getSkills(null))->toHaveCount(1);
-
-        $provider->flush();
-
+        // A worker holds this provider for its whole lifetime, so a memo would
+        // make a skill invisible until the process restarted. Nothing calls an
+        // invalidation hook, which is why there is no cache here at all.
         $names = array_map(static fn($s): string => $s->name, $provider->getSkills(null));
         expect($names)->toBe(['demo', 'late']);
     } finally {

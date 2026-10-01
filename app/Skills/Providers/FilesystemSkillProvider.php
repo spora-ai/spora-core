@@ -19,15 +19,15 @@ use Spora\Skills\SkillSummary;
  * user of a file the operator already controls. A principal-scoped provider is a
  * different implementation, not a different argument to this one.
  *
- * The scan is memoised with an explicit {@see flush()} rather than a `static`:
- * skill directories are mutable, and a `static` would survive the container with
- * no way to invalidate it from here.
+ * Every read rescans. Skill directories are mutable, and a worker or an SSE
+ * listener holds this provider for its whole lifetime, so a memo here would be a
+ * staleness window with no boundary to close it — a skill added on disk would
+ * stay invisible until the process restarted. Caching this needs an
+ * invalidation point, which is a deliberate change rather than a side effect of
+ * adding a provider.
  */
 final class FilesystemSkillProvider implements SkillProviderInterface
 {
-    /** @var array<string, Skill>|null */
-    private ?array $byName = null;
-
     public function __construct(
         private readonly SkillScanner $scanner,
     ) {}
@@ -35,14 +35,6 @@ final class FilesystemSkillProvider implements SkillProviderInterface
     public function source(): string
     {
         return 'filesystem';
-    }
-
-    /**
-     * Drop the memo so the next read rescans the configured roots.
-     */
-    public function flush(): void
-    {
-        $this->byName = null;
     }
 
     public function getSkills(?int $principalId): array
@@ -168,10 +160,6 @@ final class FilesystemSkillProvider implements SkillProviderInterface
      */
     private function index(): array
     {
-        if ($this->byName !== null) {
-            return $this->byName;
-        }
-
         $byName = [];
         foreach ($this->scanner->scan() as $skill) {
             // First entry wins, mirroring the scanner's root precedence: a
@@ -179,6 +167,6 @@ final class FilesystemSkillProvider implements SkillProviderInterface
             $byName[$skill->name()] ??= $skill;
         }
 
-        return $this->byName = $byName;
+        return $byName;
     }
 }
