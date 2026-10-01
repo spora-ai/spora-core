@@ -1,7 +1,7 @@
 ---
 name: schedule
 description: "Create, list, update, delete and trigger scheduled runs (cron or one-shot) and prompt templates attached to this agent. Trigger on: 'schedule this', 'remind me tomorrow at 8', 'set up a daily check', 'every Monday at 9am', 'save this prompt as a template', 'what's on my schedule', 'trigger the X job now'. When a schedule fires later, the prompt is the only task-specific input — the agent's system prompt and tool allowlist are inherited from the agent row, but there is no operator, no chat history, no attachments, and no live state at fire time. The prompt must be self-contained end-to-end: goal, data sources to consult, output format, and what 'done' means."
-license: Apache-2.0
+license: MIT
 compatibility: "Designed for Spora agents with the `schedule` tool enabled."
 metadata:
   author: spora-ai
