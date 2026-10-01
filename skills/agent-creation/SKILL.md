@@ -5,7 +5,7 @@ license: Apache-2.0
 metadata:
   author: spora-ai
   version: "2.1"
-  allowedByDefault: false
+  allowedByDefault: "false"
   requiresTools: "agent:create_agent,agent:configure_tools,agent:read_agent,agent:update_agent,agent:list_agents,agent:get_available_tools,agent:read_notes,agent:write_notes"
 ---
 
