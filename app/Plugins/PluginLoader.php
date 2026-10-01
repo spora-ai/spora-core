@@ -243,6 +243,29 @@ final class PluginLoader
     }
 
     /**
+     * All {@see \Spora\Search\SearchProviderInterface} class FQCNs contributed by
+     * loaded plugins, merged into the container's search provider list.
+     *
+     * Mirrors {@see skillProviderClasses()} rather than being generic over both:
+     * the two hooks have independent precedence, and one generic helper would
+     * have to invent a merge order for them.
+     *
+     * @return list<class-string<\Spora\Search\SearchProviderInterface>>
+     */
+    public function searchProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->searchProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *

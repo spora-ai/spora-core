@@ -21,6 +21,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
+use Spora\Apps\AppRegistry;
 use Spora\Auth\AuthService;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerReaper;
@@ -29,6 +30,8 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\WorkerController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
+use Spora\Search\Providers\SkillSearchProvider;
+use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\DbRateLimiter;
@@ -318,6 +321,35 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SkillProviderRegistry($providers);
+            },
+
+            // Core's own provider first, then plugin `searchProviders()`, so a
+            // plugin cannot displace what ⌘K already returns.
+            SkillSearchProvider::class => static function (ContainerInterface $c): SkillSearchProvider {
+                return new SkillSearchProvider(
+                    $c->get(SkillProviderRegistry::class),
+                    $c->get(AppRegistry::class),
+                );
+            },
+
+            'search_provider_classes' => [
+                SkillSearchProvider::class,
+            ],
+
+            'search_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('search_provider_classes'),
+                    $c->get(PluginLoader::class)->searchProviderClasses(),
+                )));
+            },
+
+            SearchProviderRegistry::class => static function (ContainerInterface $c): SearchProviderRegistry {
+                $providers = [];
+                foreach ($c->get('search_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SearchProviderRegistry($providers);
             },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {

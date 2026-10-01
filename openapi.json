@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.28.0-7-g5d4fe0eb"
+        "version": "0.29.0-5-g546830e5"
     },
     "servers": [
         {
@@ -3454,6 +3454,25 @@
                         }
                     }
                 ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/search": {
+            "get": {
+                "tags": [
+                    "Search"
+                ],
+                "summary": "Index Search",
+                "parameters": [],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

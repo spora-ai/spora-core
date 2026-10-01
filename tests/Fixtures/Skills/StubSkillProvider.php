@@ -94,6 +94,27 @@ final class StubSkillProvider implements SkillProviderInterface
         return $this;
     }
 
+    public function markWarnings(string $name): self
+    {
+        foreach ($this->skills as $index => $skill) {
+            if ($skill['summary']->name !== $name) {
+                continue;
+            }
+            $summary = $skill['summary'];
+            $this->skills[$index]['summary'] = new SkillSummary(
+                name: $summary->name,
+                description: $summary->description,
+                license: $summary->license,
+                source: $summary->source,
+                slug: $summary->slug,
+                fileCount: $summary->fileCount,
+                hasWarnings: true,
+            );
+        }
+
+        return $this;
+    }
+
     public function getSkills(?int $principalId): array
     {
         $this->lastPrincipalId = $principalId;

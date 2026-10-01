@@ -96,4 +96,10 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
+
+    /** @return list<class-string<\Spora\Search\SearchProviderInterface>> */
+    public function searchProviders(): array
+    {
+        return [];
+    }
 }

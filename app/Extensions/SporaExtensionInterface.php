@@ -108,4 +108,15 @@ interface SporaExtensionInterface
      * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
      */
     public function skillProviders(): array;
+
+    /**
+     * Search provider classes this extension contributes to the host ⌘K palette.
+     *
+     * Distinct from {@see skillProviders()}: that makes a resource *readable*,
+     * this makes it *findable*. Most plugins need neither hook for skills —
+     * core's provider already searches everything in the skill registry.
+     *
+     * @return list<class-string<\Spora\Search\SearchProviderInterface>>
+     */
+    public function searchProviders(): array;
 }
