@@ -48,6 +48,7 @@ This is the operator-facing CLI for installing, migrating, seeding, running work
 - `worker:run` — Run async worker (queued mode)
 - `worker:run --scheduled` — Run scheduled tasks worker
 - `spora:openapi [--output=openapi.json] [--check]` — Generate / drift-check the OpenAPI spec
+- `spora:audit-operation-overrides` — Read-only report of tool-config rows whose `tool_class` no longer resolves
 - Full CLI reference: `bin/spora --help`
 
 **Build: `bin/spora-build`** — deliberately skips the Kernel / DI / secret-key boot

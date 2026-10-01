@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Psr\Log\LoggerInterface;
 use Spora\Search\SearchContext;
 use Spora\Search\SearchHit;
 use Spora\Search\SearchProviderInterface;
@@ -70,6 +71,23 @@ it('contains a throwing provider so the rest of the palette survives', function 
 
     expect($hits)->toHaveCount(1)
         ->and($hits[0]->type)->toBe('agent');
+});
+
+it('logs a throwing provider, so a silent failure is distinguishable from no results', function () {
+    $logger = Mockery::mock(LoggerInterface::class);
+    $logger->shouldReceive('warning')
+        ->once()
+        ->withArgs(static function (string $message, array $context): bool {
+            return str_contains($message, 'provider failed')
+                && ($context['provider'] ?? null) !== null;
+        });
+
+    $registry = new SearchProviderRegistry(
+        [stubSearchProvider('broken', [], new RuntimeException('provider exploded'))],
+        $logger,
+    );
+
+    expect($registry->search('inv', new SearchContext([1])))->toBe([]);
 });
 
 it('lists provider types in precedence order', function () {

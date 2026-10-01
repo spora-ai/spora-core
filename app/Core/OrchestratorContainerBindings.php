@@ -248,11 +248,9 @@ final class OrchestratorContainerBindings
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
-            // The inspector resolves `resolveAs: 'skill'` settings against the
-            // same registry the `skill` tool authorises against. That identity
-            // is the point: if these two ever read different sources, a skill
-            // can be reachable but never suggested, or suggested but
-            // unreachable, and neither failure produces an error.
+            // Resolves `resolveAs: 'skill'` settings against the same registry
+            // the `skill` tool authorises against — see the note on
+            // `SkillListProjector` below, which is the same identity argument.
             ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
                 return new ToolConfigSchemaInspector(
                     $c->get(SkillListProjector::class),
@@ -349,7 +347,7 @@ final class OrchestratorContainerBindings
                     $providers[] = $c->get($class);
                 }
 
-                return new SearchProviderRegistry($providers);
+                return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
             },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
