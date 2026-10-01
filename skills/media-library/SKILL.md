@@ -1,7 +1,7 @@
 ---
 name: media-library
 description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library. Trigger on any of: 'show this asset', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, and the size/mime constraints that decide between inline-bytes and public-URL retrieval."
-license: Apache-2.0
+license: MIT
 compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
   author: spora-ai
