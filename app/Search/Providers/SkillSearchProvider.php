@@ -75,24 +75,27 @@ final readonly class SkillSearchProvider implements SearchProviderInterface
     /**
      * Lower is better; null means no match.
      *
-     * Name matches outrank description matches because prose is weak evidence:
-     * without the split every descriptive word outranks the one skill actually
-     * typed.
+     * The tiers are ordered best-to-worst and the first match wins, so the
+     * order here is the ranking. Name matches outrank description matches
+     * because prose is weak evidence: without the split every descriptive word
+     * outranks the one skill actually typed.
      */
     private function rank(string $name, string $description, string $needle): ?int
     {
         $subject = mb_strtolower($name);
-        if ($subject === $needle) {
-            return 0;
-        }
-        if (str_starts_with($subject, $needle)) {
-            return 1;
-        }
-        if (str_contains($subject, $needle)) {
-            return 2;
-        }
-        if ($description !== '' && str_contains(mb_strtolower($description), $needle)) {
-            return 3;
+        $prose = mb_strtolower($description);
+
+        $tiers = [
+            $subject === $needle,
+            str_starts_with($subject, $needle),
+            str_contains($subject, $needle),
+            $description !== '' && str_contains($prose, $needle),
+        ];
+
+        foreach ($tiers as $rank => $matched) {
+            if ($matched) {
+                return $rank;
+            }
         }
 
         return null;
