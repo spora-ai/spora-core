@@ -46,12 +46,27 @@ final readonly class SkillSearchProvider implements SearchProviderInterface
         /** @var list<array{int, string, SearchHit}> $scored */
         $scored = [];
 
+        /** @var array<string, true> $seen */
+        $seen = [];
+
         foreach ($context->principalIds() as $principalId) {
             foreach ($this->skills->getSkills($principalId) as $summary) {
                 $rank = $this->rank($summary->name, $summary->description, $needle);
                 if ($rank === null) {
                     continue;
                 }
+
+                // A shipped skill resolves to the same summary for every
+                // principal, because the filesystem provider ignores the
+                // principal. Without this the loop emits one identical hit per
+                // visible principal, and each duplicate also spends a slot of
+                // `MAX_HITS`. Keyed exactly as `SkillController::index()` keys
+                // its own loop, so the two endpoints cannot disagree.
+                $key = $summary->source . '::' . $summary->name;
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
 
                 $scored[] = [$rank, $summary->name, new SearchHit(
                     type: $this->type(),

@@ -138,6 +138,26 @@ it('spans every visible principal, not just one', function () {
     expect($ids)->toContain('mine')->toContain('theirs');
 });
 
+it('returns one hit per skill when the provider ignores the principal', function () {
+    // `FilesystemSkillProvider` answers identically for every principal, so the
+    // per-principal loop sees the same summary N times. `onlyVisibleTo` stays
+    // null here, which is how the stub models that.
+    $agnostic = new StubSkillProvider('core');
+    $agnostic->add('typst', ['SKILL.md'], 'body', 'Typeset documents.');
+
+    $provider = new SkillSearchProvider(
+        new SkillProviderRegistry([$agnostic]),
+        buildAppRegistry([]),
+    );
+
+    $ids = array_map(
+        static fn($h) => $h->id,
+        $provider->search('typst', new SearchContext([SEARCH_OWNER, 4243, 4244])),
+    );
+
+    expect($ids)->toBe(['typst']);
+});
+
 it('ranks a name match above a description match', function () {
     $provider = new SkillSearchProvider(
         new SkillProviderRegistry([
