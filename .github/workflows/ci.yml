@@ -262,29 +262,64 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed=$(git diff --name-only --diff-filter=ACMRT "$BASE_SHA...HEAD" -- '*.md')
-          if [ -z "$changed" ]; then
+          # NUL-delimited, never word-split, and no bash-4-only builtins: a
+          # path may contain a space, and `for f in $changed` both errors on it
+          # and silently skips the file, which is the same "nothing is broken"
+          # failure this step exists for.
+          changed=()
+          while IFS= read -r -d '' file; do
+            changed+=("$file")
+          done < <(git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA...HEAD" -- '*.md')
+
+          if [ ${#changed[@]} -eq 0 ]; then
             echo "No markdown files changed; skipping link check."
             exit 0
           fi
-          # Collect every relative markdown link target from the changed files.
-          targets=$(grep -ohE '\]\(([^)#]+)\)' $changed \
-            | sed -E 's/^\]\((.*)\)$/\1/' \
-            | grep -vE '^(https?:|mailto:|#)' || true)
+
+          dirs=()
+          for file in "${changed[@]}"; do
+            dirs+=("$(dirname "$file")")
+          done
+          deduped=()
+          while IFS= read -r dir; do
+            deduped+=("$dir")
+          done < <(printf '%s\n' "${dirs[@]}" | sort -u)
+
           status=0
-          for target in $targets; do
-            # Resolve each target relative to every directory containing a
-            # changed file, since the same relative path can be valid in one
-            # and dead in another.
-            found=0
-            for base in $(dirname $changed | sort -u); do
-              if [ -e "$base/$target" ]; then found=1; break; fi
+          for file in "${changed[@]}"; do
+            # A relative markdown link, optionally titled and optionally
+            # anchored: ](a.md), ](a.md "A Title"), ](a.md#frag). The
+            # capture class has to admit the title, so the title comes back
+            # with it and is stripped below.
+            targets=()
+            while IFS= read -r target; do
+              targets+=("$target")
+            done < <(
+              grep -ohE '\]\([^)]+\)' "$file" \
+                | sed -E 's/^\]\((.*)\)$/\1/' \
+                | sed -E 's/[[:space:]]+"[^"]*"$//' \
+                | sed -E 's/#.*$//' \
+                | grep -vE '^(https?:|mailto:|#)' || true
+            )
+
+            for target in "${targets[@]}"; do
+              # Resolve relative to every directory holding a changed file:
+              # the same relative path can be live in one and dead in another.
+              # A literal space in a target is fine; a percent-encoded one is
+              # not decoded, and no relative link in this repo uses that form —
+              # the percent-encoded links here are all absolute badge URLs,
+              # filtered out above.
+              found=0
+              for base in "${deduped[@]}"; do
+                if [ -e "$base/$target" ]; then found=1; break; fi
+              done
+              if [ -e "$target" ]; then found=1; fi
+
+              if [ "$found" -eq 0 ]; then
+                echo "Dead link in $file: $target"
+                status=1
+              fi
             done
-            if [ -e "$target" ]; then found=1; fi
-            if [ "$found" -eq 0 ]; then
-              echo "Dead link in changed markdown: $target"
-              status=1
-            fi
           done
           exit $status
 
