@@ -13,6 +13,7 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\SkillTool\AgentSkillAllowlist;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
@@ -126,6 +127,7 @@ final class SkillTool extends AbstractTool
         private readonly SkillProviderRegistry $skills,
         private readonly ToolConfigServiceInterface $config,
         private readonly PrincipalResolver $principals,
+        private readonly AgentSkillAllowlist $allowlist,
     ) {}
 
     public function execute(
@@ -136,6 +138,7 @@ final class SkillTool extends AbstractTool
         ?PrincipalContext $context = null,
     ): ToolResult {
         $operation = $this->getOperationName($arguments);
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
 
         // Split before the allowlist gate, because that gate is the thing these two
         // operate on: `activate` exists to add a name the gate would refuse, and
@@ -143,24 +146,12 @@ final class SkillTool extends AbstractTool
         // unless an operator enabled the operation — `ToolCallExecutor` rejects a
         // disabled operation before `execute()` is called at all.
         if ($operation === 'list' || $operation === 'activate') {
-            return $this->executeManagement($operation, $arguments, $agentId, $userId, $context);
+            return $operation === 'list'
+                ? $this->doList($agentId, $userId, $context)
+                : $this->doActivate($name, $agentId, $userId, $context);
         }
 
         return $this->executeRead($operation, $arguments, $agentId, $userId, $context);
-    }
-
-    private function executeManagement(
-        string $operation,
-        array $arguments,
-        int $agentId,
-        ?int $userId,
-        ?PrincipalContext $context,
-    ): ToolResult {
-        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
-
-        return $operation === 'list'
-            ? $this->doList($agentId, $userId, $context)
-            : $this->doActivate($name, $agentId, $userId, $context);
     }
 
     private function executeRead(
@@ -224,7 +215,7 @@ final class SkillTool extends AbstractTool
     private function doList(int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         $principalId = $this->resolvePrincipalId($agentId, $context);
-        $active = $this->allowedSkillNames($agentId, $userId, $context);
+        $active = $this->allowlist->names($agentId, $userId, $context);
 
         $rows = [];
         $seen = [];
@@ -285,7 +276,7 @@ final class SkillTool extends AbstractTool
      */
     private function doActivate(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
-        $current = $this->allowedSkillNames($agentId, $userId, $context);
+        $current = $this->allowlist->names($agentId, $userId, $context);
 
         $refusal = $this->activationRefusal($name, $agentId, $context);
         if ($refusal !== null) {
@@ -300,8 +291,7 @@ final class SkillTool extends AbstractTool
             );
         }
 
-        $next = [...$current, $name];
-        $this->config->putAgentOverride(self::class, $agentId, ['allowed_skills' => json_encode($next)]);
+        $next = $this->allowlist->add($name, $agentId, $current);
 
         return new ToolResult(
             true,
@@ -325,7 +315,12 @@ final class SkillTool extends AbstractTool
             return new ToolResult(false, 'name is required.');
         }
 
-        if ($this->skills->getSkillDetails($name, $this->resolvePrincipalId($agentId, $context)) === null) {
+        $eligible = $this->allowlist->isActivatable(
+            $name,
+            $this->skills,
+            $this->resolvePrincipalId($agentId, $context),
+        );
+        if (! $eligible) {
             return new ToolResult(
                 false,
                 "Skill '{$name}' is not available to this principal, so there is nothing to activate. "
@@ -334,42 +329,6 @@ final class SkillTool extends AbstractTool
         }
 
         return null;
-    }
-
-    /**
-     * The effective allowlist as lower-cased names.
-     *
-     * Read through the execution's context for the reason {@see isSkillAllowed()}
-     * gives: the setting belongs to the agent, so it resolves against the agent's
-     * principal and not the runner's. `array_map` over a possibly-non-list value is
-     * avoided deliberately — a hand-edited override can hold anything, and a
-     * `strtolower` on a non-string is a TypeError rather than a skip.
-     *
-     * @return list<string>
-     */
-    private function allowedSkillNames(int $agentId, ?int $userId, ?PrincipalContext $context): array
-    {
-        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId, $context);
-        $allowed = $settings['allowed_skills'] ?? [];
-
-        if (is_string($allowed)) {
-            // The multi-select is stored JSON-encoded, and the override endpoint
-            // takes it that way, so a string here is the normal case, not a smell.
-            $decoded = json_decode($allowed, true);
-            $allowed = is_array($decoded) ? $decoded : [];
-        }
-        if (! is_array($allowed)) {
-            return [];
-        }
-
-        $names = [];
-        foreach ($allowed as $candidate) {
-            if (is_string($candidate) && trim($candidate) !== '') {
-                $names[] = strtolower(trim($candidate));
-            }
-        }
-
-        return $names;
     }
 
     /**

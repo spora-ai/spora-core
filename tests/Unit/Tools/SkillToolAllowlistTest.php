@@ -20,6 +20,7 @@ use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\SkillTool;
+use Spora\Tools\SkillTool\AgentSkillAllowlist;
 
 /**
  * A skill directory with a SKILL.md, in its own scan root.
@@ -88,6 +89,7 @@ function makeRealConfigSkillTool(?string $slug = 'allowlist-skill'): array
         ]))]),
         $service,
         new PrincipalResolver(),
+        new AgentSkillAllowlist($service),
     );
 
     return [$tool, $service, $agentId, $cleanup];
