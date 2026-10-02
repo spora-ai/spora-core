@@ -1,7 +1,7 @@
 ---
 name: agent-creation
 description: "When the user asks to create, set up, scaffold, or configure a new Spora agent, sub-agent, or specialised assistant; OR when a sub-task needs a toolset different from the calling agent's; OR when the user wants to edit an existing agent's configuration (name, description, system_prompt, scheduling, flags). Use for tasks like 'create me a weather agent', 'I need a research sub-agent', 'scaffold a translator', or 'rename agent 42 to Translation bot'. Do NOT use for editing the current agent's notes — those go through write_notes. Recommended tools: agent (operations create_agent, configure_tools, read_agent, update_agent, list_agents, get_available_tools, read_notes, write_notes, write_notes_overwrite)."
-license: Apache-2.0
+license: MIT
 metadata:
   author: spora-ai
   version: "2.1"

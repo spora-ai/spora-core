@@ -1,7 +1,7 @@
 ---
 name: time-arithmetic
 description: "Add or subtract durations from the current time, or convert an epoch to a human-readable datetime in a chosen IANA timezone. Use when the user asks 'what time will it be in 3 hours', '2 hours ago', 'how many minutes until 5pm', or any other arithmetic on the current time. Covers seconds, minutes, hours, days, weeks, and combinations."
-license: Apache-2.0
+license: MIT
 compatibility: Designed for Spora agents with the `time` tool (now + format operations) and `calculator` tool enabled.
 metadata:
   author: spora-ai

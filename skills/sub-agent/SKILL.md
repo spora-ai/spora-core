@@ -1,7 +1,7 @@
 ---
 name: sub-agent
 description: "Delegate work to another agent (`sub_agent` op, default) or close the source chat and start a fresh task on the target without returning (`handover` op). Trigger on: 'delegate this', 'spawn a sub-agent', 'hand off to N', 'let N take it from here', 'send it to N', 'use the N agent for this', 'I need N to do this'. The critical rules: (a) `sub_agent` is the default — only `handover` when the source agent does NOT need to hear back; (b) the `prompt` parameter is the ONLY input the target receives — source history, attachments, and inferred context are NOT carried over, so the prompt must be self-contained; (c) the parent reads the child's `final_response` as text on the next tick — if the child put an `asset_id` (or any other id) into that text, the parent chains it into a follow-up tool call. The parent does NOT see the child's structured tool-result payloads directly."
-license: Apache-2.0
+license: MIT
 compatibility: "Designed for Spora agents with the `sub_agent` tool enabled."
 metadata:
   author: spora-ai
