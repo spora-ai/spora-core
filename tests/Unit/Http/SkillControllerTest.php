@@ -285,3 +285,49 @@ test('the response envelope shape is unchanged', function (): void {
         $cleanup();
     }
 });
+
+test('a caller with no principal row still sees the shipped skills', function (): void {
+    // `visiblePrincipalIdsFor()` returns [] for a user whose principal row has
+    // not been materialised, and both this listing and ⌘K loop over the visible
+    // set — so an empty set returned an empty response, shipped skills included,
+    // even though a shipped skill belongs to no principal and is visible to
+    // everyone. The `allowed_skills` picker rendered blank.
+    //
+    // The fixture is built here rather than through makeSkillControllerFixture()
+    // because that one calls createUserPrincipalPublic(), which would create the
+    // very row this test needs absent.
+    $userId = skillCtrlUser('skillctrlnoprin@example.com');
+    $GLOBALS['__skillCtrlUserId'] = $userId;
+
+    $root = sys_get_temp_dir() . '/spora_skill_noprin_' . uniqid('', true);
+    mkdir($root, 0o755, true);
+    writeToySkillMd($root, 'git', '# Body', 'Git skill.');
+
+    $auth = Mockery::mock(AuthService::class);
+    $auth->shouldReceive('currentUserId')->andReturn($userId);
+    $controller = new SkillController(
+        $auth,
+        new SkillProviderRegistry([new FilesystemSkillProvider(new SkillScanner([['path' => $root, 'source' => 'project']]))]),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    try {
+        // Precondition: the caller has no principal row yet.
+        $precondition = Illuminate\Database\Capsule\Manager::table('principals')
+            ->where('type', 'user')->where('user_id', $userId)->value('id');
+        expect($precondition)->toBeNull();
+
+        $payload = json_decode((string) $controller->index(Request::create('/api/v1/skills'))->getContent(), true);
+
+        expect(array_column($payload['data']['skills'], 'name'))->toContain('git');
+        // The row is materialised rather than the lookup skipped.
+        expect(
+            Illuminate\Database\Capsule\Manager::table('principals')
+                ->where('type', 'user')->where('user_id', $userId)->value('id'),
+        )->not->toBeNull();
+    } finally {
+        array_map('unlink', glob($root . '/git/*') ?: []);
+        @rmdir($root . '/git');
+        @rmdir($root);
+    }
+});

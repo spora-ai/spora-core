@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\PrincipalService;
 use Spora\Skills\SkillDescriptor;
@@ -38,6 +39,13 @@ final class SkillController
         private readonly PrincipalService $principals,
     ) {}
 
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'Narrow the listing to one principal the caller controls. An id outside the caller\'s visible set is discarded rather than rejected, and the caller\'s full visible set is returned instead — the SPA sends this per editor mode so a group admin\'s personal skills do not appear in a group\'s picker. Shipped skills are principal-independent and appear either way.',
+        schema: new OA\Schema(type: 'integer'),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -45,7 +53,7 @@ final class SkillController
             return $this->unauthenticated();
         }
 
-        $visible = $this->principals->visiblePrincipalIdsFor($userId);
+        $visible = $this->visiblePrincipalIds($userId);
         $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
 
         $seen = [];
@@ -64,6 +72,13 @@ final class SkillController
         return new JsonResponse(['data' => ['skills' => $summaries]]);
     }
 
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'Narrow the lookup to one principal the caller controls, under the same discard-not-reject rule as the listing. A name the caller cannot see answers 404, not 403.',
+        schema: new OA\Schema(type: 'integer'),
+    )]
     public function show(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -76,7 +91,7 @@ final class SkillController
         // /api/v1/skills/Git and /api/v1/skills/git are equivalent.
         $name = strtolower(trim((string) $request->attributes->get('slug', '')));
 
-        $visible = $this->principals->visiblePrincipalIdsFor($userId);
+        $visible = $this->visiblePrincipalIds($userId);
         $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
 
         foreach ($ids as $principalId) {
@@ -92,6 +107,31 @@ final class SkillController
         }
 
         return $this->notFound('SKILL_NOT_FOUND', "Skill '{$name}' not found.");
+    }
+
+    /**
+     * The principals whose skills this caller may see, materialising the
+     * user-principal row first.
+     *
+     * `visiblePrincipalIdsFor()` deliberately does not auto-materialise and
+     * returns `[]` when the row is absent, so consulting it directly returns an
+     * empty set — and because the listing loops over the visible set, an empty
+     * set means an empty response, including for shipped skills, which no
+     * principal owns. `ensureUserPrincipal()` is the documented precondition of
+     * that method; it is called only when the set comes back empty so the
+     * common case (the row exists) costs no write.
+     *
+     * @return list<int>
+     */
+    private function visiblePrincipalIds(int $userId): array
+    {
+        $visible = $this->principals->visiblePrincipalIdsFor($userId);
+
+        if ($visible === []) {
+            return [(int) $this->principals->ensureUserPrincipal($userId)->id];
+        }
+
+        return $visible;
     }
 
     /**

@@ -63,6 +63,14 @@ final readonly class SkillListProjector
      * widening there would put one tenant's skills in another's preview. Shipped
      * skills are principal-independent and still resolve.
      *
+     * Cost: with the shipped provider this walks the skill tree and parses every
+     * `SKILL.md`'s frontmatter on each call, and {@see self::project()} runs once
+     * per `resolveAs: 'skill'` setting per agent build. The provider deliberately
+     * holds no memo — skill directories are mutable and a staleness window with
+     * no invalidation point is worse than the scan — so if this ever shows up in
+     * a tick-time profile the fix belongs on the provider as an explicit
+     * invalidation point, not as a cache in this class.
+     *
      * @return array<string, SkillSummary>
      */
     private function visibleByName(?PrincipalContext $context): array

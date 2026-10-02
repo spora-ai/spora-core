@@ -34,8 +34,10 @@ final class AgentSkillAllowlist
      * The effective allowlist as lower-cased names.
      *
      * `isSkillAllowed()` in the tool does its own array walk, so the two readers of
-     * this setting have to agree on what an entry is: a hand-edited override can hold
-     * anything, and `strtolower` on a non-string is a TypeError rather than a skip.
+     * this setting have to agree on what an entry is. The binding is a
+     * multi-select, which normalises to a list of scalars, so the case that has
+     * to be survived is a non-string entry: `strtolower` on one is a TypeError
+     * rather than a skip.
      *
      * @return list<string>
      */
@@ -92,6 +94,13 @@ final class AgentSkillAllowlist
      * single agent override row holds every setting for the tool: writing just the
      * allowlist would drop the rest. The caller owns the "is it already there?"
      * question, so this never makes a no-op write.
+     *
+     * `$current` is the *effective* list, so on a group agent whose allowlist
+     * is configured at the group principal this freezes every currently-inherited
+     * entry into the agent-level row, and later group-level edits stop
+     * propagating to this agent. That is the trade for being able to append
+     * without knowing which layer the list came from, and it is why the
+     * `activate` operation says so out loud.
      *
      * @param  list<string>  $current
      * @return list<string>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Search\SearchContext;
 use Spora\Search\SearchProviderRegistry;
@@ -32,6 +33,13 @@ final class SearchController
         private readonly PrincipalService $principals,
     ) {}
 
+    #[OA\Parameter(
+        name: 'q',
+        in: 'query',
+        required: false,
+        description: 'Search query, clamped to 200 characters rather than rejected. An empty or absent query returns no hits and never reaches a provider. Results are scoped to the caller\'s visible principals, resolved server-side and handed to every provider.',
+        schema: new OA\Schema(type: 'string'),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -41,14 +49,26 @@ final class SearchController
 
         $query = mb_substr(trim((string) $request->query->get('q', '')), 0, self::MAX_QUERY_LENGTH);
 
+        // An empty query is answered with the same envelope as a real one, so a
+        // client reading `data.query` does not get an undefined index depending
+        // on whether the palette sent a blank box.
         if ($query === '') {
-            return new JsonResponse(['data' => ['hits' => []]]);
+            return new JsonResponse(['data' => ['hits' => [], 'query' => '']]);
         }
 
         // Resolved once and handed to every provider, so none can widen scope by
         // resolving it differently.
-        $context = new SearchContext($this->principals->visiblePrincipalIdsFor($userId));
-        $hits = $this->providers->search($query, $context);
+        //
+        // `visiblePrincipalIdsFor()` does not auto-materialise, so a user whose
+        // principal row is absent would get an empty scope and therefore an empty
+        // palette — including for shipped skills, which no principal owns. The
+        // materialise-on-empty shape is the same one `SkillController` uses.
+        $principalIds = $this->principals->visiblePrincipalIdsFor($userId);
+        if ($principalIds === []) {
+            $principalIds = [(int) $this->principals->ensureUserPrincipal($userId)->id];
+        }
+
+        $hits = $this->providers->search($query, new SearchContext($principalIds));
 
         return new JsonResponse([
             'data' => [

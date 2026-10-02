@@ -1573,7 +1573,7 @@ final class ContainerDefinitions
                 );
             },
 
-            AgentSkillAllowlist::class => static fn (ContainerInterface $c): AgentSkillAllowlist => new AgentSkillAllowlist(
+            AgentSkillAllowlist::class => static fn(ContainerInterface $c): AgentSkillAllowlist => new AgentSkillAllowlist(
                 $c->get(ToolConfigService::class),
             ),
 

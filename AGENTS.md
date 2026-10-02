@@ -72,7 +72,7 @@ in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
 - `APP_ENV` — Environment (`dev`, `prod`)
 
 ### CI
-GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `test` (Pest, default PHP), `test-85` (Pest, PHP 8.5), `test-mysql` and `test-mariadb` (Pest against a real engine), `static-analysis` (PHPStan + CS-Fixer + OpenAPI drift + merge-marker checks), `sonar`.
+GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `test` (Pest, default PHP), `test-85` (Pest, PHP 8.5), `test-mysql` and `test-mariadb` (Pest against a real engine), `static-analysis` (PHPStan + OpenAPI drift + merge-marker + markdown-link checks), `sonar`. Formatting is not gated in CI — run `composer format` before committing.
 
 ### SonarQube (MCP)
 - Project key `spora-ai_Spora` (see `sonar-project.properties`).

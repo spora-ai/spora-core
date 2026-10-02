@@ -83,12 +83,6 @@ use Spora\Tools\ValueObjects\ToolResult;
     requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
-    name: 'name',
-    type: 'string',
-    description: 'Skill slug. Must be in the configured allowed_skills list.',
-    required: true,
-)]
-#[ToolParameter(
     name: 'filename',
     type: 'string',
     description: 'Relative path inside the skill. Defaults to SKILL.md. Only used when action is "read".',
@@ -104,8 +98,8 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'name',
     type: 'string',
-    description: 'Skill slug. Must be in the configured allowed_skills list, except for action "activate" where it is the skill to add.',
-    required: true,
+    description: 'Skill slug. Must be in the configured allowed_skills list, except for action "activate" where it is the skill to add, and action "list" which takes no skill.',
+    required: ['read', 'files', 'activate'],
 )]
 #[ToolOperation(
     name: 'list',
@@ -115,7 +109,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'activate',
-    description: 'Add a skill to this agent\'s allowed_skills so it can read it. Only skills already visible to this principal can be added.',
+    description: 'Add a skill to this agent\'s allowed_skills so it can read it. Only skills already visible to this principal can be added. The write stores the whole currently-effective list at the agent level, so a group-inherited allowlist stops following the group from here on.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -220,9 +214,12 @@ final class SkillTool extends AbstractTool
         $rows = [];
         $seen = [];
         foreach ($this->skills->getSkills($principalId) as $summary) {
-            // A provider's name is the identity, and two providers can answer for
-            // the same name; the first one listed wins so `activate` and `read`
-            // agree on which skill a name means.
+            // Two providers claiming one name is already resolved by
+            // SkillProviderRegistry, which drops the later one. What can still
+            // arrive is a single provider naming two skills identically — a defect
+            // in that provider, so it is collapsed here rather than listed twice,
+            // with the `source` half of the key so two providers agreeing on a
+            // name is *not* collapsed.
             $key = $summary->source . '::' . $summary->name;
             if (isset($seen[$key])) {
                 continue;
@@ -258,7 +255,7 @@ final class SkillTool extends AbstractTool
                 $row['description'],
             );
         }
-        $inactive = count(array_filter($rows, static fn (array $row): bool => ! $row['active']));
+        $inactive = count(array_filter($rows, static fn(array $row): bool => ! $row['active']));
         if ($inactive > 0) {
             $lines[] = 'Call action "activate" with a name to add it to this agent\'s allowed_skills.';
         }

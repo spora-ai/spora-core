@@ -10,6 +10,7 @@ use Spora\Search\SearchProviderInterface;
 use Spora\Search\SearchProviderRegistry;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -48,6 +49,19 @@ function searchControllerFixture(?int $userId, ?array $hits = []): SearchControl
     );
 }
 
+/**
+ * A user id with no principal row yet.
+ *
+ * The controller resolves a scope and, when `visiblePrincipalIdsFor()` comes
+ * back empty, materialises the user-principal — which needs a real `users` row
+ * and throws otherwise. `currentUserId()` can only return a real id in
+ * production, so an arbitrary `1` is not a fixture the controller can honour.
+ */
+function searchCallerWithoutPrincipal(): int
+{
+    return bootAuth(bootAuthLayer(), 'search-scope-' . uniqid('', false) . '@example.com', 'Password1!');
+}
+
 function searchRequest(string $query): Request
 {
     return Request::create('/api/v1/search', 'GET', $query === '' ? [] : ['q' => $query]);
@@ -64,7 +78,7 @@ it('refuses an unauthenticated caller', function () {
 it('returns hits inside the standard data envelope', function () {
     $hit = new SearchHit(type: 'skill', id: 'invoice', label: 'invoice', subLabel: 'How to draft.');
     $body = json_decode(
-        (string) searchControllerFixture(1, [$hit])->index(searchRequest('inv'))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])->index(searchRequest('inv'))->getContent(),
         true,
     );
 
@@ -76,16 +90,86 @@ it('returns hits inside the standard data envelope', function () {
 
 it('returns an empty result for an absent query', function () {
     $body = json_decode(
-        (string) searchControllerFixture(1)->index(searchRequest(''))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(''))->getContent(),
         true,
     );
 
     expect($body['data']['hits'])->toBe([]);
 });
 
+it('answers an empty query with the same envelope as a real one', function () {
+    // The palette sends a blank box on focus, so this is the common path, and a
+    // client reading `data.query` got an undefined index on it.
+    $body = json_decode(
+        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(''))->getContent(),
+        true,
+    );
+
+    expect($body['data'])->toHaveKeys(['hits', 'query'])
+        ->and($body['data']['query'])->toBe('');
+});
+
+it('lets Symfony reject an array-valued q rather than searching for "Array"', function () {
+    // `?q[]=a` is not a string the controller has to defend against: Symfony's
+    // InputBag throws BadRequestException before the value is ever read, so a
+    // guard here would be a fallback for a case that cannot arrive. This test
+    // pins that, so a future "just is_string() it" change is a deliberate
+    // decision rather than an accident.
+    $request = Request::create('/api/v1/search', 'GET', ['q' => ['a', 'b']]);
+
+    expect(fn() => searchControllerFixture(searchCallerWithoutPrincipal())->index($request))
+        ->toThrow(BadRequestException::class);
+});
+
+it('searches with a scope even when the caller has no principal row', function () {
+    // `visiblePrincipalIdsFor()` does not auto-materialise, so a user whose
+    // principal row is absent produced an empty SearchContext and an empty
+    // palette — including for shipped skills, which no principal owns. The
+    // provider here records the scope it was handed.
+    $userId = searchCallerWithoutPrincipal();
+
+    // Precondition: the caller must have no principal row yet.
+    expect(
+        Illuminate\Database\Capsule\Manager::table('principals')
+            ->where('type', 'user')->where('user_id', $userId)->value('id'),
+    )->toBeNull();
+
+    $provider = new class implements SearchProviderInterface {
+        /** @var list<int>|null */
+        public ?array $seenScope = null;
+
+        public function type(): string
+        {
+            return 'skill';
+        }
+
+        public function search(string $query, SearchContext $context): array
+        {
+            $this->seenScope = $context->principalIds();
+
+            return [new SearchHit('skill', 'git', 'Git', null, null, '/apps/x/skill/git')];
+        }
+    };
+
+    $auth = Mockery::mock(AuthService::class);
+    $auth->shouldReceive('currentUserId')->andReturn($userId);
+    $controller = new SearchController(
+        $auth,
+        new SearchProviderRegistry([$provider]),
+        new PrincipalService(new PrincipalResolver()),
+    );
+
+    $body = json_decode((string) $controller->index(searchRequest('git'))->getContent(), true);
+
+    // A provider must never be handed an empty scope: it cannot tell that apart
+    // from "this caller has no skills", and returns nothing for both.
+    expect($provider->seenScope)->not->toBeEmpty()
+        ->and($body['data']['hits'])->toHaveCount(1);
+});
+
 it('truncates an over-long query instead of rejecting it', function () {
     $body = json_decode(
-        (string) searchControllerFixture(1)->index(searchRequest(str_repeat('a', 5000)))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(str_repeat('a', 5000)))->getContent(),
         true,
     );
 
@@ -102,7 +186,7 @@ it('carries every hit field the palette reads', function () {
         href: '/apps/custom-skills/skill/invoice',
     );
     $body = json_decode(
-        (string) searchControllerFixture(1, [$hit])->index(searchRequest('inv'))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])->index(searchRequest('inv'))->getContent(),
         true,
     );
 
@@ -118,7 +202,7 @@ it('carries every hit field the palette reads', function () {
 
 it('serialises a hit with nowhere to go as an explicit null', function () {
     $body = json_decode(
-        (string) searchControllerFixture(1, [new SearchHit(type: 'skill', id: 'typst', label: 'typst')])
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [new SearchHit(type: 'skill', id: 'typst', label: 'typst')])
             ->index(searchRequest('typst'))->getContent(),
         true,
     );
