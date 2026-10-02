@@ -126,16 +126,29 @@ final readonly class MediaDerivativeHandler
         ));
     }
 
+    /**
+     * Announces the derivative AND embeds it. The embed is what makes the
+     * result visible: without it the operator sees a sentence naming an id
+     * and has to call `get_media` to find out what came out, which is the
+     * one thing an operation that just minted a file should not require.
+     */
     private function derivativeResponse(MediaAsset $parent, MediaAsset $derivative, string $format): ToolResult
     {
+        $derivativeUrl = $derivative->publicUrl();
+        $altText       = (string) ($derivative->filename ?? '') ?: $derivative->id;
+
+        $content = sprintf(
+            "Created derivative %s of %s (format=%s, mime=%s).\n\n%s\n\n"
+            . 'Echo the block above verbatim so the chat UI renders the result.',
+            $derivative->id,
+            $parent->id,
+            $format,
+            (string) ($derivative->mime_type ?? 'application/octet-stream'),
+            MediaEmbed::forAsset($derivative, $derivative->typedMediaType(), $derivativeUrl, $altText),
+        );
+
         return ToolResult::ok(
-            sprintf(
-                "Created derivative %s of %s (format=%s, mime=%s).",
-                $derivative->id,
-                $parent->id,
-                $format,
-                (string) ($derivative->mime_type ?? 'application/octet-stream'),
-            ),
+            $content,
             [
                 'derivative_id' => $derivative->id,
                 'parent_id'     => $parent->id,
@@ -144,7 +157,7 @@ final readonly class MediaDerivativeHandler
                 'byte_size'     => $derivative->byte_size,
                 'width'         => $derivative->width,
                 'height'        => $derivative->height,
-                'asset_url'     => $derivative->publicUrl(),
+                'asset_url'     => $derivativeUrl,
                 'plugin_slug'   => $derivative->plugin_slug,
                 'tool_name'     => $derivative->tool_name,
             ],

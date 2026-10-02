@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
-use InvalidArgumentException;
+use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
 
 /**
  * Static registry of {@see MediaConverterInterface} FQCNs.
@@ -23,42 +23,14 @@ use InvalidArgumentException;
  */
 final class MediaConverterDiscovery
 {
-    /** @var list<class-string<MediaConverterInterface>> */
-    private static array $converters = [];
+    /** @use DiscoversRegistrations<MediaConverterInterface> */
+    use DiscoversRegistrations;
 
     /**
-     * Add a converter class to the registry. Idempotent: adding the
-     * same FQCN twice is a no-op (no duplicates).
-     *
-     * @param class-string<MediaConverterInterface> $class
+     * @return class-string<MediaConverterInterface>
      */
-    public static function add(string $class): void
+    protected static function registrationContract(): string
     {
-        if (!is_subclass_of($class, MediaConverterInterface::class)) {
-            throw new InvalidArgumentException(sprintf(
-                'MediaConverterDiscovery::add: %s does not implement %s',
-                $class,
-                MediaConverterInterface::class,
-            ));
-        }
-        if (!in_array($class, self::$converters, true)) {
-            self::$converters[] = $class;
-        }
-    }
-
-    /**
-     * @return list<class-string<MediaConverterInterface>>
-     */
-    public static function all(): array
-    {
-        return self::$converters;
-    }
-
-    /**
-     * Test-only: clear the registry between test runs.
-     */
-    public static function reset(): void
-    {
-        self::$converters = [];
+        return MediaConverterInterface::class;
     }
 }

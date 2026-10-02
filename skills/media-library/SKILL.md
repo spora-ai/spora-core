@@ -10,7 +10,7 @@ metadata:
 
 # Media library
 
-Seven operations on a single `media` tool: `search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, and `create_derivative`. The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
+Eight operations on a single `media` tool: `search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, and `create_media`. The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
 
 ## Operation matrix
 
@@ -21,6 +21,7 @@ Seven operations on a single `media` tool: `search`, `get_media`, `get_embed_cod
 | `get_embed_code` | true | false | Clean embed snippet, no header |
 | `list_derivatives` | true | false | Derivative rows for a parent asset |
 | `create_derivative` | true | true | Fresh derivative, idempotent on (parent, format, producer_plugin, producer_operation) |
+| `create_media` | true | true | New source asset from authored text, **not idempotent** |
 | `get_public_url` | false | true | Mint or fetch shareable URL |
 | `get_source` | false | true | Read text bytes or extracted markdown |
 
@@ -34,6 +35,18 @@ Want to **show** a previously-created asset in chat? Use `get_media`. The respon
 
 Want a **clean** markdown snippet only — no asset header, no extracted text? Use `get_embed_code`. Same embed, but the response is the bare markdown string. Use this when the parent is composing a structured reply that should not carry the asset's prose context.
 
+### Document assets render as a download card, not a link
+
+The `document` bucket (`text/*` and `application/*` — Markdown, PDF, CSV, JSON, XML, YAML, HTML, plus anything a plugin's converter registers) no longer embeds as a bare markdown `[label](url)`. It embeds as a single-line `spora-file-card` block:
+
+```html
+<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/<uuid>.pdf"><span class="spora-file-card__name">report.pdf</span><span class="spora-file-card__meta">12.4 KB · application/pdf</span></a></div>
+```
+
+This is one `MediaType::Document` render, not a per-op or per-producer format — `get_media`, `get_embed_code`, `create_media`, and `create_derivative` all produce the identical block for the same asset. **Echo the whole block verbatim.** Do not rewrite the label, rename the file, or hand-roll a markdown link in its place. The filename and the `href` are the entire contract; the surrounding `div`/`span` elements are presentational chrome the chat UI styles with CSS, there is no icon element to reproduce, and there is no `aria-hidden` attribute for you to add. If you need prose *about* the document, write it above or below the card — the card itself carries nothing beyond filename, size, and MIME.
+
+The `href` is the session-authenticated `/api/v1/assets/<uuid>` route, not the public share URL, so a click forces a download. To hand the user an externally shareable link, use `get_public_url` as before.
+
 Want to **browse the archive**? Use `search`. Filters: `mime_type` (bucketed by mime prefix — see below), `plugin_slug` (exact match), `limit` (default 24, capped at 100), `offset`. **`task_id` is currently reserved-but-unused on `search`; don't rely on it as a filter.** **Derivatives are filtered out of `search`** — `search` returns only "primary" assets, so the listing is not drowned by PNG/PDF/SVG renders of the same source. To fetch a derivative of a known parent, call `get_media(asset_id: <parent_id>)` and read `derivatives[]` off the result; do NOT call `search` to re-locate the derivative.
 
 ### `mime_type` is a coarse bucket, not a LIKE
@@ -46,6 +59,8 @@ Want to **browse the archive**? Use `search`. Filters: `mime_type` (bucketed by 
 
 Pick the bucket that matches what you're after; don't expect exact-mime filtering.
 
+The same argument means something different on `create_media`, and the difference is the whole reason the op is safe. There, `mime_type` is a **declared hint, never a claim**: the byte ingest path always re-sniffs the payload and ignores the declared value. A hint that is not on the operator's allowlist is rejected before anything is stored (the failure message lists what *is* allowed), and a hint that *is* allowed but whose bytes sniff to a non-allowlisted type is stored, found on re-gate, deleted, and rejected. Either way the call fails. **So `data.mime_type` on the response — not the value you sent — is the authoritative type.** Read it back; never report the type you requested as though it had been confirmed.
+
 Want a **shareable external link**? Use `get_public_url`. Mints a public access token on first call (persists a token on the asset row), then returns the stable URL. Off by default, always operator-approved. The URL uses the operator-configured `app_url`, not the per-request host — so it's stable across requests and not vulnerable to Host-header spoofing.
 
 Want to **read bytes** to iterate on the source (re-typeset a `.typ`, re-ingest an extracted document, etc.)? Use `get_source`. Mime shapes decide what comes back:
@@ -57,6 +72,15 @@ Want to **read bytes** to iterate on the source (re-typeset a `.typ`, re-ingest 
 Want the **renders** of a known source? Use `list_derivatives`. Pass `format` to narrow to one derivative kind (e.g. only PNG). Each row carries `media_id`, `format`, `asset_url`, `label`, `producer_plugin`, `producer_operation`, `created_at` — the same shape the operator dashboard's VersionsStrip renders, so the LLM and operator see identical rows.
 
 Want to **render a source** into a fresh derivative? Use `create_derivative`. Pick a `format` that matches a registered producer for the parent's MIME/extension (e.g. "png" for a `.typ` source, "thumbnail-256" for an uploaded image). **Idempotent on `(parent_id, format, producer_plugin, producer_operation)`** — re-rendering returns the existing derivative id without producing a new row. Per-call approval because producers may take seconds.
+
+Want to **put authored text into the archive** so it can be rendered, shared, or read back later? Use `create_media`. Arguments:
+
+- `content` (required) — the text, stored verbatim. Capped at 1 MiB; a larger call fails with the actual byte count and the limit, so split long documents rather than truncating them yourself.
+- `filename` (required) — sanitised on the way in (`basename()`, control characters stripped, 255-character cap). The extension implied by `mime_type` is appended when you leave it off. Always name the file: the name is what the download card shows.
+- `mime_type` (optional, default `text/markdown`) — a hint; see the re-sniff note above. Accepts whatever the operator's allowlist covers for text: `text/plain`, `text/markdown`, `text/csv`, `text/html`, `application/json`, `application/xml`, `text/xml`, `application/yaml`, `text/yaml`.
+- `prompt` (optional) — provenance, persisted on `media_assets.prompt` and read back by `get_media`. Use it for the brief the content was written from, not for the content itself.
+
+The response is the usual asset header plus a download card, and `data` carries `asset_id`, `asset_url`, `filename`, `mime_type`, and `byte_size`. There is no `files` array and no `op` discriminator: the card comes from the response content, so `data` stays a flat metadata bag you can read in one hop. Use the returned `asset_id` as the parent for a follow-up `create_derivative` — that is the whole intended chain (author Markdown → `create_derivative` → DOCX/PDF render).
 
 ## Returned assets — never lose the id
 
@@ -71,6 +95,7 @@ Every `media` op that produces or surfaces an asset returns its id on the wire. 
 | `get_source` | `data.asset_id` |
 | `list_derivatives` | `data.parent_id` (parent) + `derivatives[].media_id` (children) |
 | `create_derivative` | `data.derivative_id` |
+| `create_media` | `data.asset_id` |
 
 Always pass the id from the same op that returned it; do not assume the key is `asset_id` everywhere. Downstream calls — versions, source bytes, public URL, derivative renders, parent lookup — take that same id. The LLM must keep the id verbatim in its memory and pass it back; do NOT re-issue a `search` to refind an asset id that was just handed back. `search` returns 24 rows at a time and you have no guarantee the asset you just saw is on the next page.
 
@@ -91,9 +116,17 @@ The `scope` setting (default `agent`) is operator-configured, NOT an LLM paramet
 
 Re-rendering with the same `(parent_id, format, producer_plugin, producer_operation)` returns the existing derivative id without producing a new one. So calling `create_derivative` twice in a row is safe and cheap — the second call is a DB lookup, not a render. This is the safe retry pattern: if you aren't sure whether the previous `create_derivative` succeeded, call it again with the same arguments and check the returned id.
 
+## `create_media` is NOT idempotent
+
+`create_derivative` above can be retried blindly. `create_media` cannot. The byte ingest path has no natural key — dedup only exists on `(tool_call_id, source_url)`, and a tool call that carries authored text has neither — so **every call inserts a new row**. A retry after an ambiguous failure (timeout, dropped connection, approval you did not see the result of) leaves you with two near-identical assets and no way to tell which one the operator will see.
+
+So the retry pattern is inverted: **do not call `create_media` again to check whether it worked.** Instead, before retrying, `search` for the filename you used and inspect the newest `media_assets` row. If a matching asset exists, keep its `asset_id` and carry on. If it does not, it is genuinely safe to call `create_media` again. When you already hold an `asset_id` — from this call or any earlier one in the task — reuse it for every downstream `get_media` / `create_derivative` / `get_source` and treat it as the one true id for the document.
+
+To iterate on the content, call `get_source` on the existing asset, edit, then `create_media` under a *new* filename. Two versions side by side is the intended outcome; two rows with the same name is a mistake.
+
 ## Approval preview
 
-`get_public_url`, `get_source`, and `create_derivative` all require operator approval per call. Expect an approval prompt before the call returns. Be ready to state what asset and why — a one-line "render report.pdf to PNG for inline preview" is enough.
+`get_public_url`, `get_source`, `create_derivative`, and `create_media` all require operator approval per call. Expect an approval prompt before the call returns. Be ready to state what asset and why — a one-line "render report.pdf to PNG for inline preview" is enough. For `create_media` the operator is approving a *write*, so name the file and say what it is in one line ("write the quarterly report as quarterly-report.md").
 
 ## Examples
 
@@ -111,4 +144,12 @@ Re-rendering with the same `(parent_id, format, producer_plugin, producer_operat
 
 ```json
 { "action": "create_derivative", "asset_id": "0b8a…f31c", "format": "thumbnail-256" }
+```
+
+```json
+{ "action": "create_media", "filename": "quarterly-report.md", "mime_type": "text/markdown", "content": "# Q3\n\n…", "prompt": "Q3 revenue summary for the board deck" }
+```
+
+```json
+{ "action": "create_derivative", "asset_id": "<asset_id from create_media>", "format": "pdf" }
 ```

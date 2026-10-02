@@ -4,55 +4,29 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
-use InvalidArgumentException;
+use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
 
 /**
  * Static registry of {@see MediaDerivativeProducerInterface} FQCNs.
  *
  * Mirrors {@see MediaConverterDiscovery} exactly so plugin authors only
- * learn one registration pattern. PHP-DI v7 does not expose a runtime
- * taggable container, so a static list populated by core in
- * {@see \Spora\Core\ContainerDefinitions} and by plugins in their
- * `register(ContainerBuilder)` hook is the bridge between the two.
+ * learn one registration pattern — the shared body now lives in
+ * {@see DiscoversRegistrations} rather than being copy-pasted. PHP-DI
+ * v7 does not expose a runtime taggable container, so a static list
+ * populated by core in {@see \Spora\Core\ContainerDefinitions} and by
+ * plugins in their `register(ContainerBuilder)` hook is the bridge
+ * between the two.
  */
 final class MediaDerivativeProducerDiscovery
 {
-    /** @var list<class-string<MediaDerivativeProducerInterface>> */
-    private static array $producers = [];
+    /** @use DiscoversRegistrations<MediaDerivativeProducerInterface> */
+    use DiscoversRegistrations;
 
     /**
-     * Add a producer class to the registry. Idempotent: adding the
-     * same FQCN twice is a no-op (no duplicates).
-     *
-     * @param class-string<MediaDerivativeProducerInterface> $class
+     * @return class-string<MediaDerivativeProducerInterface>
      */
-    public static function add(string $class): void
+    protected static function registrationContract(): string
     {
-        if (!is_subclass_of($class, MediaDerivativeProducerInterface::class)) {
-            throw new InvalidArgumentException(sprintf(
-                'MediaDerivativeProducerDiscovery::add: %s does not implement %s',
-                $class,
-                MediaDerivativeProducerInterface::class,
-            ));
-        }
-        if (!in_array($class, self::$producers, true)) {
-            self::$producers[] = $class;
-        }
-    }
-
-    /**
-     * @return list<class-string<MediaDerivativeProducerInterface>>
-     */
-    public static function all(): array
-    {
-        return self::$producers;
-    }
-
-    /**
-     * Test-only: clear the registry between test runs.
-     */
-    public static function reset(): void
-    {
-        self::$producers = [];
+        return MediaDerivativeProducerInterface::class;
     }
 }

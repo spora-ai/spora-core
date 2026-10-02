@@ -342,6 +342,10 @@ describe('MediaTool::create_derivative', function (): void {
 
             expect($result->success)->toBeTrue();
             expect($result->content)->toContain('Created derivative');
+            // The PDF derivative embeds as a download card, so the operator
+            // sees the artifact without a follow-up `get_media` call.
+            expect($result->content)->toContain('class="spora-file-card"');
+            expect($result->content)->toContain('spora-file-card__link');
             expect($result->data['parent_id'])->toBe('aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa');
             expect($result->data['format'])->toBe('pdf');
             expect($result->data['mime_type'])->toBe('application/pdf');
@@ -358,6 +362,49 @@ describe('MediaTool::create_derivative', function (): void {
             expect($link)->not->toBeNull();
             expect((string) $link->format)->toBe('pdf');
             expect((string) $link->producer_plugin)->toBe('fake-derivative-producer');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('embeds a document derivative as a download card, matching get_media on the same asset', function (): void {
+        // The render rule keys on the asset TYPE, not on which op produced it.
+        // `create_derivative` is the op that *mints* the artifact, so if it
+        // emitted only a sentence the user would have to call `get_media` to
+        // find out what came out — the one thing an op that just produced a
+        // file must not require.
+        seedMediaToolDerivativeParent('cccccccc-1111-2222-3333-cccccccccccc');
+
+        [$tool, $restore] = makeMediaToolForDerivatives();
+        try {
+            $created = $tool->execute(
+                [
+                    'action'   => 'create_derivative',
+                    'asset_id' => 'cccccccc-1111-2222-3333-cccccccccccc',
+                    'format'   => 'pdf',
+                ],
+                agentId: 1,
+                userId: 99,
+            );
+
+            expect($created->success)->toBeTrue();
+            expect($created->content)->toContain('Created derivative')
+                ->and($created->content)->toContain('class="spora-file-card"')
+                ->and($created->content)->toContain('spora-file-card__link')
+                ->and($created->content)->toContain($created->data['derivative_id'])
+                ->and($created->content)->toContain('Echo the block above verbatim');
+
+            // Same asset through `get_media` produces the identical embed:
+            // one taxonomy, one rendering, regardless of provenance.
+            $read = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $created->data['derivative_id']],
+                agentId: 1,
+                userId: 99,
+            );
+
+            expect($read->success)->toBeTrue();
+            expect($read->content)->toContain('class="spora-file-card"')
+                ->and($read->content)->toContain($created->data['derivative_id']);
         } finally {
             $restore();
         }

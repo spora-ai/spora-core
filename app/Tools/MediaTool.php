@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Built-in tool for reading and producing media library content.
  *
- * Seven operations:
+ * Eight operations:
  *
  *   - `search`            — paginated list of `media_assets` rows (auto-approved read).
  *                           Derivatives are filtered out — the LLM fetches a
@@ -77,6 +77,17 @@ use Symfony\Component\HttpFoundation\Request;
  *                           producer_operation)` — re-rendering returns
  *                           the same derivative id. Off by default; each
  *                           call requires operator approval.
+ *   - `create_media`       — store LLM-authored text (Markdown, plain text,
+ *                           CSV, JSON, XML, YAML, HTML) as a new source
+ *                           asset. The only write that needs no existing
+ *                           parent, so it is the primitive every text-parent
+ *                           derivative producer builds on. The declared
+ *                           `mime_type` is a hint: the byte ingest path
+ *                           re-sniffs, and a row that lands on a
+ *                           non-allowlisted MIME is deleted and rejected.
+ *                           **Not idempotent** — a retry creates a second
+ *                           asset, so reuse the returned `asset_id`.
+ *                           Per-call operator approval.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -153,8 +164,29 @@ use Symfony\Component\HttpFoundation\Request;
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
+#[ToolOperation(
+    name: 'create_media',
+    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML, HTML). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
+    operatorDescription: 'Create a text media asset',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
-#[ToolParameter(name: 'mime_type', type: 'string', description: 'Filter by media_assets.mime_type (case-insensitive LIKE).', required: false)]
+#[ToolParameter(
+    name: 'mime_type',
+    type: 'string',
+    description: 'For `search`: coarse bucket filter — mapped through MediaType::fromMime, NOT a LIKE on the exact mime. For `create_media`: the declared type of the content, default "text/markdown". Hint only — the archive re-sniffs the bytes and the returned `data.mime_type` is authoritative.',
+    required: false,
+    // No `default:` even though the description names one for
+    // `create_media`. The schema advertises it to every op that accepts
+    // `mime_type`, and `search` maps the value through
+    // MediaType::fromMime, where `text/markdown` resolves to the Document
+    // bucket — a model copying the advertised default would silently
+    // narrow its search. Nothing in core applies a JSON-Schema default at
+    // runtime either, so it would be documentation the model acts on and
+    // the code ignores. `MediaCreateHandler::create()` holds the real
+    // fallback, where it is actually honoured.
+)]
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
@@ -169,6 +201,24 @@ use Symfony\Component\HttpFoundation\Request;
     name: 'options',
     type: 'object',
     description: 'Producer-specific options for `create_derivative` (e.g. {"page": 0, "ppi": 144} for typst; {"longEdge": 1024} for image derivatives). Omit for defaults. Ignored by every other op.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'content',
+    type: 'string',
+    description: 'The text to store, verbatim. Required for `create_media`; capped at 1 MiB (larger calls fail with both byte counts). Ignored by every other op.',
+    required: ['create_media'],
+)]
+#[ToolParameter(
+    name: 'filename',
+    type: 'string',
+    description: 'Filename to store the content under. Required for `create_media`; sanitised (basename, control characters stripped, 255-char cap) and the extension implied by `mime_type` is appended when absent. Ignored by every other op.',
+    required: ['create_media'],
+)]
+#[ToolParameter(
+    name: 'prompt',
+    type: 'string',
+    description: 'Provenance for `create_media` — persisted on `media_assets.prompt` and read back by `get_media`. Ignored by every other op.',
     required: false,
 )]
 final class MediaTool extends AbstractTool
@@ -193,6 +243,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaDerivativeService $derivatives,
         private readonly MediaSourceReader $sourceReader,
         private readonly MediaDerivativeHandler $derivativeHandler,
+        private readonly MediaCreateHandler $createHandler,
         private readonly ?ToolConfigService $toolConfigService = null,
         Request|array $request = [],
     ) {
@@ -216,15 +267,21 @@ final class MediaTool extends AbstractTool
             'get_source'        => $this->getSource($arguments, $agentId, $userId, $context),
             'list_derivatives'  => $this->listDerivatives($arguments, $agentId, $userId, $context),
             'create_derivative' => $this->createDerivative($arguments, $agentId, $userId, $context),
-            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, or create_derivative.'),
+            // Straight from the match, no `createMedia()` wrapper: the
+            // handler extraction exists to keep this class under the
+            // per-method budget, and a 21st method would undo it.
+            'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
+            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, or create_media.'),
         };
     }
 
     public function describeAction(array $arguments): string
     {
         $op = (string) ($arguments['action'] ?? $this->getOperationName($arguments));
-        $assetId = (string) ($arguments['asset_id'] ?? '');
-        $format  = (string) ($arguments['format'] ?? '');
+        $assetId  = (string) ($arguments['asset_id'] ?? '');
+        $format   = (string) ($arguments['format'] ?? '');
+        $filename = (string) ($arguments['filename'] ?? '');
+        $mime     = (string) ($arguments['mime_type'] ?? '');
 
         return match ($op) {
             'search'            => 'Media library search',
@@ -234,6 +291,7 @@ final class MediaTool extends AbstractTool
             'get_source'        => "Media get_source({$assetId})",
             'list_derivatives'  => "Media list_derivatives({$assetId}" . ($format !== '' ? ", format={$format}" : '') . ')',
             'create_derivative' => "Media create_derivative({$assetId}, format={$format})",
+            'create_media'      => "Media create_media({$filename}, mime={$mime})",
             default             => "Media {$op}",
         };
     }
@@ -358,16 +416,7 @@ final class MediaTool extends AbstractTool
         string $assetUrl,
         string $altText,
     ): string {
-        return match ($mediaType) {
-            MediaType::Image => MediaEmbed::image($assetUrl, $altText),
-            MediaType::Audio => MediaEmbed::audioFromUrl($assetUrl),
-            MediaType::Video => MediaEmbed::videoFromUrl(
-                $assetUrl,
-                $asset->width !== null ? (int) $asset->width : null,
-                $asset->height !== null ? (int) $asset->height : null,
-            ),
-            default => MediaEmbed::link($assetUrl, $altText),
-        };
+        return MediaEmbed::forAsset($asset, $mediaType, $assetUrl, $altText);
     }
 
     /**
