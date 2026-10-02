@@ -29,6 +29,17 @@ use Spora\Tools\ValueObjects\ToolResult;
  *               time via the agent's `allowed_skills` summary).
  *   - 'files' — return the recursive file listing as
  *               `[{path, bytes}]`.
+ *   - 'list'   — every skill visible to this principal, and which of them are
+ *                active. Off and approval-gated: it exists so the model can
+ *                discover a skill it was not given, which is the one thing the
+ *                `allowed_skills` projection in the tool definition cannot do.
+ *   - 'activate' — add a skill to *this agent's* `allowed_skills`. Off and
+ *                approval-gated, and deliberately so: `allowed_skills` is the
+ *                operator's curation of what this agent is allowed to load, and
+ *                a model that can extend its own allowlist turns that curation
+ *                into a suggestion. Both operations are off by default and need
+ *                per-call approval, so enabling them is a decision an operator
+ *                makes once and can see in the audit trail.
  *
  * **Two gates, in this order, and the order is the point.** `name` must be in the
  * agent's `allowed_skills`, *and* visible to the execution's principal. A skill
@@ -92,8 +103,20 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'name',
     type: 'string',
-    description: 'Skill slug. Must be in the configured allowed_skills list.',
+    description: 'Skill slug. Must be in the configured allowed_skills list, except for action "activate" where it is the skill to add.',
     required: true,
+)]
+#[ToolOperation(
+    name: 'list',
+    description: 'List the skills available to this agent, marking the ones already on its allowed_skills list.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'activate',
+    description: 'Add a skill to this agent\'s allowed_skills so it can read it. Only skills already visible to this principal can be added.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: true,
 )]
 final class SkillTool extends AbstractTool
 {
@@ -113,6 +136,19 @@ final class SkillTool extends AbstractTool
         ?PrincipalContext $context = null,
     ): ToolResult {
         $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+        $operation = $this->getOperationName($arguments);
+
+        // Dispatched before the allowlist gate, because that gate is the thing
+        // these two operate on: `activate` exists to add a name the gate would
+        // refuse, and `list` is about the names the gate is holding back. Both are
+        // unreachable unless an operator enabled the operation — `ToolCallExecutor`
+        // rejects a disabled operation before `execute()` is called at all.
+        if ($operation === 'activate') {
+            return $this->doActivate($name, $agentId, $userId, $context);
+        }
+        if ($operation === 'list') {
+            return $this->doList($agentId, $userId, $context);
+        }
 
         $authError = $this->authorizationErrorFor($name, $agentId, $userId, $context);
         if ($authError !== null) {
@@ -142,10 +178,162 @@ final class SkillTool extends AbstractTool
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'read'  => "Read a file from skill '{$name}'.",
-            'files' => "List the files in skill '{$name}'.",
-            default => "Use the skill tool on '{$name}'.",
+            'read'    => "Read a file from skill '{$name}'.",
+            'files'   => "List the files in skill '{$name}'.",
+            'list'    => 'List the skills available to this agent.',
+            'activate' => "Add skill '{$name}' to this agent's allowed_skills.",
+            default   => "Use the skill tool on '{$name}'.",
         };
+    }
+
+    /**
+     * Every skill this principal can see, and which of them this agent may read.
+     *
+     * The same listing the admin UI's picker is built from, scoped to one
+     * principal and resolved through the same gate as a read, so a name that
+     * appears here is a name `read` would accept once activated. `active` is
+     * reported rather than the inactive ones being hidden: the question the model
+     * is asking is "what am I missing", and a list that quietly omits the answer
+     * makes it guess.
+     *
+     * Each row in `ToolResult::$data['skills']` is
+     * `{name, description, source, files, warnings, active}`.
+     */
+    private function doList(int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
+    {
+        $principalId = $this->resolvePrincipalId($agentId, $context);
+        $active = $this->allowedSkillNames($agentId, $userId, $context);
+
+        $rows = [];
+        $seen = [];
+        foreach ($this->skills->getSkills($principalId) as $summary) {
+            // A provider's name is the identity, and two providers can answer for
+            // the same name; the first one listed wins so `activate` and `read`
+            // agree on which skill a name means.
+            $key = $summary->source . '::' . $summary->name;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $rows[] = [
+                'name'        => $summary->name,
+                'description' => $summary->description,
+                'source'      => $summary->source,
+                'files'       => $summary->fileCount,
+                'warnings'    => $summary->hasWarnings,
+                'active'      => in_array($summary->name, $active, true),
+            ];
+        }
+
+        if ($rows === []) {
+            return new ToolResult(
+                true,
+                'No skills are available to this principal. Skills come from what the host ships '
+                . 'and what each principal has written; neither is visible here.',
+                ['skills' => []],
+            );
+        }
+
+        $lines = ['Skills available to this agent:'];
+        foreach ($rows as $row) {
+            $lines[] = sprintf(
+                '  - %s [%s]%s — %s',
+                $row['name'],
+                $row['source'] ?? 'unknown',
+                $row['active'] ? ' (active)' : '',
+                $row['description'],
+            );
+        }
+        $inactive = count(array_filter($rows, static fn (array $row): bool => ! $row['active']));
+        if ($inactive > 0) {
+            $lines[] = 'Call action "activate" with a name to add it to this agent\'s allowed_skills.';
+        }
+
+        return new ToolResult(true, implode("\n", $lines), ['skills' => $rows]);
+    }
+
+    /**
+     * Add a skill to this agent's own `allowed_skills`.
+     *
+     * The skill must resolve for this principal first. `activate` only ever
+     * pre-approves something the same principal could already be given by hand, so
+     * it cannot become a way to reach another tenant's skills — but writing a name
+     * that resolves to nothing would leave the model believing it had loaded a
+     * skill, and the next `read` would fail with a much less obvious message.
+     *
+     * The override is read-modify-written through the service rather than
+     * replaced, because a single agent override row holds every setting for the
+     * tool: overwriting it with just the allowlist would drop the rest.
+     */
+    private function doActivate(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
+    {
+        if ($name === '') {
+            return new ToolResult(false, 'name is required.');
+        }
+
+        $principalId = $this->resolvePrincipalId($agentId, $context);
+        if ($this->skills->getSkillDetails($name, $principalId) === null) {
+            return new ToolResult(
+                false,
+                "Skill '{$name}' is not available to this principal, so there is nothing to activate. "
+                . 'Call action "list" to see what is.',
+            );
+        }
+
+        $current = $this->allowedSkillNames($agentId, $userId, $context);
+        if (in_array($name, $current, true)) {
+            return new ToolResult(
+                true,
+                "Skill '{$name}' is already on this agent's allowed_skills list.",
+                ['name' => $name, 'allowed_skills' => $current, 'changed' => false],
+            );
+        }
+
+        $next = [...$current, $name];
+        $this->config->putAgentOverride(self::class, $agentId, ['allowed_skills' => json_encode($next)]);
+
+        return new ToolResult(
+            true,
+            sprintf("Added '%s' to this agent's allowed_skills. Read it with action \"read\".", $name),
+            ['name' => $name, 'allowed_skills' => $next, 'changed' => true],
+        );
+    }
+
+    /**
+     * The effective allowlist as lower-cased names.
+     *
+     * Read through the execution's context for the reason {@see isSkillAllowed()}
+     * gives: the setting belongs to the agent, so it resolves against the agent's
+     * principal and not the runner's. `array_map` over a possibly-non-list value is
+     * avoided deliberately — a hand-edited override can hold anything, and a
+     * `strtolower` on a non-string is a TypeError rather than a skip.
+     *
+     * @return list<string>
+     */
+    private function allowedSkillNames(int $agentId, ?int $userId, ?PrincipalContext $context): array
+    {
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId, $context);
+        $allowed = $settings['allowed_skills'] ?? [];
+
+        if (is_string($allowed)) {
+            // The multi-select is stored JSON-encoded, and the override endpoint
+            // takes it that way, so a string here is the normal case, not a smell.
+            $decoded = json_decode($allowed, true);
+            $allowed = is_array($decoded) ? $decoded : [];
+        }
+        if (! is_array($allowed)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($allowed as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                $names[] = strtolower(trim($candidate));
+            }
+        }
+
+        return $names;
     }
 
     /**

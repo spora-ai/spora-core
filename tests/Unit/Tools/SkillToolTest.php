@@ -223,7 +223,11 @@ test('SkillTool describeAction describes the right operation', function (): void
         expect($tool->describeAction(['action' => 'read', 'name' => 'git']))
             ->toContain("Read a file from skill 'git'")
             ->and($tool->describeAction(['action' => 'files', 'name' => 'git']))
-            ->toContain("List the files in skill 'git'");
+            ->toContain("List the files in skill 'git'")
+            ->and($tool->describeAction(['action' => 'list']))
+            ->toContain('List the skills available')
+            ->and($tool->describeAction(['action' => 'activate', 'name' => 'git']))
+            ->toContain("Add skill 'git'");
     } finally {
         $cleanup();
     }
@@ -234,6 +238,30 @@ test('SkillTool has the read and files operations declared', function (): void {
     try {
         $ops = array_map(static fn($op) => $op->name, $tool->getOperations());
         expect($ops)->toContain('read', 'files');
+    } finally {
+        $cleanup();
+    }
+});
+
+test('SkillTool list and activate are off by default and need approval', function (): void {
+    // The whole reason these two are safe to ship: a model that can extend its own
+    // `allowed_skills` turns the operator's curation into a suggestion. An operator
+    // has to switch them on per agent, and approve each call.
+    [$tool, $cleanup] = makeSkillToolFixture();
+    try {
+        $byName = [];
+        foreach ($tool->getOperations() as $op) {
+            $byName[$op->name] = $op;
+        }
+
+        foreach (['read', 'files'] as $openByDefault) {
+            expect($byName[$openByDefault]->enabledByDefault)->toBeTrue();
+        }
+        foreach (['list', 'activate'] as $gated) {
+            expect($byName)->toHaveKey($gated)
+                ->and($byName[$gated]->enabledByDefault)->toBeFalse()
+                ->and($byName[$gated]->requiresApprovalByDefault)->toBeTrue();
+        }
     } finally {
         $cleanup();
     }
