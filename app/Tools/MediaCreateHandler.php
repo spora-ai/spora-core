@@ -57,6 +57,36 @@ final readonly class MediaCreateHandler
         ?PrincipalContext $context,
     ): ToolResult {
         $content = Utf8Sanitizer::scrubString((string) ($arguments['content'] ?? ''));
+
+        $rejection = $this->rejectUnusableContent($content);
+        if ($rejection !== null) {
+            return $rejection;
+        }
+
+        $hint = trim((string) ($arguments['mime_type'] ?? ''));
+        if ($hint === '') {
+            $hint = 'text/markdown';
+        }
+
+        $hintFailure = $this->gateMime($hint, $agentId);
+        if ($hintFailure !== null) {
+            return $hintFailure;
+        }
+
+        $stored = $this->store($arguments, $content, $hint, $agentId, $userId, $context);
+
+        return $stored instanceof ToolResult
+            ? $stored
+            : $this->judgeSniffed($stored, $agentId);
+    }
+
+    /**
+     * The two content checks that need nothing but the bytes, kept out of
+     * `create()` so the flow there reads as the four stages it is —
+     * validate, gate, store, judge — instead of as six exit points.
+     */
+    private function rejectUnusableContent(string $content): ?ToolResult
+    {
         // Whitespace-only counts as empty: the op is non-idempotent, so a
         // row holding three spaces is a duplicate the caller can never
         // reconcile against later.
@@ -65,24 +95,30 @@ final readonly class MediaCreateHandler
         }
 
         $size = strlen($content);
-        if ($size > self::MAX_CONTENT_BYTES) {
-            return ToolResult::fail(sprintf(
-                '`create_media` content is %d bytes, over the %d-byte limit. Create one asset per section instead, or trim the document before storing it.',
-                $size,
-                self::MAX_CONTENT_BYTES,
-            ));
+        if ($size <= self::MAX_CONTENT_BYTES) {
+            return null;
         }
 
-        $hint = trim((string) ($arguments['mime_type'] ?? ''));
-        if ($hint === '') {
-            $hint = 'text/markdown';
-        }
-        $hintFailure = $this->gateMime($hint, $agentId);
-        if ($hintFailure !== null) {
-            return $hintFailure;
-        }
+        return ToolResult::fail(sprintf(
+            '`create_media` content is %d bytes, over the %d-byte limit. Create one asset per section instead, or trim the document before storing it.',
+            $size,
+            self::MAX_CONTENT_BYTES,
+        ));
+    }
 
-        $filename = $this->sanitiseFilename((string) ($arguments['filename'] ?? ''), $hint);
+    /**
+     * @param  array<string, mixed> $arguments
+     *
+     * @return MediaAsset|ToolResult the stored row, or the failure to report
+     */
+    private function store(
+        array $arguments,
+        string $content,
+        string $hint,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): MediaAsset|ToolResult {
         $prompt = (string) ($arguments['prompt'] ?? '');
 
         // Without this the orchestrator's catch-all turns a store failure
@@ -91,10 +127,10 @@ final readonly class MediaCreateHandler
         // history — the LLM gets no size hint and no retry strategy, and the
         // exception class leaks into a user-visible tool result.
         try {
-            $asset = $this->archive->ingest(new MediaIngestRequest(
+            return $this->archive->ingest(new MediaIngestRequest(
                 bytes: $content,
                 mime: $hint,
-                filename: $filename,
+                filename: $this->sanitiseFilename((string) ($arguments['filename'] ?? ''), $hint),
                 agentId: $agentId,
                 userId: $userId,
                 principalId: $context?->principalId,
@@ -109,32 +145,39 @@ final readonly class MediaCreateHandler
                 $e->getMessage(),
             ));
         }
+    }
 
-        // The pipeline ignored `$hint` and stored what it sniffed, so the
-        // row is judged on that value — a good hint over bad bytes fails
-        // here, which the pre-gate above cannot see.
+    /**
+     * The gate that actually decides, run against what landed in the row
+     * rather than what the caller declared.
+     */
+    private function judgeSniffed(MediaAsset $asset, int $agentId): ToolResult
+    {
+        // The pipeline ignored the declared type and stored what it sniffed,
+        // so the row is judged on that value — a good hint over bad bytes
+        // fails here, which the pre-gate cannot see.
         $sniffed = (string) ($asset->mime_type ?? '');
-        if (!$this->allowedTypes->isAllowed($sniffed, $agentId)) {
-            // `delete()` removes the row, which also removes the bytes in
-            // `data_url` mode. A `local`-mode row would leave its file on
-            // disk with no row pointing at it. Unreachable under the
-            // shipped defaults — `MAX_CONTENT_BYTES` equals the default
-            // `asset_store.auto_threshold_bytes` and `AutoAssetStore`
-            // compares `<=`, so a payload at the cap stays inline — but an
-            // operator who lowers the threshold or forces `local` would
-            // accumulate one orphaned file per rejected call. Fixing that
-            // belongs in `MediaArchiveService::delete()`, which has the same
-            // gap on every other delete path.
-            $this->archive->delete($asset->id);
-
-            return ToolResult::fail(sprintf(
-                '`create_media` rejected and discarded the stored row: the content was detected as "%s", which is not an allowed media type. Allowed: %s.',
-                $sniffed === '' ? 'unknown' : $sniffed,
-                $this->allowedMimeList($agentId),
-            ));
+        if ($this->allowedTypes->isAllowed($sniffed, $agentId)) {
+            return $this->created($asset);
         }
 
-        return $this->created($asset);
+        // `delete()` removes the row, which also removes the bytes in
+        // `data_url` mode. A `local`-mode row would leave its file on disk
+        // with no row pointing at it. Unreachable under the shipped
+        // defaults — `MAX_CONTENT_BYTES` equals the default
+        // `asset_store.auto_threshold_bytes` and `AutoAssetStore` compares
+        // `<=`, so a payload at the cap stays inline — but an operator who
+        // lowers the threshold or forces `local` would accumulate one
+        // orphaned file per rejected call. Fixing that belongs in
+        // `MediaArchiveService::delete()`, which has the same gap on every
+        // other delete path.
+        $this->archive->delete($asset->id);
+
+        return ToolResult::fail(sprintf(
+            '`create_media` rejected and discarded the stored row: the content was detected as "%s", which is not an allowed media type. Allowed: %s.',
+            $sniffed === '' ? 'unknown' : $sniffed,
+            $this->allowedMimeList($agentId),
+        ));
     }
 
     /**
