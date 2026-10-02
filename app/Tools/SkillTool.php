@@ -135,20 +135,42 @@ final class SkillTool extends AbstractTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
         $operation = $this->getOperationName($arguments);
 
-        // Dispatched before the allowlist gate, because that gate is the thing
-        // these two operate on: `activate` exists to add a name the gate would
-        // refuse, and `list` is about the names the gate is holding back. Both are
-        // unreachable unless an operator enabled the operation — `ToolCallExecutor`
-        // rejects a disabled operation before `execute()` is called at all.
-        if ($operation === 'activate') {
-            return $this->doActivate($name, $agentId, $userId, $context);
+        // Split before the allowlist gate, because that gate is the thing these two
+        // operate on: `activate` exists to add a name the gate would refuse, and
+        // `list` is about the names the gate is holding back. Neither is reachable
+        // unless an operator enabled the operation — `ToolCallExecutor` rejects a
+        // disabled operation before `execute()` is called at all.
+        if ($operation === 'list' || $operation === 'activate') {
+            return $this->executeManagement($operation, $arguments, $agentId, $userId, $context);
         }
-        if ($operation === 'list') {
-            return $this->doList($agentId, $userId, $context);
-        }
+
+        return $this->executeRead($operation, $arguments, $agentId, $userId, $context);
+    }
+
+    private function executeManagement(
+        string $operation,
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): ToolResult {
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
+
+        return $operation === 'list'
+            ? $this->doList($agentId, $userId, $context)
+            : $this->doActivate($name, $agentId, $userId, $context);
+    }
+
+    private function executeRead(
+        string $operation,
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): ToolResult {
+        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
 
         $authError = $this->authorizationErrorFor($name, $agentId, $userId, $context);
         if ($authError !== null) {
@@ -165,10 +187,10 @@ final class SkillTool extends AbstractTool
             return new ToolResult(false, "Skill '{$name}' is not available.");
         }
 
-        return match ($this->getOperationName($arguments)) {
+        return match ($operation) {
             'read'  => $this->doRead($name, $files, $principalId, $arguments),
             'files' => $this->doFiles($name, $files),
-            default => new ToolResult(false, "Unknown operation '{$this->getOperationName($arguments)}'."),
+            default => new ToolResult(false, "Unknown operation '{$operation}'."),
         };
     }
 
@@ -256,32 +278,20 @@ final class SkillTool extends AbstractTool
     /**
      * Add a skill to this agent's own `allowed_skills`.
      *
-     * The skill must resolve for this principal first. `activate` only ever
-     * pre-approves something the same principal could already be given by hand, so
-     * it cannot become a way to reach another tenant's skills — but writing a name
-     * that resolves to nothing would leave the model believing it had loaded a
-     * skill, and the next `read` would fail with a much less obvious message.
-     *
      * The override is read-modify-written through the service rather than
      * replaced, because a single agent override row holds every setting for the
-     * tool: overwriting it with just the allowlist would drop the rest.
+     * tool: overwriting it with just the allowlist would drop the rest. Which
+     * names are eligible is {@see activationRefusal()}.
      */
     private function doActivate(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
-        if ($name === '') {
-            return new ToolResult(false, 'name is required.');
-        }
-
-        $principalId = $this->resolvePrincipalId($agentId, $context);
-        if ($this->skills->getSkillDetails($name, $principalId) === null) {
-            return new ToolResult(
-                false,
-                "Skill '{$name}' is not available to this principal, so there is nothing to activate. "
-                . 'Call action "list" to see what is.',
-            );
-        }
-
         $current = $this->allowedSkillNames($agentId, $userId, $context);
+
+        $refusal = $this->activationRefusal($name, $agentId, $context);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
         if (in_array($name, $current, true)) {
             return new ToolResult(
                 true,
@@ -298,6 +308,32 @@ final class SkillTool extends AbstractTool
             sprintf("Added '%s' to this agent's allowed_skills. Read it with action \"read\".", $name),
             ['name' => $name, 'allowed_skills' => $next, 'changed' => true],
         );
+    }
+
+    /**
+     * Why `activate` will not write, or `null` when it will.
+     *
+     * The availability check is the point of this: `activate` only ever
+     * pre-approves something this principal could have been given by hand, so it
+     * cannot become a way to reach another tenant's skills. A name that resolves to
+     * nothing is refused rather than left in the allowlist for the model to load and
+     * fail on with a much less obvious message.
+     */
+    private function activationRefusal(string $name, int $agentId, ?PrincipalContext $context): ?ToolResult
+    {
+        if ($name === '') {
+            return new ToolResult(false, 'name is required.');
+        }
+
+        if ($this->skills->getSkillDetails($name, $this->resolvePrincipalId($agentId, $context)) === null) {
+            return new ToolResult(
+                false,
+                "Skill '{$name}' is not available to this principal, so there is nothing to activate. "
+                . 'Call action "list" to see what is.',
+            );
+        }
+
+        return null;
     }
 
     /**
