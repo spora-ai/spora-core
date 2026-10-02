@@ -122,6 +122,14 @@ final readonly class SkillSearchProvider implements SearchProviderInterface
      * The host has no skills page, so a plugin app is the only destination that
      * can exist. Shipped skills match no app and come back unrouted rather than
      * with a link that would 404.
+     *
+     * A path segment, not a query parameter, which is what this emitted first. The
+     * host router registers no child route for either, so the app parses the path
+     * itself — but a path is what browser back/forward, a hard refresh and a
+     * pasted link all carry, and a query parameter on an app route is invisible to
+     * every one of them. It also matches what `spora-plugin-media-archive` already
+     * does for an asset (`/apps/media-archive/asset/{id}`), so the palette hands out
+     * one shape of link rather than two.
      */
     private function hrefFor(?string $source, string $name): ?string
     {
@@ -129,6 +137,6 @@ final readonly class SkillSearchProvider implements SearchProviderInterface
             return null;
         }
 
-        return '/apps/' . rawurlencode($source) . '?skill=' . rawurlencode($name);
+        return '/apps/' . rawurlencode($source) . '/skill/' . rawurlencode($name);
     }
 }

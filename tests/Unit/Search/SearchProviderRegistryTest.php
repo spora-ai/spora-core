@@ -116,7 +116,7 @@ it('serialises a hit to the wire shape the palette consumes', function () {
         label: 'invoice',
         subLabel: 'How to draft one.',
         badge: '1 warning',
-        href: '/apps/custom-skills?skill=invoice',
+        href: '/apps/custom-skills/skill/invoice',
     );
 
     expect($h->toArray())->toBe([
@@ -125,7 +125,7 @@ it('serialises a hit to the wire shape the palette consumes', function () {
         'label'    => 'invoice',
         'subLabel' => 'How to draft one.',
         'badge'    => '1 warning',
-        'href'     => '/apps/custom-skills?skill=invoice',
+        'href'     => '/apps/custom-skills/skill/invoice',
     ]);
 });
 

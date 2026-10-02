@@ -99,7 +99,7 @@ it('carries every hit field the palette reads', function () {
         label: 'invoice',
         subLabel: 'How to draft.',
         badge: '1 warning',
-        href: '/apps/custom-skills?skill=invoice',
+        href: '/apps/custom-skills/skill/invoice',
     );
     $body = json_decode(
         (string) searchControllerFixture(1, [$hit])->index(searchRequest('inv'))->getContent(),
@@ -112,7 +112,7 @@ it('carries every hit field the palette reads', function () {
         'label'    => 'invoice',
         'subLabel' => 'How to draft.',
         'badge'    => '1 warning',
-        'href'     => '/apps/custom-skills?skill=invoice',
+        'href'     => '/apps/custom-skills/skill/invoice',
     ]);
 });
 

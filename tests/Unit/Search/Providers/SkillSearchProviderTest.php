@@ -225,7 +225,7 @@ it('routes a plugin skill to its own panel', function () {
     );
 
     expect($provider->search('invoice', new SearchContext([SEARCH_OWNER]))[0]->href)
-        ->toBe('/apps/custom-skills?skill=invoice-drafting');
+        ->toBe('/apps/custom-skills/skill/invoice-drafting');
 });
 
 it('returns a shipped skill with no href, because the host has no page for one', function () {
