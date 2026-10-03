@@ -85,6 +85,15 @@ final class MediaArchiveService
             'application/pdf'  => 'pdf',
             'text/plain'       => 'txt',
             'text/x-typst'     => 'typ',
+            // Word OOXML. In the static map, not only on the byte path, so
+            // `sniffFromExtension()` and the URL branch agree with the
+            // sniffer. Neither static map entry is load-bearing on its own:
+            // the `.docx` asset suffix needs the *sniffed* MIME to be the OOXML
+            // type, which is what `MediaMimeRefinerInterface` exists to
+            // arrange on hosts whose libmagic reports `application/zip`; and
+            // `allowed-types` only offers `.docx` once a converter claims the
+            // MIME. Core ships neither, so both effects arrive with a plugin.
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
         ];
         return $map[strtolower($mime)] ?? null;
     }
@@ -118,6 +127,7 @@ final class MediaArchiveService
             'pdf'  => 'application/pdf',
             'txt'  => 'text/plain',
             'typ'  => 'text/x-typst',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
         return $reverse[strtolower(ltrim($ext, '.'))] ?? null;
     }

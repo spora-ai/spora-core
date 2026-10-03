@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use finfo;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
@@ -21,11 +22,23 @@ use Throwable;
  * round-trip. It is deliberately conservative: unrecognised extensions
  * return `application/octet-stream` rather than guessing.
  *
- * Both returners are pure; the class is stateless and safe to reuse as a
- * long-lived service.
+ * Both returners are pure and the class is stateless, so it is safe to
+ * reuse as a long-lived service. `sniffFromBytes()` is not quite a
+ * function of its arguments alone, though: its final step consults
+ * {@see MediaMimeRefinerDiscovery}, a process-global list, so a
+ * registered plugin refiner can change the verdict for the same bytes.
+ * That is the point of the seam — see the interface's docblock.
  */
 final class MimeSniffer
 {
+    public function __construct(
+        // Optional so `new MimeSniffer()` stays valid at the test call
+        // sites and in ContainerDefinitions; a null logger only costs the
+        // decline-and-continue path its diagnostic, not its behaviour.
+        private readonly ?LoggerInterface $logger = null,
+    ) {}
+
+
     /**
      * Fallback MIME returned when nothing matched. Centralised so callers and
      * tests can refer to a single value rather than duplicating the literal.
@@ -127,6 +140,7 @@ final class MimeSniffer
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
         'typ'  => self::TYPST_MIME,
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
 
     /**
@@ -136,6 +150,9 @@ final class MimeSniffer
      * refine generic `text/plain` detection for known text formats.
      * Always returns a non-empty string — falls back to
      * `application/octet-stream` when nothing matches.
+     *
+     * Receives the full byte string, not the 4 KiB prefix, so a
+     * registered refiner can inspect as much of the payload as it needs.
      */
     public function sniffFromBytes(string $bytes, ?string $filename = null): string
     {
@@ -150,10 +167,55 @@ final class MimeSniffer
         if ($detected === 'text/plain' && $filename !== null
             && $this->sniffFromExtension($filename) === self::TYPST_MIME
         ) {
-            return self::TYPST_MIME;
+            $detected = self::TYPST_MIME;
         }
 
-        return $detected;
+        return $this->applyRegisteredRefiners($bytes, $filename, $detected);
+    }
+
+    /**
+     * Last hop of the byte sniff: hand the verdict to every registered
+     * {@see MediaMimeRefinerInterface} and take the first upgrade any of
+     * them offers.
+     *
+     * Runs *after* the built-in Typst upgrade so a refiner always sees
+     * the most specific MIME core can produce — a refiner that only
+     * cared about `text/plain` would otherwise see a `text/x-typst`
+     * input and a `text/plain` output as the same call.
+     *
+     * A refiner that throws is declined, not propagated. Registry entries
+     * are plugin-supplied and therefore untrusted, and the exception
+     * would otherwise travel `sniffFromBytes()` → `ingestFromBytes()` →
+     * the upload controller and take down every media upload in the
+     * process over one MIME verdict. This mirrors
+     * `MediaArchiveIngestPipeline::runConversionPipeline()`, which wraps
+     * the plugin-supplied *converter* in the same `catch (Throwable)`.
+     */
+    private function applyRegisteredRefiners(string $bytes, ?string $filename, string $sniffedMime): string
+    {
+        foreach (MediaMimeRefinerDiscovery::all() as $class) {
+            // `new $class()` rather than a container lookup: the refiner
+            // contract requires a no-arg constructor, and a container
+            // round-trip here would make every MIME sniff depend on DI
+            // being booted.
+            try {
+                $refined = (new $class())->refine($bytes, $filename, $sniffedMime);
+            } catch (Throwable $e) {
+                $this->logger?->warning('MimeSniffer: registered MIME refiner failed', [
+                    'refiner' => $class,
+                    'mime'    => $sniffedMime,
+                    'error'   => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            if ($refined !== null) {
+                return $refined;
+            }
+        }
+
+        return $sniffedMime;
     }
 
     /**

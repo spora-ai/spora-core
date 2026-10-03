@@ -343,6 +343,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $derivatives,
             $sourceReader,
             $derivativeHandler,
+            makeMediaCreateHandlerForTest($ctx['service']),
             $config,
             $globalConfig,
         );
@@ -394,6 +395,40 @@ if (!function_exists('buildMediaToolForSchema')) {
             $derivatives,
             $sourceReader,
             $derivativeHandler,
+            makeMediaCreateHandlerForTest($ctx['service']),
+        );
+    }
+}
+
+if (!function_exists('makeMediaCreateHandlerForTest')) {
+    /**
+     * Build the `create_media` handler with an allowlist that has image
+     * types switched off.
+     *
+     * `MediaAllowedTypesService` only admits `image/*` when the calling
+     * agent's LLM reports `supportsImageInput()`, which the seeded test
+     * agents never have a driver configuration for. Passing an empty
+     * extension list pins that gate explicitly instead of leaving the
+     * tests at the mercy of whatever `MediaUploadControllerTest` leaves
+     * behind in `llm_driver_configurations`, and it keeps `create_media`
+     * honestly scoped to what the op advertises: authored text.
+     */
+    function makeMediaCreateHandlerForTest(
+        Spora\Services\MediaArchive\MediaArchiveService $archive,
+    ): Spora\Tools\MediaCreateHandler {
+        $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $llmService = new Spora\Services\LLMConfigService($security, [
+            Spora\Drivers\OpenAICompatibleDriver::class,
+            Spora\Drivers\AnthropicCompatibleDriver::class,
+        ]);
+
+        return new Spora\Tools\MediaCreateHandler(
+            $archive,
+            new Spora\Services\MediaArchive\MediaAllowedTypesService(
+                Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+                new Spora\Drivers\DriverFactory(new Psr\Log\NullLogger(), $llmService, 60),
+                [],
+            ),
         );
     }
 }

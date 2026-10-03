@@ -175,6 +175,7 @@ use Spora\Tools\AgentTool;
 use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
+use Spora\Tools\MediaCreateHandler;
 use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
@@ -632,7 +633,9 @@ final class ContainerDefinitions
         return [
             // MediaArchive service stack — see app/Services/MediaArchive.
             // Config block lives under the `media_archive` key above.
-            MimeSniffer::class => static fn(): MimeSniffer => new MimeSniffer(),
+            MimeSniffer::class => static fn(ContainerInterface $c): MimeSniffer => new MimeSniffer(
+                $c->get(LoggerInterface::class),
+            ),
 
             RemoteMediaFetcher::class => static function (ContainerInterface $c): RemoteMediaFetcher {
                 $cfg = $c->get('config')['media_archive'] ?? [];
@@ -1589,6 +1592,8 @@ final class ContainerDefinitions
                 );
             },
 
+            MediaCreateHandler::class => \DI\autowire(),
+
             MediaTool::class => static function (ContainerInterface $c): MediaTool {
                 $derivatives = $c->get(MediaDerivativeService::class);
                 return new MediaTool(
@@ -1598,6 +1603,7 @@ final class ContainerDefinitions
                     $derivatives,
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),
+                    $c->get(MediaCreateHandler::class),
                     $c->get(ToolConfigService::class),
                     $c->get('config'),
                 );

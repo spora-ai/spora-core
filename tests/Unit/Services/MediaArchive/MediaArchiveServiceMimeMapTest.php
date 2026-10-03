@@ -25,6 +25,7 @@ describe('MediaArchiveService::extensionForMime', function (): void {
             'application/pdf' => 'pdf',
             'text/plain'      => 'txt',
             'text/x-typst'    => 'typ',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
         ];
         foreach ($cases as $mime => $expected) {
             expect(MediaArchiveService::extensionForMime($mime))->toBe($expected);
@@ -67,6 +68,7 @@ describe('MediaArchiveService::mimeForExtension', function (): void {
             'pdf' => 'application/pdf',
             'txt' => 'text/plain',
             'typ' => 'text/x-typst',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
         foreach ($cases as $ext => $expected) {
             expect(MediaArchiveService::mimeForExtension($ext))->toBe($expected);

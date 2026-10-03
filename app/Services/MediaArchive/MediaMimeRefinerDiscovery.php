@@ -1,0 +1,33 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Services\MediaArchive;
+
+use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
+
+/**
+ * Static registry of {@see MediaMimeRefinerInterface} FQCNs, read by
+ * {@see MimeSniffer::sniffFromBytes()} on every byte sniff.
+ *
+ * Third member of the discovery trio, so it shares the registration
+ * pattern with {@see MediaConverterDiscovery} and
+ * {@see MediaDerivativeProducerDiscovery} through
+ * {@see DiscoversRegistrations} — plugin authors learn it once. Core
+ * ships no refiner: the seam exists for plugins whose formats an old
+ * libmagic reports as a coarser container type (OOXML as
+ * `application/zip`).
+ */
+final class MediaMimeRefinerDiscovery
+{
+    /** @use DiscoversRegistrations<MediaMimeRefinerInterface> */
+    use DiscoversRegistrations;
+
+    /**
+     * @return class-string<MediaMimeRefinerInterface>
+     */
+    protected static function registrationContract(): string
+    {
+        return MediaMimeRefinerInterface::class;
+    }
+}
