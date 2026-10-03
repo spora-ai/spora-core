@@ -62,12 +62,11 @@ So `{"tool_class": "X", "settings": {...}}` configures X without turning it on. 
 what you want almost every time — configure a tool the operator has already enabled,
 rather than enabling it as a side effect of a settings write.
 
-**`enabled` accepts a real boolean, or the strings `"true"` / `"false"`.** Some
-providers flatten scalars into strings, so both forms are honoured — a revocation must
-stay possible. What is refused is what cannot be read as a flag without guessing: `0`,
-`1`, `null`, `"yes"`, `""`. Those are a count or a missing value as easily as a flag.
-If you see `must be true or false, got the number 0`, you sent a number where a flag
-belongs.
+**`enabled` accepts `true` / `false`, the strings `"true"` / `"false"`, or `0` / `1`.** Some
+providers flatten scalars into strings. A quoted value is read as **the value it names**,
+not as truthy — so `"false"` still disables. That distinction is the whole ballgame: a
+loose read would turn every revocation into a grant. What is refused is a value that
+names no flag at all: `"yes"`, `2`, `null`.
 
 **`tools: []` does nothing.** It is not a revoke-all. To strip a toolset, read the
 agent's current tools and send each one back with `"enabled": false`.
@@ -122,6 +121,30 @@ cannot be told apart from "leave them alone", and reporting the second as a succ
 "Notes unchanged" would tell you your clear worked when nothing happened. If the operator
 wants the notes actually gone, that is a settings-panel action — say so rather than
 retrying. A single space *is* content and is accepted.
+
+## Quoted scalars are read, not cast
+
+Every scalar this tool accepts — `enabled`, `auto_approve`, `allow_followup`,
+`is_pinned`, `is_archived`, `max_steps`, `retry_after_minutes`, `max_retries` — may
+arrive quoted, and sometimes does. Some providers flatten scalars into strings.
+
+A quoted value is read as **the value it names**, never as truthiness:
+
+| You send | It is read as |
+|---|---|
+| `"true"`, `"false"`, `true`, `false`, `1`, `0` | the boolean it names |
+| `"25"` for `max_steps` | the number 25 |
+| `"yes"`, `"on"`, `2`, `null` | refused — names no flag |
+| `"12.5"` for `max_steps` | refused — not a whole number |
+
+Quoting never buys you a way around a bound. `"25"` is accepted and `"999"` is
+refused, because the value is coerced **first and range-checked second**. The same
+holds on `update_agent`: the whole patch is checked, and one bad field means nothing
+is written.
+
+If you ever see a stored flag disagree with what you sent, this is why it matters —
+the old behaviour cast the string, so `"false"` archived an agent instead of
+unarchiving it and reported success while doing it.
 
 ## Finding an agent again
 
@@ -208,8 +231,8 @@ a *different* agent, note that you have no way to read that agent's current list
 
 | Trap | What actually happens |
 |---|---|
-| `"enabled": 0` or `"1"` or `null` | Refused. A number or a null is a count or a missing value as easily as a flag. Send `true` / `false`, or the strings `"true"` / `"false"`. |
-| `"enabled": "yes"` / `"on"` | Refused. Only `true` and `false` are read as flags. |
+| `"enabled": "yes"` / `2` / `null` | Refused. Only `true`, `false`, `"true"`, `"false"`, `0` and `1` are read as a flag. |
+| `"enabled": ""` | Read as **no change**, not as `false`. Tri-state can express "unspecified", so a malformed empty value must not revoke a tool. |
 | `{tool_class: X}` with no `enabled` | Enablement is left alone. It does not enable X. |
 | `tools: []` expecting a revoke-all | Nothing changes. Send each tool back with `enabled: false`. |
 | An operation name the tool does not declare | Refused, with the valid names listed. A typo would otherwise write a dead override row that never shows up in the manifest. |

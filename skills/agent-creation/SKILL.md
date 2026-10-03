@@ -329,7 +329,8 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
 | `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
 | `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
-| `configure_tools: tool entry #N 'enabled' must be true or false` | Sent `0` / `1` / `null` / a non-boolean string | Send a real `true` / `false`, or the strings `"true"` / `"false"` — those are honoured, because some providers flatten scalars and a revocation has to stay possible |
+| `configure_tools: tool entry #N 'enabled' must be true or false` | Sent `"yes"` / `2` / `null` — nothing that names a flag | Send `true` / `false`, `"true"` / `"false"`, or `0` / `1`. Quoted scalars are read as the value they name, so `"false"` really does disable |
+| `create_agent: \`max_steps\` must be a whole number in 1..100` | Sent `"999"`, `12.5`, or `"lots"` | A quoted number is read as the number, then range-checked — so `"25"` works and `"999"` does not. Only whole numbers in 1..100 |
 | `configure_tools: operations[N][M] names 'X', which is not an operation on <FQCN>` | Misspelled or invented an operation name | The refusal lists the valid names. Get them from `get_available_tools` → that tool's `operations[]` |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
@@ -356,17 +357,30 @@ Accepts an `agent_id` (numeric pk) and a partial `agent` object. Omitting `agent
 }
 ```
 
-Allowed keys inside the `agent` object:
+Allowed keys inside the `agent` object — these are the only ones that are yours to
+write:
 
 - `name`, `description`, `system_prompt`
 - `max_steps`, `allow_followup`, `retry_after_minutes`, `max_retries`
-- `is_pinned`, `is_archived`, `is_favorite`
+- `is_pinned`, `is_archived`
 
 **Silent drops:**
 
 - `notes` — stripped by the tool before the DB write. Use `write_notes` (append/prepend) or `write_notes_overwrite` (destructive, requires approval) instead.
-- `llm_driver_config_id` — operator-only; stripped silently.
-- Any other key — silently dropped at the database layer.
+- `is_favorite` — not part of this patch. The favourite is per-user; there is no such thing as favouriting an agent for everybody.
+- Any other key — dropped at the database layer against its allowlist.
+
+**Not your business, and not blocked either:** `llm_driver_config_id` is *not* in the
+drop list, despite an older version of this skill saying so. It is a real column with a
+foreign key, so a made-up id fails the constraint and a real one would repoint the
+agent at a different LLM configuration. You have no way to read the valid ids, so do not
+send it — an operator sets that. If you need a different model on an agent, say so
+rather than trying to write the id.
+
+**Types are checked here too, unlike a bare database write.** The patch is coerced and
+range-checked before anything is written, so `"is_archived": "false"` really does
+unarchive, `"max_steps": "25"` is accepted, and `"max_steps": "999"` is refused. One
+bad field means the whole patch is refused and nothing is written.
 
 To verify a write took effect, call `read_agent(agent_id: <id>)` (or just `read_agent` for the calling agent) and look at the manifest. If a field you sent is not in the returned payload, it was dropped — don't assume success.
 
