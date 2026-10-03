@@ -1467,42 +1467,12 @@ final class ContainerDefinitions
         ];
     }
 
-    /**
-     * Every tool class the container should instantiate: the built-ins, then the
-     * plugins, then whatever the loaded app contributes.
-     *
-     * Split out of the `tool_instances` closure so the null-safe walk over the
-     * app loader is not buried inside a chain of inline calls.
-     *
-     * @return list<string>
-     */
-    private static function allToolClasses(ContainerInterface $c): array
-    {
-        return array_values(array_unique(array_merge(
-            $c->get('tool_classes'),
-            $c->get(PluginLoader::class)->toolClasses(),
-            self::appToolClasses($c),
-        )));
-    }
-
-    /**
-     * @return list<string>
-     */
-    private static function appToolClasses(ContainerInterface $c): array
-    {
-        if (!$c->has(AppLoader::class)) {
-            return [];
-        }
-        $app = $c->get(AppLoader::class)->getApp();
-
-        return $app === null ? [] : $app->tools();
-    }
 
     private static function toolDefinitions(): array
     {
         return [
             'tool_instances' => static function (ContainerInterface $c): array {
-                $classes = self::allToolClasses($c);
+                $classes = InstalledToolClasses::for($c);
                 return array_combine($classes, array_map(
                     fn(string $toolClass) => $c->get($toolClass),
                     $classes,

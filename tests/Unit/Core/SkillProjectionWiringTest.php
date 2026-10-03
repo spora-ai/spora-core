@@ -62,8 +62,11 @@ it('the container wires the skill registry into every AgentTool skill path', fun
 
     $tool = $c->get(AgentTool::class);
 
+    // The write path reaches skills through the planner's parser, which owns the
+    // principal check; the planner itself only applies a validated plan.
     $planner = (new ReflectionProperty(AgentTool::class, 'configurePlanner'))->getValue($tool);
-    $plannerSkills = (new ReflectionProperty($planner, 'skills'))->getValue($planner);
+    $parser = (new ReflectionProperty($planner, 'parser'))->getValue($planner);
+    $plannerSkills = (new ReflectionProperty($parser, 'skills'))->getValue($parser);
 
     $catalog = (new ReflectionProperty(AgentTool::class, 'catalogPresenter'))->getValue($tool);
     $skillCatalog = (new ReflectionProperty($catalog, 'skillCatalog'))->getValue($catalog);
