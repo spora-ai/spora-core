@@ -7,6 +7,7 @@ namespace Spora\Tools\AgentTool;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -57,6 +58,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 final class ConfigurePlanner
 {
+    use LlmScalarCoercion;
+
     private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
 
     private const ENABLE_NOT_FOUND = 'NOT_FOUND';
@@ -267,18 +270,18 @@ final class ConfigurePlanner
      * A tri-state enablement flag: `true`, `false`, or null when the key is
      * absent and enablement should be left alone.
      *
-     * A real boolean, and the two exact strings `"true"` / `"false"`, are
-     * both unambiguous and both honoured. The strings matter because a
-     * provider that flattens scalars into strings is a real channel here,
-     * and refusing them would leave a model able to grant a tool but unable
-     * to revoke one — trading a correctness bug for a capability hole.
+     * Delegates to {@see LlmScalarCoercion::coerceBool()} so every tool
+     * accepts the same set of scalar spellings — some providers quote their
+     * booleans, and a surface that refused those would let a model grant a
+     * tool but never revoke one. Nothing here is cast: the `(bool)` cast
+     * this replaced read `"false"` as **true**, so a quoted revocation
+     * enabled the tool it was meant to remove.
      *
-     * What is refused is everything genuinely ambiguous: `0` and `1` (a count
-     * as easily as a flag), `null` (indistinguishable from an absent key),
-     * and any other string. Note the difference from the `(bool)` cast this
-     * replaced: the cast read `"false"` as **true**, so a quoted revocation
-     * enabled the tool. Nothing here is cast — each accepted form maps to
-     * exactly one value.
+     * One local rule on top. A blank string is treated as *absent* rather
+     * than as `false`, unlike the shared helper. Tri-state makes "no
+     * change" representable here, so a malformed empty value should not be
+     * read as a revocation — where there is no tri-state (a plain boolean
+     * setting) the shared helper's `"empty means false"` stands.
      *
      * @param  array<string, mixed> $entry
      * @return bool|null|ToolResult
@@ -289,36 +292,20 @@ final class ConfigurePlanner
             return null;
         }
         $raw = $entry[$key];
-        if (is_bool($raw)) {
-            return $raw;
+        if (is_string($raw) && trim($raw) === '') {
+            return null;
         }
-        if (is_string($raw)) {
-            $normalised = strtolower(trim($raw));
-            if ($normalised === 'true') {
-                return true;
-            }
-            if ($normalised === 'false') {
-                return false;
-            }
+        $coerced = $this->coerceBool($raw);
+        if ($coerced === null) {
+            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+                "%s '%s' must be true or false, got %s. Send true / false, or the string "
+                . '"true" / "false" — a quoted value is read as the boolean it names, not as truthy.',
+                $at,
+                $key,
+                $this->describeValue($raw),
+            ));
         }
-        return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
-            "%s '%s' must be true or false, got %s. Send a real boolean, or the string \"true\" / \"false\" — "
-            . '0, 1, null and other strings are refused because none of them can be read as a flag without guessing.',
-            $at,
-            $key,
-            self::describeValue($raw),
-        ));
-    }
-
-    private static function describeValue(mixed $raw): string
-    {
-        return match (true) {
-            $raw === null  => 'null',
-            is_bool($raw)  => $raw ? 'true' : 'false',
-            is_string($raw) => 'the string "' . $raw . '"',
-            is_int($raw), is_float($raw) => 'the number ' . $raw,
-            default => get_debug_type($raw),
-        };
+        return $coerced;
     }
 
     /**

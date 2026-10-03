@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools\AgentTool;
 
+use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
@@ -21,6 +22,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 final class SlimPayloadValidator
 {
+    use LlmScalarCoercion;
+
     private const DESCRIPTION_MAX_LENGTH   = 2000;
     private const NAME_MAX_LENGTH          = 200;
     private const MAX_STEPS_MIN            = 1;
@@ -81,10 +84,15 @@ final class SlimPayloadValidator
             'description'          => is_string($raw['description'] ?? null) ? $raw['description'] : null,
             'system_prompt'        => is_string($raw['system_prompt'] ?? null) ? $raw['system_prompt'] : null,
             'llm_driver_config_id' => null,
-            'max_steps'            => (int) ($raw['max_steps'] ?? 10),
-            'allow_followup'       => (bool) ($raw['allow_followup'] ?? true),
-            'retry_after_minutes'  => (int) ($raw['retry_after_minutes'] ?? 0),
-            'max_retries'          => (int) ($raw['max_retries'] ?? 0),
+            // Coerce here rather than cast: `(bool) "false"` is true, so a
+            // provider that quotes its scalars would otherwise flip the flag
+            // the validators just accepted. The `?? default` arms are
+            // unreachable once validate* has run — they only keep this
+            // method total if it is ever called without them.
+            'max_steps'            => $this->coercePositiveInt($raw['max_steps'] ?? 10) ?? 10,
+            'allow_followup'       => $this->coerceBool($raw['allow_followup'] ?? true) ?? true,
+            'retry_after_minutes'  => $this->coerceNonNegativeInt($raw['retry_after_minutes'] ?? 0) ?? 0,
+            'max_retries'          => $this->coerceNonNegativeInt($raw['max_retries'] ?? 0) ?? 0,
         ];
     }
 
@@ -163,12 +171,16 @@ final class SlimPayloadValidator
         if (!array_key_exists('max_steps', $raw)) {
             return null;
         }
-        $value = $raw['max_steps'];
-        if (!is_int($value) || $value < self::MAX_STEPS_MIN || $value > self::MAX_STEPS_MAX) {
+        $value = $this->coercePositiveInt($raw['max_steps']);
+        if ($value === null
+            || $value < self::MAX_STEPS_MIN
+            || $value > self::MAX_STEPS_MAX
+        ) {
             return ToolResult::fail(
-                'create_agent: `max_steps` must be an integer in '
+                'create_agent: `max_steps` must be a whole number in '
                 . self::MAX_STEPS_MIN . '..' . self::MAX_STEPS_MAX . '. '
-                . 'Send `"max_steps": 10` (note: not a string).',
+                . 'A quoted number is read as the number, then range-checked — '
+                . 'so "10" is accepted and "999" is not.',
             );
         }
         return null;
@@ -179,10 +191,11 @@ final class SlimPayloadValidator
         if (!array_key_exists('allow_followup', $raw)) {
             return null;
         }
-        if (!is_bool($raw['allow_followup'])) {
+        if ($this->coerceBool($raw['allow_followup']) === null) {
             return ToolResult::fail(
                 'create_agent: `allow_followup` must be a boolean. '
-                . 'Send `"allow_followup": true`, not the string `"true"`.',
+                . 'true / false, or the strings "true" / "false" — some providers '
+                . 'emit scalars as strings, and those are read as the boolean they name.',
             );
         }
         return null;
@@ -193,10 +206,9 @@ final class SlimPayloadValidator
         if (!array_key_exists('retry_after_minutes', $raw)) {
             return null;
         }
-        $value = $raw['retry_after_minutes'];
-        if (!is_int($value) || $value < 0) {
+        if ($this->coerceNonNegativeInt($raw['retry_after_minutes']) === null) {
             return ToolResult::fail(
-                'create_agent: `retry_after_minutes` must be a non-negative integer.',
+                'create_agent: `retry_after_minutes` must be a whole number of 0 or more.',
             );
         }
         return null;
@@ -207,10 +219,9 @@ final class SlimPayloadValidator
         if (!array_key_exists('max_retries', $raw)) {
             return null;
         }
-        $value = $raw['max_retries'];
-        if (!is_int($value) || $value < 0) {
+        if ($this->coerceNonNegativeInt($raw['max_retries']) === null) {
             return ToolResult::fail(
-                'create_agent: `max_retries` must be a non-negative integer.',
+                'create_agent: `max_retries` must be a whole number of 0 or more.',
             );
         }
         return null;

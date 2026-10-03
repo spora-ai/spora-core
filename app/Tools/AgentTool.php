@@ -12,6 +12,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Tools\AgentTool\AgentPatchValidator;
 use Spora\Tools\AgentTool\AgentTargetResolver;
 use Spora\Tools\AgentTool\AgentToolCollaborators;
 use Spora\Tools\AgentTool\CatalogPresenter;
@@ -183,6 +184,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'ONLY for `update_agent`: a partial agent with the fields to update. '
                . 'Allowed keys: name, description, system_prompt, max_steps, '
                . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived. '
+               . 'Booleans take true / false or the strings "true" / "false" / 0 / 1, and numbers '
+               . 'may be quoted — both are read as the value they name, then range-checked, so '
+               . '"25" is accepted for max_steps and "999" is not. '
                . '`notes` is intentionally not accepted here — use write_notes. '
                . 'Plan A: `is_favorite` was removed from this list because the toggle '
                . 'is now per-user (POST/DELETE /api/v1/agents/{id}/favorite). '
@@ -237,8 +241,9 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
               . 'A tool with `enabled: false` removes it from the agent; OMITTING `enabled` leaves the tool '
               . 'as it is, so an entry carrying only `settings` or `operations` never grants the tool by accident. '
-              . '`enabled` takes a real boolean, or the string "true" / "false" (some providers flatten scalars into strings). '
-              . '0, 1, null and other strings are refused — none of them can be read as a flag without guessing. '
+              . '`enabled` takes true / false, the strings "true" / "false", or 0 / 1 — some providers '
+              . 'flatten scalars into strings, and a quoted value is read as the value it names rather than '
+              . 'as truthy, so a revocation still revokes. A value naming no flag ("yes", 2) is refused. '
               . '`settings` is an object of `{setting_key: value}` for the tool\'s own settings (keys are validated; '
               . 'a multi-select such as the skill tool\'s `allowed_skills` takes an array of strings). '
               . 'IMPORTANT: a settings write REPLACES the value at that key outright — it does not merge or append. '
@@ -282,6 +287,8 @@ final class AgentTool extends AbstractTool
 
     private readonly SlimPayloadValidator $payloadValidator;
 
+    private readonly AgentPatchValidator $patchValidator;
+
     private readonly AgentTargetResolver $targetResolver;
 
     private readonly PrincipalService $principalService;
@@ -308,6 +315,7 @@ final class AgentTool extends AbstractTool
         );
         $this->configurePlanner  = $collaborators->configurePlanner($toolSettings);
         $this->payloadValidator  = $collaborators->payloadValidator();
+        $this->patchValidator    = $collaborators->patchValidator();
         $this->targetResolver    = $collaborators->targetResolver();
     }
 
@@ -387,7 +395,11 @@ final class AgentTool extends AbstractTool
         if ($patch === null) {
             return $this->notesOnlyPatchFail($arguments);
         }
-        $agent = $this->agentService->updateAgentByAgentId($targetId, $patch);
+        $normalised = $this->patchValidator->normalise($patch);
+        if ($normalised instanceof ToolResult) {
+            return $normalised;
+        }
+        $agent = $this->agentService->updateAgentByAgentId($targetId, $normalised);
         return $agent === null
             ? ToolResult::fail(self::AGENT_NOT_FOUND)
             : $this->renderManifestResult($agent);

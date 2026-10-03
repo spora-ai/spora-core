@@ -243,7 +243,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Ambiguous Strings']);
 
-        foreach (['yes', 'no', 'on', 'off', '', '1'] as $value) {
+        foreach (['yes', 'no', 'on', 'off', 'truthy', '1.5', []] as $value) {
             $result = $tool->execute([
                 'action' => 'configure_tools', 'agent_id' => $target->id,
                 'tools'  => [['tool_class' => TimeTool::class, 'enabled' => $value]],
@@ -253,6 +253,49 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         }
 
         expect(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('accepts 0 and 1, matching the coercion the schedule tool already uses', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Numeric Flags']);
+
+        $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 1]],
+        ], $target->id, $userId);
+        expect(persistedToolsFor($target->id))->toBe([TimeTool::class]);
+
+        $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 0]],
+        ], $target->id, $userId);
+        expect(persistedToolsFor($target->id))->toBe([]);
+
+        $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => '0']],
+        ], $target->id, $userId);
+        expect(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('reads a blank string as "no change", not as a revocation', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Blank String']);
+
+        $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => true]],
+        ], $target->id, $userId);
+
+        // The shared helper maps "" to false, but tri-state makes "no change"
+        // representable here, so a malformed empty value must not revoke.
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => '  ']],
+        ], $target->id, $userId);
+
+        expect($result->success)->toBeTrue()
+            ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
     });
 
     it('honours stringified per-operation flags too', function (): void {
@@ -281,20 +324,18 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
             ->and($byName['format']['requires_approval'])->toBeFalse();
     });
 
-    it('refuses 0, 1, and null', function (): void {
+    it('refuses null, which cannot be told apart from an absent key', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
-        $target = $agents->createAgent($userId, ['name' => 'Non Boolean']);
+        $target = $agents->createAgent($userId, ['name' => 'Null Flag']);
 
-        foreach ([0, 1, null] as $value) {
-            $result = $tool->execute([
-                'action' => 'configure_tools', 'agent_id' => $target->id,
-                'tools'  => [['tool_class' => TimeTool::class, 'enabled' => $value]],
-            ], $target->id, $userId);
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => null]],
+        ], $target->id, $userId);
 
-            expect($result->success)->toBeFalse();
-        }
-
-        expect(persistedToolsFor($target->id))->toBe([]);
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('must be true or false')
+            ->and(persistedToolsFor($target->id))->toBe([]);
     });
 
     it('refuses an ambiguous per-operation flag and names the index', function (): void {

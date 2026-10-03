@@ -30,6 +30,7 @@ final class AgentToolCollaborators
         private readonly ?CatalogPresenter $catalogPresenter = null,
         private readonly ?ConfigurePlanner $configurePlanner = null,
         private readonly ?SlimPayloadValidator $payloadValidator = null,
+        private readonly ?AgentPatchValidator $patchValidator = null,
         private readonly ?AgentTargetResolver $targetResolver = null,
     ) {}
 
@@ -62,6 +63,11 @@ final class AgentToolCollaborators
     public function payloadValidator(): SlimPayloadValidator
     {
         return $this->payloadValidator ?? new SlimPayloadValidator();
+    }
+
+    public function patchValidator(): AgentPatchValidator
+    {
+        return $this->patchValidator ?? new AgentPatchValidator();
     }
 
     public function targetResolver(): AgentTargetResolver
