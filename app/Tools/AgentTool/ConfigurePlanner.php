@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools\AgentTool;
 
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\ValueObjects\ToolResult;
@@ -29,6 +30,11 @@ use Spora\Tools\ValueObjects\ToolResult;
  * `Record<string, string>`, so a multi-select travels as a JSON-encoded
  * string. `ToolConfigService::getEffectiveSettings()` normalises it back to
  * an array on read, so the two forms meet there rather than in every reader.
+ *
+ * The principal check rides here, on the write, because it is a property of
+ * the write: a skill name is a claim about what the executing principal can
+ * see, and a write that cannot make that claim should not be able to grant
+ * the name either.
  */
 final class ConfigurePlanner
 {
@@ -36,17 +42,20 @@ final class ConfigurePlanner
 
     public function __construct(
         private readonly AgentToolSettingsServiceInterface $toolSettings,
+        private readonly ?SkillProviderRegistry $skills = null,
     ) {}
 
     /**
      * @param  mixed $entries
+     * @param  int|null $principalId The principal whose visible skills a
+     *        `allowed_skills` write may name; null fails every name closed.
      * @return list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
      */
-    public function buildPlan(mixed $entries): array|ToolResult
+    public function buildPlan(mixed $entries, ?int $principalId = null): array|ToolResult
     {
         $plan = [];
         foreach ($entries as $i => $entry) {
-            $step = $this->parseEntry($entry, $i);
+            $step = $this->parseEntry($entry, $i, $principalId);
             if ($step instanceof ToolResult) {
                 return $step;
             }
@@ -90,7 +99,7 @@ final class ConfigurePlanner
      * @param  mixed $entry
      * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
      */
-    private function parseEntry(mixed $entry, int $i): array|ToolResult
+    private function parseEntry(mixed $entry, int $i, ?int $principalId): array|ToolResult
     {
         $shapeFail = $this->shapeEntryFailure($entry, $i);
         if ($shapeFail !== null) {
@@ -102,7 +111,7 @@ final class ConfigurePlanner
         if ($operations instanceof ToolResult) {
             return $operations;
         }
-        $settings = $this->parseSettings($entry['settings'] ?? [], $toolClass, $i);
+        $settings = $this->parseSettings($entry['settings'] ?? [], $toolClass, $i, $principalId);
         if ($settings instanceof ToolResult) {
             return $settings;
         }
@@ -178,7 +187,7 @@ final class ConfigurePlanner
      *
      * @return array<string, mixed>|ToolResult
      */
-    private function parseSettings(mixed $settings, string $toolClass, int $i): array|ToolResult
+    private function parseSettings(mixed $settings, string $toolClass, int $i, ?int $principalId): array|ToolResult
     {
         if ($settings === null || $settings === []) {
             return [];
@@ -208,9 +217,51 @@ final class ConfigurePlanner
             if ($encoded === null) {
                 return $this->settingsFailure($i, "'{$key}' must be an array of strings.");
             }
+            if ($setting->resolveAs === 'skill') {
+                $refusal = $this->invisibleSkillRefusal($key, $value, $i, $principalId);
+                if ($refusal !== null) {
+                    return $refusal;
+                }
+            }
             $out[$key] = $encoded;
         }
         return $out;
+    }
+
+    /**
+     * The first submitted skill name this principal cannot see, as a refusal,
+     * or null when every name is visible.
+     *
+     * Refuse rather than silently drop. A list that quietly shrank reads to the
+     * model as the whole list landing — and the names it dropped are the ones it
+     * is not entitled to have confirmed. The check can only ever pre-approve what
+     * the operator could have granted by hand, so bounding it here is what keeps
+     * the write from being a cross-tenant grant.
+     *
+     * @param array<array-key, mixed> $names
+     */
+    private function invisibleSkillRefusal(string $key, array $names, int $i, ?int $principalId): ?ToolResult
+    {
+        if ($this->skills === null) {
+            return null;
+        }
+
+        $visible = [];
+        foreach ($this->skills->getSkills($principalId) as $summary) {
+            $visible[strtolower($summary->name)] = true;
+        }
+
+        foreach ($names as $name) {
+            if (!is_string($name) || !isset($visible[strtolower(trim($name))])) {
+                return $this->settingsFailure($i, sprintf(
+                    "'%s' names '%s', which is not available to this principal. Read get_available_tools and pick from its `skills.visible` list.",
+                    $key,
+                    is_string($name) ? $name : gettype($name),
+                ));
+            }
+        }
+
+        return null;
     }
 
     /**

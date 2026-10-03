@@ -8,17 +8,22 @@ use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use Spora\Tools\TimeTool;
+use Tests\Fixtures\Skills\StubSkillProvider;
 
 /**
+ * @param  SkillProviderRegistry|null $skills Only needed by the tests that
+ *         exercise the principal check on a `configure_tools` `allowed_skills`
+ *         write; every other path leaves it null.
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
  */
-function makeAgentTool(): array
+function makeAgentTool(?SkillProviderRegistry $skills = null): array
 {
     // AgentTemplateImporter + AgentTemplateValidator are final and cannot
     // be mocked directly; use real instances. Validator is parameter-less,
@@ -44,7 +49,7 @@ function makeAgentTool(): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, null);
 
     return [
-        new AgentTool($agentService, $toolSettings, $manifest),
+        new AgentTool($agentService, $toolSettings, $manifest, new AgentTool\AgentToolCollaborators(skills: $skills)),
         $agentService,
         $toolSettings,
     ];
@@ -1179,11 +1184,15 @@ describe('AgentTool::execute — configure_tools', function (): void {
 
         expect($result->success)->toBeTrue();
     });
+
     test('writes a tool setting through the same putOverride the panel uses', function (): void {
         $auth    = bootAuthLayer();
         $ownerId = bootAuth($auth, 'configure-settings@example.com');
 
-        [$tool, , $toolSettings] = makeAgentTool();
+        $skills = new SkillProviderRegistry([(new StubSkillProvider('core'))
+            ->add('time-arithmetic', ['SKILL.md'], 'Body.', 'Do sums of times.')
+            ->add('email', ['SKILL.md'], 'Body.', 'Read email.')]);
+        [$tool, , $toolSettings] = makeAgentTool($skills);
         /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
         $callingId = insertAgentRow($ownerId);
 
@@ -1216,6 +1225,44 @@ describe('AgentTool::execute — configure_tools', function (): void {
         );
 
         expect($result->success)->toBeTrue();
+    });
+
+    test('refuses the whole call when a named skill is invisible to the principal', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-cross-tenant@example.com');
+        $principalId = createUserPrincipalPublic($ownerId);
+
+        // One skill the principal owns, one owned by somebody else. The write
+        // may only ever pre-approve what the operator could have granted by
+        // hand, so the foreign name has to stop the call — and a list that
+        // quietly dropped it would read to the model as the whole list landing.
+        $provider = (new StubSkillProvider('custom'))
+            ->add('mine', ['SKILL.md'], 'Body.', 'Mine.', $principalId)
+            ->add('theirs', ['SKILL.md'], 'Body.', 'Theirs.', $principalId + 500);
+        $provider->onlyVisibleTo = $principalId;
+        [$tool, , $toolSettings] = makeAgentTool(new SkillProviderRegistry([$provider]));
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+        $toolSettings->shouldNotReceive('enableTool');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => ['mine', 'theirs']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'allowed_skills' names 'theirs'")
+            ->and($result->content)->toContain('not available to this principal')
+            ->and($result->content)->toContain('skills.visible');
     });
 
     test('refuses a setting key the tool does not declare', function (): void {

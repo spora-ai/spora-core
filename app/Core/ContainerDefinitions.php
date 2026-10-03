@@ -1520,6 +1520,12 @@ final class ContainerDefinitions
                         pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
                         iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
                         principalResolver: $c->get(PrincipalResolver::class),
+                        // Backs the principal check on a `configure_tools`
+                        // `allowed_skills` write. Guarded for the same reason as
+                        // the registry in coreServiceDefinitions(): the
+                        // controller graph resolves without the orchestrator
+                        // slice in some build/test contexts.
+                        skills: $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),

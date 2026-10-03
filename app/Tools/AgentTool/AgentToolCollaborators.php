@@ -9,6 +9,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolIconResolver;
+use Spora\Skills\SkillProviderRegistry;
 
 /**
  * Optional helpers + framework collaborators that `AgentTool` consumes.
@@ -23,6 +24,7 @@ final class AgentToolCollaborators
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?SkillProviderRegistry $skills = null,
         private readonly ?NotesHandler $notesHandler = null,
         private readonly ?CatalogPresenter $catalogPresenter = null,
         private readonly ?ConfigurePlanner $configurePlanner = null,
@@ -52,7 +54,7 @@ final class AgentToolCollaborators
 
     public function configurePlanner(AgentToolSettingsServiceInterface $toolSettings): ConfigurePlanner
     {
-        return $this->configurePlanner ?? new ConfigurePlanner($toolSettings);
+        return $this->configurePlanner ?? new ConfigurePlanner($toolSettings, $this->skills);
     }
 
     public function payloadValidator(): SlimPayloadValidator

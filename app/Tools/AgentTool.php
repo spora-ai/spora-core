@@ -317,7 +317,7 @@ final class AgentTool extends AbstractTool
             'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
             'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId, $context),
             'create_agent'              => $this->createAgent($agentId, $arguments, $context),
-            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
+            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments, $context),
             'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
             'list_agents'               => $this->listAgents($agentId, $context),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
@@ -553,14 +553,18 @@ final class AgentTool extends AbstractTool
      *
      * @param array<string, mixed> $arguments
      */
-    private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
-    {
-        $context = $this->resolveConfigureToolsContext($userId, $agentId, $arguments);
-        if ($context instanceof ToolResult) {
-            return $context;
+    private function configureTools(
+        int $agentId,
+        ?int $userId,
+        array $arguments,
+        ?PrincipalContext $context,
+    ): ToolResult {
+        $prepared = $this->resolveConfigureToolsContext($userId, $agentId, $arguments, $context);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
 
-        [$target, $plan] = $context;
+        [$target, $plan] = $prepared;
         $this->configurePlanner->apply($target->id, $userId, $plan);
         return $this->renderFreshAgentAfterConfigure($userId, $target->id);
     }
@@ -569,20 +573,43 @@ final class AgentTool extends AbstractTool
      * @param  array<string, mixed> $arguments
      * @return array{0: Agent, 1: list<mixed>}|ToolResult
      */
-    private function resolveConfigureToolsContext(?int $userId, int $agentId, array $arguments): array|ToolResult
-    {
+    private function resolveConfigureToolsContext(
+        ?int $userId,
+        int $agentId,
+        array $arguments,
+        ?PrincipalContext $context,
+    ): array|ToolResult {
         $entries = $this->runConfigureToolsPrecheck($userId, $arguments);
         if ($entries instanceof ToolResult) {
             return $entries;
         }
 
-        $plan = $this->configurePlanner->buildPlan($entries);
+        $plan = $this->configurePlanner->buildPlan(
+            $entries,
+            $this->executingPrincipalId($agentId, $context),
+        );
         if ($plan instanceof ToolResult) {
             return $plan;
         }
 
         $target = $this->targetResolver->resolveAgentToolTarget($userId, $agentId, $arguments);
         return $target instanceof ToolResult ? $target : [$target, $plan];
+    }
+
+    /**
+     * The principal whose skills a `configure_tools` write may name.
+     *
+     * Same resolution as the `skill` tool's read gate: the execution's context,
+     * else the calling agent's own principal, and an unresolvable one becomes
+     * `null` so every name fails closed. `$userId` is never used — it is the
+     * runner, not the owner, so a group agent triggered by one member would
+     * otherwise resolve against that member's personal skills.
+     */
+    private function executingPrincipalId(int $callingAgentId, ?PrincipalContext $context): ?int
+    {
+        $resolved = $context ?? $this->principalResolver->resolveForToolExecute($callingAgentId);
+
+        return $resolved->isResolvable() ? $resolved->principalId : null;
     }
 
     /**
