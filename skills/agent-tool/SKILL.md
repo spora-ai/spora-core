@@ -27,17 +27,26 @@ the `agent` tool — now what".
 | `list_agents` | yes | no | Agents the calling principal can see |
 | `read_notes` | yes | no | The calling agent's own notes |
 | `write_notes` | yes | no | The calling agent's own notes (append/prepend) |
-| `read_agent` | no | no | Any agent the principal may read |
-| `get_available_tools` | no | no | The tool inventory. Read-only. |
-| `update_agent` | no | **yes** | Editable fields on a target agent |
-| `create_agent` | no | **yes** | A new agent |
-| `configure_tools` | no | **yes** | Tool enablement, per-op approval, and tool settings |
-| `write_notes_overwrite` | no | **yes** | The calling agent's notes, wholesale |
+| `read_agent` | **no** | no | Any agent the principal may read |
+| `get_available_tools` | **no** | no | The tool inventory. Read-only. |
+| `update_agent` | **no** | **yes** | Editable fields on a target agent |
+| `create_agent` | **no** | **yes** | A new agent |
+| `configure_tools` | **no** | **yes** | Tool enablement, per-op approval, and tool settings |
+| `write_notes_overwrite` | **no** | **yes** | The calling agent's notes, wholesale |
 
-**Everything that writes requires operator approval, and everything that writes is off by
-default.** Only the four read-shaped operations plus `write_notes` are on when the tool is
-first granted. If a write operation refuses as unavailable, that is the operator's
-setting, not a bug — do not try to route around it by reaching for a different operation.
+**Every configuration operation is off by default and approval-gated** — `update_agent`,
+`create_agent`, `configure_tools`, `write_notes_overwrite`. Two of the three operations on
+by default are reads (`list_agents`, `read_notes`); the third is `write_notes`, which can
+only append to your own notes.
+
+**This bites the self-widening path specifically.** `get_available_tools` and
+`configure_tools` are *both* off by default, so if the operator granted you the `agent`
+tool without enabling them, the sequence below fails at step one with an
+"operation not available" refusal. That is the operator's setting, not a bug — say which
+operations you need rather than looking for another route in.
+
+`read_agent` is off by default too, so the read-back you would normally use to verify a
+change may be unavailable.
 
 ## Notes: three operations, because replacement is not editing
 
@@ -83,6 +92,16 @@ and send it back with the addition — otherwise you silently drop everything th
 already granted. This is deliberate: a write that appends pins whatever the inherited
 group-level entries happened to be at the moment of the call.
 
+**You can only read your own list.** `allowed` in the `skills` block is the calling
+agent's. `read_agent` returns a slim manifest — `tool_class`, `icon`, `enabled`, and
+per-operation state — and carries **no setting values at all**, for you or anyone else.
+There is no LLM-facing way to see another agent's current `allowed_skills`.
+
+So for `agent_id` other than your own, a replace is a blind write that will wipe whatever
+is there. In that case, do not guess: tell the operator you need the list, or have them
+make the change in the settings panel. A blind replace of another agent's allowlist is the
+one genuinely destructive thing this tool can do to somebody else's configuration.
+
 The names must come from `get_available_tools`. See below.
 
 ## The `skills` block
@@ -113,19 +132,22 @@ even the entries that were fine — that is intentional, so a partially-applied 
 never read as a complete one.
 
 `allowed` describes the **calling** agent, because `get_available_tools` takes no
-`agent_id`. If you are about to configure a *different* agent, its current list is not
-what you see here. `read_agent(agent_id: N)` is the way to look before you write.
+`agent_id` — passing one does nothing there. Names you take from it are always names the
+executing principal can see, so they will not be refused. But if you are about to configure
+a *different* agent, note that you have no way to read that agent's current list.
 
 ## Traps
 
 | Trap | What actually happens |
 |---|---|
-| `tool_class` guessed from the tool's display name | Refused. Get the FQCN from `get_available_tools`. There is no `call_name` and no `tool_name` in the v2 payload. |
+| `tool_class` guessed from the tool's display name | Refused. Get the FQCN from `get_available_tools`. The text payload carries `tool_class` and `display_name`; `tool_name` exists only in the result's `data` field, which you do not read. |
 | `allowed_skills` sent as a comma-joined string | Refused. It is a JSON array. |
 | `allowed_target_agents` sent as `["3","4"]` | Refused. That multi-select is stored as `int[]` — send `[3, 4]`. `allowed_skills` is the opposite: `string[]`. |
 | Any `type: 'password'` setting | Refused, always. A credential is the one thing a tool call may not write: the value would land in the call's own recorded arguments, so you could read back the key you just set. Credentials are operator-only. |
+| Replacing another agent's `allowed_skills` | Allowed, and blind — you cannot read their current list. Ask the operator instead. |
 | `notes` inside an `update_agent` patch | Stripped silently. Use `write_notes`. |
 | Assuming a skill is readable because you can see it | `visible` is not `allowed`. Reading needs the name in your allowlist. |
+| Enabling the `agent` tool and expecting `configure_tools` | Six of nine operations are off by default, including both halves of the self-widening path. Ask the operator to enable them. |
 | Adding a skill then reading it in the same turn | The write is a separate approved call. Read it on the next turn. |
 
 ## Approval summaries
