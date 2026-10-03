@@ -331,15 +331,20 @@ final class ConfigurePlanParser
         foreach ($pairs as $key => $value) {
             $key = (string) $key;
             $setting = $schema[$key] ?? null;
-            $known = $setting === null
-                ? $this->settingsFailure($i, sprintf(
+            if ($setting === null) {
+                $valid = $schema === []
+                    ? 'It declares no settings.'
+                    : 'Valid settings: ' . implode(', ', array_keys($schema)) . '.';
+
+                return $this->settingsFailure($i, sprintf(
                     "'%s' is not a setting on %s. %s",
                     $key,
                     $toolClass,
-                    $schema === [] ? 'It declares no settings.' : 'Valid settings: ' . implode(', ', array_keys($schema)) . '.',
-                ))
-                : $this->coerceSetting($key, $value, $setting, $i, $principalId);
+                    $valid,
+                ));
+            }
 
+            $known = $this->coerceSetting($key, $value, $setting, $i, $principalId);
             if ($known instanceof ToolResult) {
                 return $known;
             }
