@@ -20,6 +20,20 @@ final class NotesHandler
 
     private const APPEND_MODES = ['append', 'prepend'];
 
+    /**
+     * Empty content on the destructive path is refused rather than absorbed
+     * as a no-op. `combineNotes` cannot tell an intentional replace with
+     * nothing from "leave them as they are", and reporting the latter as
+     * "Notes unchanged" with a success is indistinguishable to the caller
+     * from an idempotent write that landed — so a clear attempt reads as
+     * having worked when nothing happened. Clearing stays operator-only,
+     * through the settings panel.
+     */
+    private const EMPTY_OVERWRITE_CONTENT =
+        'write_notes_overwrite: content is empty. This operation replaces the notes, so an empty '
+        . 'string would leave them exactly as they are while reporting success. Send the notes you '
+        . 'want the agent to have; to clear them, remove them in the settings panel.';
+
     public function __construct(
         private readonly AgentServiceInterface $agentService,
     ) {}
@@ -93,14 +107,29 @@ final class NotesHandler
         if (!array_key_exists('content', $arguments)) {
             return ToolResult::fail('write_notes: content is required.');
         }
-        $content = (string) $arguments['content'];
 
-        $resolvedMode = $this->resolveMode($arguments, $defaultMode);
-        if ($resolvedMode instanceof ToolResult) {
-            return $resolvedMode;
+        $resolved = $this->resolveWrite((string) $arguments['content'], $arguments, $defaultMode);
+
+        return $resolved instanceof ToolResult ? $resolved : [$resolved['content'], $resolved['mode']];
+    }
+
+    /**
+     * The mode, plus the one rule that only the destructive path obeys.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return array{content: string, mode: string}|ToolResult
+     */
+    private function resolveWrite(string $content, array $arguments, string $defaultMode): array|ToolResult
+    {
+        $mode = $this->resolveMode($arguments, $defaultMode);
+        if ($mode instanceof ToolResult) {
+            return $mode;
+        }
+        if ($mode === 'overwrite' && $content === '') {
+            return ToolResult::fail(self::EMPTY_OVERWRITE_CONTENT);
         }
 
-        return [$content, $resolvedMode];
+        return ['content' => $content, 'mode' => $mode];
     }
 
     /** @return string|ToolResult */

@@ -5,149 +5,128 @@ declare(strict_types=1);
 namespace Spora\Tools\AgentTool;
 
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Per-operation validation + apply for `configure_tools`.
+ * Applies a validated `configure_tools` plan.
  *
- * Flow:
- *   1. `buildPlan` walks each `tools[i]` entry once
- *   2. `parseEntry` validates the entry's shape
- *   3. `parseOperations` validates the entry's operations
- *      (defensively `unwrapSingleItemArray`-ing the OpenAI
- *      `{item: [...]}` quirk)
- *   4. `apply` writes each plan step through
- *      `AgentToolSettingsServiceInterface` so the LLM-facing path
- *      and the operator-facing API share the same enable / override
- *      semantics.
+ * Parsing lives in {@see ConfigurePlanParser}: the two halves have different
+ * dependencies and different failure modes — every refusal happens in the parser
+ * before a single write, so a rejected payload cannot have landed anything.
+ *
+ * `enableTool` signals an unowned agent by returning `['error' => 'NOT_FOUND']`
+ * rather than throwing, and discarding that is how a success-shaped response can
+ * hide a write that never happened. It is surfaced instead. The check is
+ * per-agent and therefore identical for every step, so bailing on the first one
+ * leaves nothing half-applied.
  */
 final class ConfigurePlanner
 {
     private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
 
+    private const ENABLE_NOT_FOUND = 'NOT_FOUND';
+
+    private readonly ConfigurePlanParser $parser;
+
     public function __construct(
         private readonly AgentToolSettingsServiceInterface $toolSettings,
-    ) {}
-
-    /**
-     * @param  mixed $entries
-     * @return list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}>|ToolResult
-     */
-    public function buildPlan(mixed $entries): array|ToolResult
-    {
-        $plan = [];
-        foreach ($entries as $i => $entry) {
-            $step = $this->parseEntry($entry, $i);
-            if ($step instanceof ToolResult) {
-                return $step;
-            }
-            $plan[] = $step;
-        }
-        return $plan;
+        ?SkillProviderRegistry $skills = null,
+    ) {
+        $this->parser = new ConfigurePlanParser($skills);
     }
 
     /**
-     * Apply the validated `configure_tools` plan.
+     * Validate the submitted entries into a plan, or refuse the whole call.
      *
-     * @param  list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}> $plan
+     * @param  mixed $entries
+     * @param  int|null $principalId The principal whose visible skills an
+     *        `allowed_skills` write may name. Null resolves no principal, so a
+     *        provider that scopes by one sees nothing and every name is refused.
+     * @return list<array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
      */
-    public function apply(int $agentId, int $userId, array $plan): void
+    public function buildPlan(mixed $entries, ?int $principalId = null): array|ToolResult
+    {
+        return $this->parser->buildPlan($entries, $principalId);
+    }
+
+    public function apply(int $agentId, int $userId, array $plan): ToolResult|null
     {
         foreach ($plan as $step) {
-            if ($step['enable']) {
-                $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
-            } else {
-                $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
+            $failure = $this->applyStep($agentId, $userId, $step);
+            if ($failure instanceof ToolResult) {
+                return $failure;
             }
-            foreach ($step['operations'] as $op) {
-                $this->toolSettings->patchOperationOverride(
-                    $agentId,
-                    $userId,
-                    $step['tool_class'],
-                    $op['name'],
-                    [
-                        'enabled'                   => $op['enabled'] ? 1 : 0,
-                        'default_requires_approval' => $op['auto_approve'] ? 0 : 1,
-                    ],
-                );
-            }
-        }
-    }
-
-    /**
-     * @param  mixed $entry
-     * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>}|ToolResult
-     */
-    private function parseEntry(mixed $entry, int $i): array|ToolResult
-    {
-        $shapeFail = $this->shapeEntryFailure($entry, $i);
-        if ($shapeFail !== null) {
-            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . $shapeFail);
-        }
-        $toolClass = (string) ($entry['tool_class'] ?? '');
-
-        $operations = $this->parseOperations($entry['operations'] ?? [], $i);
-        if ($operations instanceof ToolResult) {
-            return $operations;
-        }
-        return [
-            'tool_class' => $toolClass,
-            'enable'     => (bool) ($entry['enabled'] ?? true),
-            'operations' => $operations,
-        ];
-    }
-
-    private function shapeEntryFailure(mixed $entry, int $i): ?string
-    {
-        if (!is_array($entry)) {
-            return "tool entry #{$i} must be an object.";
-        }
-        if (!isset($entry['tool_class']) || !is_string($entry['tool_class']) || $entry['tool_class'] === '') {
-            return "tool entry #{$i} is missing `tool_class`.";
         }
         return null;
     }
 
     /**
-     * Empty / missing operations is legal — the operation default then
-     * applies.
+     * One plan step: enablement first, then per-operation overrides, then settings.
      *
-     * @param  mixed $ops
-     * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
+     * Split out of {@see apply()} so the loop stays a loop. The enablement write
+     * can be the one that discovers the target is unwritable, and it is checked
+     * before anything else in the step so a step never half-applies.
+     *
+     * @param  array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>} $step
+     * @return ToolResult|null
      */
-    private function parseOperations(mixed $ops, int $i): array|ToolResult
+    private function applyStep(int $agentId, int $userId, array $step): ToolResult|null
     {
-        if (!is_array($ops) || $ops === []) {
-            return [];
+        $enablement = $this->applyEnablement($agentId, $userId, $step);
+        if ($enablement instanceof ToolResult) {
+            return $enablement;
         }
-        $ops = SlimPayloadValidator::unwrapSingleItemArray($ops);
-        if (!is_array($ops) || ($ops !== [] && !array_is_list($ops))) {
-            return ToolResult::fail(
-                self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}] must be an array of `{name, enabled?, auto_approve?}`.",
+
+        foreach ($step['operations'] as $op) {
+            $this->toolSettings->patchOperationOverride(
+                $agentId,
+                $userId,
+                $step['tool_class'],
+                $op['name'],
+                [
+                    'enabled'                   => $op['enabled'] ? 1 : 0,
+                    'default_requires_approval' => $op['auto_approve'] ? 0 : 1,
+                ],
             );
         }
-        return $this->parseOperationRows($ops, $i);
+
+        if ($step['settings'] !== []) {
+            $this->toolSettings->putOverride($agentId, $userId, $step['tool_class'], $step['settings']);
+        }
+
+        return null;
     }
 
     /**
-     * @param  list<mixed> $ops
-     * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
+     * @param  array{tool_class: string, enable: bool|null} $step
+     * @return ToolResult|null
      */
-    private function parseOperationRows(array $ops, int $i): array|ToolResult
+    private function applyEnablement(int $agentId, int $userId, array $step): ToolResult|null
     {
-        $out = [];
-        foreach ($ops as $j => $op) {
-            if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
-                return ToolResult::fail(
-                    self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}][{$j}] must be `{name, enabled?, auto_approve?}`.",
-                );
-            }
-            $out[] = [
-                'name'         => $op['name'],
-                'enabled'      => (bool) ($op['enabled'] ?? true),
-                'auto_approve' => (bool) ($op['auto_approve'] ?? false),
-            ];
+        if ($step['enable'] === false) {
+            $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
+            return null;
         }
-        return $out;
+        if ($step['enable'] !== true) {
+            return null;
+        }
+
+        $written = $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
+
+        return ($written['error'] ?? null) === self::ENABLE_NOT_FOUND
+            ? $this->notVisibleFailure()
+            : null;
     }
+
+    private function notVisibleFailure(): ToolResult
+    {
+        return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX
+            . 'the target agent is not visible to this user, so no tool was changed.');
+    }
+
+    /**
+     * @param  mixed $entry
+     * @return array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
+     */
 }

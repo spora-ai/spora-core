@@ -21,6 +21,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
+use Spora\Apps\AppRegistry;
 use Spora\Auth\AuthService;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerReaper;
@@ -29,6 +30,8 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\WorkerController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
+use Spora\Search\Providers\SkillSearchProvider;
+use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\DbRateLimiter;
@@ -50,12 +53,16 @@ use Spora\Services\PromptTemplateService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunService;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Services\SkillListProjector;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
+use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
@@ -242,11 +249,23 @@ final class OrchestratorContainerBindings
 
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
+            // Resolves `resolveAs: 'skill'` settings against the same registry
+            // the `skill` tool authorises against — see the note on
+            // `SkillListProjector` below, which is the same identity argument.
             ToolConfigSchemaInspector::class => static function (ContainerInterface $c): ToolConfigSchemaInspector {
                 return new ToolConfigSchemaInspector(
-                    [],
+                    $c->get(SkillListProjector::class),
                     $c->get(PrincipalResolver::class),
                 );
+            },
+
+            // The inspector's `resolveAs: 'skill'` axis, over the same registry
+            // the `skill` tool authorises against. That identity is the point:
+            // if these two ever read different sources, a skill can be reachable
+            // but never suggested, or suggested but unreachable, and neither
+            // failure produces an error.
+            SkillListProjector::class => static function (ContainerInterface $c): SkillListProjector {
+                return new SkillListProjector($c->get(SkillProviderRegistry::class));
             },
 
             // Skills are scanned in priority order: project, then framework,
@@ -275,6 +294,73 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SkillScanner($roots);
+            },
+
+            // Core's skill provider is listed first and the plugin classes are
+            // appended, so a plugin can never shadow a shipped skill by
+            // reusing its name. A single SkillProviderRegistry owns the merged
+            // list; the `skill_provider_classes` data array is the only place
+            // the order is expressed, and the merge below is the only place it
+            // is applied.
+            'skill_provider_classes' => [
+                FilesystemSkillProvider::class,
+            ],
+
+            'skill_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('skill_provider_classes'),
+                    $c->get(PluginLoader::class)->skillProviderClasses(),
+                )));
+            },
+
+            SkillProviderRegistry::class => static function (ContainerInterface $c): SkillProviderRegistry {
+                $providers = [];
+                foreach ($c->get('skill_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SkillProviderRegistry($providers);
+            },
+
+            // The `skills` block of `get_available_tools`. Same registry as the
+            // `skill` tool authorises against, so a name the block reports as
+            // visible is a name a read would accept and a `configure_tools`
+            // `allowed_skills` write would let the agent name.
+            SkillCatalogPresenter::class => static function (ContainerInterface $c): SkillCatalogPresenter {
+                return new SkillCatalogPresenter(
+                    $c->get(SkillProviderRegistry::class),
+                    $c->get(ToolConfigService::class),
+                    $c->get(PrincipalResolver::class),
+                );
+            },
+
+            // Core's own provider first, then plugin `searchProviders()`, so a
+            // plugin cannot displace what ⌘K already returns.
+            SkillSearchProvider::class => static function (ContainerInterface $c): SkillSearchProvider {
+                return new SkillSearchProvider(
+                    $c->get(SkillProviderRegistry::class),
+                    $c->get(AppRegistry::class),
+                );
+            },
+
+            'search_provider_classes' => [
+                SkillSearchProvider::class,
+            ],
+
+            'search_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('search_provider_classes'),
+                    $c->get(PluginLoader::class)->searchProviderClasses(),
+                )));
+            },
+
+            SearchProviderRegistry::class => static function (ContainerInterface $c): SearchProviderRegistry {
+                $providers = [];
+                foreach ($c->get('search_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
             },
 
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {

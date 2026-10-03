@@ -23,6 +23,11 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - `$agentFacing` (slim v2) drops those fields because they're
  *     redundant for an LLM that already has `tool_class` and wants to
  *     call `configure_tools` next.
+ *
+ * The agent-facing payload also carries a `skills` block, which is the
+ * discovery surface the `skill` tool's `list` operation used to be. It is
+ * omitted when no skill catalog is wired — the block is a bonus on the tool
+ * inventory, not part of it, and its absence must not fail the call.
  */
 final class CatalogPresenter
 {
@@ -32,6 +37,7 @@ final class CatalogPresenter
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
+        private readonly ?SkillCatalogPresenter $skillCatalog = null,
     ) {}
 
     /**
@@ -79,6 +85,10 @@ final class CatalogPresenter
         }
 
         $agentFacing = $this->buildAgentFacingToolRows($enriched, $operationsByClass);
+        $skills = $this->skillCatalog?->present($agentId, $resolvedUserId, $context);
+        if ($skills !== null) {
+            $agentFacing['skills'] = $skills;
+        }
         $content = json_encode(
             $agentFacing,
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
@@ -133,6 +143,18 @@ final class CatalogPresenter
     }
 
     /**
+     * Sixth reader of `agent_tool_operation_overrides`, and the only one that
+     * also emits each operation's `description`. Takes the resolved state as an
+     * argument, so its sole fallback is "no row supplied" → the attribute
+     * default — the shape of {@see \Spora\Services\AgentManifest::mergeOperations()},
+     * of which this is the description-carrying twin.
+     *
+     * The catalog is what the LLM reads, so diverging from
+     * {@see \Spora\Agents\Orchestrator::resolveRequiresApproval()} would let a
+     * call present as requiring approval and then execute unapproved. The
+     * declared list is empty for a `HasOperations`-less tool, so the return-[]'
+     * guard keeps that input out of reach.
+     *
      * @param list<array{name: string, description: string, enabledByDefault: bool, requiresApprovalByDefault: bool, discriminatorKey: string}> $declaredOperations
      * @param list<array{operation: string, effective_enabled: bool, effective_requires_approval: bool}> $effectiveOperations
      * @return list<array{name: string, description: string, enabled: bool, requires_approval: bool}>

@@ -195,6 +195,16 @@ final class PrincipalResolver
      * agent's principal once, then fills `ownerUserId` from the principal
      * and `runnerUserId` from the latest task. Either may be `null` for a
      * stale principal or a cold agent; callers fall back to defaults.
+     *
+     * **Two unresolvable sentinels, both of which reach callers.** When the
+     * agent row is missing the context carries `principalId: 0`; when the
+     * principal row is missing it carries the agent's own (now dangling)
+     * non-zero `principal_id`. Neither is distinguishable from a valid id
+     * without a lookup, so tenant-scoped consumers must treat
+     * {@see PrincipalContext::isResolvable()} as necessary but not
+     * sufficient. Both shapes are pinned by
+     * `PrincipalResolverSentinelTest`; changing either is a deliberate,
+     * visible diff rather than an accident.
      */
     public function resolveForToolExecute(int $agentId): PrincipalContext
     {

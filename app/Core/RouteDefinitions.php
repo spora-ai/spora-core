@@ -42,6 +42,7 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
+use Spora\Http\SearchController;
 use Spora\Http\SkillController;
 use Spora\Http\SseController;
 use Spora\Http\TaskController;
@@ -347,6 +348,10 @@ final class RouteDefinitions
         // for the admin UI's skill-detail view.
         $r->addRoute('GET', '/api/v1/skills', [SkillController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_SKILLS_SLUG, [SkillController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // The ⌘K palette had no endpoint and filtered Pinia stores directly,
+        // which left anything served by a plugin unsearchable.
+        $r->addRoute('GET', '/api/v1/search', [SearchController::class, 'index'], [AuthMiddleware::class]);
     }
 
     private static function registerLlmConfigRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void

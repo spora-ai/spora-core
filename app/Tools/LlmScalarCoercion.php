@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Spora\Tools\ScheduleTool;
+namespace Spora\Tools;
 
 /**
- * Lenient type coercion for LLM-supplied patch fields.
+ * Lenient scalar coercion for LLM-supplied arguments.
  *
  * Background: the patch comes back from the LLM as JSON parsed via
  * `json_decode($raw, true)`. Some LLM drivers (and certain JSON-mode
@@ -22,7 +22,7 @@ namespace Spora\Tools\ScheduleTool;
  * whether to error and the assembled payload uses the canonical PHP
  * form.
  */
-trait SchedulableTypeCoercion
+trait LlmScalarCoercion
 {
     /**
      * Normalise an LLM boolean emission to a PHP bool.

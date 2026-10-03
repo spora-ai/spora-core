@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
-use Spora\Skills\Skill;
 use Spora\Tools\ToolSettingSchema;
 
 /**
@@ -21,43 +20,17 @@ use Spora\Tools\ToolSettingSchema;
  * - 'agent' (default) — stored as `int[]`; LLM-facing values are
  *   resolved against the Agent model to "Name (#id)" strings.
  * - 'skill'           — stored as `string[]` of slugs; LLM-facing
- *   values are resolved against the bundled `$skillsByName` map to
- *   "name: short description" strings (description truncated to ~80
- *   chars).
+ *   values are projected by {@see SkillListProjector} into
+ *   "name: short description" strings (description truncated to ~80 chars).
  * - 'raw'             — stored and surfaced as-is. Use when neither
  *   agent nor skill resolution fits the field's semantics.
  */
 final class ToolConfigSchemaInspector
 {
-    /**
-     * Skill name → Skill map, populated by the container from the
-     * SkillScanner. Used to resolve `resolveAs: 'skill'` multi-select
-     * settings at LLM-exposure time.
-     *
-     * @var array<string, Skill>
-     */
-    private readonly array $skillsByName;
-
-    /**
-     * @param array<string, Skill> $skillsByName Skill name → Skill map used to
-     *                                             resolve `resolveAs: 'skill'`
-     *                                             multi-select settings. The
-     *                                             inspector is constructed
-     *                                             once per request lifetime
-     *                                             with a snapshot of available
-     *                                             skills; long-running workers
-     *                                             (SSE / queue listeners) must
-     *                                             rebuild via
-     *                                             {@see ToolConfigService::reload()}
-     *                                             or accept the snapshot's
-     *                                             staleness window.
-     */
     public function __construct(
-        array $skillsByName = [],
+        private readonly ?SkillListProjector $skillProjector = null,
         private readonly ?PrincipalResolver $principalResolver = null,
-    ) {
-        $this->skillsByName = $skillsByName;
-    }
+    ) {}
 
     /**
      * Return keys of all #[ToolSetting] attributes where type === 'password'.
@@ -256,10 +229,24 @@ final class ToolConfigSchemaInspector
      *                                          with no source agent) returns
      *                                          "#id" placeholders — same
      *                                          safe-by-default as before.
+     * @param  PrincipalContext|null $context  Ownership of the execution,
+     *                                          forwarded only to
+     *                                          {@see SkillListProjector}, the
+     *                                          sole consumer. Without the
+     *                                          projector (test call sites) the
+     *                                          `resolveAs: 'skill'` axis
+     *                                          projects to `[]` — the same
+     *                                          fail-closed direction a null
+     *                                          context produces.
      * @return array<string, array{label: string, value: mixed}>
      */
-    public function getLlmToolSettings(string $toolClass, array $effectiveSettings, ?int $userId = null, ?int $agentId = null): array
-    {
+    public function getLlmToolSettings(
+        string $toolClass,
+        array $effectiveSettings,
+        ?int $userId = null,
+        ?int $agentId = null,
+        ?PrincipalContext $context = null,
+    ): array {
         $labels        = $this->getLlmSettingLabels($toolClass);
         $multiKeys     = array_flip($this->getMultiSelectKeys($toolClass));
         $resolveAsByKey = $this->getResolveAsByKey($toolClass);
@@ -271,7 +258,7 @@ final class ToolConfigSchemaInspector
             if (isset($multiKeys[$key])) {
                 $resolveAs = $resolveAsByKey[$key] ?? 'agent';
                 $value = match ($resolveAs) {
-                    'skill' => $this->formatSkillList($value),
+                    'skill' => $this->skillProjector?->project($value, $context) ?? [],
                     'raw'   => is_array($value) ? array_values($value) : [],
                     default => $this->formatAgentIdList($value, $resolvedAgentNames),
                 };
@@ -398,39 +385,6 @@ final class ToolConfigSchemaInspector
             $out[] = isset($names[$intId])
                 ? "{$names[$intId]} (#{$intId})"
                 : "#{$intId}";
-        }
-        return $out;
-    }
-
-    /**
-     * Resolve a list of skill slugs to a list of "name: short description"
-     * strings for LLM exposure. Description is truncated to ~80 chars
-     * with an ellipsis; the full body is available on demand via
-     * `skill_read`. Slugs that no longer exist on disk (renamed or
-     * removed after selection) are silently skipped.
-     *
-     * @param  mixed $value
-     * @return list<string>
-     */
-    private function formatSkillList(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $out = [];
-        foreach ($value as $slug) {
-            $slug = (string) $slug;
-            if ($slug === '' || !isset($this->skillsByName[$slug])) {
-                continue;
-            }
-            $skill = $this->skillsByName[$slug];
-            $description = $skill->description();
-            $truncated = mb_strlen($description) > 80
-                ? mb_substr($description, 0, 77) . '...'
-                : $description;
-            $out[] = $truncated === ''
-                ? $skill->name()
-                : "{$skill->name()}: {$truncated}";
         }
         return $out;
     }

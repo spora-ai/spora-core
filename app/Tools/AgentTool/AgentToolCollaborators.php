@@ -9,6 +9,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ToolIconResolver;
+use Spora\Skills\SkillProviderRegistry;
 
 /**
  * Optional helpers + framework collaborators that `AgentTool` consumes.
@@ -23,10 +24,13 @@ final class AgentToolCollaborators
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private readonly ?SkillProviderRegistry $skills = null,
+        private readonly ?SkillCatalogPresenter $skillCatalog = null,
         private readonly ?NotesHandler $notesHandler = null,
         private readonly ?CatalogPresenter $catalogPresenter = null,
         private readonly ?ConfigurePlanner $configurePlanner = null,
         private readonly ?SlimPayloadValidator $payloadValidator = null,
+        private readonly ?AgentPatchValidator $patchValidator = null,
         private readonly ?AgentTargetResolver $targetResolver = null,
     ) {}
 
@@ -47,17 +51,23 @@ final class AgentToolCollaborators
                 $principalResolver ?? $this->principalResolver,
                 $this->pluginLoader,
                 $this->iconResolver,
+                $this->skillCatalog,
             );
     }
 
     public function configurePlanner(AgentToolSettingsServiceInterface $toolSettings): ConfigurePlanner
     {
-        return $this->configurePlanner ?? new ConfigurePlanner($toolSettings);
+        return $this->configurePlanner ?? new ConfigurePlanner($toolSettings, $this->skills);
     }
 
     public function payloadValidator(): SlimPayloadValidator
     {
         return $this->payloadValidator ?? new SlimPayloadValidator();
+    }
+
+    public function patchValidator(): AgentPatchValidator
+    {
+        return $this->patchValidator ?? new AgentPatchValidator();
     }
 
     public function targetResolver(): AgentTargetResolver

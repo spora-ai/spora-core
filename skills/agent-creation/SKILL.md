@@ -5,8 +5,6 @@ license: MIT
 metadata:
   author: spora-ai
   version: "2.1"
-  allowedByDefault: false
-  requiresTools: "agent:create_agent,agent:configure_tools,agent:read_agent,agent:update_agent,agent:list_agents,agent:get_available_tools,agent:read_notes,agent:write_notes"
 ---
 
 # Agent creation
@@ -47,6 +45,7 @@ Before driving the flow:
    - `ready_to_enable` — whether configure will succeed without operator setup.
    - `missing_required` — list of setting keys that block enablement (e.g. `["api_key"]`).
    - `operations[]` — each `{name, description, enabled, requires_approval}`. Convert to `[{name: "..."}]` objects before placing inside `configure_tools`'s `tools[].operations`.
+   - `skills` — the skill discovery block: `allowed` is the calling agent's `allowed_skills` list right now, and `visible[]` is every skill the current principal can see, as `{name, description, active}`. Read `visible` to pick names; a name you did not read there is refused by `configure_tools`, and a name you read there is one the principal can be granted.
 
 ## Minimal-toolset protocol
 
@@ -117,7 +116,7 @@ Key invariants:
 - Per-tool entries in `tools[]` carry only `tool_class`, `icon`, `enabled`, and `operations[]` — slim by design, since `read_agent` / `update_agent` / `configure_tools` responses run on every LLM turn. Browsing-style enrichment (`display_name`, `description`) stays on `get_available_tools` (operator-facing). Pin the slim shape in your reply so an upstream change can't silently bloat the response.
 - `tools[]` lists every registered tool (with `enabled: true|false`) so you can see at a glance what's active and what isn't. Per-tool `operations[]` carries the effective `enabled` / `requires_approval` state after per-agent overrides fold in.
 - The Markdown preamble adds a `Disabled: ClassA, ClassB, …` line under the status line when at least one tool is disabled. The line is omitted entirely on the all-enabled case so the all-green path stays clean.
-- `overrides[]` carries the per-operation audit trail — `{tool_class, operation, enabled, default_requires_approval}` rows for every op where the operator actively overrode the tool's default. **`enabled` and `default_requires_approval` are nullable**: `null` means the operator kept the tool's default for that field, `true|false` means the operator explicitly set it. This is what proves a `configure_tools` patch with `auto_approve: true` actually persisted — the `tools[i].operations[j].requires_approval` effective value would show `false` either way, but `overrides[]` is the only place that records "the operator's call landed on this op".
+- `overrides[]` carries the per-operation audit trail — `{tool_class, operation, enabled, default_requires_approval}` rows for every op where the operator actively overrode the tool's default. **`enabled` and `default_requires_approval` are nullable**: `null` means the operator kept the tool's default for that field, `true|false` means the operator explicitly set it. This is what proves a `configure_tools` patch with `auto_approve: true` actually persisted — the `tools[i].operations[j].requires_approval` effective value would show `false` either way, but `overrides[]` is the only place that records "the operator's call landed on this op". **It says nothing about which tools are enabled** — that is `tools[].enabled`. An empty `overrides[]` after a `configure_tools` that only touched `enabled` is correct, not a lost write.
 - `missing_required: ["<tool_class>:<setting_key>", ...]` lists configuration that blocks enablement. `[]` means no blockers.
 - `warnings: []` is empty on success. Operator-upload templates may populate it with `TOOL_PLUGIN_MISSING` notes.
 
@@ -250,7 +249,34 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | Field | Required | Description |
 | --- | --- | --- |
 | `agent_id` | no | Numeric pk returned by `create_agent`. Omit to operate on the calling agent. Cross-user agent ids return "not found". |
-| `tools` | yes | Array of `{ tool_class, enabled?, operations?: [{ name, enabled?, auto_approve? }] }`. Empty array is valid (removes everything on the targeted agent — usually not what you want). |
+| `tools` | yes | Array of `{ tool_class, enabled?, settings?: { … }, operations?: [{ name, enabled?, auto_approve? }] }`. An empty array changes **nothing** — it is not a revoke-all. To strip the toolset, read the current tools and send each with `enabled: false`. |
+
+#### Writing settings
+
+`settings` writes a tool's own `#[ToolSetting]` values, and only keys the tool actually declares are accepted — an unknown key is refused, naming the valid ones.
+
+```json
+{
+  "action": "configure_tools",
+  "agent_id": 6,
+  "tools": [
+    {
+      "tool_class": "Spora\\Tools\\SkillTool",
+      "enabled": true,
+      "settings": { "allowed_skills": ["time-arithmetic", "email"] }
+    }
+  ]
+}
+```
+
+Two things to get right, both of which fail silently if you assume the opposite:
+
+- **A settings write REPLACES the value at that key outright.** It does not merge and it does not append. If the agent already holds `["a"]` and you send `["b"]`, the result is `["b"]`, not `["a", "b"]`. Always send the whole list you want.
+- **The write lands at the agent level.** Entries the agent was inheriting from a group or user level stop being inherited from here on, because the agent now has its own value. This is the intended consequence of a replace, not a bug.
+
+A multi-select takes an array, but the element type depends on the setting: `allowed_skills` is `string[]` (names), while `allowed_target_agents` is `int[]` (agent ids) — send `[3, 4]`, not `["3", "4"]`. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`. A `type: 'password'` setting is refused outright and always will be: a tool call must not be able to write a credential, because the value would land in the call's own recorded arguments. Credentials stay operator-only, through the settings panel.
+
+Operating the tool once you already have it — including granting yourself a skill — is the **agent-tool** skill. This section covers only the new-agent flow.
 
 #### Delta syntax
 
@@ -277,6 +303,7 @@ Each tool entry:
 
 - `tool_class` — FQCN string. **Get this from `get_available_tools`.** NOT `call_name` (v2 removed) and NOT `tool_name` (v2 removed).
 - `enabled` — bool, default true. `false` removes the tool from the agent entirely.
+- `settings` — object of `{setting_key: value}` for the tool's own settings. Omit to leave them alone. See *Writing settings* above for the replace semantics.
 - `operations` — array. Omit to inherit the tool's per-operation defaults. Each entry is `{ name, enabled?, auto_approve? }`:
   - `name` (required) — string from `get_available_tools.operations[].name`
   - `enabled` — bool, default true
@@ -297,8 +324,21 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `\`agent_id\` must be a positive integer` | Sent zero, a string, or omitted entirely + couldn't fall back | Use a numeric `agent_id`; if omitted is intended, the agent must exist as the calling agent |
 | `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: [...]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
+| `configure_tools: settings[0] 'X' is not a setting on <FQCN>` | Misspelled or invented a setting key | Use a key the tool declares; the refusal lists the valid ones |
+| `configure_tools: settings[0] 'allowed_skills' must be an array of strings` | Sent a multi-select as a string, or as an array of objects | Send `["time-arithmetic"]`, not `"time-arithmetic"` or `[{name: "..."}]` |
+| `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
+| `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
+| `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
+| `configure_tools: tool entry #N 'enabled' must be true or false` | Sent `"yes"` / `2` / `null` — nothing that names a flag | Send `true` / `false`, `"true"` / `"false"`, or `0` / `1`. Quoted scalars are read as the value they name, so `"false"` really does disable |
+| `create_agent: \`max_steps\` must be a whole number in 1..100` | Sent `"999"`, `12.5`, or `"lots"` | A quoted number is read as the number, then range-checked — so `"25"` works and `"999"` does not. Only whole numbers in 1..100 |
+| `configure_tools: operations[N][M] names 'X', which is not an operation on <FQCN>` | Misspelled or invented an operation name | The refusal lists the valid names. Get them from `get_available_tools` → that tool's `operations[]` |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
+
+`enabled` is tri-state: `true` enables, `false` removes the tool, and **omitting the key
+leaves the tool as it is**. An entry that carries only `settings` or `operations` never
+grants the tool as a side effect — which is what you want for the minimal toolset. And
+`tools: []` is a no-op, not a revoke-all.
 
 ## `update_agent` workflow (in-place edits to **any** agent)
 
@@ -317,17 +357,31 @@ Accepts an `agent_id` (numeric pk) and a partial `agent` object. Omitting `agent
 }
 ```
 
-Allowed keys inside the `agent` object:
+Allowed keys inside the `agent` object — these are the only ones that are yours to
+write:
 
 - `name`, `description`, `system_prompt`
 - `max_steps`, `allow_followup`, `retry_after_minutes`, `max_retries`
-- `is_pinned`, `is_archived`, `is_favorite`
+- `is_pinned`, `is_archived`
 
 **Silent drops:**
 
 - `notes` — stripped by the tool before the DB write. Use `write_notes` (append/prepend) or `write_notes_overwrite` (destructive, requires approval) instead.
-- `llm_driver_config_id` — operator-only; stripped silently.
-- Any other key — silently dropped at the database layer.
+- `is_favorite` — not part of this patch. The favourite is per-user; there is no such thing as favouriting an agent for everybody.
+- Any other key — dropped at the database layer against its allowlist.
+
+**Not writable through this tool, and refused rather than dropped:** `llm_driver_config_id`,
+`speech_driver_config_id` and `voice_message_retention_count` all sit in the service's
+allowlist but are not part of this surface. The first two decide which model and credential
+set the agent runs on, and you have no way to read the valid ids, so sending one would be
+guessing at a consequential value. An operator sets those. The refusal names the key and
+**the whole patch is refused** — so if you want a different model on an agent, say so
+rather than trying to write the id.
+
+**Types are checked here too, unlike a bare database write.** The patch is coerced and
+range-checked before anything is written, so `"is_archived": "false"` really does
+unarchive, `"max_steps": "25"` is accepted, and `"max_steps": "999"` is refused. One
+bad field means the whole patch is refused and nothing is written.
 
 To verify a write took effect, call `read_agent(agent_id: <id>)` (or just `read_agent` for the calling agent) and look at the manifest. If a field you sent is not in the returned payload, it was dropped — don't assume success.
 

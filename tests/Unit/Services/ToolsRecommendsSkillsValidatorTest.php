@@ -11,6 +11,8 @@ use RecursiveIteratorIterator;
 use RuntimeException;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ToolInterface;
@@ -118,14 +120,14 @@ final class RecMixedTool implements ToolInterface
 }
 
 /**
- * Build a SkillScanner rooted at a fresh temp directory and write a
- * `SKILL.md` for each requested slug. Returns [scanner, cleanup]. The
- * cleanup callback recursively removes the temp root.
+ * Build a SkillProviderRegistry over a filesystem provider rooted at a fresh
+ * temp directory, with a `SKILL.md` written for each requested slug. Returns
+ * [registry, cleanup]. The cleanup callback recursively removes the temp root.
  *
  * @param list<string> $slugs
- * @return array{0: SkillScanner, 1: callable(): void}
+ * @return array{0: SkillProviderRegistry, 1: callable(): void}
  */
-function buildScannerWithSlugs(array $slugs): array
+function buildRegistryWithSlugs(array $slugs): array
 {
     $root = sys_get_temp_dir() . '/spora_recs_' . uniqid('', true);
     if (!mkdir($root, 0o755, true) && !is_dir($root)) {
@@ -143,8 +145,10 @@ function buildScannerWithSlugs(array $slugs): array
         );
     }
 
-    $scanner = new SkillScanner([
-        ['path' => $root, 'source' => 'project'],
+    $scanner = new SkillProviderRegistry([
+        new FilesystemSkillProvider(new SkillScanner([
+            ['path' => $root, 'source' => 'project'],
+        ])),
     ]);
 
     $cleanup = static function () use ($root): void {
@@ -177,11 +181,11 @@ function buildScannerWithSlugs(array $slugs): array
  */
 function makeValidatorFixture(array $toolClasses, array $onDiskSlugs): array
 {
-    [$scanner, $scannerCleanup] = buildScannerWithSlugs($onDiskSlugs);
+    [$skills, $skillsCleanup] = buildRegistryWithSlugs($onDiskSlugs);
     $resolver = new ToolConfigNameResolver(new NullLogger(), $toolClasses);
-    $validator = new ToolsRecommendsSkillsValidator($resolver, $scanner);
+    $validator = new ToolsRecommendsSkillsValidator($resolver, $skills);
 
-    return [$validator, $scannerCleanup];
+    return [$validator, $skillsCleanup];
 }
 
 test('validate returns [] when the tool declares no recommendsSkills', function (): void {
@@ -254,8 +258,8 @@ test('validate is case-insensitive: a lowercased attribute slug resolves to an u
     }
 });
 
-test('validate returns [] when the scanner is null', function (): void {
-    // When the container resolves without a SkillScanner bound (build/test
+test('validate returns [] when the registry is null', function (): void {
+    // When the container resolves without the orchestrator slice (build/test
     // contexts), the validator must stay silent — same trade-off as the
     // controller's nullable validator parameter.
     $resolver = new ToolConfigNameResolver(new NullLogger(), [RecOneMissingTool::class]);
@@ -287,10 +291,10 @@ test('validate returns [] when the registered class has no #[Tool] attribute', f
         }
     };
 
-    [$scanner, $cleanup] = buildScannerWithSlugs([]);
+    [$skills, $cleanup] = buildRegistryWithSlugs([]);
     try {
         $resolver = new ToolConfigNameResolver(new NullLogger(), [$classWithoutTool::class]);
-        $validator = new ToolsRecommendsSkillsValidator($resolver, $scanner);
+        $validator = new ToolsRecommendsSkillsValidator($resolver, $skills);
         expect($validator->validate())->toBe([]);
     } finally {
         $cleanup();

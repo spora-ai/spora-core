@@ -136,4 +136,28 @@ abstract class AbstractPlugin implements PluginInterface
     {
         return [];
     }
+
+    /**
+     * Skill provider classes this plugin contributes. Override only for skills
+     * that do not live on disk — a shipped skill is a directory plus
+     * `skillPaths()` and needs no provider. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::skillProviders()}.
+     *
+     * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
+     */
+    public function skillProviders(): array
+    {
+        return [];
+    }
+
+    /**
+     * Search provider classes this plugin contributes to the host palette. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::searchProviders()}.
+     *
+     * @return list<class-string<\Spora\Search\SearchProviderInterface>>
+     */
+    public function searchProviders(): array
+    {
+        return [];
+    }
 }

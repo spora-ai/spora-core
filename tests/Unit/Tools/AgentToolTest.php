@@ -8,18 +8,28 @@ use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Models\Agent;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Schema\OperationSchemaFilter;
 use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use Spora\Tools\TimeTool;
+use Tests\Fixtures\Skills\StubSkillProvider;
 
 /**
+ * @param  SkillProviderRegistry|null $skills Only needed by the tests that
+ *         exercise the principal check on a `configure_tools` `allowed_skills`
+ *         write; every other path leaves it null.
+ * @param  AgentTool\SkillCatalogPresenter|null $skillCatalog Only
+ *         needed by the `get_available_tools` `skills` block; it is optional in
+ *         production too, so the block's absence is a case worth exercising.
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
  */
-function makeAgentTool(): array
-{
+function makeAgentTool(
+    ?SkillProviderRegistry $skills = null,
+    ?AgentTool\SkillCatalogPresenter $skillCatalog = null,
+): array {
     // AgentTemplateImporter + AgentTemplateValidator are final and cannot
     // be mocked directly; use real instances. Validator is parameter-less,
     // importer needs a real ToolConfigService + PluginLoader + Paths.
@@ -44,7 +54,10 @@ function makeAgentTool(): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, null);
 
     return [
-        new AgentTool($agentService, $toolSettings, $manifest),
+        new AgentTool($agentService, $toolSettings, $manifest, new AgentTool\AgentToolCollaborators(
+            skills: $skills,
+            skillCatalog: $skillCatalog,
+        )),
         $agentService,
         $toolSettings,
     ];
@@ -96,6 +109,28 @@ function makeAgentToolWithPlugins(): array
         $pluginLoader,
         $iconResolver,
     ];
+}
+
+/**
+ * A real `agents` row for the given owner, because the configure/read target
+ * resolvers hit the live table rather than a mock.
+ */
+function insertAgentRow(int $ownerId, string $name = 'Calling'): int
+{
+    return (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        'principal_id' => createUserPrincipalPublic($ownerId),
+        'name'                 => $name,
+        'description'          => null,
+        'system_prompt'        => null,
+        'notes'                => null,
+        'max_steps'            => 10,
+        'allow_followup'       => 1,
+        'retry_after_minutes'  => 0,
+        'max_retries'          => 0,
+        'is_active'            => 1,
+        'created_at'           => date('Y-m-d H:i:s'),
+        'updated_at'           => date('Y-m-d H:i:s'),
+    ]);
 }
 
 function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = null): Agent
@@ -678,6 +713,64 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not found');
     });
+
+    test('carries a skills block, with allowed and visible as two separate fields', function (): void {
+        $config = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
+        $config->shouldReceive('getEffectiveSettings')->andReturn(['allowed_skills' => ['alpha']]);
+        $provider = (new StubSkillProvider('custom'))->add('alpha', ['SKILL.md'], 'Body.', 'The alpha skill.');
+        $provider->add('beta', ['SKILL.md'], 'Body.', 'The beta skill.');
+        $catalog = new AgentTool\SkillCatalogPresenter(
+            new SkillProviderRegistry([$provider]),
+            $config,
+        );
+
+        [$tool, $service, $toolSettings] = makeAgentTool(null, $catalog);
+        /** @var AgentServiceInterface&MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->principal_id = createUserPrincipalPublic(99);
+        $agent->name = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($payload)->toHaveKey('skills');
+        $skills = $payload['skills'];
+
+        // Two fields, never one merged list: the model's question is "may I
+        // load this?", and a single array answers it wrongly for every name
+        // the agent can see but does not hold.
+        expect($skills['allowed'])->toBe(['alpha']);
+        expect($skills['visible'])->toBe([
+            ['name' => 'alpha', 'description' => 'The alpha skill.', 'active' => true],
+            ['name' => 'beta', 'description' => 'The beta skill.', 'active' => false],
+        ]);
+    });
+
+    test('omits the skills block when no skill catalog is wired', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var AgentServiceInterface&MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->principal_id = createUserPrincipalPublic(99);
+        $agent->name = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($result->success)->toBeTrue()
+            ->and($payload)->not->toHaveKey('skills');
+    });
 });
 
 describe('AgentTool::execute — create_agent', function (): void {
@@ -1156,6 +1249,273 @@ describe('AgentTool::execute — configure_tools', function (): void {
         );
 
         expect($result->success)->toBeTrue();
+    });
+
+    test('writes a tool setting through the same putOverride the panel uses', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-settings@example.com');
+
+        $skills = new SkillProviderRegistry([(new StubSkillProvider('core'))
+            ->add('time-arithmetic', ['SKILL.md'], 'Body.', 'Do sums of times.')
+            ->add('email', ['SKILL.md'], 'Body.', 'Read email.')]);
+        [$tool, , $toolSettings] = makeAgentTool($skills);
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->allows('enableTool')->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
+        // The multi-select is stored the way the settings form stores one: a
+        // JSON-encoded string inside a `Record<string, string>` blob. The panel
+        // reads it back out of `?raw=true` and JSON-parses, so a nested array
+        // would read as "no skills configured" and its next union-write would
+        // wipe the operator's list.
+        $toolSettings->shouldReceive('putOverride')
+            ->once()
+            ->with($callingId, $ownerId, 'Spora\\Tools\\SkillTool', [
+                'allowed_skills' => '["time-arithmetic","email"]',
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'enabled'    => true,
+                    'settings'   => ['allowed_skills' => ['time-arithmetic', 'email']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('refuses the whole call when a named skill is invisible to the principal', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-cross-tenant@example.com');
+        $principalId = createUserPrincipalPublic($ownerId);
+
+        // One skill the principal owns, one owned by somebody else. The write
+        // may only ever pre-approve what the operator could have granted by
+        // hand, so the foreign name has to stop the call — and a list that
+        // quietly dropped it would read to the model as the whole list landing.
+        $provider = (new StubSkillProvider('custom'))
+            ->add('mine', ['SKILL.md'], 'Body.', 'Mine.', $principalId)
+            ->add('theirs', ['SKILL.md'], 'Body.', 'Theirs.', $principalId + 500);
+        $provider->onlyVisibleTo = $principalId;
+        [$tool, , $toolSettings] = makeAgentTool(new SkillProviderRegistry([$provider]));
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+        $toolSettings->shouldNotReceive('enableTool');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => ['mine', 'theirs']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'allowed_skills' names 'theirs'")
+            ->and($result->content)->toContain('not available to this principal')
+            ->and($result->content)->toContain('skills.visible');
+    });
+
+    test('refuses a skill write when the registry is absent rather than waving it through', function (): void {
+        // The container guards the registry with `$c->has(...) ? ... : null`, so a
+        // build without the orchestrator slice resolves it to null. Approving the
+        // write there would make the cross-tenant check vanish exactly when the
+        // wiring is incomplete — which is when you least want a check vanishing.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-no-registry@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => ['anything']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('the skill registry is unavailable');
+    });
+
+    test('refuses a password setting, so a tool call cannot write or read back a credential', function (): void {
+        // `api_key` is a real `type: 'password'` setting on the LLM drivers. A
+        // model-supplied value would land in the call's own recorded arguments,
+        // so the agent could read back the key it just wrote — and an approval
+        // granted for "configure my tools" does not obviously cover "repoint my
+        // LLM driver at someone else's key".
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-password@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Drivers\\OpenAICompatibleDriver',
+                    'settings'   => ['api_key' => 'sk-not-mine'],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('is a credential');
+    });
+
+    test('accepts an int[] for an agent-resolved multi-select, which is how it is stored', function (): void {
+        // `allowed_target_agents` is stored as `int[]`. Demanding strings there
+        // would refuse the shape the admin panel itself writes, leaving the
+        // setting writable by hand and by nothing else.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-agent-ids@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->allows('enableTool')->andReturn([]);
+        $toolSettings->shouldReceive('putOverride')
+            ->once()
+            ->with($callingId, $ownerId, 'Spora\\Tools\\SubAgentTool', [
+                'allowed_target_agents' => '[3,4]',
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SubAgentTool',
+                    'settings'   => ['allowed_target_agents' => [3, 4]],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('refuses strings for an agent-resolved multi-select, which is not how it is stored', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-agent-strings@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SubAgentTool',
+                    'settings'   => ['allowed_target_agents' => ['3', '4']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('must be an array of agent ids');
+    });
+
+    test('refuses a setting key the tool does not declare', function (): void {
+        // Dropping an unknown key would leave the model believing a list landed
+        // that did not, and it would then read a skill it still cannot read.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_sklls' => ['time-arithmetic']],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('configure_tools: settings[0]')
+            ->and($result->content)->toContain("'allowed_sklls' is not a setting on Spora\\Tools\\SkillTool")
+            ->and($result->content)->toContain('allowed_skills');
+    });
+
+    test('refuses a setting key on a tool that declares no settings', function (): void {
+        // TimeTool has no `#[ToolSetting]`, so the useful half of the refusal
+        // is "this tool has nothing to configure", not an empty key list.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'settings'   => ['timezone' => 'Europe/Berlin'],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'timezone' is not a setting on Spora\\Tools\\TimeTool")
+            ->and($result->content)->toContain('It declares no settings.');
+    });
+
+    test('refuses a multi-select that is not an array of strings', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => 'time-arithmetic'],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'allowed_skills' must be an array of strings");
     });
 });
 
@@ -1946,7 +2306,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ->and($result->data)->toBe(['agents' => []]);
         });
 
-        test('returns a slim id/name/description list of every owned agent', function (): void {
+        test('returns a slim id/name/description/archived list of every owned agent', function (): void {
             [$tool, $service] = makeAgentTool();
             /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
@@ -1961,22 +2321,60 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ->once()
                 ->with(99)
                 ->andReturn([
-                    ['id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
-                    ['id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
-                    ['id' => 11, 'name' => 'Travel',        'description' => ''],
+                    ['id' => 4,  'name' => 'Custom Agent', 'description' => 'does X', 'is_archived' => false],
+                    ['id' => 7,  'name' => 'Wetter-Agent',  'description' => null, 'is_archived' => false],
+                    ['id' => 11, 'name' => 'Travel',        'description' => '', 'is_archived' => true],
                 ]);
 
             $result = $tool->execute(['action' => 'list_agents'], 7, null);
 
             expect($result->success)->toBeTrue()
                 ->and($result->data['agents'])->toBe([
-                    ['agent_id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
-                    ['agent_id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
-                    ['agent_id' => 11, 'name' => 'Travel',        'description' => ''],
+                    ['agent_id' => 4,  'name' => 'Custom Agent', 'description' => 'does X', 'is_archived' => false],
+                    ['agent_id' => 7,  'name' => 'Wetter-Agent',  'description' => null, 'is_archived' => false],
+                    ['agent_id' => 11, 'name' => 'Travel',        'description' => '', 'is_archived' => true],
                 ])
                 ->and($result->content)->toContain('#4 Custom Agent — does X')
                 ->and($result->content)->toContain('#7 Wetter-Agent')
-                ->and($result->content)->toContain('#11 Travel');
+                ->and($result->content)->toContain('#11 Travel (archived)');
+        });
+
+        test('flags an archived agent instead of hiding it, so it stays unarchivable', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var AgentServiceInterface&MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->principal_id = createUserPrincipalPublic(99);
+            $service->allows('getAgentByAgentId')->andReturn($agent);
+            $service->allows('getAgentsForUser')->andReturn([
+                ['id' => 11, 'name' => 'Retired', 'description' => null, 'is_archived' => true],
+            ]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+
+            // Still listed: `update_agent` can set is_archived back to false, so
+            // hiding it would strand the agent with no way back through this tool.
+            expect($result->data['agents'])->toHaveCount(1)
+                ->and($result->data['agents'][0]['is_archived'])->toBeTrue()
+                ->and($result->content)->toContain('#11 Retired (archived)');
+        });
+
+        test('treats a row with no is_archived key as not archived', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var AgentServiceInterface&MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->principal_id = createUserPrincipalPublic(99);
+            $service->allows('getAgentByAgentId')->andReturn($agent);
+            $service->allows('getAgentsForUser')->andReturn([
+                ['id' => 4, 'name' => 'No flag', 'description' => null],
+            ]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+
+            expect($result->data['agents'][0]['is_archived'])->toBeFalse()
+                ->and($result->content)->toContain('#4 No flag')
+                ->and($result->content)->not->toContain('(archived)');
         });
 
         test('returns AGENT_NOT_FOUND when the calling agent cannot be resolved', function (): void {
@@ -2026,7 +2424,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             $data = $result->data;
             $row  = $data['agents'][0];
 
-            expect(array_keys($row))->toBe(['agent_id', 'name', 'description']);
+            expect(array_keys($row))->toBe(['agent_id', 'name', 'description', 'is_archived']);
         });
     });
 

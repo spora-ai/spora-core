@@ -266,6 +266,20 @@ final class SkillValidator
     }
 
     /**
+     * The field is spec-experimental and unenforced: it is carried onto the
+     * descriptor and echoed by the API, and no tool, resolver or approval path
+     * reads it. So the only thing worth checking is that it is a string —
+     * parsing the list would be validating a value nothing consumes.
+     *
+     * Both separators are named in the message because both are in use: the
+     * space-separated form is what the message used to promise, and the
+     * comma-separated form is what shipped skills such as
+     * `spora-plugin-minimax/skills/minimax-image-to-video` actually write. The
+     * old message called the comma form invalid while the code accepted it,
+     * which is the worst of both: an author who read it and complied was told
+     * their own skill was fine, and one who did not read it had no way to find
+     * out that commas were fine too.
+     *
      * @param array<string, mixed> $frontmatter
      */
     private function validateAllowedTools(array $frontmatter, ValidationResult $result): void
@@ -273,12 +287,11 @@ final class SkillValidator
         if (!array_key_exists('allowed-tools', $frontmatter)) {
             return;
         }
-        $value = $frontmatter['allowed-tools'];
-        if (!is_string($value)) {
+        if (!is_string($frontmatter['allowed-tools'])) {
             $result->addError([
                 'code'     => 'ALLOWED_TOOLS_INVALID',
                 'severity' => 'error',
-                'message'  => "Field 'allowed-tools' must be a space-separated string.",
+                'message'  => "Field 'allowed-tools' must be a string listing tool names separated by spaces or commas.",
                 'path'     => 'allowed-tools',
             ]);
         }

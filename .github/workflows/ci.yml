@@ -193,7 +193,13 @@ jobs:
     name: PHPStan
     runs-on: ubuntu-latest
     steps:
+      # Full history, matching the `test` job. The two diff-based steps below
+      # compare against the PR's base sha, and a depth-1 checkout does not
+      # contain that object — `git diff <base>...HEAD` fails with "Invalid
+      # symmetric difference expression" rather than reporting a clean tree.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
 
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
@@ -219,17 +225,103 @@ jobs:
         if: github.event_name == 'pull_request'
         run: composer openapi:check
 
-      # `git diff --check` inspects the working tree for unresolved
-      # conflict markers. We restrict to tracked files so the hook never
-      # fails on a deleted-staged entry or an untracked comment; an empty
-      # match is the success path.
+      # Unresolved conflict markers in the *committed* changeset.
+      #
+      # Two mistakes this replaces, both of which made the guard a silent
+      # no-op rather than a failing check:
+      #
+      #   1. `git diff --check <paths>` compares the working tree against the
+      #      INDEX. On a clean CI checkout those are identical, so a marker
+      #      committed in the PR — the only kind that can exist — was never
+      #      inspected. The revision pair is mandatory:
+      #      `git diff --check <base>...HEAD`.
+      #   2. The diff was taken from `HEAD~`, which does not exist in a
+      #      depth-1 checkout (`static-analysis` has no `fetch-depth: 0`,
+      #      unlike the `test` job), and points at the previous *commit*
+      #      rather than the PR's base. GitHub supplies the real base sha.
+      #
+      # The merge-base form (`A...B`) scopes the check to this branch's
+      # commits, so a marker that is already on main is not re-reported.
       - name: Check for merge-conflict markers
         if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if ! git diff --check $(git diff --name-only --diff-filter=ACMRT HEAD~ HEAD); then
+          if ! git diff --check "$BASE_SHA...HEAD"; then
             echo "Unresolved merge-conflict markers detected in the changeset."
             exit 1
           fi
+
+      # Markdown link check, scoped to the relative paths inside the files a
+      # PR touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
+      # 0fcdaf71, but AGENTS.md kept pointing at the deleted files for months
+      # and no gate noticed. Only in-repo links are resolvable here; the
+      # absolute docs.spora-ai.com URLs need network access and are skipped.
+      - name: Check markdown links
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # NUL-delimited, never word-split, and no bash-4-only builtins: a
+          # path may contain a space, and `for f in $changed` both errors on it
+          # and silently skips the file, which is the same "nothing is broken"
+          # failure this step exists for.
+          changed=()
+          while IFS= read -r -d '' file; do
+            changed+=("$file")
+          done < <(git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA...HEAD" -- '*.md')
+
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo "No markdown files changed; skipping link check."
+            exit 0
+          fi
+
+          dirs=()
+          for file in "${changed[@]}"; do
+            dirs+=("$(dirname "$file")")
+          done
+          deduped=()
+          while IFS= read -r dir; do
+            deduped+=("$dir")
+          done < <(printf '%s\n' "${dirs[@]}" | sort -u)
+
+          status=0
+          for file in "${changed[@]}"; do
+            # A relative markdown link, optionally titled and optionally
+            # anchored: ](a.md), ](a.md "A Title"), ](a.md#frag). The
+            # capture class has to admit the title, so the title comes back
+            # with it and is stripped below.
+            targets=()
+            while IFS= read -r target; do
+              targets+=("$target")
+            done < <(
+              grep -ohE '\]\([^)]+\)' "$file" \
+                | sed -E 's/^\]\((.*)\)$/\1/' \
+                | sed -E 's/[[:space:]]+"[^"]*"$//' \
+                | sed -E 's/#.*$//' \
+                | grep -vE '^(https?:|mailto:|#)' || true
+            )
+
+            for target in "${targets[@]}"; do
+              # Resolve relative to every directory holding a changed file:
+              # the same relative path can be live in one and dead in another.
+              # A literal space in a target is fine; a percent-encoded one is
+              # not decoded, and no relative link in this repo uses that form —
+              # the percent-encoded links here are all absolute badge URLs,
+              # filtered out above.
+              found=0
+              for base in "${deduped[@]}"; do
+                if [ -e "$base/$target" ]; then found=1; break; fi
+              done
+              if [ -e "$target" ]; then found=1; fi
+
+              if [ "$found" -eq 0 ]; then
+                echo "Dead link in $file: $target"
+                status=1
+              fi
+            done
+          done
+          exit $status
 
   sonar:
     name: SonarCloud scan

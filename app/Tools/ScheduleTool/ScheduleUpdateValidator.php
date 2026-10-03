@@ -7,6 +7,7 @@ namespace Spora\Tools\ScheduleTool;
 use Cron\CronExpression;
 use DateTimeImmutable;
 use DateTimeZone;
+use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -18,7 +19,7 @@ use Throwable;
  */
 final class ScheduleUpdateValidator
 {
-    use SchedulableTypeCoercion;
+    use LlmScalarCoercion;
 
     public const OP_UPDATE_SCHEDULE  = 'update_schedule';
     public const OP_UPDATE_TEMPLATE = 'update_prompt_template';

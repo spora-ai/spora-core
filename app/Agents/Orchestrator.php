@@ -589,6 +589,22 @@ final class Orchestrator implements OrchestratorInterface
         }
     }
 
+    /**
+     * Whether the current call must await operator approval.
+     *
+     * Precedence, per operation: the agent's `agent_tool_operation_overrides`
+     * row, then `#[ToolOperation(requiresApprovalByDefault:)]`. **That
+     * attribute is only the activation-time default** — once an operator stores
+     * a row, the row is the configuration and is never clamped back toward it.
+     *
+     * A non-`HasOperations` tool **throws** here, where
+     * {@see AgentToolOperationsResolver::resolveOperationEffectiveRequiresApproval()}
+     * returns `true` for the same input. Deliberate: a malformed call must
+     * refuse and tell the LLM why, while the resolver serves read-only API
+     * responses where `true` is the safe default. Collapsing the two turns the
+     * throw into `AwaitingApproval`, and the call then executes on approval —
+     * the opposite of refusing.
+     */
     public function resolveRequiresApproval(object $toolInstance, string $toolClass, int $agentId, array|object $arguments = []): bool
     {
         if (is_object($arguments)) {
@@ -627,6 +643,15 @@ final class Orchestrator implements OrchestratorInterface
         throw new ToolContractException("Tool '{$toolClass}' does not use HasOperations trait.");
     }
 
+    /**
+     * Whether the agent has the operation switched on.
+     *
+     * Same precedence and override-wins rule as {@see resolveRequiresApproval()},
+     * on the `enabled` axis. Unlike it, this performs **no** `HasOperations`
+     * check — the branch is unreachable in practice since every current tool
+     * uses the trait, and the resolver's `enabled` axis falls back to `true`
+     * for such a tool. Pinned by {@see AgentToolOperationsPrecedenceTest}.
+     */
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
         $toolClass = get_class($toolInstance);

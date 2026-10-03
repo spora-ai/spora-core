@@ -12,6 +12,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Tools\AgentTool\AgentPatchValidator;
 use Spora\Tools\AgentTool\AgentTargetResolver;
 use Spora\Tools\AgentTool\AgentToolCollaborators;
 use Spora\Tools\AgentTool\CatalogPresenter;
@@ -40,10 +41,14 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Inspect or modify this agent: read/write its configuration, manage its '
                . 'operator-facing notes, list available tools (with details such as '
                . 'description, source plugin, per-operation enablement and approval state, '
-               . 'and any missing required configuration), and create new agents.',
+               . 'and any missing required configuration), and create new agents. '
+               . 'See the agent-tool skill for which operations write, how to grant '
+               . 'yourself a skill, and the traps; use the agent-creation skill for the '
+               . 'new-agent protocol.',
     displayName: 'Agent',
     category: 'agent',
     icon: 'bot',
+    recommendsSkills: ['agent-tool'],
 )]
 #[ToolOperation(
     name: 'update_agent',
@@ -94,6 +99,11 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'current enablement, missing required configuration, and per-operation '
                . 'enabled/requires_approval state). Tools that need configuration to '
                . 'become activatable are flagged via `ready_to_enable: false`. '
+               . 'The payload also carries a `skills` block: `allowed` is the agent\'s own '
+               . '`allowed_skills` list, and `visible` is every skill the current principal can '
+               . 'see (`{name, description, active}` each). Read `visible` to pick names, then '
+               . 'set them via `configure_tools` with a `settings.allowed_skills` array on the '
+               . 'SkillTool entry — that write replaces the list wholesale. '
                . 'Use this to plan a sub-agent via `create_agent`. When planning a sub-agent, '
                . 'also read the agent-creation skill (skill action: read, name: agent-creation).',
     operatorDescription: 'List every registered tool as a compact JSON payload.',
@@ -118,20 +128,25 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'configure_tools',
-    description: 'Enable or disable tools and per-operation overrides on an agent. '
+    description: 'Enable or disable tools and per-operation overrides on an agent, and write a tool\'s '
+               . 'settings. '
                . 'Takes `agent_id` (the numeric pk returned by `create_agent`; '
                . 'omit to operate on the calling agent) and a `tools` list of '
-               . '`{ tool_class, enabled, operations: [{name, enabled?, auto_approve?}] }`. '
+               . '`{ tool_class, enabled, settings, operations: [{name, enabled?, auto_approve?}] }`. '
                . 'A tool with `enabled: false` removes it from the agent. '
                . 'Omit `operations` to inherit defaults; pass `[{name:"now"}]` to enable one, '
                . '`[{name:"now", enabled:false}]` to disable one, '
                . '`[{name:"now", auto_approve:true}]` to enable auto-approve. '
+               . '`settings` writes the tool\'s own settings — e.g. '
+               . '`{tool_class: "Spora\\Tools\\SkillTool", settings: {allowed_skills: ["time-arithmetic"]}}` '
+               . 'replaces that agent\'s `allowed_skills` list wholesale. Use `get_available_tools`\'s `skills` '
+               . 'block to see which skills exist before naming them. '
                . 'Returns the canonical agent manifest (Markdown wrapper + '
                . 'structured JSON) so you can verify what landed without a '
                . 'follow-up `read_agent` call. See the agent-creation skill '
                . '(skill action: read, name: agent-creation, filename: SKILL.md) '
                . 'for the slim two-phase flow.',
-    operatorDescription: 'Enable or disable tools and per-op overrides on an agent.',
+    operatorDescription: 'Enable or disable tools, per-op overrides, and tool settings on an agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -169,6 +184,9 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'ONLY for `update_agent`: a partial agent with the fields to update. '
                . 'Allowed keys: name, description, system_prompt, max_steps, '
                . 'allow_followup, retry_after_minutes, max_retries, is_pinned, is_archived. '
+               . 'Booleans take true / false or the strings "true" / "false" / 0 / 1, and numbers '
+               . 'may be quoted — both are read as the value they name, then range-checked, so '
+               . '"25" is accepted for max_steps and "999" is not. '
                . '`notes` is intentionally not accepted here — use write_notes. '
                . 'Plan A: `is_favorite` was removed from this list because the toggle '
                . 'is now per-user (POST/DELETE /api/v1/agents/{id}/favorite). '
@@ -219,9 +237,20 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'tools',
     type: 'array',
-    description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, operations: [...] }` entries. '
+    description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, settings, operations: [...] }` entries. '
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
-              . 'A tool with `enabled: false` removes it from the agent. '
+              . 'A tool with `enabled: false` removes it from the agent; OMITTING `enabled` leaves the tool '
+              . 'as it is, so an entry carrying only `settings` or `operations` never grants the tool by accident. '
+              . '`enabled` takes true / false, the strings "true" / "false", or 0 / 1 — some providers '
+              . 'flatten scalars into strings, and a quoted value is read as the value it names rather than '
+              . 'as truthy, so a revocation still revokes. A value naming no flag ("yes", 2) is refused. '
+              . '`settings` is an object of `{setting_key: value}` for the tool\'s own settings (keys are validated; '
+              . 'a multi-select such as the skill tool\'s `allowed_skills` takes an array of strings). '
+              . 'IMPORTANT: a settings write REPLACES the value at that key outright — it does not merge or append. '
+              . 'Send the whole list you want, and remember that the value lands at the agent level, so entries '
+              . 'inherited from a group or user level stop being inherited from here on. '
+              . 'An empty list changes nothing. To revoke everything, read the current tools and send each one '
+              . 'with `enabled: false`. '
               . 'Ignored by every other operation; omit this key entirely when calling '
               . 'read_notes, write_notes, write_notes_overwrite, update_agent, '
               . 'get_available_tools, create_agent, list_agents, or read_agent.',
@@ -258,6 +287,8 @@ final class AgentTool extends AbstractTool
 
     private readonly SlimPayloadValidator $payloadValidator;
 
+    private readonly AgentPatchValidator $patchValidator;
+
     private readonly AgentTargetResolver $targetResolver;
 
     private readonly PrincipalService $principalService;
@@ -284,6 +315,7 @@ final class AgentTool extends AbstractTool
         );
         $this->configurePlanner  = $collaborators->configurePlanner($toolSettings);
         $this->payloadValidator  = $collaborators->payloadValidator();
+        $this->patchValidator    = $collaborators->patchValidator();
         $this->targetResolver    = $collaborators->targetResolver();
     }
 
@@ -307,7 +339,7 @@ final class AgentTool extends AbstractTool
             'write_notes_overwrite'     => $this->notesHandler->write($agentId, $arguments, 'overwrite'),
             'get_available_tools'       => $this->catalogPresenter->present($agentId, $userId, $context),
             'create_agent'              => $this->createAgent($agentId, $arguments, $context),
-            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments),
+            'configure_tools'           => $this->configureTools($agentId, $userId, $arguments, $context),
             'read_agent'                => $this->readAgent($agentId, $userId, $arguments),
             'list_agents'               => $this->listAgents($agentId, $context),
             default                     => ToolResult::fail("Invalid action '{$operation}'."),
@@ -359,14 +391,31 @@ final class AgentTool extends AbstractTool
         if ($targetId instanceof ToolResult) {
             return $targetId;
         }
+        $patch = $this->normalisedPatch($arguments);
+        if ($patch instanceof ToolResult) {
+            return $patch;
+        }
+        $agent = $this->agentService->updateAgentByAgentId($targetId, $patch);
+
+        return $agent === null
+            ? ToolResult::fail(self::AGENT_NOT_FOUND)
+            : $this->renderManifestResult($agent);
+    }
+
+    /**
+     * The patch to write, with every field coerced and range-checked.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return array<string, mixed>|ToolResult
+     */
+    private function normalisedPatch(array $arguments): array|ToolResult
+    {
         $patch = self::buildWriteConfigurationPatch($arguments);
         if ($patch === null) {
             return $this->notesOnlyPatchFail($arguments);
         }
-        $agent = $this->agentService->updateAgentByAgentId($targetId, $patch);
-        return $agent === null
-            ? ToolResult::fail(self::AGENT_NOT_FOUND)
-            : $this->renderManifestResult($agent);
+
+        return $this->patchValidator->normalise($patch);
     }
 
     private function notesOnlyPatchFail(array $arguments): ToolResult
@@ -435,6 +484,7 @@ final class AgentTool extends AbstractTool
                     'agent_id'    => $a['id'] ?? null,
                     'name'        => $a['name'] ?? null,
                     'description' => $a['description'] ?? null,
+                    'is_archived' => (bool) ($a['is_archived'] ?? false),
                 ];
             },
             $rows,
@@ -448,7 +498,13 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * @param  list<array{agent_id: int|string|null, name: string|null, description: string|null}> $slim
+     * Archived agents stay in the list, flagged rather than hidden: the
+     * service layer is deliberately filter-free so the dashboard and this
+     * tool share one payload, and `update_agent` can unarchive — so hiding
+     * them would make an archived agent unreachable and permanent. The flag
+     * is what stops a retired agent reading as a normal candidate.
+     *
+     * @param  list<array{agent_id: int|string|null, name: string|null, description: string|null, is_archived: bool}> $slim
      */
     private function renderAgentsList(array $slim): string
     {
@@ -459,7 +515,8 @@ final class AgentTool extends AbstractTool
             $desc = isset($row['description']) && $row['description'] !== ''
                 ? ' — ' . $row['description']
                 : '';
-            $lines[] = "- {$id} {$name}{$desc}";
+            $archived = $row['is_archived'] ? ' (archived)' : '';
+            $lines[] = "- {$id} {$name}{$archived}{$desc}";
         }
         return implode("\n", $lines);
     }
@@ -543,15 +600,22 @@ final class AgentTool extends AbstractTool
      *
      * @param array<string, mixed> $arguments
      */
-    private function configureTools(int $agentId, ?int $userId, array $arguments): ToolResult
-    {
-        $context = $this->resolveConfigureToolsContext($userId, $agentId, $arguments);
-        if ($context instanceof ToolResult) {
-            return $context;
+    private function configureTools(
+        int $agentId,
+        ?int $userId,
+        array $arguments,
+        ?PrincipalContext $context,
+    ): ToolResult {
+        $prepared = $this->resolveConfigureToolsContext($userId, $agentId, $arguments, $context);
+        if ($prepared instanceof ToolResult) {
+            return $prepared;
         }
 
-        [$target, $plan] = $context;
-        $this->configurePlanner->apply($target->id, $userId, $plan);
+        [$target, $plan] = $prepared;
+        $applied = $this->configurePlanner->apply($target->id, $userId, $plan);
+        if ($applied instanceof ToolResult) {
+            return $applied;
+        }
         return $this->renderFreshAgentAfterConfigure($userId, $target->id);
     }
 
@@ -559,20 +623,43 @@ final class AgentTool extends AbstractTool
      * @param  array<string, mixed> $arguments
      * @return array{0: Agent, 1: list<mixed>}|ToolResult
      */
-    private function resolveConfigureToolsContext(?int $userId, int $agentId, array $arguments): array|ToolResult
-    {
+    private function resolveConfigureToolsContext(
+        ?int $userId,
+        int $agentId,
+        array $arguments,
+        ?PrincipalContext $context,
+    ): array|ToolResult {
         $entries = $this->runConfigureToolsPrecheck($userId, $arguments);
         if ($entries instanceof ToolResult) {
             return $entries;
         }
 
-        $plan = $this->configurePlanner->buildPlan($entries);
+        $plan = $this->configurePlanner->buildPlan(
+            $entries,
+            $this->executingPrincipalId($agentId, $context),
+        );
         if ($plan instanceof ToolResult) {
             return $plan;
         }
 
         $target = $this->targetResolver->resolveAgentToolTarget($userId, $agentId, $arguments);
         return $target instanceof ToolResult ? $target : [$target, $plan];
+    }
+
+    /**
+     * The principal whose skills a `configure_tools` write may name.
+     *
+     * Same resolution as the `skill` tool's read gate: the execution's context,
+     * else the calling agent's own principal, and an unresolvable one becomes
+     * `null` so every name fails closed. `$userId` is never used — it is the
+     * runner, not the owner, so a group agent triggered by one member would
+     * otherwise resolve against that member's personal skills.
+     */
+    private function executingPrincipalId(int $callingAgentId, ?PrincipalContext $context): ?int
+    {
+        $resolved = $context ?? $this->principalResolver->resolveForToolExecute($callingAgentId);
+
+        return $resolved->isResolvable() ? $resolved->principalId : null;
     }
 
     /**

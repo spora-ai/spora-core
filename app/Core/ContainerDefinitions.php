@@ -23,6 +23,7 @@ use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
+use Spora\Console\Commands\AuditOperationOverridesCommand;
 use Spora\Console\Commands\MailTemplatesSyncCommand;
 use Spora\Console\Commands\MediaArchiveGcCommand;
 use Spora\Console\Commands\MediaArchiveListCommand;
@@ -158,18 +159,20 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
-use Spora\Skills\SkillScanner;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Todo\TodoStoreRegistry;
 use Spora\Tools\AgentTool;
+use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\MediaDerivativeHandler;
@@ -573,7 +576,10 @@ final class ContainerDefinitions
                         $c->get('tool_classes'),
                         $c->get(PluginLoader::class)->toolClasses(),
                     ))),
-                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    // Guarded because some build/test contexts resolve this
+                    // graph without the orchestrator slice; null yields an
+                    // empty skills map, matching a bare `new` call site.
+                    $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
                     $c->get(PrincipalService::class),
                     (bool) ($config['tools_group_cascade_enabled'] ?? false),
                     $c->get(PrincipalResolver::class),
@@ -594,9 +600,9 @@ final class ContainerDefinitions
             },
 
             // Strict-mode validator: every tool's `#[Tool(recommendsSkills: ...)]`
-            // slug must resolve to an on-disk skill. SkillScanner is guarded
+            // slug must resolve to a shipped skill. The registry is guarded
             // because some build/test contexts resolve the controller graph
-            // without a full skill scan; production always provides it via
+            // without the orchestrator slice; production always provides it via
             // OrchestratorContainerBindings::orchestratorDefinitions().
             ToolsRecommendsSkillsValidator::class => static function (ContainerInterface $c): ToolsRecommendsSkillsValidator {
                 return new ToolsRecommendsSkillsValidator(
@@ -607,7 +613,7 @@ final class ContainerDefinitions
                             $c->get(PluginLoader::class)->toolClasses(),
                         ))),
                     ),
-                    $c->has(SkillScanner::class) ? $c->get(SkillScanner::class) : null,
+                    $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
                 );
             },
         ];
@@ -1461,18 +1467,12 @@ final class ContainerDefinitions
         ];
     }
 
+
     private static function toolDefinitions(): array
     {
         return [
             'tool_instances' => static function (ContainerInterface $c): array {
-                $appToolClasses = $c->has(AppLoader::class)
-                    ? ($c->get(AppLoader::class)->getApp()?->tools() ?? [])
-                    : [];
-                $classes = array_values(array_unique(array_merge(
-                    $c->get('tool_classes'),
-                    $c->get(PluginLoader::class)->toolClasses(),
-                    $appToolClasses,
-                )));
+                $classes = InstalledToolClasses::for($c);
                 return array_combine($classes, array_map(
                     fn(string $toolClass) => $c->get($toolClass),
                     $classes,
@@ -1515,6 +1515,14 @@ final class ContainerDefinitions
                         pluginLoader: $c->has(PluginLoader::class) ? $c->get(PluginLoader::class) : null,
                         iconResolver: $c->has(ToolIconResolver::class) ? $c->get(ToolIconResolver::class) : null,
                         principalResolver: $c->get(PrincipalResolver::class),
+                        // Backs the principal check on a `configure_tools`
+                        // `allowed_skills` write. Guarded for the same reason as
+                        // the registry in coreServiceDefinitions(): the
+                        // controller graph resolves without the orchestrator
+                        // slice in some build/test contexts.
+                        skills: $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
+                        // Backs the `skills` block of `get_available_tools`.
+                        skillCatalog: $c->has(SkillCatalogPresenter::class) ? $c->get(SkillCatalogPresenter::class) : null,
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
@@ -1560,8 +1568,9 @@ final class ContainerDefinitions
 
             SkillTool::class => static function (ContainerInterface $c): SkillTool {
                 return new SkillTool(
-                    $c->get(SkillScanner::class),
+                    $c->get(SkillProviderRegistry::class),
                     $c->get(ToolConfigService::class),
+                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -1691,6 +1700,10 @@ final class ContainerDefinitions
 
             RepairAdminCommand::class => static function (ContainerInterface $c): RepairAdminCommand {
                 return new RepairAdminCommand($c->get(Database::class));
+            },
+
+            AuditOperationOverridesCommand::class => static function (ContainerInterface $c): AuditOperationOverridesCommand {
+                return new AuditOperationOverridesCommand($c->get(Database::class));
             },
 
             MailTemplatesSyncCommand::class => static function (ContainerInterface $c): MailTemplatesSyncCommand {

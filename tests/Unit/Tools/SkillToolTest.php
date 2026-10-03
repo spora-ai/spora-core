@@ -2,14 +2,16 @@
 
 declare(strict_types=1);
 
-use Spora\Skills\Skill;
+use Spora\Services\PrincipalResolver;
+use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\SkillTool;
 
 /**
- * Build a SkillTool backed by a real SkillScanner reading a temp dir,
- * with a mocked ToolConfigServiceInterface that returns the given
- * effective settings. Returns the tool and a cleanup callback.
+ * Build a SkillTool backed by a real registry over a filesystem provider
+ * reading a temp dir, with a mocked ToolConfigServiceInterface that returns the
+ * given effective settings. Returns the tool and a cleanup callback.
  *
  * @return array{0: SkillTool, 1: callable(): void, 2: string}
  */
@@ -25,7 +27,11 @@ function makeSkillToolFixture(array $effectiveSettings = []): array
     $config = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn($effectiveSettings);
 
-    $tool = new SkillTool($scanner, $config);
+    $tool = new SkillTool(
+        new SkillProviderRegistry([new FilesystemSkillProvider($scanner)]),
+        $config,
+        new PrincipalResolver(),
+    );
 
     $cleanup = static function () use ($root): void {
         if (!is_dir($root)) {
@@ -115,13 +121,16 @@ test('SkillTool rejects reads when the skill is not in allowed_skills', function
     }
 });
 
-test('SkillTool rejects reads when the skill does not exist on disk', function (): void {
+test('SkillTool rejects reads when no provider can serve the skill', function (): void {
     [$tool, $cleanup] = makeSkillToolFixture(['allowed_skills' => ['git']]);
     try {
         $result = $tool->execute(['action' => 'read', 'name' => 'git'], 1, 1);
 
         expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('not currently available');
+            // Not "on disk": a provider need not be filesystem-backed, and
+            // telling the model otherwise teaches it to retry a dead path.
+            ->and($result->content)->toContain("is not available")
+            ->and($result->content)->not->toContain('on disk');
     } finally {
         $cleanup();
     }
@@ -220,11 +229,22 @@ test('SkillTool describeAction describes the right operation', function (): void
     }
 });
 
-test('SkillTool has the read and files operations declared', function (): void {
+test('SkillTool exposes exactly read and files, so it cannot write its own allowlist', function (): void {
+    // The tool is read-only by contract. Which skills an agent may load is
+    // written through `configure_tools` (the agent's configuration) and
+    // discovered through `get_available_tools`, so a `list`/`activate` pair
+    // coming back here would be a second, less guarded path to the same
+    // permission decision.
     [$tool, $cleanup] = makeSkillToolFixture();
     try {
         $ops = array_map(static fn($op) => $op->name, $tool->getOperations());
-        expect($ops)->toContain('read', 'files');
+
+        expect($ops)->toBe(['read', 'files']);
+
+        foreach ($tool->getOperations() as $op) {
+            expect($op->enabledByDefault)->toBeTrue()
+                ->and($op->requiresApprovalByDefault)->toBeFalse();
+        }
     } finally {
         $cleanup();
     }
@@ -246,7 +266,11 @@ test('SkillTool accepts the bundled time-arithmetic skill via the framework path
     $config = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn(['allowed_skills' => ['time-arithmetic']]);
 
-    $tool = new SkillTool($scanner, $config);
+    $tool = new SkillTool(
+        new SkillProviderRegistry([new FilesystemSkillProvider($scanner)]),
+        $config,
+        new PrincipalResolver(),
+    );
     $result = $tool->execute(['action' => 'read', 'name' => 'time-arithmetic'], 1, 1);
 
     expect($result->success)->toBeTrue()

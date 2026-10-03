@@ -7,6 +7,7 @@ namespace Spora\Tools\ScheduleTool;
 use Cron\CronExpression;
 use DateTimeImmutable;
 use DateTimeZone;
+use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -21,7 +22,7 @@ use Throwable;
  */
 final class SchedulePayloadValidator
 {
-    use SchedulableTypeCoercion;
+    use LlmScalarCoercion;
 
     public const OP_CREATE_SCHEDULE  = 'create_schedule';
     public const OP_CREATE_TEMPLATE = 'create_prompt_template';

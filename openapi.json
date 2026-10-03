@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.28.0-7-g5d4fe0eb"
+        "version": "0.29.0-19-ged814894"
     },
     "servers": [
         {
@@ -3425,7 +3425,17 @@
                     "Skills"
                 ],
                 "summary": "Index Skill",
-                "parameters": [],
+                "parameters": [
+                    {
+                        "name": "principal_id",
+                        "in": "query",
+                        "description": "Narrow the listing to one principal the caller controls. An id outside the caller's visible set is discarded rather than rejected, and the caller's full visible set is returned instead — the SPA sends this per editor mode so a group admin's personal skills do not appear in a group's picker. Shipped skills are principal-independent and appear either way.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
@@ -3449,6 +3459,44 @@
                         "name": "slug",
                         "in": "path",
                         "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "principal_id",
+                        "in": "query",
+                        "description": "Narrow the lookup to one principal the caller controls, under the same discard-not-reject rule as the listing. A name the caller cannot see answers 404, not 403.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/search": {
+            "get": {
+                "tags": [
+                    "Search"
+                ],
+                "summary": "Index Search",
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "description": "Search query, clamped to 200 characters rather than rejected. An empty or absent query returns no hits and never reaches a provider. Results are scoped to the caller's visible principals, resolved server-side and handed to every provider.",
+                        "required": false,
                         "schema": {
                             "type": "string"
                         }

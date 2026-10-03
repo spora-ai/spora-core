@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use ReflectionClass;
-use Spora\Skills\SkillScanner;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\Tool;
 
 /**
@@ -21,17 +21,25 @@ use Spora\Tools\Attributes\Tool;
  * for their scanner roots.
  *
  * Comparison is case-insensitive (the scanner slug is canonical), and the
- * validator scans the {@see SkillScanner} once per call rather than per tool
- * class — the scan is the expensive step, the reflection loop is cheap. The
+ * validator lists the skills once per call rather than per tool class — the
+ * listing is the expensive step, the reflection loop is cheap. The
  * wire-format field name `recommends_skills` is what the SPA renders; the
  * validator's own return shape uses native PHP keys (`tool_class`,
  * `tool_name`, `missing`) since it never crosses the JSON boundary itself.
+ *
+ * **It lists with a `null` principal, deliberately.** `recommendsSkills` is a
+ * static declaration on a tool class, so it has no principal to resolve
+ * against, and a strict-mode check that 500s the whole tool list must not
+ * depend on who is asking. A principal-scoped provider therefore returns `[]`
+ * here, which means a tool may not advertise a custom skill: the declaration
+ * would be true for one user and false for the next. Shipped skills are
+ * principal-independent and still resolve.
  */
 final class ToolsRecommendsSkillsValidator
 {
     public function __construct(
         private readonly ToolConfigNameResolver $resolver,
-        private readonly ?SkillScanner $scanner,
+        private readonly ?SkillProviderRegistry $skills,
     ) {}
 
     /**
@@ -39,7 +47,7 @@ final class ToolsRecommendsSkillsValidator
      */
     public function validate(): array
     {
-        if ($this->scanner === null) {
+        if ($this->skills === null) {
             return [];
         }
 
@@ -85,19 +93,24 @@ final class ToolsRecommendsSkillsValidator
     }
 
     /**
-     * Scan the disk once. Skills whose frontmatter fails validation are
+     * List the skills once. Skills whose frontmatter fails validation are
      * still included — the strict-mode check is "does a SKILL.md exist for
      * this slug?", not "is the skill parseable?". Operators with broken
      * skill bodies still want the slug to resolve so the LLM gets a
      * readable error rather than a missing-skill one.
+     *
+     * Keyed on the slug, falling back to the name: a shipped skill's slug is
+     * its directory basename, which is what `recommendsSkills` has always been
+     * compared against, and a provider with no directory behind it only has a
+     * name.
      *
      * @return array<string, true>
      */
     private function knownSlugSet(): array
     {
         $set = [];
-        foreach ($this->scanner->scan() as $skill) {
-            $set[strtolower($skill->slug())] = true;
+        foreach ($this->skills->getSkills(null) as $summary) {
+            $set[strtolower($summary->slug ?? $summary->name)] = true;
         }
         return $set;
     }
