@@ -40,10 +40,14 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Inspect or modify this agent: read/write its configuration, manage its '
                . 'operator-facing notes, list available tools (with details such as '
                . 'description, source plugin, per-operation enablement and approval state, '
-               . 'and any missing required configuration), and create new agents.',
+               . 'and any missing required configuration), and create new agents. '
+               . 'See the agent-tool skill for which operations write, how to grant '
+               . 'yourself a skill, and the traps; use the agent-creation skill for the '
+               . 'new-agent protocol.',
     displayName: 'Agent',
     category: 'agent',
     icon: 'bot',
+    recommendsSkills: ['agent-tool'],
 )]
 #[ToolOperation(
     name: 'update_agent',

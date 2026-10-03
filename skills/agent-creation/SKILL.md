@@ -274,7 +274,9 @@ Two things to get right, both of which fail silently if you assume the opposite:
 - **A settings write REPLACES the value at that key outright.** It does not merge and it does not append. If the agent already holds `["a"]` and you send `["b"]`, the result is `["b"]`, not `["a", "b"]`. Always send the whole list you want.
 - **The write lands at the agent level.** Entries the agent was inheriting from a group or user level stop being inherited from here on, because the agent now has its own value. This is the intended consequence of a replace, not a bug.
 
-A multi-select such as `allowed_skills` takes an array of strings. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`.
+A multi-select takes an array, but the element type depends on the setting: `allowed_skills` is `string[]` (names), while `allowed_target_agents` is `int[]` (agent ids) — send `[3, 4]`, not `["3", "4"]`. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`. A `type: 'password'` setting is refused outright and always will be: a tool call must not be able to write a credential, because the value would land in the call's own recorded arguments. Credentials stay operator-only, through the settings panel.
+
+Operating the tool once you already have it — including granting yourself a skill — is the **agent-tool** skill. This section covers only the new-agent flow.
 
 #### Delta syntax
 
@@ -324,6 +326,8 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
 | `configure_tools: settings[0] 'X' is not a setting on <FQCN>` | Misspelled or invented a setting key | Use a key the tool declares; the refusal lists the valid ones |
 | `configure_tools: settings[0] 'allowed_skills' must be an array of strings` | Sent a multi-select as a string, or as an array of objects | Send `["time-arithmetic"]`, not `"time-arithmetic"` or `[{name: "..."}]` |
+| `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
+| `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
 | `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
