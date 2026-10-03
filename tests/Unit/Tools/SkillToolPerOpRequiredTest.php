@@ -8,42 +8,41 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
 use Spora\Tools\SkillTool;
 
 /**
- * Per-op `required[]` narrowing for SkillTool's `name` parameter.
+ * `SkillTool`'s `name` argument, asserted through the schema rather than
+ * through `SkillTool::execute()`.
  *
- * `list` takes no skill, so a schema that makes `name` required for every
- * operation makes `list` uncallable — the model has nothing to pass. This is
- * asserted through the schema, not through `SkillTool::execute()`, because
- * `execute()` is reached in tests with arguments the validator would never
- * have let through. A duplicate `#[ToolParameter(name: 'name')]` declaring
- * `required: true` twice did exactly that: the builder writes
- * `$properties[$param->name]` last-wins and only populates the `__required_when`
- * side channel for a list, so the parameter became unconditionally required and
- * every `skill(action: "list")` was rejected before dispatch.
+ * `execute()` is reached in tests with arguments the validator would never have
+ * let through, so a schema bug is invisible there. The bug these pin: a
+ * duplicate `#[ToolParameter(name: 'name')]` declaring `required: true` twice
+ * did exactly that — the builder writes `$properties[$param->name]` last-wins
+ * and only populates the `__required_when` side channel for a list, so the
+ * parameter became unconditionally required and the `list` operation was
+ * rejected before dispatch.
+ *
+ * The tool is read-only now, so every operation that exists takes a slug and
+ * `required: true` is unconditionally right — the per-operation narrowing the
+ * two-operation version needed is gone with the operations.
  */
-it('declares `name` as required for every operation except list', function (): void {
+it('makes `name` required for every operation, with no per-op narrowing left', function (): void {
     $schema = ToolParameterSchemaBuilder::build(SkillTool::class);
 
-    expect($schema['__required_when']['name'] ?? null)
-        ->toBe(['read', 'files', 'activate']);
+    // No `__required_when` entry at all: both operations need the argument, so
+    // the per-op channel would carry the same list twice and read as if it
+    // meant something.
+    expect($schema['__required_when']['name'] ?? null)->toBeNull();
 
-    foreach (['read', 'files', 'activate'] as $operation) {
+    foreach (['read', 'files'] as $operation) {
         $filtered = OperationSchemaFilter::filter($schema, [$operation], 'action');
         expect($filtered['required'])->toContain('name');
     }
-
-    $listOnly = OperationSchemaFilter::filter($schema, ['list'], 'action');
-    expect($listOnly['required'])->not->toContain('name');
 });
 
 it('accepts every operation with the arguments it declares', function (): void {
     $schema = ToolParameterSchemaBuilder::build(SkillTool::class);
 
     $arguments = [
-        'read' => ['action' => 'read', 'name' => 'demo'],
+        'read'  => ['action' => 'read', 'name' => 'demo'],
         'files' => ['action' => 'files', 'name' => 'demo'],
-        // The regression: this is the call the schema used to reject.
-        'list' => ['action' => 'list'],
-        'activate' => ['action' => 'activate', 'name' => 'demo'],
     ];
 
     foreach ($arguments as $operation => $args) {

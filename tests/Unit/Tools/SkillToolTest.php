@@ -7,7 +7,6 @@ use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\SkillTool;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 
 /**
  * Build a SkillTool backed by a real registry over a filesystem provider
@@ -32,7 +31,6 @@ function makeSkillToolFixture(array $effectiveSettings = []): array
         new SkillProviderRegistry([new FilesystemSkillProvider($scanner)]),
         $config,
         new PrincipalResolver(),
-        new AgentSkillAllowlist($config),
     );
 
     $cleanup = static function () use ($root): void {
@@ -225,44 +223,27 @@ test('SkillTool describeAction describes the right operation', function (): void
         expect($tool->describeAction(['action' => 'read', 'name' => 'git']))
             ->toContain("Read a file from skill 'git'")
             ->and($tool->describeAction(['action' => 'files', 'name' => 'git']))
-            ->toContain("List the files in skill 'git'")
-            ->and($tool->describeAction(['action' => 'list']))
-            ->toContain('List the skills available')
-            ->and($tool->describeAction(['action' => 'activate', 'name' => 'git']))
-            ->toContain("Add skill 'git'");
+            ->toContain("List the files in skill 'git'");
     } finally {
         $cleanup();
     }
 });
 
-test('SkillTool has the read and files operations declared', function (): void {
+test('SkillTool exposes exactly read and files, so it cannot write its own allowlist', function (): void {
+    // The tool is read-only by contract. Which skills an agent may load is
+    // written through `configure_tools` (the agent's configuration) and
+    // discovered through `get_available_tools`, so a `list`/`activate` pair
+    // coming back here would be a second, less guarded path to the same
+    // permission decision.
     [$tool, $cleanup] = makeSkillToolFixture();
     try {
         $ops = array_map(static fn($op) => $op->name, $tool->getOperations());
-        expect($ops)->toContain('read', 'files');
-    } finally {
-        $cleanup();
-    }
-});
 
-test('SkillTool list and activate are off by default and need approval', function (): void {
-    // The whole reason these two are safe to ship: a model that can extend its own
-    // `allowed_skills` turns the operator's curation into a suggestion. An operator
-    // has to switch them on per agent, and approve each call.
-    [$tool, $cleanup] = makeSkillToolFixture();
-    try {
-        $byName = [];
+        expect($ops)->toBe(['read', 'files']);
+
         foreach ($tool->getOperations() as $op) {
-            $byName[$op->name] = $op;
-        }
-
-        foreach (['read', 'files'] as $openByDefault) {
-            expect($byName[$openByDefault]->enabledByDefault)->toBeTrue();
-        }
-        foreach (['list', 'activate'] as $gated) {
-            expect($byName)->toHaveKey($gated)
-                ->and($byName[$gated]->enabledByDefault)->toBeFalse()
-                ->and($byName[$gated]->requiresApprovalByDefault)->toBeTrue();
+            expect($op->enabledByDefault)->toBeTrue()
+                ->and($op->requiresApprovalByDefault)->toBeFalse();
         }
     } finally {
         $cleanup();
@@ -289,7 +270,6 @@ test('SkillTool accepts the bundled time-arithmetic skill via the framework path
         new SkillProviderRegistry([new FilesystemSkillProvider($scanner)]),
         $config,
         new PrincipalResolver(),
-        new AgentSkillAllowlist($config),
     );
     $result = $tool->execute(['action' => 'read', 'name' => 'time-arithmetic'], 1, 1);
 

@@ -8,7 +8,6 @@ use Spora\Services\ToolConfigServiceInterface;
 use Spora\Skills\SkillProviderInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\SkillTool;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 use Tests\Fixtures\Skills\StubSkillProvider;
 
 /**
@@ -30,7 +29,7 @@ function makeProviderSkillTool(
     $config = Mockery::mock(ToolConfigServiceInterface::class);
     $config->shouldReceive('getEffectiveSettings')->andReturn(['allowed_skills' => $allowed]);
 
-    return new SkillTool($registry, $config, $principals ?? new PrincipalResolver(), new AgentSkillAllowlist($config));
+    return new SkillTool($registry, $config, $principals ?? new PrincipalResolver());
 }
 
 function providerContext(int $principalId): PrincipalContext
@@ -313,7 +312,6 @@ describe('gate 1 and gate 2 resolve the same principal', function (): void {
             new SkillProviderRegistry([$provider]),
             $config,
             new PrincipalResolver(),
-            new AgentSkillAllowlist($config),
         );
 
         // A runner who is *not* the owner — the divergence a runner-scoped

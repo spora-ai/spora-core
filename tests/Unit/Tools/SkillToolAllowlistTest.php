@@ -3,15 +3,15 @@
 declare(strict_types=1);
 
 /**
- * The allowlist round trip through the *real* `ToolConfigService`.
+ * The `allowed_skills` read gate over the *real* `ToolConfigService`.
  *
  * `SkillToolTest` mocks `getEffectiveSettings` to hand the tool a native array,
  * which is the shape the tests wanted and not the shape production stores: the
  * override endpoint takes `allowed_skills` JSON-encoded, because the settings blob
  * is itself JSON and a nested array is not something the panel can put inside it.
- * These tests use the real service so the stored form and the read form meet
- * somewhere, which is where the two new operations and the existing read gate
- * could otherwise disagree.
+ * This uses the real service so the stored form and the read form meet somewhere,
+ * which is where the read gate and the agent's own configuration could otherwise
+ * disagree.
  */
 
 use Monolog\Logger;
@@ -22,7 +22,6 @@ use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Spora\Tools\SkillTool;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 
 /**
  * A skill directory with a SKILL.md, in its own scan root.
@@ -58,14 +57,9 @@ function writeRealConfigSkill(string $slug): array
 /**
  * @return array{0: SkillTool, 1: ToolConfigService, 2: int, 3: callable(): void}
  */
-function makeRealConfigSkillTool(?string $slug = 'allowlist-skill'): array
+function makeRealConfigSkillTool(string $slug): array
 {
-    [$root, $cleanup] = $slug === null
-        ? [sys_get_temp_dir() . '/spora_skill_empty_' . uniqid('', true), static function (): void {}]
-        : writeRealConfigSkill($slug);
-    if (! is_dir($root)) {
-        mkdir($root, 0o755, true);
-    }
+    [$root, $cleanup] = writeRealConfigSkill($slug);
 
     $authService = bootAuthLayer();
     $service = new ToolConfigService(
@@ -91,7 +85,6 @@ function makeRealConfigSkillTool(?string $slug = 'allowlist-skill'): array
         ]))]),
         $service,
         new PrincipalResolver(),
-        new AgentSkillAllowlist($service),
     );
 
     return [$tool, $service, $agentId, $cleanup];
@@ -113,111 +106,6 @@ test('the stored allowlist is a JSON string, and a read still works', function (
 
         expect($result->success)->toBeTrue()
             ->and($result->content)->toContain('Body.');
-    } finally {
-        $cleanup();
-    }
-});
-
-test('list reports a stored skill as active, from the same stored form', function (): void {
-    [$tool, $service, $agentId, $cleanup] = makeRealConfigSkillTool('listed-skill');
-    try {
-        $service->putAgentOverride(SkillTool::class, $agentId, [
-            'allowed_skills' => json_encode(['listed-skill']),
-        ]);
-
-        $result = $tool->execute(['action' => 'list'], $agentId);
-        $row = null;
-        foreach ($result->data['skills'] as $candidate) {
-            if ($candidate['name'] === 'listed-skill') {
-                $row = $candidate;
-            }
-        }
-
-        expect($result->success)->toBeTrue()
-            ->and($row)->not->toBeNull()
-            ->and($row['active'])->toBeTrue();
-    } finally {
-        $cleanup();
-    }
-});
-
-test('activate appends to a stored allowlist instead of replacing it', function (): void {
-    [$tool, $service, $agentId, $cleanup] = makeRealConfigSkillTool('first-skill');
-    try {
-        $service->putAgentOverride(SkillTool::class, $agentId, [
-            'allowed_skills' => json_encode(['something-else']),
-        ]);
-
-        $result = $tool->execute(['action' => 'activate', 'name' => 'first-skill'], $agentId);
-
-        expect($result->success)->toBeTrue()
-            ->and($result->data['allowed_skills'])->toBe(['something-else', 'first-skill']);
-
-        // The pre-existing entry survived, which is why the write goes through the
-        // service as a merge rather than replacing the row: one override row holds
-        // every setting for the tool.
-        $after = json_decode(
-            $service->getRawAgentOverride(SkillTool::class, $agentId)['allowed_skills'],
-            true,
-        );
-        expect($after)->toBe(['something-else', 'first-skill']);
-    } finally {
-        $cleanup();
-    }
-});
-
-test('activate is idempotent, and does not duplicate an entry', function (): void {
-    [$tool, , $agentId, $cleanup] = makeRealConfigSkillTool('twice-skill');
-    try {
-        $tool->execute(['action' => 'activate', 'name' => 'twice-skill'], $agentId);
-        $second = $tool->execute(['action' => 'activate', 'name' => 'twice-skill'], $agentId);
-
-        expect($second->success)->toBeTrue()
-            ->and($second->data['changed'])->toBeFalse()
-            ->and($second->data['allowed_skills'])->toBe(['twice-skill']);
-    } finally {
-        $cleanup();
-    }
-});
-
-test('activate then read works, which is the whole point of the pair', function (): void {
-    [$tool, , $agentId, $cleanup] = makeRealConfigSkillTool('pair-skill');
-    try {
-        $refused = $tool->execute(['action' => 'read', 'name' => 'pair-skill'], $agentId);
-        expect($refused->success)->toBeFalse()
-            ->and($refused->content)->toContain('not in the allowed_skills list');
-
-        $tool->execute(['action' => 'activate', 'name' => 'pair-skill'], $agentId);
-
-        expect($tool->execute(['action' => 'read', 'name' => 'pair-skill'], $agentId)->success)->toBeTrue();
-    } finally {
-        $cleanup();
-    }
-});
-
-test('activate refuses a name the principal cannot see', function (): void {
-    [$tool, $service, $agentId, $cleanup] = makeRealConfigSkillTool('visible-skill');
-    try {
-        $result = $tool->execute(['action' => 'activate', 'name' => 'not-a-real-skill'], $agentId);
-
-        expect($result->success)->toBeFalse()
-            ->and($result->content)->toContain('not available to this principal');
-
-        // Nothing written, so a later read still fails the allowlist gate. Activating
-        // must not become a way to pre-approve a name that resolves to nothing.
-        expect($service->getRawAgentOverride(SkillTool::class, $agentId))->toBe([]);
-    } finally {
-        $cleanup();
-    }
-});
-
-test('list is empty rather than a failure when the principal has no skills', function (): void {
-    [$tool, , $agentId, $cleanup] = makeRealConfigSkillTool(null);
-    try {
-        $result = $tool->execute(['action' => 'list'], $agentId);
-
-        expect($result->success)->toBeTrue()
-            ->and($result->data['skills'])->toBe([]);
     } finally {
         $cleanup();
     }

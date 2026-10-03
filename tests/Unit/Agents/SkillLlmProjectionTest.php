@@ -11,7 +11,6 @@ use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\SkillTool;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 use Tests\Fixtures\Skills\StubSkillProvider;
 
 defined('SKILL_PROJ_PASSWORD') || define('SKILL_PROJ_PASSWORD', 'Password1!');
@@ -58,7 +57,6 @@ function skillProjectionText(ToolConfigService $service, int $agentId, ?Principa
         new SkillProviderRegistry(),
         $service,
         new PrincipalResolver(),
-        new AgentSkillAllowlist($service),
     )], $service, null, static fn(array $settings): string => json_encode($settings));
 
     $defs = $builder->buildToolDefinitions([SkillTool::class], $agentId, $context);

@@ -180,7 +180,6 @@ use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ScheduleTool;
 use Spora\Tools\SkillTool;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\TodoTool;
@@ -1569,13 +1568,8 @@ final class ContainerDefinitions
                     $c->get(SkillProviderRegistry::class),
                     $c->get(ToolConfigService::class),
                     $c->get(PrincipalResolver::class),
-                    $c->get(AgentSkillAllowlist::class),
                 );
             },
-
-            AgentSkillAllowlist::class => static fn(ContainerInterface $c): AgentSkillAllowlist => new AgentSkillAllowlist(
-                $c->get(ToolConfigService::class),
-            ),
 
             MediaSourceReader::class => static function (ContainerInterface $c): MediaSourceReader {
                 return new MediaSourceReader(

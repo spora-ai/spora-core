@@ -13,11 +13,17 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
-use Spora\Tools\SkillTool\AgentSkillAllowlist;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * Lets the LLM list the files in a skill, or read one of its files.
+ *
+ * **Read-only by design.** Which skills an agent may load is the *agent's*
+ * configuration, not a property of the tool that reads them, so the write
+ * lives on the AgentTool — `configure_tools` carries a `settings` block, and
+ * `get_available_tools` carries the matching `skills` block for discovery.
+ * A tool that could both read a skill and grant itself one would put the
+ * second half of the permission decision inside the first.
  *
  * Per-agent allowlist is the `allowed_skills` multi-select
  * (`exposeToLlm: true`, `resolveAs: 'skill'` — resolved to
@@ -30,17 +36,6 @@ use Spora\Tools\ValueObjects\ToolResult;
  *               time via the agent's `allowed_skills` summary).
  *   - 'files' — return the recursive file listing as
  *               `[{path, bytes}]`.
- *   - 'list'   — every skill visible to this principal, and which of them are
- *                active. Off and approval-gated: it exists so the model can
- *                discover a skill it was not given, which is the one thing the
- *                `allowed_skills` projection in the tool definition cannot do.
- *   - 'activate' — add a skill to *this agent's* `allowed_skills`. Off and
- *                approval-gated, and deliberately so: `allowed_skills` is the
- *                operator's curation of what this agent is allowed to load, and
- *                a model that can extend its own allowlist turns that curation
- *                into a suggestion. Both operations are off by default and need
- *                per-call approval, so enabling them is a decision an operator
- *                makes once and can see in the audit trail.
  *
  * **Two gates, in this order, and the order is the point.** `name` must be in the
  * agent's `allowed_skills`, *and* visible to the execution's principal. A skill
@@ -98,20 +93,8 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'name',
     type: 'string',
-    description: 'Skill slug. Must be in the configured allowed_skills list, except for action "activate" where it is the skill to add, and action "list" which takes no skill.',
-    required: ['read', 'files', 'activate'],
-)]
-#[ToolOperation(
-    name: 'list',
-    description: 'List the skills available to this agent, marking the ones already on its allowed_skills list.',
-    enabledByDefault: false,
-    requiresApprovalByDefault: true,
-)]
-#[ToolOperation(
-    name: 'activate',
-    description: 'Add a skill to this agent\'s allowed_skills so it can read it. Only skills already visible to this principal can be added. The write stores the whole currently-effective list at the agent level, so a group-inherited allowlist stops following the group from here on.',
-    enabledByDefault: false,
-    requiresApprovalByDefault: true,
+    description: 'Skill slug. Must be in the configured allowed_skills list.',
+    required: true,
 )]
 final class SkillTool extends AbstractTool
 {
@@ -121,7 +104,6 @@ final class SkillTool extends AbstractTool
         private readonly SkillProviderRegistry $skills,
         private readonly ToolConfigServiceInterface $config,
         private readonly PrincipalResolver $principals,
-        private readonly AgentSkillAllowlist $allowlist,
     ) {}
 
     public function execute(
@@ -132,29 +114,6 @@ final class SkillTool extends AbstractTool
         ?PrincipalContext $context = null,
     ): ToolResult {
         $operation = $this->getOperationName($arguments);
-        $name = strtolower(trim((string) ($arguments['name'] ?? '')));
-
-        // Split before the allowlist gate, because that gate is the thing these two
-        // operate on: `activate` exists to add a name the gate would refuse, and
-        // `list` is about the names the gate is holding back. Neither is reachable
-        // unless an operator enabled the operation — `ToolCallExecutor` rejects a
-        // disabled operation before `execute()` is called at all.
-        if ($operation === 'list' || $operation === 'activate') {
-            return $operation === 'list'
-                ? $this->doList($agentId, $userId, $context)
-                : $this->doActivate($name, $agentId, $userId, $context);
-        }
-
-        return $this->executeRead($operation, $arguments, $agentId, $userId, $context);
-    }
-
-    private function executeRead(
-        string $operation,
-        array $arguments,
-        int $agentId,
-        ?int $userId,
-        ?PrincipalContext $context,
-    ): ToolResult {
         $name = strtolower(trim((string) ($arguments['name'] ?? '')));
 
         $authError = $this->authorizationErrorFor($name, $agentId, $userId, $context);
@@ -185,147 +144,10 @@ final class SkillTool extends AbstractTool
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'read'    => "Read a file from skill '{$name}'.",
-            'files'   => "List the files in skill '{$name}'.",
-            'list'    => 'List the skills available to this agent.',
-            'activate' => "Add skill '{$name}' to this agent's allowed_skills.",
-            default   => "Use the skill tool on '{$name}'.",
+            'read'  => "Read a file from skill '{$name}'.",
+            'files' => "List the files in skill '{$name}'.",
+            default => "Use the skill tool on '{$name}'.",
         };
-    }
-
-    /**
-     * Every skill this principal can see, and which of them this agent may read.
-     *
-     * The same listing the admin UI's picker is built from, scoped to one
-     * principal and resolved through the same gate as a read, so a name that
-     * appears here is a name `read` would accept once activated. `active` is
-     * reported rather than the inactive ones being hidden: the question the model
-     * is asking is "what am I missing", and a list that quietly omits the answer
-     * makes it guess.
-     *
-     * Each row in `ToolResult::$data['skills']` is
-     * `{name, description, source, files, warnings, active}`.
-     */
-    private function doList(int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
-    {
-        $principalId = $this->resolvePrincipalId($agentId, $context);
-        $active = $this->allowlist->names($agentId, $userId, $context);
-
-        $rows = [];
-        $seen = [];
-        foreach ($this->skills->getSkills($principalId) as $summary) {
-            // Two providers claiming one name is already resolved by
-            // SkillProviderRegistry, which drops the later one. What can still
-            // arrive is a single provider naming two skills identically — a defect
-            // in that provider, so it is collapsed here rather than listed twice,
-            // with the `source` half of the key so two providers agreeing on a
-            // name is *not* collapsed.
-            $key = $summary->source . '::' . $summary->name;
-            if (isset($seen[$key])) {
-                continue;
-            }
-            $seen[$key] = true;
-
-            $rows[] = [
-                'name'        => $summary->name,
-                'description' => $summary->description,
-                'source'      => $summary->source,
-                'files'       => $summary->fileCount,
-                'warnings'    => $summary->hasWarnings,
-                'active'      => in_array($summary->name, $active, true),
-            ];
-        }
-
-        if ($rows === []) {
-            return new ToolResult(
-                true,
-                'No skills are available to this principal. Skills come from what the host ships '
-                . 'and what each principal has written; neither is visible here.',
-                ['skills' => []],
-            );
-        }
-
-        $lines = ['Skills available to this agent:'];
-        foreach ($rows as $row) {
-            $lines[] = sprintf(
-                '  - %s [%s]%s — %s',
-                $row['name'],
-                $row['source'] ?? 'unknown',
-                $row['active'] ? ' (active)' : '',
-                $row['description'],
-            );
-        }
-        $inactive = count(array_filter($rows, static fn(array $row): bool => ! $row['active']));
-        if ($inactive > 0) {
-            $lines[] = 'Call action "activate" with a name to add it to this agent\'s allowed_skills.';
-        }
-
-        return new ToolResult(true, implode("\n", $lines), ['skills' => $rows]);
-    }
-
-    /**
-     * Add a skill to this agent's own `allowed_skills`.
-     *
-     * The override is read-modify-written through the service rather than
-     * replaced, because a single agent override row holds every setting for the
-     * tool: overwriting it with just the allowlist would drop the rest. Which
-     * names are eligible is {@see activationRefusal()}.
-     */
-    private function doActivate(string $name, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
-    {
-        $current = $this->allowlist->names($agentId, $userId, $context);
-
-        $refusal = $this->activationRefusal($name, $agentId, $context);
-        if ($refusal !== null) {
-            return $refusal;
-        }
-
-        if (in_array($name, $current, true)) {
-            return new ToolResult(
-                true,
-                "Skill '{$name}' is already on this agent's allowed_skills list.",
-                ['name' => $name, 'allowed_skills' => $current, 'changed' => false],
-            );
-        }
-
-        $next = $this->allowlist->add($name, $agentId, $current);
-
-        return new ToolResult(
-            true,
-            sprintf("Added '%s' to this agent's allowed_skills. Read it with action \"read\".", $name),
-            ['name' => $name, 'allowed_skills' => $next, 'changed' => true],
-        );
-    }
-
-    /**
-     * Why `activate` will not write, or `null` when it will.
-     *
-     * The availability check is the point of this: `activate` only ever
-     * pre-approves something this principal could have been given by hand, so it
-     * cannot become a way to reach another tenant's skills. A name that resolves to
-     * nothing is refused rather than left in the allowlist for the model to load and
-     * fail on with a much less obvious message.
-     */
-    private function activationRefusal(string $name, int $agentId, ?PrincipalContext $context): ?ToolResult
-    {
-        if ($name === '') {
-            return new ToolResult(false, 'name is required.');
-        }
-
-        $eligible = $this->allowlist->isActivatable(
-            $name,
-            $this->skills,
-            $this->resolvePrincipalId($agentId, $context),
-        );
-        if (! $eligible) {
-            return new ToolResult(
-                false,
-                "Skill '{$name}' is not available to this principal, so there is nothing to activate. "
-                . 'Call action "list" to see what is.',
-            );
-        }
-
-        return null;
     }
 
     /**
