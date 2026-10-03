@@ -48,13 +48,60 @@ operations you need rather than looking for another route in.
 `read_agent` is off by default too, so the read-back you would normally use to verify a
 change may be unavailable.
 
+## Turning tools on and off
+
+`enabled` is **tri-state**, and the middle state is the one that bites:
+
+| You send | What happens |
+|---|---|
+| `"enabled": true` | The tool is enabled on the target agent |
+| `"enabled": false` | The tool is **removed** from the target agent |
+| key omitted | **Nothing changes.** An entry carrying only `settings` or `operations` never grants the tool by accident |
+
+So `{"tool_class": "X", "settings": {...}}` configures X without turning it on. That is
+what you want almost every time — configure a tool the operator has already enabled,
+rather than enabling it as a side effect of a settings write.
+
+**`enabled` must be a real JSON boolean.** `"false"` as a *string* is refused, not read
+as `false` — a string is truthy, so a loose read would turn your revocation into a
+grant. If you get `must be true or false, got the string "false"`, you quoted it by
+accident. Same for `0` and `1`.
+
+**`tools: []` does nothing.** It is not a revoke-all. To strip a toolset, read the
+agent's current tools and send each one back with `"enabled": false`.
+
+Per-operation entries are checked the same way, and the operation name must be one the
+tool actually declares:
+
+```json
+{ "action": "configure_tools",
+  "agent_id": 6,
+  "tools": [{
+    "tool_class": "Spora\\Tools\\TimeTool",
+    "enabled": true,
+    "operations": [
+      { "name": "now", "enabled": false },
+      { "name": "format", "auto_approve": true }
+    ]
+  }]
+}
+```
+
+A name that does not exist is refused, and the refusal lists the ones that do. A typo
+would otherwise write an override row for an operation that never fires — invisible in
+the manifest, so it would read to you as "nothing landed" while you believe you revoked
+something. `auto_approve: true` means the operation stops asking the operator.
+
+Every refusal is atomic: one bad entry anywhere in `tools` writes nothing, not even the
+entries that were fine.
+
 ## Notes: three operations, because replacement is not editing
 
 | Operation | Behaviour |
 |---|---|
 | `read_notes` | Returns the calling agent's markdown notes. |
 | `write_notes` | `mode: "append"` (default) adds a segment; `mode: "prepend"` puts it first. Segments join with a blank line. |
-| `write_notes_overwrite` | Replaces the whole document. |
+| `write_notes_overwrite` | Replaces the whole document. Empty `content` is **refused**, not treated as a no-op. |
 
 `write_notes` takes `content`, and `mode` which it ignores everywhere else. Wholesale
 replacement is a **separate operation** on purpose: `update_agent` strips `notes` from its
@@ -65,6 +112,25 @@ never silently wipe.
 Prefer `write_notes` in `append` mode. Reach for `write_notes_overwrite` only when the
 operator has explicitly asked for notes to be replaced, and say so in your one-line
 approval summary.
+
+**Empty content behaves differently on the two paths, deliberately.** `write_notes` with
+`content: ""` is a no-op — that keeps repeated calls from stacking separators. But
+`write_notes_overwrite` with `content: ""` is **refused**, because "replace with nothing"
+cannot be told apart from "leave them alone", and reporting the second as a successful
+"Notes unchanged" would tell you your clear worked when nothing happened. If the operator
+wants the notes actually gone, that is a settings-panel action — say so rather than
+retrying. A single space *is* content and is accepted.
+
+## Finding an agent again
+
+`list_agents` returns every agent you can see, newest first, as
+`{agent_id, name, description, is_archived}`.
+
+**Archived agents are listed, flagged — not hidden.** `is_archived: true` on the row and
+`(archived)` in the rendered list. That is deliberate: `update_agent` can set
+`is_archived` back to `false`, so hiding them would strand an archived agent with no way
+back through this tool. Check the flag before treating a row as a candidate for
+delegation or reconfiguration, and use `read_agent` when you need the rest.
 
 ## Giving yourself a skill
 
@@ -140,12 +206,17 @@ a *different* agent, note that you have no way to read that agent's current list
 
 | Trap | What actually happens |
 |---|---|
+| `"enabled": "false"` (quoted) | Refused. A string is truthy, so reading it loosely would **enable** the tool you meant to revoke. Send a real boolean. |
+| `{tool_class: X}` with no `enabled` | Enablement is left alone. It does not enable X. |
+| `tools: []` expecting a revoke-all | Nothing changes. Send each tool back with `enabled: false`. |
+| An operation name the tool does not declare | Refused, with the valid names listed. A typo would otherwise write a dead override row that never shows up in the manifest. |
 | `tool_class` guessed from the tool's display name | Refused. Get the FQCN from `get_available_tools`. The text payload carries `tool_class` and `display_name`; `tool_name` exists only in the result's `data` field, which you do not read. |
 | `allowed_skills` sent as a comma-joined string | Refused. It is a JSON array. |
 | `allowed_target_agents` sent as `["3","4"]` | Refused. That multi-select is stored as `int[]` — send `[3, 4]`. `allowed_skills` is the opposite: `string[]`. |
 | Any `type: 'password'` setting | Refused, always. A credential is the one thing a tool call may not write: the value would land in the call's own recorded arguments, so you could read back the key you just set. Credentials are operator-only. |
 | Replacing another agent's `allowed_skills` | Allowed, and blind — you cannot read their current list. Ask the operator instead. |
 | `notes` inside an `update_agent` patch | Stripped silently. Use `write_notes`. |
+| `write_notes_overwrite` with `content: ""` | Refused, not a no-op. Clearing notes is operator-only. |
 | Assuming a skill is readable because you can see it | `visible` is not `allowed`. Reading needs the name in your allowlist. |
 | Enabling the `agent` tool and expecting `configure_tools` | Six of nine operations are off by default, including both halves of the self-widening path. Ask the operator to enable them. |
 | Adding a skill then reading it in the same turn | The write is a separate approved call. Read it on the next turn. |

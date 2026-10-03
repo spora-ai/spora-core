@@ -116,7 +116,7 @@ Key invariants:
 - Per-tool entries in `tools[]` carry only `tool_class`, `icon`, `enabled`, and `operations[]` — slim by design, since `read_agent` / `update_agent` / `configure_tools` responses run on every LLM turn. Browsing-style enrichment (`display_name`, `description`) stays on `get_available_tools` (operator-facing). Pin the slim shape in your reply so an upstream change can't silently bloat the response.
 - `tools[]` lists every registered tool (with `enabled: true|false`) so you can see at a glance what's active and what isn't. Per-tool `operations[]` carries the effective `enabled` / `requires_approval` state after per-agent overrides fold in.
 - The Markdown preamble adds a `Disabled: ClassA, ClassB, …` line under the status line when at least one tool is disabled. The line is omitted entirely on the all-enabled case so the all-green path stays clean.
-- `overrides[]` carries the per-operation audit trail — `{tool_class, operation, enabled, default_requires_approval}` rows for every op where the operator actively overrode the tool's default. **`enabled` and `default_requires_approval` are nullable**: `null` means the operator kept the tool's default for that field, `true|false` means the operator explicitly set it. This is what proves a `configure_tools` patch with `auto_approve: true` actually persisted — the `tools[i].operations[j].requires_approval` effective value would show `false` either way, but `overrides[]` is the only place that records "the operator's call landed on this op".
+- `overrides[]` carries the per-operation audit trail — `{tool_class, operation, enabled, default_requires_approval}` rows for every op where the operator actively overrode the tool's default. **`enabled` and `default_requires_approval` are nullable**: `null` means the operator kept the tool's default for that field, `true|false` means the operator explicitly set it. This is what proves a `configure_tools` patch with `auto_approve: true` actually persisted — the `tools[i].operations[j].requires_approval` effective value would show `false` either way, but `overrides[]` is the only place that records "the operator's call landed on this op". **It says nothing about which tools are enabled** — that is `tools[].enabled`. An empty `overrides[]` after a `configure_tools` that only touched `enabled` is correct, not a lost write.
 - `missing_required: ["<tool_class>:<setting_key>", ...]` lists configuration that blocks enablement. `[]` means no blockers.
 - `warnings: []` is empty on success. Operator-upload templates may populate it with `TOOL_PLUGIN_MISSING` notes.
 
@@ -249,7 +249,7 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | Field | Required | Description |
 | --- | --- | --- |
 | `agent_id` | no | Numeric pk returned by `create_agent`. Omit to operate on the calling agent. Cross-user agent ids return "not found". |
-| `tools` | yes | Array of `{ tool_class, enabled?, settings?: { … }, operations?: [{ name, enabled?, auto_approve? }] }`. Empty array is valid (removes everything on the targeted agent — usually not what you want). |
+| `tools` | yes | Array of `{ tool_class, enabled?, settings?: { … }, operations?: [{ name, enabled?, auto_approve? }] }`. An empty array changes **nothing** — it is not a revoke-all. To strip the toolset, read the current tools and send each with `enabled: false`. |
 
 #### Writing settings
 
@@ -329,8 +329,15 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
 | `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
 | `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
+| `configure_tools: tool entry #N 'enabled' must be true or false` | Quoted the boolean, or sent `0`/`1`/`null` | Send a real `true` / `false`. A string is truthy, so `"false"` would otherwise *enable* the tool you meant to revoke |
+| `configure_tools: operations[N][M] names 'X', which is not an operation on <FQCN>` | Misspelled or invented an operation name | The refusal lists the valid names. Get them from `get_available_tools` → that tool's `operations[]` |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
+
+`enabled` is tri-state: `true` enables, `false` removes the tool, and **omitting the key
+leaves the tool as it is**. An entry that carries only `settings` or `operations` never
+grants the tool as a side effect — which is what you want for the minimal toolset. And
+`tools: []` is a no-op, not a revoke-all.
 
 ## `update_agent` workflow (in-place edits to **any** agent)
 
