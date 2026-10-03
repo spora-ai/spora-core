@@ -7,6 +7,7 @@ namespace Spora\Tools\ScheduleTool;
 use DateInvalidTimeZoneException;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
+use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
@@ -32,7 +33,7 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 final class ScheduleOperationRunner
 {
-    use SchedulableTypeCoercion;
+    use LlmScalarCoercion;
 
     public function __construct(
         private readonly ScheduledRunServiceInterface $scheduledRunService,
