@@ -172,6 +172,7 @@ use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Spora\Todo\TodoStoreRegistry;
 use Spora\Tools\AgentTool;
+use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\MediaDerivativeHandler;
@@ -1526,6 +1527,8 @@ final class ContainerDefinitions
                         // controller graph resolves without the orchestrator
                         // slice in some build/test contexts.
                         skills: $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
+                        // Backs the `skills` block of `get_available_tools`.
+                        skillCatalog: $c->has(SkillCatalogPresenter::class) ? $c->get(SkillCatalogPresenter::class) : null,
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),

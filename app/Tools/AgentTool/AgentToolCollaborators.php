@@ -25,6 +25,7 @@ final class AgentToolCollaborators
         private readonly ?ToolIconResolver $iconResolver = null,
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?SkillProviderRegistry $skills = null,
+        private readonly ?SkillCatalogPresenter $skillCatalog = null,
         private readonly ?NotesHandler $notesHandler = null,
         private readonly ?CatalogPresenter $catalogPresenter = null,
         private readonly ?ConfigurePlanner $configurePlanner = null,
@@ -49,6 +50,7 @@ final class AgentToolCollaborators
                 $principalResolver ?? $this->principalResolver,
                 $this->pluginLoader,
                 $this->iconResolver,
+                $this->skillCatalog,
             );
     }
 

@@ -62,6 +62,7 @@ use Spora\Services\ToolConfigService;
 use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
+use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
@@ -319,6 +320,18 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SkillProviderRegistry($providers);
+            },
+
+            // The `skills` block of `get_available_tools`. Same registry as the
+            // `skill` tool authorises against, so a name the block reports as
+            // visible is a name a read would accept and a `configure_tools`
+            // `allowed_skills` write would let the agent name.
+            SkillCatalogPresenter::class => static function (ContainerInterface $c): SkillCatalogPresenter {
+                return new SkillCatalogPresenter(
+                    $c->get(SkillProviderRegistry::class),
+                    $c->get(ToolConfigService::class),
+                    $c->get(PrincipalResolver::class),
+                );
             },
 
             // Core's own provider first, then plugin `searchProviders()`, so a

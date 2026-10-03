@@ -47,6 +47,7 @@ Before driving the flow:
    - `ready_to_enable` — whether configure will succeed without operator setup.
    - `missing_required` — list of setting keys that block enablement (e.g. `["api_key"]`).
    - `operations[]` — each `{name, description, enabled, requires_approval}`. Convert to `[{name: "..."}]` objects before placing inside `configure_tools`'s `tools[].operations`.
+   - `skills` — the skill discovery block: `allowed` is the calling agent's `allowed_skills` list right now, and `visible[]` is every skill the current principal can see, as `{name, description, active}`. Read `visible` to pick names; a name you did not read there is refused by `configure_tools`, and a name you read there is one the principal can be granted.
 
 ## Minimal-toolset protocol
 
@@ -250,7 +251,32 @@ The LLM-facing `create_agent` accepts only a slim subset of the agent-template s
 | Field | Required | Description |
 | --- | --- | --- |
 | `agent_id` | no | Numeric pk returned by `create_agent`. Omit to operate on the calling agent. Cross-user agent ids return "not found". |
-| `tools` | yes | Array of `{ tool_class, enabled?, operations?: [{ name, enabled?, auto_approve? }] }`. Empty array is valid (removes everything on the targeted agent — usually not what you want). |
+| `tools` | yes | Array of `{ tool_class, enabled?, settings?: { … }, operations?: [{ name, enabled?, auto_approve? }] }`. Empty array is valid (removes everything on the targeted agent — usually not what you want). |
+
+#### Writing settings
+
+`settings` writes a tool's own `#[ToolSetting]` values, and only keys the tool actually declares are accepted — an unknown key is refused, naming the valid ones.
+
+```json
+{
+  "action": "configure_tools",
+  "agent_id": 6,
+  "tools": [
+    {
+      "tool_class": "Spora\\Tools\\SkillTool",
+      "enabled": true,
+      "settings": { "allowed_skills": ["time-arithmetic", "email"] }
+    }
+  ]
+}
+```
+
+Two things to get right, both of which fail silently if you assume the opposite:
+
+- **A settings write REPLACES the value at that key outright.** It does not merge and it does not append. If the agent already holds `["a"]` and you send `["b"]`, the result is `["b"]`, not `["a", "b"]`. Always send the whole list you want.
+- **The write lands at the agent level.** Entries the agent was inheriting from a group or user level stop being inherited from here on, because the agent now has its own value. This is the intended consequence of a replace, not a bug.
+
+A multi-select such as `allowed_skills` takes an array of strings. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`.
 
 #### Delta syntax
 
@@ -277,6 +303,7 @@ Each tool entry:
 
 - `tool_class` — FQCN string. **Get this from `get_available_tools`.** NOT `call_name` (v2 removed) and NOT `tool_name` (v2 removed).
 - `enabled` — bool, default true. `false` removes the tool from the agent entirely.
+- `settings` — object of `{setting_key: value}` for the tool's own settings. Omit to leave them alone. See *Writing settings* above for the replace semantics.
 - `operations` — array. Omit to inherit the tool's per-operation defaults. Each entry is `{ name, enabled?, auto_approve? }`:
   - `name` (required) — string from `get_available_tools.operations[].name`
   - `enabled` — bool, default true
@@ -297,6 +324,9 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `\`agent_id\` must be a positive integer` | Sent zero, a string, or omitted entirely + couldn't fall back | Use a numeric `agent_id`; if omitted is intended, the agent must exist as the calling agent |
 | `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: [...]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
+| `configure_tools: settings[0] 'X' is not a setting on <FQCN>` | Misspelled or invented a setting key | Use a key the tool declares; the refusal lists the valid ones |
+| `configure_tools: settings[0] 'allowed_skills' must be an array of strings` | Sent a multi-select as a string, or as an array of objects | Send `["time-arithmetic"]`, not `"time-arithmetic"` or `[{name: "..."}]` |
+| `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.
 

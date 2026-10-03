@@ -23,6 +23,11 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - `$agentFacing` (slim v2) drops those fields because they're
  *     redundant for an LLM that already has `tool_class` and wants to
  *     call `configure_tools` next.
+ *
+ * The agent-facing payload also carries a `skills` block, which is the
+ * discovery surface the `skill` tool's `list` operation used to be. It is
+ * omitted when no skill catalog is wired — the block is a bonus on the tool
+ * inventory, not part of it, and its absence must not fail the call.
  */
 final class CatalogPresenter
 {
@@ -32,6 +37,7 @@ final class CatalogPresenter
         private readonly ?PrincipalResolver $principalResolver = null,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?ToolIconResolver $iconResolver = null,
+        private readonly ?SkillCatalogPresenter $skillCatalog = null,
     ) {}
 
     /**
@@ -79,6 +85,10 @@ final class CatalogPresenter
         }
 
         $agentFacing = $this->buildAgentFacingToolRows($enriched, $operationsByClass);
+        $skills = $this->skillCatalog?->present($agentId, $resolvedUserId, $context);
+        if ($skills !== null) {
+            $agentFacing['skills'] = $skills;
+        }
         $content = json_encode(
             $agentFacing,
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,

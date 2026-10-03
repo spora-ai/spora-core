@@ -94,6 +94,11 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'current enablement, missing required configuration, and per-operation '
                . 'enabled/requires_approval state). Tools that need configuration to '
                . 'become activatable are flagged via `ready_to_enable: false`. '
+               . 'The payload also carries a `skills` block: `allowed` is the agent\'s own '
+               . '`allowed_skills` list, and `visible` is every skill the current principal can '
+               . 'see (`{name, description, active}` each). Read `visible` to pick names, then '
+               . 'set them via `configure_tools` with a `settings.allowed_skills` array on the '
+               . 'SkillTool entry — that write replaces the list wholesale. '
                . 'Use this to plan a sub-agent via `create_agent`. When planning a sub-agent, '
                . 'also read the agent-creation skill (skill action: read, name: agent-creation).',
     operatorDescription: 'List every registered tool as a compact JSON payload.',

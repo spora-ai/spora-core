@@ -21,10 +21,15 @@ use Tests\Fixtures\Skills\StubSkillProvider;
  * @param  SkillProviderRegistry|null $skills Only needed by the tests that
  *         exercise the principal check on a `configure_tools` `allowed_skills`
  *         write; every other path leaves it null.
+ * @param  Spora\Tools\AgentTool\SkillCatalogPresenter|null $skillCatalog Only
+ *         needed by the `get_available_tools` `skills` block; it is optional in
+ *         production too, so the block's absence is a case worth exercising.
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
  */
-function makeAgentTool(?SkillProviderRegistry $skills = null): array
-{
+function makeAgentTool(
+    ?SkillProviderRegistry $skills = null,
+    ?AgentTool\SkillCatalogPresenter $skillCatalog = null,
+): array {
     // AgentTemplateImporter + AgentTemplateValidator are final and cannot
     // be mocked directly; use real instances. Validator is parameter-less,
     // importer needs a real ToolConfigService + PluginLoader + Paths.
@@ -49,7 +54,10 @@ function makeAgentTool(?SkillProviderRegistry $skills = null): array
     $manifest = new Spora\Services\AgentManifest($toolSettings, null);
 
     return [
-        new AgentTool($agentService, $toolSettings, $manifest, new AgentTool\AgentToolCollaborators(skills: $skills)),
+        new AgentTool($agentService, $toolSettings, $manifest, new AgentTool\AgentToolCollaborators(
+            skills: $skills,
+            skillCatalog: $skillCatalog,
+        )),
         $agentService,
         $toolSettings,
     ];
@@ -704,6 +712,64 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not found');
+    });
+
+    test('carries a skills block, with allowed and visible as two separate fields', function (): void {
+        $config = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
+        $config->shouldReceive('getEffectiveSettings')->andReturn(['allowed_skills' => ['alpha']]);
+        $provider = (new StubSkillProvider('custom'))->add('alpha', ['SKILL.md'], 'Body.', 'The alpha skill.');
+        $provider->add('beta', ['SKILL.md'], 'Body.', 'The beta skill.');
+        $catalog = new AgentTool\SkillCatalogPresenter(
+            new SkillProviderRegistry([$provider]),
+            $config,
+        );
+
+        [$tool, $service, $toolSettings] = makeAgentTool(null, $catalog);
+        /** @var AgentServiceInterface&MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->principal_id = createUserPrincipalPublic(99);
+        $agent->name = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($payload)->toHaveKey('skills');
+        $skills = $payload['skills'];
+
+        // Two fields, never one merged list: the model's question is "may I
+        // load this?", and a single array answers it wrongly for every name
+        // the agent can see but does not hold.
+        expect($skills['allowed'])->toBe(['alpha']);
+        expect($skills['visible'])->toBe([
+            ['name' => 'alpha', 'description' => 'The alpha skill.', 'active' => true],
+            ['name' => 'beta', 'description' => 'The beta skill.', 'active' => false],
+        ]);
+    });
+
+    test('omits the skills block when no skill catalog is wired', function (): void {
+        [$tool, $service, $toolSettings] = makeAgentTool();
+        /** @var AgentServiceInterface&MockInterface $service */
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $agent = new Agent();
+        $agent->id = 7;
+        $agent->principal_id = createUserPrincipalPublic(99);
+        $agent->name = 'Alpha';
+        $service->allows('getAgentByAgentId')->andReturn($agent);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+
+        /** @var array<string, mixed> $payload */
+        $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
+        expect($result->success)->toBeTrue()
+            ->and($payload)->not->toHaveKey('skills');
     });
 });
 
