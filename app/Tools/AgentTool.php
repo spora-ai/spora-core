@@ -118,20 +118,25 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'configure_tools',
-    description: 'Enable or disable tools and per-operation overrides on an agent. '
+    description: 'Enable or disable tools and per-operation overrides on an agent, and write a tool\'s '
+               . 'settings. '
                . 'Takes `agent_id` (the numeric pk returned by `create_agent`; '
                . 'omit to operate on the calling agent) and a `tools` list of '
-               . '`{ tool_class, enabled, operations: [{name, enabled?, auto_approve?}] }`. '
+               . '`{ tool_class, enabled, settings, operations: [{name, enabled?, auto_approve?}] }`. '
                . 'A tool with `enabled: false` removes it from the agent. '
                . 'Omit `operations` to inherit defaults; pass `[{name:"now"}]` to enable one, '
                . '`[{name:"now", enabled:false}]` to disable one, '
                . '`[{name:"now", auto_approve:true}]` to enable auto-approve. '
+               . '`settings` writes the tool\'s own settings — e.g. '
+               . '`{tool_class: "Spora\\Tools\\SkillTool", settings: {allowed_skills: ["time-arithmetic"]}}` '
+               . 'replaces that agent\'s `allowed_skills` list wholesale. Use `get_available_tools`\'s `skills` '
+               . 'block to see which skills exist before naming them. '
                . 'Returns the canonical agent manifest (Markdown wrapper + '
                . 'structured JSON) so you can verify what landed without a '
                . 'follow-up `read_agent` call. See the agent-creation skill '
                . '(skill action: read, name: agent-creation, filename: SKILL.md) '
                . 'for the slim two-phase flow.',
-    operatorDescription: 'Enable or disable tools and per-op overrides on an agent.',
+    operatorDescription: 'Enable or disable tools, per-op overrides, and tool settings on an agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: true,
 )]
@@ -219,9 +224,14 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'tools',
     type: 'array',
-    description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, operations: [...] }` entries. '
+    description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, settings, operations: [...] }` entries. '
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
               . 'A tool with `enabled: false` removes it from the agent. '
+              . '`settings` is an object of `{setting_key: value}` for the tool\'s own settings (keys are validated; '
+              . 'a multi-select such as the skill tool\'s `allowed_skills` takes an array of strings). '
+              . 'IMPORTANT: a settings write REPLACES the value at that key outright — it does not merge or append. '
+              . 'Send the whole list you want, and remember that the value lands at the agent level, so entries '
+              . 'inherited from a group or user level stop being inherited from here on. '
               . 'Ignored by every other operation; omit this key entirely when calling '
               . 'read_notes, write_notes, write_notes_overwrite, update_agent, '
               . 'get_available_tools, create_agent, list_agents, or read_agent.',

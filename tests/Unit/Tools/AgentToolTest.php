@@ -98,6 +98,28 @@ function makeAgentToolWithPlugins(): array
     ];
 }
 
+/**
+ * A real `agents` row for the given owner, because the configure/read target
+ * resolvers hit the live table rather than a mock.
+ */
+function insertAgentRow(int $ownerId, string $name = 'Calling'): int
+{
+    return (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        'principal_id' => createUserPrincipalPublic($ownerId),
+        'name'                 => $name,
+        'description'          => null,
+        'system_prompt'        => null,
+        'notes'                => null,
+        'max_steps'            => 10,
+        'allow_followup'       => 1,
+        'retry_after_minutes'  => 0,
+        'max_retries'          => 0,
+        'is_active'            => 1,
+        'created_at'           => date('Y-m-d H:i:s'),
+        'updated_at'           => date('Y-m-d H:i:s'),
+    ]);
+}
+
 function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = null): Agent
 {
     $agent          = new Agent();
@@ -1156,6 +1178,86 @@ describe('AgentTool::execute — configure_tools', function (): void {
         );
 
         expect($result->success)->toBeTrue();
+    });
+    test('writes a tool setting through the same putOverride the panel uses', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-settings@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->allows('enableTool')->andReturn(['tool' => ['tool_class' => 'X', 'tool_name' => 'x']]);
+        // The multi-select is stored the way the settings form stores one: a
+        // JSON-encoded string inside a `Record<string, string>` blob. The panel
+        // reads it back out of `?raw=true` and JSON-parses, so a nested array
+        // would read as "no skills configured" and its next union-write would
+        // wipe the operator's list.
+        $toolSettings->shouldReceive('putOverride')
+            ->once()
+            ->with($callingId, $ownerId, 'Spora\\Tools\\SkillTool', [
+                'allowed_skills' => '["time-arithmetic","email"]',
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'enabled'    => true,
+                    'settings'   => ['allowed_skills' => ['time-arithmetic', 'email']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('refuses a setting key the tool does not declare', function (): void {
+        // Dropping an unknown key would leave the model believing a list landed
+        // that did not, and it would then read a skill it still cannot read.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_sklls' => ['time-arithmetic']],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('configure_tools: settings[0]')
+            ->and($result->content)->toContain("'allowed_sklls' is not a setting on Spora\\Tools\\SkillTool")
+            ->and($result->content)->toContain('allowed_skills');
+    });
+
+    test('refuses a multi-select that is not an array of strings', function (): void {
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => 'time-arithmetic'],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'allowed_skills' must be an array of strings");
     });
 });
 
