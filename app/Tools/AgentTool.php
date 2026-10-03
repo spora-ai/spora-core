@@ -235,12 +235,16 @@ use Spora\Tools\ValueObjects\ToolResult;
     type: 'array',
     description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, settings, operations: [...] }` entries. '
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
-              . 'A tool with `enabled: false` removes it from the agent. '
+              . 'A tool with `enabled: false` removes it from the agent; OMITTING `enabled` leaves the tool '
+              . 'as it is, so an entry carrying only `settings` or `operations` never grants the tool by accident. '
+              . '`enabled` must be a real boolean — the string "false" is refused, not read as true. '
               . '`settings` is an object of `{setting_key: value}` for the tool\'s own settings (keys are validated; '
               . 'a multi-select such as the skill tool\'s `allowed_skills` takes an array of strings). '
               . 'IMPORTANT: a settings write REPLACES the value at that key outright — it does not merge or append. '
               . 'Send the whole list you want, and remember that the value lands at the agent level, so entries '
               . 'inherited from a group or user level stop being inherited from here on. '
+              . 'An empty list changes nothing. To revoke everything, read the current tools and send each one '
+              . 'with `enabled: false`. '
               . 'Ignored by every other operation; omit this key entirely when calling '
               . 'read_notes, write_notes, write_notes_overwrite, update_agent, '
               . 'get_available_tools, create_agent, list_agents, or read_agent.',
@@ -454,6 +458,7 @@ final class AgentTool extends AbstractTool
                     'agent_id'    => $a['id'] ?? null,
                     'name'        => $a['name'] ?? null,
                     'description' => $a['description'] ?? null,
+                    'is_archived' => (bool) ($a['is_archived'] ?? false),
                 ];
             },
             $rows,
@@ -467,7 +472,13 @@ final class AgentTool extends AbstractTool
     }
 
     /**
-     * @param  list<array{agent_id: int|string|null, name: string|null, description: string|null}> $slim
+     * Archived agents stay in the list, flagged rather than hidden: the
+     * service layer is deliberately filter-free so the dashboard and this
+     * tool share one payload, and `update_agent` can unarchive — so hiding
+     * them would make an archived agent unreachable and permanent. The flag
+     * is what stops a retired agent reading as a normal candidate.
+     *
+     * @param  list<array{agent_id: int|string|null, name: string|null, description: string|null, is_archived: bool}> $slim
      */
     private function renderAgentsList(array $slim): string
     {
@@ -478,7 +489,8 @@ final class AgentTool extends AbstractTool
             $desc = isset($row['description']) && $row['description'] !== ''
                 ? ' — ' . $row['description']
                 : '';
-            $lines[] = "- {$id} {$name}{$desc}";
+            $archived = $row['is_archived'] ? ' (archived)' : '';
+            $lines[] = "- {$id} {$name}{$archived}{$desc}";
         }
         return implode("\n", $lines);
     }

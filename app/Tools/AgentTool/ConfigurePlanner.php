@@ -7,6 +7,7 @@ namespace Spora\Tools\AgentTool;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\ToolSetting;
+use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\ValueObjects\ToolResult;
 
@@ -44,6 +45,15 @@ use Spora\Tools\ValueObjects\ToolResult;
  * thing a tool call should not be able to write: the value would land in the
  * call's own recorded arguments, so the agent could read back the key it just
  * set. Credentials stay operator-only, through the settings panel.
+ *
+ * `enabled` is tri-state: `true` enables, `false` disables, and an **absent**
+ * key leaves enablement alone so a settings- or operations-only entry cannot
+ * grant a tool as a side effect. Only a real boolean is accepted — a model
+ * that emits the string `"false"` would otherwise be read as truthy and
+ * *enable* the tool on a revocation request, so a non-boolean is refused
+ * rather than guessed at. An unknown operation name is refused for the same
+ * reason an unknown setting key is: a dead override row is invisible in the
+ * manifest, so a typo would read to the caller as "nothing landed".
  */
 final class ConfigurePlanner
 {
@@ -59,7 +69,7 @@ final class ConfigurePlanner
      * @param  int|null $principalId The principal whose visible skills an
      *        `allowed_skills` write may name. Null resolves no principal, so a
      *        provider that scopes by one sees nothing and every name is refused.
-     * @return list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
+     * @return list<array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
      */
     public function buildPlan(mixed $entries, ?int $principalId = null): array|ToolResult
     {
@@ -77,14 +87,14 @@ final class ConfigurePlanner
     /**
      * Apply the validated `configure_tools` plan.
      *
-     * @param  list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}> $plan
+     * @param  list<array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}> $plan
      */
     public function apply(int $agentId, int $userId, array $plan): void
     {
         foreach ($plan as $step) {
-            if ($step['enable']) {
+            if ($step['enable'] === true) {
                 $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
-            } else {
+            } elseif ($step['enable'] === false) {
                 $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
             }
             foreach ($step['operations'] as $op) {
@@ -107,7 +117,7 @@ final class ConfigurePlanner
 
     /**
      * @param  mixed $entry
-     * @return array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
+     * @return array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
      */
     private function parseEntry(mixed $entry, int $i, ?int $principalId): array|ToolResult
     {
@@ -117,7 +127,12 @@ final class ConfigurePlanner
         }
         $toolClass = (string) ($entry['tool_class'] ?? '');
 
-        $operations = $this->parseOperations($entry['operations'] ?? [], $i);
+        $enable = $this->enablementFlag($entry, 'enabled', "tool entry #{$i}");
+        if ($enable instanceof ToolResult) {
+            return $enable;
+        }
+
+        $operations = $this->parseOperations($entry['operations'] ?? [], $toolClass, $i);
         if ($operations instanceof ToolResult) {
             return $operations;
         }
@@ -127,7 +142,7 @@ final class ConfigurePlanner
         }
         return [
             'tool_class' => $toolClass,
-            'enable'     => (bool) ($entry['enabled'] ?? true),
+            'enable'     => $enable,
             'operations' => $operations,
             'settings'   => $settings,
         ];
@@ -151,7 +166,7 @@ final class ConfigurePlanner
      * @param  mixed $ops
      * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
      */
-    private function parseOperations(mixed $ops, int $i): array|ToolResult
+    private function parseOperations(mixed $ops, string $toolClass, int $i): array|ToolResult
     {
         if (!is_array($ops) || $ops === []) {
             return [];
@@ -162,29 +177,112 @@ final class ConfigurePlanner
                 self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}] must be an array of `{name, enabled?, auto_approve?}`.",
             );
         }
-        return $this->parseOperationRows($ops, $i);
+        return $this->parseOperationRows($ops, $toolClass, $i);
     }
 
     /**
      * @param  list<mixed> $ops
      * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
      */
-    private function parseOperationRows(array $ops, int $i): array|ToolResult
+    private function parseOperationRows(array $ops, string $toolClass, int $i): array|ToolResult
     {
+        $declared = self::declaredOperationNames($toolClass);
         $out = [];
         foreach ($ops as $j => $op) {
+            $at = "operations[{$i}][{$j}]";
             if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
                 return ToolResult::fail(
-                    self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}][{$j}] must be `{name, enabled?, auto_approve?}`.",
+                    self::CONFIGURE_TOOLS_ERR_PREFIX . "{$at} must be `{name, enabled?, auto_approve?}`.",
                 );
             }
+            if ($declared !== [] && !isset($declared[$op['name']])) {
+                return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+                    "%s names '%s', which is not an operation on %s. Available operations: %s.",
+                    $at,
+                    $op['name'],
+                    $toolClass,
+                    implode(', ', array_keys($declared)),
+                ));
+            }
+
+            $enabled = $this->enablementFlag($op, 'enabled', $at) ?? true;
+            if ($enabled instanceof ToolResult) {
+                return $enabled;
+            }
+            $autoApprove = $this->enablementFlag($op, 'auto_approve', $at) ?? false;
+            if ($autoApprove instanceof ToolResult) {
+                return $autoApprove;
+            }
+
             $out[] = [
                 'name'         => $op['name'],
-                'enabled'      => (bool) ($op['enabled'] ?? true),
-                'auto_approve' => (bool) ($op['auto_approve'] ?? false),
+                'enabled'      => $enabled,
+                'auto_approve' => $autoApprove,
             ];
         }
         return $out;
+    }
+
+    /**
+     * The operation names a tool class actually declares, keyed for lookup.
+     *
+     * Empty when the class declares no operations or cannot be reflected
+     * against. Callers must then skip validation rather than refuse every
+     * name — a plugin tool that is not loaded is not grounds for a
+     * false refusal.
+     *
+     * @return array<string, true>
+     */
+    private static function declaredOperationNames(string $toolClass): array
+    {
+        $names = [];
+        foreach (ToolSchemaPresenter::summarize($toolClass)['operations'] as $op) {
+            if ($op['name'] !== '') {
+                $names[$op['name']] = true;
+            }
+        }
+        return $names;
+    }
+
+    /**
+     * A tri-state enablement flag: `true`, `false`, or null when the key is
+     * absent and enablement should be left alone.
+     *
+     * Only a real boolean is accepted. A provider that emits the string
+     * `"false"` would be read as truthy by a `(bool)` cast and *enable* the
+     * tool on a revocation request, and a non-boolean cannot be told apart
+     * from an absent key — so it is refused rather than guessed at.
+     *
+     * @param  array<string, mixed> $entry
+     * @return bool|null|ToolResult
+     */
+    private function enablementFlag(array $entry, string $key, string $at): bool|null|ToolResult
+    {
+        if (!array_key_exists($key, $entry)) {
+            return null;
+        }
+        $raw = $entry[$key];
+        if (!is_bool($raw)) {
+            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+                "%s '%s' must be true or false, got %s.%s",
+                $at,
+                $key,
+                self::describeValue($raw),
+                is_string($raw) ? ' A quoted "false" would be read as true here — send a real boolean.' : '',
+            ));
+        }
+        return $raw;
+    }
+
+    private static function describeValue(mixed $raw): string
+    {
+        return match (true) {
+            $raw === null  => 'null',
+            is_bool($raw)  => $raw ? 'true' : 'false',
+            is_string($raw) => 'the string "' . $raw . '"',
+            is_int($raw), is_float($raw) => 'the number ' . $raw,
+            default => get_debug_type($raw),
+        };
     }
 
     /**

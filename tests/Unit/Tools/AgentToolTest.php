@@ -2306,7 +2306,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ->and($result->data)->toBe(['agents' => []]);
         });
 
-        test('returns a slim id/name/description list of every owned agent', function (): void {
+        test('returns a slim id/name/description/archived list of every owned agent', function (): void {
             [$tool, $service] = makeAgentTool();
             /** @var AgentServiceInterface&MockInterface $service */
             $agent = new Agent();
@@ -2321,22 +2321,60 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ->once()
                 ->with(99)
                 ->andReturn([
-                    ['id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
-                    ['id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
-                    ['id' => 11, 'name' => 'Travel',        'description' => ''],
+                    ['id' => 4,  'name' => 'Custom Agent', 'description' => 'does X', 'is_archived' => false],
+                    ['id' => 7,  'name' => 'Wetter-Agent',  'description' => null, 'is_archived' => false],
+                    ['id' => 11, 'name' => 'Travel',        'description' => '', 'is_archived' => true],
                 ]);
 
             $result = $tool->execute(['action' => 'list_agents'], 7, null);
 
             expect($result->success)->toBeTrue()
                 ->and($result->data['agents'])->toBe([
-                    ['agent_id' => 4,  'name' => 'Custom Agent', 'description' => 'does X'],
-                    ['agent_id' => 7,  'name' => 'Wetter-Agent',  'description' => null],
-                    ['agent_id' => 11, 'name' => 'Travel',        'description' => ''],
+                    ['agent_id' => 4,  'name' => 'Custom Agent', 'description' => 'does X', 'is_archived' => false],
+                    ['agent_id' => 7,  'name' => 'Wetter-Agent',  'description' => null, 'is_archived' => false],
+                    ['agent_id' => 11, 'name' => 'Travel',        'description' => '', 'is_archived' => true],
                 ])
                 ->and($result->content)->toContain('#4 Custom Agent — does X')
                 ->and($result->content)->toContain('#7 Wetter-Agent')
-                ->and($result->content)->toContain('#11 Travel');
+                ->and($result->content)->toContain('#11 Travel (archived)');
+        });
+
+        test('flags an archived agent instead of hiding it, so it stays unarchivable', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var AgentServiceInterface&MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->principal_id = createUserPrincipalPublic(99);
+            $service->allows('getAgentByAgentId')->andReturn($agent);
+            $service->allows('getAgentsForUser')->andReturn([
+                ['id' => 11, 'name' => 'Retired', 'description' => null, 'is_archived' => true],
+            ]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+
+            // Still listed: `update_agent` can set is_archived back to false, so
+            // hiding it would strand the agent with no way back through this tool.
+            expect($result->data['agents'])->toHaveCount(1)
+                ->and($result->data['agents'][0]['is_archived'])->toBeTrue()
+                ->and($result->content)->toContain('#11 Retired (archived)');
+        });
+
+        test('treats a row with no is_archived key as not archived', function (): void {
+            [$tool, $service] = makeAgentTool();
+            /** @var AgentServiceInterface&MockInterface $service */
+            $agent = new Agent();
+            $agent->id = 7;
+            $agent->principal_id = createUserPrincipalPublic(99);
+            $service->allows('getAgentByAgentId')->andReturn($agent);
+            $service->allows('getAgentsForUser')->andReturn([
+                ['id' => 4, 'name' => 'No flag', 'description' => null],
+            ]);
+
+            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+
+            expect($result->data['agents'][0]['is_archived'])->toBeFalse()
+                ->and($result->content)->toContain('#4 No flag')
+                ->and($result->content)->not->toContain('(archived)');
         });
 
         test('returns AGENT_NOT_FOUND when the calling agent cannot be resolved', function (): void {
@@ -2386,7 +2424,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             $data = $result->data;
             $row  = $data['agents'][0];
 
-            expect(array_keys($row))->toBe(['agent_id', 'name', 'description']);
+            expect(array_keys($row))->toBe(['agent_id', 'name', 'description', 'is_archived']);
         });
     });
 
