@@ -329,7 +329,7 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
 | `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
 | `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
-| `configure_tools: tool entry #N 'enabled' must be true or false` | Quoted the boolean, or sent `0`/`1`/`null` | Send a real `true` / `false`. A string is truthy, so `"false"` would otherwise *enable* the tool you meant to revoke |
+| `configure_tools: tool entry #N 'enabled' must be true or false` | Sent `0` / `1` / `null` / a non-boolean string | Send a real `true` / `false`, or the strings `"true"` / `"false"` — those are honoured, because some providers flatten scalars and a revocation has to stay possible |
 | `configure_tools: operations[N][M] names 'X', which is not an operation on <FQCN>` | Misspelled or invented an operation name | The refusal lists the valid names. Get them from `get_available_tools` → that tool's `operations[]` |
 
 After three identical validation errors, **stop and ask the operator** — re-reading this skill won't help if the schema is genuinely unknown to you.

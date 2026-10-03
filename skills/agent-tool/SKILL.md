@@ -62,10 +62,12 @@ So `{"tool_class": "X", "settings": {...}}` configures X without turning it on. 
 what you want almost every time — configure a tool the operator has already enabled,
 rather than enabling it as a side effect of a settings write.
 
-**`enabled` must be a real JSON boolean.** `"false"` as a *string* is refused, not read
-as `false` — a string is truthy, so a loose read would turn your revocation into a
-grant. If you get `must be true or false, got the string "false"`, you quoted it by
-accident. Same for `0` and `1`.
+**`enabled` accepts a real boolean, or the strings `"true"` / `"false"`.** Some
+providers flatten scalars into strings, so both forms are honoured — a revocation must
+stay possible. What is refused is what cannot be read as a flag without guessing: `0`,
+`1`, `null`, `"yes"`, `""`. Those are a count or a missing value as easily as a flag.
+If you see `must be true or false, got the number 0`, you sent a number where a flag
+belongs.
 
 **`tools: []` does nothing.** It is not a revoke-all. To strip a toolset, read the
 agent's current tools and send each one back with `"enabled": false`.
@@ -206,7 +208,8 @@ a *different* agent, note that you have no way to read that agent's current list
 
 | Trap | What actually happens |
 |---|---|
-| `"enabled": "false"` (quoted) | Refused. A string is truthy, so reading it loosely would **enable** the tool you meant to revoke. Send a real boolean. |
+| `"enabled": 0` or `"1"` or `null` | Refused. A number or a null is a count or a missing value as easily as a flag. Send `true` / `false`, or the strings `"true"` / `"false"`. |
+| `"enabled": "yes"` / `"on"` | Refused. Only `true` and `false` are read as flags. |
 | `{tool_class: X}` with no `enabled` | Enablement is left alone. It does not enable X. |
 | `tools: []` expecting a revoke-all | Nothing changes. Send each tool back with `enabled: false`. |
 | An operation name the tool does not declare | Refused, with the valid names listed. A typo would otherwise write a dead override row that never shows up in the manifest. |

@@ -237,7 +237,8 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
               . 'A tool with `enabled: false` removes it from the agent; OMITTING `enabled` leaves the tool '
               . 'as it is, so an entry carrying only `settings` or `operations` never grants the tool by accident. '
-              . '`enabled` must be a real boolean — the string "false" is refused, not read as true. '
+              . '`enabled` takes a real boolean, or the string "true" / "false" (some providers flatten scalars into strings). '
+              . '0, 1, null and other strings are refused — none of them can be read as a flag without guessing. '
               . '`settings` is an object of `{setting_key: value}` for the tool\'s own settings (keys are validated; '
               . 'a multi-select such as the skill tool\'s `allowed_skills` takes an array of strings). '
               . 'IMPORTANT: a settings write REPLACES the value at that key outright — it does not merge or append. '
@@ -586,7 +587,10 @@ final class AgentTool extends AbstractTool
         }
 
         [$target, $plan] = $prepared;
-        $this->configurePlanner->apply($target->id, $userId, $plan);
+        $applied = $this->configurePlanner->apply($target->id, $userId, $plan);
+        if ($applied instanceof ToolResult) {
+            return $applied;
+        }
         return $this->renderFreshAgentAfterConfigure($userId, $target->id);
     }
 

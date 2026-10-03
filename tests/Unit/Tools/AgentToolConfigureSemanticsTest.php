@@ -8,6 +8,7 @@ use Spora\Core\SecurityManager;
 use Spora\Services\AgentManifest;
 use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
+use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\LLMConfigService;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AgentTool;
@@ -194,38 +195,90 @@ describe('configure_tools — enablement is tri-state', function (): void {
 
 describe('configure_tools — a non-boolean enablement flag is refused', function (): void {
 
-    it('refuses the string "false", which a (bool) cast would have read as true', function (): void {
+    it('honours the strings "true" and "false" instead of refusing a working channel', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
-        $target = $agents->createAgent($userId, ['name' => 'Quoted False']);
+        $target = $agents->createAgent($userId, ['name' => 'Stringified Booleans']);
 
-        // The dangerous direction: a tool that is off, and a revoke request
-        // whose flag a `(bool)` cast would turn into an enable.
-        $onDisabled = $tool->execute([
+        // A provider that flattens scalars into strings is a real channel here.
+        // Refusing "false" would leave a model able to grant a tool but never
+        // revoke one — a correctness bug traded for a capability hole.
+        $on = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'true']],
+        ], $target->id, $userId);
+        expect($on->success)->toBeTrue()
+            ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
+
+        // The original defect in the string form: a `(bool)` cast read this as
+        // true, so the revocation enabled the tool instead of removing it.
+        $off = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'false']],
         ], $target->id, $userId);
-
-        expect($onDisabled->success)->toBeFalse()
-            ->and($onDisabled->content)->toContain("'enabled' must be true or false")
-            ->and($onDisabled->content)->toContain('quoted "false" would be read as true')
+        expect($off->success)->toBeTrue()
             ->and(persistedToolsFor($target->id))->toBe([]);
+
+        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, $userId);
+        expect(manifestTool($read->data, TimeTool::class)['enabled'])->toBeFalse();
+    });
+
+    it('accepts the strings case-insensitively and with surrounding whitespace', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'String Case']);
 
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
-            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => true]],
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => ' TRUE ']],
         ], $target->id, $userId);
+        expect(persistedToolsFor($target->id))->toBe([TimeTool::class]);
 
-        // And the harmless-looking direction: a refusal changes nothing at all.
-        $onEnabled = $tool->execute([
+        $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
-            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'false']],
+            'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'False']],
+        ], $target->id, $userId);
+        expect(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('refuses the strings that cannot be read as a flag without guessing', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Ambiguous Strings']);
+
+        foreach (['yes', 'no', 'on', 'off', '', '1'] as $value) {
+            $result = $tool->execute([
+                'action' => 'configure_tools', 'agent_id' => $target->id,
+                'tools'  => [['tool_class' => TimeTool::class, 'enabled' => $value]],
+            ], $target->id, $userId);
+
+            expect($result->success)->toBeFalse();
+        }
+
+        expect(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('honours stringified per-operation flags too', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Stringified Op']);
+
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [[
+                'tool_class' => TimeTool::class,
+                'enabled'    => 'true',
+                'operations' => [
+                    ['name' => 'now', 'enabled' => 'false'],
+                    ['name' => 'format', 'auto_approve' => 'true'],
+                ],
+            ]],
         ], $target->id, $userId);
 
-        expect($onEnabled->success)->toBeFalse()
-            ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
+        $byName = [];
+        foreach (manifestTool($result->data, TimeTool::class)['operations'] as $op) {
+            $byName[$op['name']] = $op;
+        }
 
-        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, $userId);
-        expect(manifestTool($read->data, TimeTool::class)['enabled'])->toBeTrue();
+        expect($result->success)->toBeTrue()
+            ->and($byName['now']['enabled'])->toBeFalse()
+            ->and($byName['format']['requires_approval'])->toBeFalse();
     });
 
     it('refuses 0, 1, and null', function (): void {
@@ -244,7 +297,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         expect(persistedToolsFor($target->id))->toBe([]);
     });
 
-    it('refuses a non-boolean on a per-operation flag and names the index', function (): void {
+    it('refuses an ambiguous per-operation flag and names the index', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Op Flag']);
 
@@ -253,7 +306,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
             'tools'  => [[
                 'tool_class' => TimeTool::class,
                 'enabled'    => true,
-                'operations' => [['name' => 'now', 'enabled' => 'false']],
+                'operations' => [['name' => 'now', 'enabled' => 'maybe']],
             ]],
         ], $target->id, $userId);
 
@@ -261,6 +314,69 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
             ->and($result->content)->toContain('operations[0][0]')
             ->and($result->content)->toContain("'enabled' must be true or false")
             ->and(persistedToolsFor($target->id))->toBe([]);
+    });
+});
+
+describe('configure_tools — an unwritable target is not a success', function (): void {
+
+    it('fails when the settings service reports the target is not visible', function (): void {
+        // `enableTool` signals this by returning ['error' => 'NOT_FOUND'] rather
+        // than throwing. Discarding that return is what let a success-shaped
+        // response hide a write that never happened, so it is asserted here
+        // against the caller's view rather than by asserting the call happened.
+        $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
+        $toolSettings->shouldReceive('enableTool')->andReturn(['error' => 'NOT_FOUND']);
+        $toolSettings->shouldNotReceive('disableTool');
+        $toolSettings->shouldNotReceive('putOverride');
+        $toolSettings->shouldNotReceive('patchOperationOverride');
+
+        $planner = new AgentTool\ConfigurePlanner($toolSettings);
+        $plan    = $planner->buildPlan([['tool_class' => TimeTool::class, 'enabled' => true]]);
+        expect($plan)->toBeArray();
+
+        $applied = $planner->apply(1, 1, $plan);
+
+        expect($applied)->toBeInstanceOf(Spora\Tools\ValueObjects\ToolResult::class)
+            ->and($applied->success)->toBeFalse()
+            ->and($applied->content)->toContain('not visible to this user');
+    });
+
+    it('leaves nothing half-applied when the first step is unwritable', function (): void {
+        $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
+        $toolSettings->shouldReceive('enableTool')
+            ->once()
+            ->with(1, 1, TimeTool::class)
+            ->andReturn(['error' => 'NOT_FOUND']);
+        // The visibility check is per-agent, so a later step could only fail the
+        // same way. Bailing on the first is what keeps this from becoming a
+        // partial write — a revocation landing while the grant ahead of it did not.
+        $toolSettings->shouldNotReceive('disableTool');
+        $toolSettings->shouldNotReceive('putOverride');
+        $toolSettings->shouldNotReceive('patchOperationOverride');
+
+        $planner = new AgentTool\ConfigurePlanner($toolSettings);
+        $plan    = $planner->buildPlan([
+            ['tool_class' => TimeTool::class, 'enabled' => true],
+            ['tool_class' => CalculatorTool::class, 'enabled' => false],
+        ]);
+
+        expect($planner->apply(1, 1, $plan))->not->toBeNull();
+    });
+
+    it('proceeds normally when the write reports no error', function (): void {
+        $toolSettings = Mockery::mock(AgentToolSettingsServiceInterface::class);
+        $toolSettings->shouldReceive('enableTool')->once()->andReturn(['tool' => ['tool_class' => TimeTool::class]]);
+        $toolSettings->shouldReceive('disableTool')->once();
+        $toolSettings->shouldNotReceive('putOverride');
+        $toolSettings->shouldNotReceive('patchOperationOverride');
+
+        $planner = new AgentTool\ConfigurePlanner($toolSettings);
+        $plan    = $planner->buildPlan([
+            ['tool_class' => TimeTool::class, 'enabled' => true],
+            ['tool_class' => CalculatorTool::class, 'enabled' => false],
+        ]);
+
+        expect($planner->apply(1, 1, $plan))->toBeNull();
     });
 });
 

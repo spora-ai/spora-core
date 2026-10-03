@@ -59,6 +59,8 @@ final class ConfigurePlanner
 {
     private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
 
+    private const ENABLE_NOT_FOUND = 'NOT_FOUND';
+
     public function __construct(
         private readonly AgentToolSettingsServiceInterface $toolSettings,
         private readonly ?SkillProviderRegistry $skills = null,
@@ -87,13 +89,23 @@ final class ConfigurePlanner
     /**
      * Apply the validated `configure_tools` plan.
      *
+     * `enableTool` signals an unowned agent by returning `['error' => 'NOT_FOUND']`
+     * rather than throwing, and discarding that is how a success-shaped response
+     * can hide a write that never happened. It is surfaced instead. The check is
+     * per-agent and therefore identical for every step, so bailing on the first
+     * one leaves nothing half-applied.
+     *
      * @param  list<array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}> $plan
+     * @return ToolResult|null A failure when the target could not be written, else null.
      */
-    public function apply(int $agentId, int $userId, array $plan): void
+    public function apply(int $agentId, int $userId, array $plan): ToolResult|null
     {
         foreach ($plan as $step) {
             if ($step['enable'] === true) {
-                $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
+                $written = $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
+                if (($written['error'] ?? null) === self::ENABLE_NOT_FOUND) {
+                    return $this->notVisibleFailure();
+                }
             } elseif ($step['enable'] === false) {
                 $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
             }
@@ -113,6 +125,13 @@ final class ConfigurePlanner
                 $this->toolSettings->putOverride($agentId, $userId, $step['tool_class'], $step['settings']);
             }
         }
+        return null;
+    }
+
+    private function notVisibleFailure(): ToolResult
+    {
+        return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX
+            . 'the target agent is not visible to this user, so no tool was changed.');
     }
 
     /**
@@ -248,10 +267,18 @@ final class ConfigurePlanner
      * A tri-state enablement flag: `true`, `false`, or null when the key is
      * absent and enablement should be left alone.
      *
-     * Only a real boolean is accepted. A provider that emits the string
-     * `"false"` would be read as truthy by a `(bool)` cast and *enable* the
-     * tool on a revocation request, and a non-boolean cannot be told apart
-     * from an absent key — so it is refused rather than guessed at.
+     * A real boolean, and the two exact strings `"true"` / `"false"`, are
+     * both unambiguous and both honoured. The strings matter because a
+     * provider that flattens scalars into strings is a real channel here,
+     * and refusing them would leave a model able to grant a tool but unable
+     * to revoke one — trading a correctness bug for a capability hole.
+     *
+     * What is refused is everything genuinely ambiguous: `0` and `1` (a count
+     * as easily as a flag), `null` (indistinguishable from an absent key),
+     * and any other string. Note the difference from the `(bool)` cast this
+     * replaced: the cast read `"false"` as **true**, so a quoted revocation
+     * enabled the tool. Nothing here is cast — each accepted form maps to
+     * exactly one value.
      *
      * @param  array<string, mixed> $entry
      * @return bool|null|ToolResult
@@ -262,16 +289,25 @@ final class ConfigurePlanner
             return null;
         }
         $raw = $entry[$key];
-        if (!is_bool($raw)) {
-            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
-                "%s '%s' must be true or false, got %s.%s",
-                $at,
-                $key,
-                self::describeValue($raw),
-                is_string($raw) ? ' A quoted "false" would be read as true here — send a real boolean.' : '',
-            ));
+        if (is_bool($raw)) {
+            return $raw;
         }
-        return $raw;
+        if (is_string($raw)) {
+            $normalised = strtolower(trim($raw));
+            if ($normalised === 'true') {
+                return true;
+            }
+            if ($normalised === 'false') {
+                return false;
+            }
+        }
+        return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+            "%s '%s' must be true or false, got %s. Send a real boolean, or the string \"true\" / \"false\" — "
+            . '0, 1, null and other strings are refused because none of them can be read as a flag without guessing.',
+            $at,
+            $key,
+            self::describeValue($raw),
+        ));
     }
 
     private static function describeValue(mixed $raw): string
