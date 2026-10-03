@@ -1331,6 +1331,129 @@ describe('AgentTool::execute — configure_tools', function (): void {
             ->and($result->content)->toContain('skills.visible');
     });
 
+    test('refuses a skill write when the registry is absent rather than waving it through', function (): void {
+        // The container guards the registry with `$c->has(...) ? ... : null`, so a
+        // build without the orchestrator slice resolves it to null. Approving the
+        // write there would make the cross-tenant check vanish exactly when the
+        // wiring is incomplete — which is when you least want a check vanishing.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-no-registry@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SkillTool',
+                    'settings'   => ['allowed_skills' => ['anything']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('the skill registry is unavailable');
+    });
+
+    test('refuses a password setting, so a tool call cannot write or read back a credential', function (): void {
+        // `api_key` is a real `type: 'password'` setting on the LLM drivers. A
+        // model-supplied value would land in the call's own recorded arguments,
+        // so the agent could read back the key it just wrote — and an approval
+        // granted for "configure my tools" does not obviously cover "repoint my
+        // LLM driver at someone else's key".
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-password@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Drivers\\OpenAICompatibleDriver',
+                    'settings'   => ['api_key' => 'sk-not-mine'],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('is a credential');
+    });
+
+    test('accepts an int[] for an agent-resolved multi-select, which is how it is stored', function (): void {
+        // `allowed_target_agents` is stored as `int[]`. Demanding strings there
+        // would refuse the shape the admin panel itself writes, leaving the
+        // setting writable by hand and by nothing else.
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-agent-ids@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->allows('enableTool')->andReturn([]);
+        $toolSettings->shouldReceive('putOverride')
+            ->once()
+            ->with($callingId, $ownerId, 'Spora\\Tools\\SubAgentTool', [
+                'allowed_target_agents' => '[3,4]',
+            ])
+            ->andReturn([]);
+        $toolSettings->allows('getAllToolsStatus')->andReturn([]);
+        $toolSettings->allows('getToolsOperations')->andReturn([]);
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SubAgentTool',
+                    'settings'   => ['allowed_target_agents' => [3, 4]],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeTrue();
+    });
+
+    test('refuses strings for an agent-resolved multi-select, which is not how it is stored', function (): void {
+        $auth    = bootAuthLayer();
+        $ownerId = bootAuth($auth, 'configure-agent-strings@example.com');
+
+        [$tool, , $toolSettings] = makeAgentTool();
+        /** @var AgentToolSettingsServiceInterface&MockInterface $toolSettings */
+        $callingId = insertAgentRow($ownerId);
+
+        $toolSettings->shouldNotReceive('putOverride');
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\SubAgentTool',
+                    'settings'   => ['allowed_target_agents' => ['3', '4']],
+                ]],
+            ],
+            $callingId,
+            $ownerId,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('must be an array of agent ids');
+    });
+
     test('refuses a setting key the tool does not declare', function (): void {
         // Dropping an unknown key would leave the model believing a list landed
         // that did not, and it would then read a skill it still cannot read.

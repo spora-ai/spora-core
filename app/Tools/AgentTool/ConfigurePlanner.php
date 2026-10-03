@@ -37,7 +37,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  * The principal check rides here, on the write, because it is a property of
  * the write: a skill name is a claim about what the executing principal can
  * see, and a write that cannot make that claim should not be able to grant
- * the name either.
+ * the name either. It fails closed — a null principal and an absent registry
+ * both refuse rather than wave the write through.
+ *
+ * A `type: 'password'` setting is refused outright. A credential is the one
+ * thing a tool call should not be able to write: the value would land in the
+ * call's own recorded arguments, so the agent could read back the key it just
+ * set. Credentials stay operator-only, through the settings panel.
  */
 final class ConfigurePlanner
 {
@@ -213,13 +219,21 @@ final class ConfigurePlanner
                     self::validKeys($schema),
                 ));
             }
+            if ($setting->type === 'password') {
+                return $this->settingsFailure($i, sprintf(
+                    "'%s' is a credential. The operator sets it in the settings panel; a tool call must not be able to write one, nor read it back through the call's own arguments.",
+                    $key,
+                ));
+            }
             if ($setting->type !== 'multi-select') {
                 $out[$key] = $value;
                 continue;
             }
-            $names = self::stringList($value);
+            $names = self::idOrNameList($value, $setting->resolveAs);
             if ($names === null) {
-                return $this->settingsFailure($i, "'{$key}' must be an array of strings.");
+                return $this->settingsFailure($i, $setting->resolveAs === 'agent'
+                    ? "'{$key}' must be an array of agent ids."
+                    : "'{$key}' must be an array of strings.");
             }
             if ($setting->resolveAs === 'skill') {
                 $refusal = $this->invisibleSkillRefusal($key, $names, $i, $principalId);
@@ -242,12 +256,20 @@ final class ConfigurePlanner
      * the operator could have granted by hand, so bounding it here is what keeps
      * the write from being a cross-tenant grant.
      *
+     * Fails closed in both directions. A null `$principalId` resolves no
+     * principal, so a provider that scopes by one sees nothing and every name is
+     * refused. An absent registry refuses too: it cannot make the claim at all,
+     * and a check that vanishes when the wiring is incomplete is not a check.
+     *
      * @param list<string> $names
      */
     private function invisibleSkillRefusal(string $key, array $names, int $i, ?int $principalId): ?ToolResult
     {
         if ($this->skills === null) {
-            return null;
+            return $this->settingsFailure($i, sprintf(
+                "'%s' cannot be written: the skill registry is unavailable, so these names cannot be checked against the principal's visible set.",
+                $key,
+            ));
         }
 
         $visible = [];
@@ -293,12 +315,16 @@ final class ConfigurePlanner
     }
 
     /**
-     * The `string[]` a multi-select is stored as, or null when the value is not
-     * one.
+     * A multi-select's stored entries, or null when the value is not one.
      *
-     * @return list<string>|null
+     * A `resolveAs: 'agent'` multi-select is stored as `int[]`, so that is the
+     * only shape accepted for it — a string there would be the `id` the admin
+     * panel never writes, and the form's own `normalizeAgentIdList` would have
+     * to paper over it. Everything else is a list of names.
+     *
+     * @return list<string>|list<int>|null
      */
-    private static function stringList(mixed $value): ?array
+    private static function idOrNameList(mixed $value, string $resolveAs): array|null
     {
         if (!is_array($value) || !array_is_list($value)) {
             return null;
@@ -306,6 +332,13 @@ final class ConfigurePlanner
 
         $out = [];
         foreach ($value as $entry) {
+            if ($resolveAs === 'agent') {
+                if (!is_int($entry)) {
+                    return null;
+                }
+                $out[] = $entry;
+                continue;
+            }
             if (!is_string($entry)) {
                 return null;
             }
