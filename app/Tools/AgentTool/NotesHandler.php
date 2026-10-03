@@ -107,18 +107,29 @@ final class NotesHandler
         if (!array_key_exists('content', $arguments)) {
             return ToolResult::fail('write_notes: content is required.');
         }
-        $content = (string) $arguments['content'];
 
-        $resolvedMode = $this->resolveMode($arguments, $defaultMode);
-        if ($resolvedMode instanceof ToolResult) {
-            return $resolvedMode;
+        $resolved = $this->resolveWrite((string) $arguments['content'], $arguments, $defaultMode);
+
+        return $resolved instanceof ToolResult ? $resolved : [$resolved['content'], $resolved['mode']];
+    }
+
+    /**
+     * The mode, plus the one rule that only the destructive path obeys.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return array{content: string, mode: string}|ToolResult
+     */
+    private function resolveWrite(string $content, array $arguments, string $defaultMode): array|ToolResult
+    {
+        $mode = $this->resolveMode($arguments, $defaultMode);
+        if ($mode instanceof ToolResult) {
+            return $mode;
         }
-
-        if ($resolvedMode === 'overwrite' && $content === '') {
+        if ($mode === 'overwrite' && $content === '') {
             return ToolResult::fail(self::EMPTY_OVERWRITE_CONTENT);
         }
 
-        return [$content, $resolvedMode];
+        return ['content' => $content, 'mode' => $mode];
     }
 
     /** @return string|ToolResult */

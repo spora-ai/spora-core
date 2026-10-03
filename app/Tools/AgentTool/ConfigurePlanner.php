@@ -104,31 +104,70 @@ final class ConfigurePlanner
     public function apply(int $agentId, int $userId, array $plan): ToolResult|null
     {
         foreach ($plan as $step) {
-            if ($step['enable'] === true) {
-                $written = $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
-                if (($written['error'] ?? null) === self::ENABLE_NOT_FOUND) {
-                    return $this->notVisibleFailure();
-                }
-            } elseif ($step['enable'] === false) {
-                $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
-            }
-            foreach ($step['operations'] as $op) {
-                $this->toolSettings->patchOperationOverride(
-                    $agentId,
-                    $userId,
-                    $step['tool_class'],
-                    $op['name'],
-                    [
-                        'enabled'                   => $op['enabled'] ? 1 : 0,
-                        'default_requires_approval' => $op['auto_approve'] ? 0 : 1,
-                    ],
-                );
-            }
-            if ($step['settings'] !== []) {
-                $this->toolSettings->putOverride($agentId, $userId, $step['tool_class'], $step['settings']);
+            $failure = $this->applyStep($agentId, $userId, $step);
+            if ($failure instanceof ToolResult) {
+                return $failure;
             }
         }
         return null;
+    }
+
+    /**
+     * One plan step: enablement first, then per-operation overrides, then settings.
+     *
+     * Split out of {@see apply()} so the loop stays a loop. The enablement write
+     * can be the one that discovers the target is unwritable, and it is checked
+     * before anything else in the step so a step never half-applies.
+     *
+     * @param  array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>} $step
+     * @return ToolResult|null
+     */
+    private function applyStep(int $agentId, int $userId, array $step): ToolResult|null
+    {
+        $enablement = $this->applyEnablement($agentId, $userId, $step);
+        if ($enablement instanceof ToolResult) {
+            return $enablement;
+        }
+
+        foreach ($step['operations'] as $op) {
+            $this->toolSettings->patchOperationOverride(
+                $agentId,
+                $userId,
+                $step['tool_class'],
+                $op['name'],
+                [
+                    'enabled'                   => $op['enabled'] ? 1 : 0,
+                    'default_requires_approval' => $op['auto_approve'] ? 0 : 1,
+                ],
+            );
+        }
+
+        if ($step['settings'] !== []) {
+            $this->toolSettings->putOverride($agentId, $userId, $step['tool_class'], $step['settings']);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array{tool_class: string, enable: bool|null} $step
+     * @return ToolResult|null
+     */
+    private function applyEnablement(int $agentId, int $userId, array $step): ToolResult|null
+    {
+        if ($step['enable'] === false) {
+            $this->toolSettings->disableTool($agentId, $userId, $step['tool_class']);
+            return null;
+        }
+        if ($step['enable'] !== true) {
+            return null;
+        }
+
+        $written = $this->toolSettings->enableTool($agentId, $userId, $step['tool_class']);
+
+        return ($written['error'] ?? null) === self::ENABLE_NOT_FOUND
+            ? $this->notVisibleFailure()
+            : null;
     }
 
     private function notVisibleFailure(): ToolResult
@@ -149,25 +188,51 @@ final class ConfigurePlanner
         }
         $toolClass = (string) ($entry['tool_class'] ?? '');
 
-        $enable = $this->enablementFlag($entry, 'enabled', "tool entry #{$i}");
-        if ($enable instanceof ToolResult) {
-            return $enable;
+        $parts = $this->parseEntryParts($entry, $toolClass, $i, $principalId);
+
+        return $parts instanceof ToolResult
+            ? $parts
+            : [
+                'tool_class' => $toolClass,
+                'enable'     => $parts['enable'],
+                'operations' => $parts['operations'],
+                'settings'   => $parts['settings'],
+            ];
+    }
+
+    /**
+     * The three independently-refusable halves of an entry, in the order they
+     * are checked. Enablement first so a malformed flag is reported before the
+     * caller is told about a misspelled operation.
+     *
+     * @param  array<string, mixed> $entry
+     * @return array{enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
+     */
+    private function parseEntryParts(array $entry, string $toolClass, int $i, ?int $principalId): array|ToolResult
+    {
+        $parsers = [
+            'enable'     => fn(): bool|null|ToolResult
+                => $this->enablementFlag($entry, 'enabled', "tool entry #{$i}"),
+            'operations' => fn(): array|ToolResult
+                => $this->parseOperations($entry['operations'] ?? [], $toolClass, $i),
+            'settings'   => fn(): array|ToolResult
+                => $this->parseSettings($entry['settings'] ?? [], $toolClass, $i, $principalId),
+        ];
+
+        // Evaluated in declaration order and short-circuits on the first
+        // refusal, so a malformed flag is still reported before a misspelled
+        // operation. A loop rather than three sequential guards because the
+        // three parsers share a shape and differ only by name.
+        $out = [];
+        foreach ($parsers as $key => $parse) {
+            $value = $parse();
+            if ($value instanceof ToolResult) {
+                return $value;
+            }
+            $out[$key] = $value;
         }
 
-        $operations = $this->parseOperations($entry['operations'] ?? [], $toolClass, $i);
-        if ($operations instanceof ToolResult) {
-            return $operations;
-        }
-        $settings = $this->parseSettings($entry['settings'] ?? [], $toolClass, $i, $principalId);
-        if ($settings instanceof ToolResult) {
-            return $settings;
-        }
-        return [
-            'tool_class' => $toolClass,
-            'enable'     => $enable,
-            'operations' => $operations,
-            'settings'   => $settings,
-        ];
+        return $out;
     }
 
     private function shapeEntryFailure(mixed $entry, int $i): ?string
@@ -211,38 +276,82 @@ final class ConfigurePlanner
         $declared = self::declaredOperationNames($toolClass);
         $out = [];
         foreach ($ops as $j => $op) {
-            $at = "operations[{$i}][{$j}]";
-            if (!is_array($op) || !isset($op['name']) || !is_string($op['name']) || $op['name'] === '') {
-                return ToolResult::fail(
-                    self::CONFIGURE_TOOLS_ERR_PREFIX . "{$at} must be `{name, enabled?, auto_approve?}`.",
-                );
+            $row = $this->parseOperationRow($op, $declared, $toolClass, "operations[{$i}][{$j}]");
+            if ($row instanceof ToolResult) {
+                return $row;
             }
-            if ($declared !== [] && !isset($declared[$op['name']])) {
-                return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
-                    "%s names '%s', which is not an operation on %s. Available operations: %s.",
-                    $at,
-                    $op['name'],
-                    $toolClass,
-                    implode(', ', array_keys($declared)),
-                ));
-            }
-
-            $enabled = $this->enablementFlag($op, 'enabled', $at) ?? true;
-            if ($enabled instanceof ToolResult) {
-                return $enabled;
-            }
-            $autoApprove = $this->enablementFlag($op, 'auto_approve', $at) ?? false;
-            if ($autoApprove instanceof ToolResult) {
-                return $autoApprove;
-            }
-
-            $out[] = [
-                'name'         => $op['name'],
-                'enabled'      => $enabled,
-                'auto_approve' => $autoApprove,
-            ];
+            $out[] = $row;
         }
         return $out;
+    }
+
+    /**
+     * @param  array<string, true> $declared
+     * @return array{name: string, enabled: bool, auto_approve: bool}|ToolResult
+     */
+    private function parseOperationRow(mixed $op, array $declared, string $toolClass, string $at): array|ToolResult
+    {
+        $name = $this->operationName($op, $declared, $toolClass, $at);
+        if ($name instanceof ToolResult) {
+            return $name;
+        }
+
+        $flags = $this->operationFlags($op, $at);
+        if ($flags instanceof ToolResult) {
+            return $flags;
+        }
+
+        return ['name' => $name, 'enabled' => $flags['enabled'], 'auto_approve' => $flags['auto_approve']];
+    }
+
+    /**
+     * The operation's name, once it is known to be a non-empty string that the
+     * tool actually declares.
+     *
+     * The declaration check is skipped for a class that declares no operations
+     * or cannot be reflected against — a plugin tool that is not loaded is not
+     * grounds for refusing every name it might legitimately declare.
+     *
+     * @param  array<string, true> $declared
+     * @return string|ToolResult
+     */
+    private function operationName(mixed $op, array $declared, string $toolClass, string $at): string|ToolResult
+    {
+        $name = is_array($op) && is_string($op['name'] ?? null) ? $op['name'] : '';
+        if ($name === '') {
+            return ToolResult::fail(
+                self::CONFIGURE_TOOLS_ERR_PREFIX . "{$at} must be `{name, enabled?, auto_approve?}`.",
+            );
+        }
+        if ($declared !== [] && !isset($declared[$name])) {
+            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+                "%s names '%s', which is not an operation on %s. Available operations: %s.",
+                $at,
+                $name,
+                $toolClass,
+                implode(', ', array_keys($declared)),
+            ));
+        }
+
+        return $name;
+    }
+
+    /**
+     * @param  array<string, mixed> $op
+     * @return array{enabled: bool, auto_approve: bool}|ToolResult
+     */
+    private function operationFlags(array $op, string $at): array|ToolResult
+    {
+        $enabled = $this->enablementFlag($op, 'enabled', $at) ?? true;
+        if ($enabled instanceof ToolResult) {
+            return $enabled;
+        }
+        $autoApprove = $this->enablementFlag($op, 'auto_approve', $at) ?? false;
+        if ($autoApprove instanceof ToolResult) {
+            return $autoApprove;
+        }
+
+        return ['enabled' => $enabled, 'auto_approve' => $autoApprove];
     }
 
     /**
@@ -288,24 +397,25 @@ final class ConfigurePlanner
      */
     private function enablementFlag(array $entry, string $key, string $at): bool|null|ToolResult
     {
-        if (!array_key_exists($key, $entry)) {
+        $raw = $entry[$key] ?? null;
+        if (!array_key_exists($key, $entry) || (is_string($raw) && trim($raw) === '')) {
             return null;
         }
-        $raw = $entry[$key];
-        if (is_string($raw) && trim($raw) === '') {
-            return null;
-        }
+
         $coerced = $this->coerceBool($raw);
-        if ($coerced === null) {
-            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
-                "%s '%s' must be true or false, got %s. Send true / false, or the string "
-                . '"true" / "false" — a quoted value is read as the boolean it names, not as truthy.',
-                $at,
-                $key,
-                $this->describeValue($raw),
-            ));
-        }
-        return $coerced;
+
+        return $coerced === null ? $this->flagFailure($key, $at, $raw) : $coerced;
+    }
+
+    private function flagFailure(string $key, string $at, mixed $raw): ToolResult
+    {
+        return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . sprintf(
+            "%s '%s' must be true or false, got %s. Send true / false, or the string "
+            . '"true" / "false" — a quoted value is read as the boolean it names, not as truthy.',
+            $at,
+            $key,
+            $this->describeValue($raw),
+        ));
     }
 
     /**
@@ -320,6 +430,41 @@ final class ConfigurePlanner
      */
     private function parseSettings(mixed $settings, string $toolClass, int $i, ?int $principalId): array|ToolResult
     {
+        $pairs = $this->settingsPairs($settings, $i);
+        if ($pairs instanceof ToolResult) {
+            return $pairs;
+        }
+
+        $schema = self::settingsSchema($toolClass);
+        $out = [];
+        foreach ($pairs as $key => $value) {
+            $key = (string) $key;
+            $setting = $schema[$key] ?? null;
+            $known = $setting === null
+                ? $this->settingsFailure($i, sprintf(
+                    "'%s' is not a setting on %s. %s",
+                    $key,
+                    $toolClass,
+                    self::validKeys($schema),
+                ))
+                : $this->coerceSetting($key, $value, $setting, $i, $principalId);
+
+            if ($known instanceof ToolResult) {
+                return $known;
+            }
+            $out[$key] = $known;
+        }
+        return $out;
+    }
+
+    /**
+     * The submitted pairs, or the refusal for a `settings` that is not an
+     * object. Absent and empty are both legal and both mean "no settings".
+     *
+     * @return array<array-key, mixed>|ToolResult
+     */
+    private function settingsPairs(mixed $settings, int $i): array|ToolResult
+    {
         if ($settings === null || $settings === []) {
             return [];
         }
@@ -327,44 +472,70 @@ final class ConfigurePlanner
             return $this->settingsFailure($i, 'must be an object of `{setting_key: value}` pairs.');
         }
 
-        $schema = self::settingsSchema($toolClass);
-        $out = [];
-        foreach ($settings as $key => $value) {
-            $key = (string) $key;
-            $setting = $schema[$key] ?? null;
-            if ($setting === null) {
-                return $this->settingsFailure($i, sprintf(
-                    "'%s' is not a setting on %s. %s",
-                    $key,
-                    $toolClass,
-                    self::validKeys($schema),
-                ));
-            }
-            if ($setting->type === 'password') {
-                return $this->settingsFailure($i, sprintf(
-                    "'%s' is a credential. The operator sets it in the settings panel; a tool call must not be able to write one, nor read it back through the call's own arguments.",
-                    $key,
-                ));
-            }
-            if ($setting->type !== 'multi-select') {
-                $out[$key] = $value;
-                continue;
-            }
-            $names = self::idOrNameList($value, $setting->resolveAs);
-            if ($names === null) {
-                return $this->settingsFailure($i, $setting->resolveAs === 'agent'
-                    ? "'{$key}' must be an array of agent ids."
-                    : "'{$key}' must be an array of strings.");
-            }
-            if ($setting->resolveAs === 'skill') {
-                $refusal = $this->invisibleSkillRefusal($key, $names, $i, $principalId);
-                if ($refusal !== null) {
-                    return $refusal;
-                }
-            }
-            $out[$key] = json_encode($names, JSON_THROW_ON_ERROR);
+        return $settings;
+    }
+
+    /**
+     * One setting's stored form, or the refusal that stops the write.
+     *
+     * Split out of {@see parseSettings()} so each rule reads on its own. Order is
+     * load-bearing: an unknown key is refused before the credential check, and
+     * the credential refusal comes before anything is written, because a tool
+     * call must never be able to put a secret where it can read it back out of
+     * its own recorded arguments.
+     *
+     * @return mixed|ToolResult
+     */
+    private function coerceSetting(
+        string $key,
+        mixed $value,
+        ToolSetting $setting,
+        int $i,
+        ?int $principalId,
+    ) {
+        if ($setting->type === 'password') {
+            return $this->settingsFailure($i, sprintf(
+                "'%s' is a credential. The operator sets it in the settings panel; a tool call must not be able to write one, nor read it back through the call's own arguments.",
+                $key,
+            ));
         }
-        return $out;
+
+        if ($setting->type !== 'multi-select') {
+            return $value;
+        }
+
+        return $this->coerceMultiSelect($key, $value, $setting, $i, $principalId);
+    }
+
+    /**
+     * A multi-select is stored JSON-encoded, so the entries are validated into a
+     * list first and encoded here — a nested array would read back as "nothing
+     * configured" in the settings panel and its next write would wipe the list.
+     *
+     * @return string|ToolResult
+     */
+    private function coerceMultiSelect(
+        string $key,
+        mixed $value,
+        ToolSetting $setting,
+        int $i,
+        ?int $principalId,
+    ): string|ToolResult {
+        $names = self::idOrNameList($value, $setting->resolveAs);
+        if ($names === null) {
+            return $this->settingsFailure($i, $setting->resolveAs === 'agent'
+                ? "'{$key}' must be an array of agent ids."
+                : "'{$key}' must be an array of strings.");
+        }
+
+        if ($setting->resolveAs === 'skill') {
+            $refusal = $this->invisibleSkillRefusal($key, $names, $i, $principalId);
+            if ($refusal !== null) {
+                return $refusal;
+            }
+        }
+
+        return json_encode($names, JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -453,14 +624,9 @@ final class ConfigurePlanner
 
         $out = [];
         foreach ($value as $entry) {
-            if ($resolveAs === 'agent') {
-                if (!is_int($entry)) {
-                    return null;
-                }
-                $out[] = $entry;
-                continue;
-            }
-            if (!is_string($entry)) {
+            $isAgent = $resolveAs === 'agent';
+            $typed = $isAgent ? is_int($entry) : is_string($entry);
+            if (!$typed) {
                 return null;
             }
             $out[] = $entry;

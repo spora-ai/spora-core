@@ -391,18 +391,31 @@ final class AgentTool extends AbstractTool
         if ($targetId instanceof ToolResult) {
             return $targetId;
         }
+        $patch = $this->normalisedPatch($arguments);
+        if ($patch instanceof ToolResult) {
+            return $patch;
+        }
+        $agent = $this->agentService->updateAgentByAgentId($targetId, $patch);
+
+        return $agent === null
+            ? ToolResult::fail(self::AGENT_NOT_FOUND)
+            : $this->renderManifestResult($agent);
+    }
+
+    /**
+     * The patch to write, with every field coerced and range-checked.
+     *
+     * @param  array<string, mixed> $arguments
+     * @return array<string, mixed>|ToolResult
+     */
+    private function normalisedPatch(array $arguments): array|ToolResult
+    {
         $patch = self::buildWriteConfigurationPatch($arguments);
         if ($patch === null) {
             return $this->notesOnlyPatchFail($arguments);
         }
-        $normalised = $this->patchValidator->normalise($patch);
-        if ($normalised instanceof ToolResult) {
-            return $normalised;
-        }
-        $agent = $this->agentService->updateAgentByAgentId($targetId, $normalised);
-        return $agent === null
-            ? ToolResult::fail(self::AGENT_NOT_FOUND)
-            : $this->renderManifestResult($agent);
+
+        return $this->patchValidator->normalise($patch);
     }
 
     private function notesOnlyPatchFail(array $arguments): ToolResult

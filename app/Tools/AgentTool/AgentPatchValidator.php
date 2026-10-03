@@ -41,15 +41,31 @@ final class AgentPatchValidator
 
     /** Columns this surface may write, and nothing else. */
     private const PATCHABLE = [
-        'name'                 => 'string',
-        'description'          => '?string',
-        'system_prompt'        => '?string',
-        'max_steps'            => 'int:1..100',
-        'allow_followup'       => 'bool',
-        'retry_after_minutes'  => 'int:0..',
-        'max_retries'          => 'int:0..',
-        'is_pinned'            => 'bool',
-        'is_archived'          => 'bool',
+        'name'                 => self::T_NAME,
+        'description'          => self::T_TEXT,
+        'system_prompt'        => self::T_TEXT,
+        'max_steps'            => self::T_STEPS,
+        'allow_followup'       => self::T_BOOL,
+        'retry_after_minutes'  => self::T_NON_NEGATIVE,
+        'max_retries'          => self::T_NON_NEGATIVE,
+        'is_pinned'            => self::T_BOOL,
+        'is_archived'          => self::T_BOOL,
+    ];
+
+    private const T_NAME        = 'name';
+    private const T_TEXT        = 'text';
+    private const T_BOOL        = 'bool';
+    private const T_STEPS       = 'steps';
+    private const T_NON_NEGATIVE = 'non-negative';
+
+    /**
+     * Fields whose shape accepts JSON `null` to clear the value, as the operator
+     * panel sends. A null on any other field is a type error, not a clear —
+     * `is_archived: null` cannot mean "unarchive" and must not be read as false.
+     */
+    private const NULLABLE = [
+        'description'   => true,
+        'system_prompt' => true,
     ];
 
     /**
@@ -109,7 +125,7 @@ final class AgentPatchValidator
                 $patch[$key] = $value;
                 continue;
             }
-            if ($value === null && str_starts_with($rule, '?')) {
+            if ($value === null && isset(self::NULLABLE[$key])) {
                 $patch[$key] = null;
                 continue;
             }
@@ -127,13 +143,13 @@ final class AgentPatchValidator
      */
     private function coerce(string $key, string $rule, mixed $value)
     {
-        return match (true) {
-            $rule === 'bool'      => $this->boolean($key, $value),
-            $rule === '?string'   => $this->nullableString($key, $value),
-            $rule === 'string'    => $this->text($key, $value, self::NAME_MAX_LENGTH, 'a non-empty string'),
-            $rule === 'int:1..100' => $this->boundedInt($key, $value, self::MAX_STEPS_MIN, self::MAX_STEPS_MAX),
-            $rule === 'int:0..'   => $this->boundedInt($key, $value, 0, PHP_INT_MAX),
-            default               => ToolResult::fail(self::ERR_PREFIX . "unhandled rule for '{$key}'."),
+        return match ($rule) {
+            self::T_BOOL         => $this->boolean($key, $value),
+            self::T_TEXT         => $this->nullableString($key, $value),
+            self::T_NAME         => $this->text($key, $value, self::NAME_MAX_LENGTH, 'a non-empty string'),
+            self::T_STEPS        => $this->boundedInt($key, $value, self::MAX_STEPS_MIN, self::MAX_STEPS_MAX),
+            self::T_NON_NEGATIVE => $this->boundedInt($key, $value, 0, PHP_INT_MAX),
+            default              => ToolResult::fail(self::ERR_PREFIX . "unhandled rule for '{$key}'."),
         };
     }
 
