@@ -115,6 +115,39 @@ test('validate() accepts optional license, compatibility, metadata, allowed-tool
     expect($result->isValid())->toBeTrue();
 });
 
+test('validate() accepts a comma-separated allowed-tools list', function (): void {
+    // The shipped `spora-plugin-minimax/skills/minimax-image-to-video` writes
+    // this form. The code accepted it while the message called it invalid, so
+    // the message is what has to change — not the content.
+    $result = validateSkill([
+        'name'          => 'foo',
+        'description'   => 'X.',
+        'allowed-tools' => 'Bash(git:*), Read',
+    ]);
+
+    expect($result->isValid())->toBeTrue();
+});
+
+test('validate() names both separators when allowed-tools is not a string', function (): void {
+    $result = validateSkill([
+        'name'          => 'foo',
+        'description'   => 'X.',
+        'allowed-tools' => ['Bash(git:*)', 'Read'],
+    ]);
+
+    expect($result->isValid())->toBeFalse();
+    expect(array_column($result->errors(), 'code'))->toContain('ALLOWED_TOOLS_INVALID');
+
+    $message = '';
+    foreach ($result->errors() as $error) {
+        if ($error['code'] === 'ALLOWED_TOOLS_INVALID') {
+            $message = $error['message'];
+        }
+    }
+    expect($message)->toContain('spaces or commas')
+        ->and($message)->not->toContain('space-separated');
+});
+
 test('validate() rejects metadata with non-string values', function (): void {
     $result = validateSkill([
         'name'        => 'foo',

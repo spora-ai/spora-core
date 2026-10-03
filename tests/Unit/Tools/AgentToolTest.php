@@ -21,7 +21,7 @@ use Tests\Fixtures\Skills\StubSkillProvider;
  * @param  SkillProviderRegistry|null $skills Only needed by the tests that
  *         exercise the principal check on a `configure_tools` `allowed_skills`
  *         write; every other path leaves it null.
- * @param  Spora\Tools\AgentTool\SkillCatalogPresenter|null $skillCatalog Only
+ * @param  AgentTool\SkillCatalogPresenter|null $skillCatalog Only
  *         needed by the `get_available_tools` `skills` block; it is optional in
  *         production too, so the block's absence is a case worth exercising.
  * @return array{0: AgentTool, 1: AgentServiceInterface, 2: AgentToolSettingsServiceInterface}
