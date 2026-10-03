@@ -1354,6 +1354,28 @@ describe('AgentTool::execute — configure_tools', function (): void {
             ->and($result->content)->toContain('allowed_skills');
     });
 
+    test('refuses a setting key on a tool that declares no settings', function (): void {
+        // TimeTool has no `#[ToolSetting]`, so the useful half of the refusal
+        // is "this tool has nothing to configure", not an empty key list.
+        [$tool] = makeAgentTool();
+
+        $result = $tool->execute(
+            [
+                'action' => 'configure_tools',
+                'tools'  => [[
+                    'tool_class' => 'Spora\\Tools\\TimeTool',
+                    'settings'   => ['timezone' => 'Europe/Berlin'],
+                ]],
+            ],
+            7,
+            99,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain("'timezone' is not a setting on Spora\\Tools\\TimeTool")
+            ->and($result->content)->toContain('It declares no settings.');
+    });
+
     test('refuses a multi-select that is not an array of strings', function (): void {
         [$tool] = makeAgentTool();
 

@@ -30,6 +30,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  * `Record<string, string>`, so a multi-select travels as a JSON-encoded
  * string. `ToolConfigService::getEffectiveSettings()` normalises it back to
  * an array on read, so the two forms meet there rather than in every reader.
+ * The panel's own reader is the reason for the JSON: it fetches
+ * `?raw=true` and `JSON.parse`s, so a nested array would read back as
+ * "nothing configured".
  *
  * The principal check rides here, on the write, because it is a property of
  * the write: a skill name is a claim about what the executing principal can
@@ -47,8 +50,9 @@ final class ConfigurePlanner
 
     /**
      * @param  mixed $entries
-     * @param  int|null $principalId The principal whose visible skills a
-     *        `allowed_skills` write may name; null fails every name closed.
+     * @param  int|null $principalId The principal whose visible skills an
+     *        `allowed_skills` write may name. Null resolves no principal, so a
+     *        provider that scopes by one sees nothing and every name is refused.
      * @return list<array{tool_class: string, enable: bool, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
      */
     public function buildPlan(mixed $entries, ?int $principalId = null): array|ToolResult
@@ -203,27 +207,27 @@ final class ConfigurePlanner
             $setting = $schema[$key] ?? null;
             if ($setting === null) {
                 return $this->settingsFailure($i, sprintf(
-                    "'%s' is not a setting on %s. Valid settings: %s.",
+                    "'%s' is not a setting on %s. %s",
                     $key,
                     $toolClass,
-                    implode(', ', array_keys($schema)),
+                    self::validKeys($schema),
                 ));
             }
             if ($setting->type !== 'multi-select') {
                 $out[$key] = $value;
                 continue;
             }
-            $encoded = self::encodeList($value);
-            if ($encoded === null) {
+            $names = self::stringList($value);
+            if ($names === null) {
                 return $this->settingsFailure($i, "'{$key}' must be an array of strings.");
             }
             if ($setting->resolveAs === 'skill') {
-                $refusal = $this->invisibleSkillRefusal($key, $value, $i, $principalId);
+                $refusal = $this->invisibleSkillRefusal($key, $names, $i, $principalId);
                 if ($refusal !== null) {
                     return $refusal;
                 }
             }
-            $out[$key] = $encoded;
+            $out[$key] = json_encode($names, JSON_THROW_ON_ERROR);
         }
         return $out;
     }
@@ -238,7 +242,7 @@ final class ConfigurePlanner
      * the operator could have granted by hand, so bounding it here is what keeps
      * the write from being a cross-tenant grant.
      *
-     * @param array<array-key, mixed> $names
+     * @param list<string> $names
      */
     private function invisibleSkillRefusal(string $key, array $names, int $i, ?int $principalId): ?ToolResult
     {
@@ -252,11 +256,11 @@ final class ConfigurePlanner
         }
 
         foreach ($names as $name) {
-            if (!is_string($name) || !isset($visible[strtolower(trim($name))])) {
+            if (!isset($visible[strtolower(trim($name))])) {
                 return $this->settingsFailure($i, sprintf(
                     "'%s' names '%s', which is not available to this principal. Read get_available_tools and pick from its `skills.visible` list.",
                     $key,
-                    is_string($name) ? $name : gettype($name),
+                    $name,
                 ));
             }
         }
@@ -277,22 +281,38 @@ final class ConfigurePlanner
     }
 
     /**
-     * The `string[]` a multi-select is stored as, or null when the value is
-     * not one. The JSON encoding is the form layer's `Record<string, string>`
-     * convention, which is also what the panel's own reader expects back out
-     * of `?raw=true`.
+     * @param array<string, ToolSetting> $schema
      */
-    private static function encodeList(mixed $value): ?string
+    private static function validKeys(array $schema): string
+    {
+        if ($schema === []) {
+            return 'It declares no settings.';
+        }
+
+        return 'Valid settings: ' . implode(', ', array_keys($schema)) . '.';
+    }
+
+    /**
+     * The `string[]` a multi-select is stored as, or null when the value is not
+     * one.
+     *
+     * @return list<string>|null
+     */
+    private static function stringList(mixed $value): ?array
     {
         if (!is_array($value) || !array_is_list($value)) {
             return null;
         }
+
+        $out = [];
         foreach ($value as $entry) {
             if (!is_string($entry)) {
                 return null;
             }
+            $out[] = $entry;
         }
-        return json_encode($value, JSON_THROW_ON_ERROR);
+
+        return $out;
     }
 
     private function settingsFailure(int $i, string $message): ToolResult
