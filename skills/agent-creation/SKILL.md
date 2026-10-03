@@ -370,11 +370,12 @@ write:
 - `is_favorite` — not part of this patch. The favourite is per-user; there is no such thing as favouriting an agent for everybody.
 - Any other key — dropped at the database layer against its allowlist.
 
-**Not your business, and not blocked either:** `llm_driver_config_id` is *not* in the
-drop list, despite an older version of this skill saying so. It is a real column with a
-foreign key, so a made-up id fails the constraint and a real one would repoint the
-agent at a different LLM configuration. You have no way to read the valid ids, so do not
-send it — an operator sets that. If you need a different model on an agent, say so
+**Not writable through this tool, and refused rather than dropped:** `llm_driver_config_id`,
+`speech_driver_config_id` and `voice_message_retention_count` all sit in the service's
+allowlist but are not part of this surface. The first two decide which model and credential
+set the agent runs on, and you have no way to read the valid ids, so sending one would be
+guessing at a consequential value. An operator sets those. The refusal names the key and
+**the whole patch is refused** — so if you want a different model on an agent, say so
 rather than trying to write the id.
 
 **Types are checked here too, unlike a bare database write.** The patch is coerced and

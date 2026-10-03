@@ -242,6 +242,7 @@ a *different* agent, note that you have no way to read that agent's current list
 | Any `type: 'password'` setting | Refused, always. A credential is the one thing a tool call may not write: the value would land in the call's own recorded arguments, so you could read back the key you just set. Credentials are operator-only. |
 | Replacing another agent's `allowed_skills` | Allowed, and blind — you cannot read their current list. Ask the operator instead. |
 | `notes` inside an `update_agent` patch | Stripped silently. Use `write_notes`. |
+| `llm_driver_config_id` in an `update_agent` patch | Refused, and the whole patch with it. It decides which model and credentials the agent runs on — operator territory, and you cannot read the valid ids. |
 | `write_notes_overwrite` with `content: ""` | Refused, not a no-op. Clearing notes is operator-only. |
 | Assuming a skill is readable because you can see it | `visible` is not `allowed`. Reading needs the name in your allowlist. |
 | Enabling the `agent` tool and expecting `configure_tools` | Six of nine operations are off by default, including both halves of the self-widening path. Ask the operator to enable them. |

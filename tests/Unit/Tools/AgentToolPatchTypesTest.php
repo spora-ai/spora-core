@@ -218,8 +218,8 @@ describe('update_agent — the documented surface', function (): void {
     it('forwards an unknown key for the service to filter', function (): void {
         // The allowlist belongs to AgentService::EDITABLE_AGENT_FIELDS, and
         // AgentToolTest pins that the tool layer forwards rather than filters.
-        // This validator owns value types only, so it must not start
-        // refusing keys that used to pass straight through.
+        // This validator owns value types, so it must not start refusing keys
+        // that used to pass straight through.
         [$tool, $agents, $userId] = makeAgentToolForPatch();
         $agent = $agents->createAgent($userId, ['name' => 'Forwarded']);
 
@@ -232,6 +232,44 @@ describe('update_agent — the documented surface', function (): void {
 
         expect($result->success)->toBeTrue()
             ->and($attributes)->not->toHaveKey('not_a_field');
+    });
+
+    it('refuses the driver-config columns an LLM must not repoint', function (): void {
+        // These are writable through the service allowlist but are not part of
+        // this surface's contract, and two of them decide which model and
+        // credential set an agent runs on. Nothing here lets a model read the
+        // valid ids, so it would be guessing at a consequential value.
+        [$tool, $agents, $userId] = makeAgentToolForPatch();
+        $agent = $agents->createAgent($userId, ['name' => 'Repointed']);
+
+        foreach (['llm_driver_config_id', 'speech_driver_config_id', 'voice_message_retention_count'] as $key) {
+            $result = $tool->execute([
+                'action' => 'update_agent', 'agent_id' => $agent->id,
+                'agent'  => [$key => 1],
+            ], $agent->id, $userId);
+
+            expect($result->success)->toBeFalse("{$key} must not be writable through the tool")
+                ->and($result->content)->toContain("'{$key}' is not writable through this tool")
+                ->and($result->content)->toContain('an operator sets it');
+        }
+
+        expect(storedColumn($agent->id, 'llm_driver_config_id'))->toBeNull();
+    });
+
+    it('refuses the whole patch when one key is not the tool\'s to write', function (): void {
+        [$tool, $agents, $userId] = makeAgentToolForPatch();
+        $agent = $agents->createAgent($userId, ['name' => 'Mixed Patch']);
+
+        // A silent drop would read to the model as "that landed", which is the
+        // same failure shape as the dead override row.
+        $result = $tool->execute([
+            'action' => 'update_agent', 'agent_id' => $agent->id,
+            'agent'  => ['name' => 'Should Not Land', 'llm_driver_config_id' => 1],
+        ], $agent->id, $userId);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('the whole patch is refused')
+            ->and(storedColumn($agent->id, 'name'))->toBe($agent->name);
     });
 
     it('refuses an empty name and an over-long name', function (): void {

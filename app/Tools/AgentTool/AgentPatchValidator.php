@@ -25,8 +25,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  * `"999"` becomes `999` and is then refused for being out of range, rather
  * than being accepted because it arrived quoted.
  *
- * Scope is the fields the `agent` parameter documents. Keys outside that
- * set are forwarded untouched for `AgentService` to filter against
+ * Scope is the fields the `agent` parameter documents, plus a refusal for the
+ * handful of service-writable columns this surface does not own. Anything else
+ * is forwarded untouched for `AgentService` to filter against
  * `EDITABLE_AGENT_FIELDS`, which is where the allowlist lives.
  */
 final class AgentPatchValidator
@@ -51,6 +52,29 @@ final class AgentPatchValidator
         'is_archived'          => 'bool',
     ];
 
+    /**
+     * Columns the service allowlist permits but this surface does not own.
+     *
+     * `AgentService::EDITABLE_AGENT_FIELDS` is the anti-escalation list — what
+     * the tool must not reach past — and it necessarily includes the columns
+     * an operator legitimately edits through the dashboard. Two of them also
+     * decide *which driver configuration an agent runs on*, which is not a
+     * content edit: an LLM that can write them can repoint an agent at a
+     * different model, provider or credential set, and nothing on this surface
+     * lets it read the valid ids first, so it would be guessing at a value
+     * with real consequences.
+     *
+     * Refused rather than dropped, because a silent drop reads to the model as
+     * "that landed" — the same failure shape as the dead override row. Keys
+     * outside both this list and `PATCHABLE` are still forwarded untouched for
+     * the service to filter, which is the boundary `AgentToolTest` pins.
+     */
+    private const NOT_OURS = [
+        'llm_driver_config_id'             => 'which LLM configuration the agent runs on',
+        'speech_driver_config_id'          => 'which speech configuration the agent uses',
+        'voice_message_retention_count'    => 'the voice-message retention window',
+    ];
+
     private const ERR_PREFIX = 'update_agent: ';
 
     /**
@@ -73,6 +97,15 @@ final class AgentPatchValidator
             $key = (string) $key;
             $rule = self::PATCHABLE[$key] ?? null;
             if ($rule === null) {
+                $notOurs = self::NOT_OURS[$key] ?? null;
+                if ($notOurs !== null) {
+                    return ToolResult::fail(self::ERR_PREFIX . sprintf(
+                        "'%s' is not writable through this tool — it decides %s, and an operator sets it. "
+                        . 'Removing the key writes nothing at all, so the whole patch is refused.',
+                        $key,
+                        $notOurs,
+                    ));
+                }
                 $patch[$key] = $value;
                 continue;
             }
