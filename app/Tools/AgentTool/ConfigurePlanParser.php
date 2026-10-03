@@ -47,6 +47,10 @@ final class ConfigurePlanParser
 
     private const CONFIGURE_TOOLS_ERR_PREFIX = 'configure_tools: ';
 
+    /** The two `#[ToolSetting]` types that are not a plain value. */
+    private const TYPE_PASSWORD     = 'password';
+    private const TYPE_MULTI_SELECT = 'multi-select';
+
     public function __construct(
         private readonly ?SkillProviderRegistry $skills = null,
     ) {}
@@ -329,22 +333,7 @@ final class ConfigurePlanParser
         }
         $out = [];
         foreach ($pairs as $key => $value) {
-            $key = (string) $key;
-            $setting = $schema[$key] ?? null;
-            if ($setting === null) {
-                $valid = $schema === []
-                    ? 'It declares no settings.'
-                    : 'Valid settings: ' . implode(', ', array_keys($schema)) . '.';
-
-                return $this->settingsFailure($i, sprintf(
-                    "'%s' is not a setting on %s. %s",
-                    $key,
-                    $toolClass,
-                    $valid,
-                ));
-            }
-
-            $known = $this->coerceSetting($key, $value, $setting, $i, $principalId);
+            $known = $this->coerceSetting((string) $key, $value, $schema, $toolClass, $i, $principalId);
             if ($known instanceof ToolResult) {
                 return $known;
             }
@@ -385,22 +374,33 @@ final class ConfigurePlanParser
     private function coerceSetting(
         string $key,
         mixed $value,
-        ToolSetting $setting,
+        array $schema,
+        string $toolClass,
         int $i,
         ?int $principalId,
     ) {
-        if ($setting->type === 'password') {
+        $setting = $schema[$key] ?? null;
+        if ($setting === null) {
+            $valid = $schema === []
+                ? 'It declares no settings.'
+                : 'Valid settings: ' . implode(', ', array_keys($schema)) . '.';
+
             return $this->settingsFailure($i, sprintf(
-                "'%s' is a credential. The operator sets it in the settings panel; a tool call must not be able to write one, nor read it back through the call's own arguments.",
+                "'%s' is not a setting on %s. %s",
                 $key,
+                $toolClass,
+                $valid,
             ));
         }
 
-        if ($setting->type !== 'multi-select') {
-            return $value;
-        }
-
-        return $this->coerceMultiSelect($key, $value, $setting, $i, $principalId);
+        return match ($setting->type) {
+            self::TYPE_PASSWORD     => $this->settingsFailure($i, sprintf(
+                "'%s' is a credential. The operator sets it in the settings panel; a tool call must not be able to write one, nor read it back through the call's own arguments.",
+                $key,
+            )),
+            self::TYPE_MULTI_SELECT => $this->coerceMultiSelect($key, $value, $setting, $i, $principalId),
+            default                 => $value,
+        };
     }
 
     /**
