@@ -209,9 +209,15 @@ final class AssetController
         $name = $asset->filename !== null && $asset->filename !== ''
             ? $asset->filename
             : $asset->publicUrl();
+
+        // `ingest()` stores the filename as handed, so this is the only place a
+        // CR/LF cannot reach the header. PHP's `header()` would refuse the whole
+        // value — a SAPI backstop, not a fix; the download just loses its name.
+        $name = basename(preg_replace('/[\x00-\x1F\x7F]/', '', $name) ?? '');
+
         $response->headers->set(
             'Content-Disposition',
-            sprintf('attachment; filename="%s"', addcslashes(basename($name), '"\\')),
+            sprintf('attachment; filename="%s"', $name === '' ? 'download' : addcslashes($name, '"\\')),
         );
     }
 

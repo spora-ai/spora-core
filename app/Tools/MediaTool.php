@@ -93,7 +93,9 @@ use Symfony\Component\HttpFoundation\Request;
  *                           non-allowlisted MIME is deleted and rejected.
  *                           **Not idempotent** — a retry creates a second
  *                           asset, so reuse the returned `asset_id`.
- *                           Enabled and auto-approved.
+ *                           Enabled and auto-approved, and the one write with
+ *                           no natural key — so the row count is unbounded.
+ *                           Bound it per agent via `requiresApprovalByDefault`.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *

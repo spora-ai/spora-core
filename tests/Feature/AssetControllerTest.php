@@ -261,6 +261,55 @@ test('GET /api/v1/assets/{uuid} sends a Cache-Control header', function (): void
     }
 });
 
+test('GET /api/v1/assets/{uuid} strips control characters out of Content-Disposition', function (): void {
+    // Ingested the way a plugin or a pre-sanitisation row would: `ingest()`
+    // stores the filename as given, so the route cannot assume a scrubbed one.
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'x',
+            mime: 'audio/mpeg',
+            filename: "speech\r\nX-Injected: 1.mp3",
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+        $response = $router->dispatch(Request::create($path, 'GET'));
+
+        $disposition = (string) $response->headers->get('Content-Disposition');
+
+        expect($disposition)->not->toContain("\r");
+        expect($disposition)->not->toContain("\n");
+        expect($disposition)->toContain('speechX-Injected: 1.mp3');
+        expect($disposition)->not->toContain('filename=""');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} falls back to a usable name when stripping empties the filename', function (): void {
+    // The strip is a new way to arrive at an empty name.
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'x',
+            mime: 'audio/mpeg',
+            filename: "\r\n",
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+        $response = $router->dispatch(Request::create($path, 'GET'));
+
+        expect((string) $response->headers->get('Content-Disposition'))
+            ->toContain('filename="download"');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
 test('GET /api/v1/assets/{uuid} returns 404 when the requester is not the owner and not an admin', function (): void {
     // assetTestSetup() with $asAdmin=false: the mock returns isAdmin=false
     // and currentUserId=null, so canAccessAsset denies the request even
