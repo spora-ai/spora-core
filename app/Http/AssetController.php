@@ -210,15 +210,9 @@ final class AssetController
             ? $asset->filename
             : $asset->publicUrl();
 
-        // Control characters are stripped here rather than escaped, because
-        // this is the only place a CR/LF cannot escape. `create_media` and
-        // the upload endpoint both scrub the name before storing it and
-        // `MediaEmbed` scrubs it again on the render path, but `ingest()`
-        // itself stores whatever it is handed, so a plugin or a legacy row
-        // can still carry one. `addcslashes` alone leaves it in the value: a
-        // CR/LF there is a header-splitting shape, and PHP's `header()`
-        // refusing the whole header is a SAPI backstop rather than a fix —
-        // the download silently loses its filename instead.
+        // `ingest()` stores the filename as handed, so this is the only place a
+        // CR/LF cannot reach the header. PHP's `header()` would refuse the whole
+        // value — a SAPI backstop, not a fix; the download just loses its name.
         $name = basename(preg_replace('/[\x00-\x1F\x7F]/', '', $name) ?? '');
 
         $response->headers->set(

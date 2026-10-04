@@ -262,13 +262,8 @@ test('GET /api/v1/assets/{uuid} sends a Cache-Control header', function (): void
 });
 
 test('GET /api/v1/assets/{uuid} strips control characters out of Content-Disposition', function (): void {
-    // Ingested the way a plugin or a pre-sanitisation legacy row would, since
-    // `ingest()` stores the filename as given. Both tools that build a name
-    // (`MediaCreateHandler::sanitiseFilename`, `MediaEmbed::fileCard`) strip
-    // control characters, so the download route used to depend on every caller
-    // having done so — and a CR/LF in a header value is a header-splitting
-    // shape, which PHP's `header()` refuses outright, costing the download its
-    // filename rather than merely looking odd.
+    // Ingested the way a plugin or a pre-sanitisation row would: `ingest()`
+    // stores the filename as given, so the route cannot assume a scrubbed one.
     [$router, $archive, $tmp, $restore] = assetTestSetup();
 
     try {
@@ -286,7 +281,6 @@ test('GET /api/v1/assets/{uuid} strips control characters out of Content-Disposi
         expect($disposition)->not->toContain("\r");
         expect($disposition)->not->toContain("\n");
         expect($disposition)->toContain('speechX-Injected: 1.mp3');
-        // A stripped name must not collapse the header to an empty filename.
         expect($disposition)->not->toContain('filename=""');
     } finally {
         assetTestTeardown($tmp);
@@ -295,9 +289,7 @@ test('GET /api/v1/assets/{uuid} strips control characters out of Content-Disposi
 });
 
 test('GET /api/v1/assets/{uuid} falls back to a usable name when stripping empties the filename', function (): void {
-    // The control-character strip is new, so it is also a new way to arrive at
-    // an empty name — `"download"` keeps the header honest instead of
-    // advertising `filename=""`, which is what the fallback is for.
+    // The strip is a new way to arrive at an empty name.
     [$router, $archive, $tmp, $restore] = assetTestSetup();
 
     try {
