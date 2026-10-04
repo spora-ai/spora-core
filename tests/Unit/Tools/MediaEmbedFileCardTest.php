@@ -101,6 +101,45 @@ it('registers every class it emits with the frontend, so none is silently droppe
         ->toBe([], 'every class the card emits must appear in the frontend @source inline() list');
 });
 
+it('documents the same classes in the media-library skill that it emits', function (): void {
+    // The skill shows the card's markup and tells the model to echo it
+    // verbatim, which makes the example load-bearing: a class the skill
+    // teaches but the code no longer emits is a card the model reproduces
+    // unstyled, and a class the code emits but the skill omits is one the
+    // model is being told not to reproduce. The card went from named
+    // BEM-ish classes to Tailwind utilities across three changes, and the
+    // skill's fenced example was still showing the first version — which is
+    // how the shipped docs ended up documenting markup that no longer exists.
+    //
+    // Compared as class lists, not raw strings: the example substitutes its
+    // own uuid and filename, which is the whole point of an example.
+    preg_match_all('/class="([^"]*)"/', MediaEmbed::fileCard('/u', 'f.docx', 900), $emittedClasses);
+    $emitted = array_values(array_unique(array_merge(...array_map(
+        static fn(string $attr): array => preg_split('/\s+/', trim($attr)),
+        $emittedClasses[1],
+    ))));
+    sort($emitted);
+
+    $skill = @file_get_contents(BASE_PATH . '/skills/media-library/SKILL.md');
+    if ($skill === false) {
+        $this->markTestSkipped('skills/media-library/SKILL.md is not readable from this checkout.');
+    }
+
+    // The card's own <div> line — the only one starting the outer wrapper.
+    preg_match('/^<div class="[^"]*inline-flex.*$/m', $skill, $m);
+    expect($m)->not->toBe([], 'the media-library skill no longer shows the card markup');
+
+    preg_match_all('/class="([^"]*)"/', $m[0], $docClasses);
+    $documented = array_values(array_unique(array_merge(...array_map(
+        static fn(string $attr): array => preg_split('/\s+/', trim($attr)),
+        $docClasses[1],
+    ))));
+    sort($documented);
+
+    expect($documented)
+        ->toBe($emitted, 'the skill\'s card example must carry exactly the classes MediaEmbed::fileCard() emits');
+});
+
 it('formats byte counts in binary units across every magnitude', function (int $size, string $expected): void {
     expect(MediaEmbed::fileCard('/api/v1/assets/a', 'a', $size))
         ->toContain($expected);

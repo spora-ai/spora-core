@@ -41,13 +41,15 @@ Want a **clean** markdown snippet only — no asset header, no extracted text? U
 
 ### Document assets render as a download card, not a link
 
-The `document` bucket (`text/*` and `application/*` — Markdown, PDF, CSV, JSON, XML, YAML, HTML, plus anything a plugin's converter registers) no longer embeds as a bare markdown `[label](url)`. It embeds as a single-line `spora-file-card` block:
+The `document` bucket (`text/*` and `application/*` — Markdown, PDF, CSV, JSON, XML, YAML, HTML, plus anything a plugin's converter registers) no longer embeds as a bare markdown link. It embeds as a single-line download card:
 
 ```html
-<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/<uuid>.pdf"><span class="spora-file-card__name">report.pdf</span><span class="spora-file-card__meta">12.4 KB · application/pdf</span></a></div>
+<div class="inline-flex max-w-120 my-[0.6rem] rounded-lg border border-foreground/10 bg-muted"><a class="flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-inherit no-underline transition-colors hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-ring spora-file-card__glyph" href="/api/v1/assets/<uuid>.pdf"><span class="min-w-0 flex-auto truncate font-medium">report.pdf</span><span class="shrink-0 text-xs text-muted-foreground">12.4 KB</span></a></div>
 ```
 
-This is one `MediaType::Document` render, not a per-op or per-producer format — `get_media`, `get_embed_code`, `create_media`, and `create_derivative` all produce the identical block for the same asset. **Echo the whole block verbatim.** Do not rewrite the label, rename the file, or hand-roll a markdown link in its place. The filename and the `href` are the entire contract; the surrounding `div`/`span` elements are presentational chrome the chat UI styles with CSS, there is no icon element to reproduce, and there is no `aria-hidden` attribute for you to add. If you need prose *about* the document, write it above or below the card — the card itself carries nothing beyond the filename and the file size. The size is omitted when the archive does not know it. There is no MIME on the card: the filename's extension already says what the file is.
+Those class names are Tailwind utilities, and they are the whole styling mechanism — spora-frontend registers this exact list with `@source inline(...)` because the string is built in PHP that Tailwind's scanner never reads. A class that is not on that list renders as an unstyled card with no error anywhere. So treat the markup above as fixed: do not rename a class, drop one as "noise", or add one. If the card ever needs a new utility, it has to be added to both files in the same change.
+
+This is one `MediaType::Document` render, not a per-op or per-producer format — `get_media`, `get_embed_code`, `create_media`, and `create_derivative` all produce the identical block for the same asset. **Echo the whole block verbatim.** Do not rewrite the label, rename the file, or hand-roll a markdown link in its place. The filename and the `href` are the entire contract; the `div`/`span` elements around them are presentational and there is no icon element to reproduce and no `aria-hidden` attribute for you to add. If you need prose *about* the document, write it above or below the card — it carries nothing beyond the filename and the file size. The size is omitted when the archive does not know it, and there is no MIME: the extension on the filename already says what the file is.
 
 The `href` is the session-authenticated `/api/v1/assets/<uuid>` route, not the public share URL, so a click forces a download. To hand the user an externally shareable link, use `get_public_url` as before.
 
