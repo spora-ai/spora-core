@@ -48,10 +48,14 @@ function createMediaAssetsTable(): void
         Capsule::schema()->dropIfExists('media_assets');
         Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
             $t->string('id', 36)->primary();
-            // Minimal stand-in for the real table: migration 0080 only
-            // needs the columns it touches plus something to hang the
-            // `after()` on.
-            $t->string('prompt')->nullable();
+            // Migration 0080 — the subject of this file — still places
+            // `transcript` with `->after('markdown_content')`, and that
+            // anchor only exists until migration 0091 drops it. The
+            // fixture therefore models the *pre-0091* schema, which is the
+            // correct shape for a test that runs 0080 in isolation. (On
+            // MySQL/MariaDB a missing anchor column is a hard 1054, not a
+            // no-op like SQLite's.)
+            $t->text('markdown_content')->nullable();
             $t->timestamps();
         });
     } finally {
@@ -129,10 +133,10 @@ test('migration is idempotent — running twice does not error', function (): vo
 test('existing rows survive migration with null transcript columns', function (): void {
     createMediaAssetsTable();
     Capsule::table('media_assets')->insert([
-        'id'         => 'legacy-uuid-1',
-        'prompt'     => null,
-        'created_at' => date('Y-m-d H:i:s'),
-        'updated_at' => date('Y-m-d H:i:s'),
+        'id'               => 'legacy-uuid-1',
+        'markdown_content' => null,
+        'created_at'       => date('Y-m-d H:i:s'),
+        'updated_at'       => date('Y-m-d H:i:s'),
     ]);
 
     runTranscribeMigration()->up();
