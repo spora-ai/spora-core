@@ -18,14 +18,18 @@ Eight operations on a single `media` tool: `search`, `get_media`, `get_embed_cod
 | --- | --- | --- | --- |
 | `search` | true | false | Paginated list of `media_assets` rows |
 | `get_media` | true | false | Metadata + markdown embed for one asset |
+| `get_public_url` | true | **true** | Mint or fetch shareable URL |
 | `get_embed_code` | true | false | Clean embed snippet, no header |
+| `get_source` | true | false | Read text bytes or extracted markdown |
 | `list_derivatives` | true | false | Derivative rows for a parent asset |
-| `create_derivative` | true | true | Fresh derivative, idempotent on (parent, format, producer_plugin, producer_operation) |
-| `create_media` | true | true | New source asset from authored text, **not idempotent** |
-| `get_public_url` | false | true | Mint or fetch shareable URL |
-| `get_source` | false | true | Read text bytes or extracted markdown |
+| `create_derivative` | true | false | Fresh derivative, idempotent on (parent, format, producer_plugin, producer_operation) |
+| `create_media` | true | false | New source asset from authored text, **not idempotent** |
 
-The LLM must not enable an op the operator has not opted into. `get_public_url` and `get_source` are off by default because they surface source bytes or external share links — operators enable per-agent in the dashboard.
+All eight are on by default, so a `media` call needs no prior opt-in. `get_public_url` is the only op that asks the operator to approve each call — it is the one that mints a link which keeps working outside the session. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
+
+If a call to `get_public_url` comes back as an approval request rather than a URL, that is the gate working. Do not retry it in a loop, and do not try to route around it with `get_media` — the embed it returns is a session-authenticated `/api/v1/assets/<uuid>` path, not a shareable link.
+
+An operator can still disable an op or clear its approval per-agent in the dashboard; that narrows what you are offered without a code change.
 
 ## Choosing the right op
 
@@ -61,7 +65,7 @@ Pick the bucket that matches what you're after; don't expect exact-mime filterin
 
 The same argument means something different on `create_media`, and the difference is the whole reason the op is safe. There, `mime_type` is a **declared hint, never a claim**: the byte ingest path always re-sniffs the payload and ignores the declared value. A hint that is not on the operator's allowlist is rejected before anything is stored (the failure message lists what *is* allowed), and a hint that *is* allowed but whose bytes sniff to a non-allowlisted type is stored, found on re-gate, deleted, and rejected. Either way the call fails. **So `data.mime_type` on the response — not the value you sent — is the authoritative type.** Read it back; never report the type you requested as though it had been confirmed.
 
-Want a **shareable external link**? Use `get_public_url`. Mints a public access token on first call (persists a token on the asset row), then returns the stable URL. Off by default, always operator-approved. The URL uses the operator-configured `app_url`, not the per-request host — so it's stable across requests and not vulnerable to Host-header spoofing.
+Want a **shareable external link**? Use `get_public_url`. Mints a public access token on first call (persists a token on the asset row), then returns the stable URL. The one op that asks the operator to approve every call, so expect a prompt before the URL comes back. The URL uses the operator-configured `app_url`, not the per-request host — so it's stable across requests and not vulnerable to Host-header spoofing.
 
 Want to **read bytes** to iterate on the source (re-typeset a `.typ`, re-ingest an extracted document, etc.)? Use `get_source`. Mime shapes decide what comes back:
 
@@ -71,7 +75,7 @@ Want to **read bytes** to iterate on the source (re-typeset a `.typ`, re-ingest 
 
 Want the **renders** of a known source? Use `list_derivatives`. Pass `format` to narrow to one derivative kind (e.g. only PNG). Each row carries `media_id`, `format`, `asset_url`, `label`, `producer_plugin`, `producer_operation`, `created_at` — the same shape the operator dashboard's VersionsStrip renders, so the LLM and operator see identical rows.
 
-Want to **render a source** into a fresh derivative? Use `create_derivative`. Pick a `format` that matches a registered producer for the parent's MIME/extension (e.g. "png" for a `.typ` source, "thumbnail-256" for an uploaded image). **Idempotent on `(parent_id, format, producer_plugin, producer_operation)`** — re-rendering returns the existing derivative id without producing a new row. Per-call approval because producers may take seconds.
+Want to **render a source** into a fresh derivative? Use `create_derivative`. Pick a `format` that matches a registered producer for the parent's MIME/extension (e.g. "png" for a `.typ` source, "thumbnail-256" for an uploaded image). **Idempotent on `(parent_id, format, producer_plugin, producer_operation)`** — re-rendering returns the existing derivative id without producing a new row, so a blind retry is the safe pattern even though a render can take seconds. Auto-approved: the derivative is a new row derived from a parent you already own, and it appears in the operator's media library like any other.
 
 Want to **put authored text into the archive** so it can be rendered, shared, or read back later? Use `create_media`. Arguments:
 

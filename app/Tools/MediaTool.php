@@ -38,9 +38,12 @@ use Symfony\Component\HttpFoundation\Request;
  *                           both directions without a second round-trip.
  *                           Auto-approved read.
  *   - `get_public_url`    — mint or fetch the public shareable URL of a single
- *                           asset. Hidden by default (`enabledByDefault: false`)
- *                           and always requires approval. Operators opt the
- *                           operation in via a per-agent override.
+ *                           asset. The only operation that requires approval
+ *                           by default: it is the one that hands out a link
+ *                           that keeps working outside the session, so the
+ *                           operator sees and answers every call. Operators
+ *                           can still drop the approval per-agent via an
+ *                           override.
  *   - `get_embed_code`    — return a markdown snippet (image / audio / video /
  *                           link) the assistant can drop into its reply,
  *                           pointing at the local archive URL. Auto-approved
@@ -57,11 +60,10 @@ use Symfony\Component\HttpFoundation\Request;
  *                           the LLM gets something it can actually iterate
  *                           on. When no markdown_content exists, fail with a
  *                           hint pointing at `get_media` /
- *                           `list_derivatives`. Hidden by default
- *                           (`enabledByDefault: false`) and always requires
- *                           approval — every call surfaces the asset's source
- *                           to the LLM, which is a stronger promise than
- *                           `get_media`'s embed-only contract.
+ *                           `list_derivatives`. Enabled and auto-approved: it
+ *                           reads a row the calling agent already owns under
+ *                           the same scope rules as `get_media`, so it grants
+ *                           no reach the agent did not already have.
  *   - `list_derivatives`  — return the derivative rows of a parent asset
  *                           (e.g. the PNG/PDF renders of a `.typ` source).
  *                           Takes an optional `format` filter to narrow
@@ -75,8 +77,12 @@ use Symfony\Component\HttpFoundation\Request;
  *                           requested `format`. Idempotent on the
  *                           natural key `(parent_id, format, producer_plugin,
  *                           producer_operation)` — re-rendering returns
- *                           the same derivative id. Off by default; each
- *                           call requires operator approval.
+ *                           the same derivative id, which is what makes a
+ *                           blind retry safe. Enabled and auto-approved: the
+ *                           derivative is derived from a parent the agent
+ *                           already owns, it costs a render rather than
+ *                           granting access, and the row it writes is
+ *                           operator-visible in the dashboard.
  *   - `create_media`       — store LLM-authored text (Markdown, plain text,
  *                           CSV, JSON, XML, YAML, HTML) as a new source
  *                           asset. The only write that needs no existing
@@ -87,7 +93,7 @@ use Symfony\Component\HttpFoundation\Request;
  *                           non-allowlisted MIME is deleted and rejected.
  *                           **Not idempotent** — a retry creates a second
  *                           asset, so reuse the returned `asset_id`.
- *                           Per-call operator approval.
+ *                           Enabled and auto-approved.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -136,8 +142,8 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'get_public_url',
-    description: 'Mint or fetch a public shareable URL. Off by default — enable first.',
-    enabledByDefault: false,
+    description: 'Mint or fetch a public shareable URL. Operator approval on every call — it hands out a link that works outside the session.',
+    enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
@@ -149,8 +155,8 @@ use Symfony\Component\HttpFoundation\Request;
 #[ToolOperation(
     name: 'get_source',
     description: 'Read source bytes (text mimes) or extracted markdown preview (binary mimes). See skill for mime handling.',
-    enabledByDefault: false,
-    requiresApprovalByDefault: true,
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'list_derivatives',
@@ -160,16 +166,16 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'create_derivative',
-    description: 'Render a fresh derivative via a registered producer; idempotent on (parent, format, producer_plugin, producer_operation). Per-call approval.',
+    description: 'Render a fresh derivative via a registered producer; idempotent on (parent, format, producer_plugin, producer_operation). Safe to retry — a repeat returns the existing derivative id.',
     enabledByDefault: true,
-    requiresApprovalByDefault: true,
+    requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'create_media',
     description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML, HTML). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
     operatorDescription: 'Create a text media asset',
     enabledByDefault: true,
-    requiresApprovalByDefault: true,
+    requiresApprovalByDefault: false,
 )]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(

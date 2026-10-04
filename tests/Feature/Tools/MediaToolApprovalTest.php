@@ -21,18 +21,20 @@ use Spora\Tools\MediaTool;
  *
  *   - `search`            : enabled_by_default = true,  requires_approval_by_default = false
  *   - `get_media`         : enabled_by_default = true,  requires_approval_by_default = false
- *   - `get_public_url`    : enabled_by_default = false, requires_approval_by_default = true
+ *   - `get_public_url`    : enabled_by_default = true,  requires_approval_by_default = true
  *   - `get_embed_code`    : enabled_by_default = true,  requires_approval_by_default = false
- *   - `get_source`        : enabled_by_default = false, requires_approval_by_default = true
+ *   - `get_source`        : enabled_by_default = true,  requires_approval_by_default = false
  *   - `list_derivatives`  : enabled_by_default = true,  requires_approval_by_default = false
- *   - `create_derivative` : enabled_by_default = true,  requires_approval_by_default = true
- *   - `create_media`      : enabled_by_default = true,  requires_approval_by_default = true
+ *   - `create_derivative` : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `create_media`      : enabled_by_default = true,  requires_approval_by_default = false
  *   - The discriminator `enum` in the generated JSON schema lists all eight
  *     operations (the orchestrator narrows the enum per-agent).
- *   - When no per-agent override exists, only `get_public_url` and `get_source`
- *     are filtered out of the tool list — `create_derivative` and
- *     `create_media` are exposed by default and gate on per-call approval
- *     instead. Matches `enabledByDefault` in
+ *   - All eight are enabled by default, so an agent with no override row sees
+ *     the full matrix. `get_public_url` is the sole operation that asks for
+ *     approval: it is the one that mints a link that outlives the session, so
+ *     every call is put in front of the operator. The remaining seven are
+ *     reads or writes the agent could already make against assets it owns.
+ *     Matches `enabledByDefault` in
  *     {@see ToolDefinitionBuilder::buildToolDefinitions()}.
  *
  * Uses a real `MediaArchiveService` rather than a Mockery mock because
@@ -120,9 +122,9 @@ describe('MediaTool attributes', function (): void {
             ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('marks get_public_url as hidden by default and requiring approval', function (): void {
+    it('marks get_public_url as enabled by default and requiring approval', function (): void {
         $op = mediaToolOpByName('get_public_url');
-        expect($op->enabledByDefault)->toBeFalse()
+        expect($op->enabledByDefault)->toBeTrue()
             ->and($op->requiresApprovalByDefault)->toBeTrue();
     });
 
@@ -132,10 +134,10 @@ describe('MediaTool attributes', function (): void {
             ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('marks get_source as hidden by default and requiring approval', function (): void {
+    it('marks get_source as enabled by default and auto-approved', function (): void {
         $op = mediaToolOpByName('get_source');
-        expect($op->enabledByDefault)->toBeFalse()
-            ->and($op->requiresApprovalByDefault)->toBeTrue();
+        expect($op->enabledByDefault)->toBeTrue()
+            ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
     it('marks list_derivatives as enabled by default and auto-approved', function (): void {
@@ -144,16 +146,44 @@ describe('MediaTool attributes', function (): void {
             ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('marks create_derivative as enabled by default and requiring approval', function (): void {
+    it('marks create_derivative as enabled by default and auto-approved', function (): void {
         $op = mediaToolOpByName('create_derivative');
         expect($op->enabledByDefault)->toBeTrue()
-            ->and($op->requiresApprovalByDefault)->toBeTrue();
+            ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('marks create_media as enabled by default and requiring approval', function (): void {
+    it('marks create_media as enabled by default and auto-approved', function (): void {
         $op = mediaToolOpByName('create_media');
         expect($op->enabledByDefault)->toBeTrue()
-            ->and($op->requiresApprovalByDefault)->toBeTrue();
+            ->and($op->requiresApprovalByDefault)->toBeFalse();
+    });
+
+    it('gates on approval for get_public_url alone', function (): void {
+        // The invariant behind the per-op assertions above, stated once so a
+        // future operation cannot quietly join the approval set: enabling an op
+        // is cheap to undo from the dashboard, but an approval prompt nobody
+        // expects is a stall on every turn. So exactly one operation may ask,
+        // and it has to be the one that reaches outside the session.
+        $ops = mediaToolOperations();
+
+        $approving = array_values(array_map(
+            static fn(ToolOperation $op): string => $op->name,
+            array_filter($ops, static fn(ToolOperation $op): bool => $op->requiresApprovalByDefault),
+        ));
+
+        expect($approving)->toBe(['get_public_url']);
+    });
+
+    it('enables every operation by default', function (): void {
+        $disabled = array_values(array_map(
+            static fn(ToolOperation $op): string => $op->name,
+            array_filter(
+                mediaToolOperations(),
+                static fn(ToolOperation $op): bool => !$op->enabledByDefault,
+            ),
+        ));
+
+        expect($disabled)->toBe([]);
     });
 
     it('exposes the scope setting as a select with two options', function (): void {
@@ -194,14 +224,15 @@ describe('MediaTool parameter schema', function (): void {
 });
 
 describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
-    it('omits only get_public_url and get_source when no per-agent override exists', function (): void {
-        // No AgentToolOperationOverride rows for this agent — the orchestrator's
-        // ToolDefinitionBuilder should hide only the two ops with
-        // `enabledByDefault: false` (`get_public_url`, `get_source`) and emit
-        // every other op (`search`, `get_media`, `get_embed_code`,
-        // `list_derivatives`, `create_derivative`, `create_media`) regardless
-        // of whether the op requires approval; approval gates execution, not
-        // schema exposure.
+    it('exposes all eight operations when no per-agent override exists', function (): void {
+        // No AgentToolOperationOverride rows for this agent. Every op declares
+        // `enabledByDefault: true`, so the full matrix is exposed — including
+        // `get_public_url`, which is exposed but still asks for approval.
+        //
+        // That split is the point: the enum is what the model may *ask* for,
+        // and approval is decided per call at execute time. Narrowing the enum
+        // by approval would make a setting the operator can change mid-task
+        // silently rewrite the tool contract the model was already given.
         $toolInstance = buildMediaToolForSchema();
 
         $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
@@ -211,11 +242,44 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
         expect($defs[0]['function']['name'])->toBe('media');
 
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
-        expect($enum)->toBe(['search', 'get_media', 'get_embed_code', 'list_derivatives', 'create_derivative', 'create_media']);
-        expect($enum)->not->toContain('get_public_url', 'get_source');
+        expect($enum)->toBe([
+            'search',
+            'get_media',
+            'get_public_url',
+            'get_embed_code',
+            'get_source',
+            'list_derivatives',
+            'create_derivative',
+            'create_media',
+        ]);
     });
 
-    it('includes get_public_url when a per-agent override opts the operation in', function (): void {
+    it('narrows the enum when a per-agent override disables one operation', function (): void {
+        // The other direction still works: an explicit per-agent `enabled = 0`
+        // removes the op from the enum even though it is on by default. This is
+        // the escape hatch for an operator who wants the tool without one of
+        // its operations, without a code change.
+        $agentId = seedMediaToolApprovalAgent();
+
+        AgentToolOperationOverride::create([
+            'agent_id'                  => $agentId,
+            'tool_class'                => MediaTool::class,
+            'operation'                 => 'get_source',
+            'enabled'                   => 0,
+            'default_requires_approval' => 0,
+        ]);
+
+        $toolInstance = buildMediaToolForSchema();
+        $builder = new ToolDefinitionBuilder([$toolInstance], null, null);
+        $defs    = $builder->buildToolDefinitions([MediaTool::class], agentId: $agentId, context: null);
+
+        expect($defs)->toHaveCount(1);
+        $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
+        expect($enum)->not->toContain('get_source');
+        expect($enum)->toContain('get_public_url', 'create_media');
+    });
+
+    it('keeps get_public_url in the enum while a per-agent override still requires approval', function (): void {
         $agentId = seedMediaToolApprovalAgent();
 
         AgentToolOperationOverride::create([
@@ -232,7 +296,18 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
 
         expect($defs)->toHaveCount(1);
         $enum = $defs[0]['function']['parameters']['properties']['action']['enum'];
-        expect($enum)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'list_derivatives', 'create_derivative', 'create_media']);
+        // Declaration order, not filtered order: the override enabled an op
+        // that was already on, so the enum comes back complete.
+        expect($enum)->toBe([
+            'search',
+            'get_media',
+            'get_public_url',
+            'get_embed_code',
+            'get_source',
+            'list_derivatives',
+            'create_derivative',
+            'create_media',
+        ]);
     });
 
     it('excludes the tool entirely when the agent does not have it enabled', function (): void {

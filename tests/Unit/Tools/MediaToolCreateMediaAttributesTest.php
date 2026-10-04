@@ -18,10 +18,14 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
  *      `action` enum, and in the `Invalid action` message the `default`
  *      arm emits (an op missing from that string tells the model the
  *      op does not exist, even though dispatch works).
- *   2. It has to be *gated correctly* — `enabledByDefault: true` but
- *      `requiresApprovalByDefault: true`, because it is the first
- *      MediaTool write that needs no existing parent, so it can mint an
- *      archive row straight from unapproved LLM output.
+ *   2. It has to be *gated correctly* — `enabledByDefault: true` and
+ *      auto-approved, because the row it writes is bounded on every side
+ *      that would make an unapproved write surprising: the payload is
+ *      capped at 1 MiB, the MIME is re-sniffed from the bytes and
+ *      allowlist-gated, and the asset is scoped to the calling agent.
+ *      What an operator sees afterwards is an ordinary library row, not
+ *      a new capability. `get_public_url` is the one op that asks for
+ *      approval, because it is the one that reaches outside the session.
  *
  * The `required[]` narrowings matter for a second reason: `content` and
  * `filename` are meaningless to every other op, so leaving them
@@ -57,11 +61,11 @@ function createMediaParameter(string $name): ToolParameter
     throw new RuntimeException("MediaTool has no #[ToolParameter] named {$name}");
 }
 
-it('declares create_media as enabled by default and requiring approval', function (): void {
+it('declares create_media as enabled by default and auto-approved', function (): void {
     $op = createMediaOperation();
 
     expect($op->enabledByDefault)->toBeTrue()
-        ->and($op->requiresApprovalByDefault)->toBeTrue()
+        ->and($op->requiresApprovalByDefault)->toBeFalse()
         ->and($op->operatorDescription)->toBe('Create a text media asset');
 });
 
