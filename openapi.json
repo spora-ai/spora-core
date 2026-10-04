@@ -3485,6 +3485,51 @@
                 ]
             }
         },
+        "/api/v1/skills/{slug}/files/{path}": {
+            "get": {
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "File Skill",
+                "parameters": [
+                    {
+                        "name": "slug",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "path",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "principal_id",
+                        "in": "query",
+                        "description": "Narrow the lookup to one principal the caller controls, under the same discard-not-reject rule as the listing. A skill the caller cannot see answers 404, not 403.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/search": {
             "get": {
                 "tags": [

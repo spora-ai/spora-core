@@ -342,12 +342,15 @@ final class RouteDefinitions
 
     private static function registerSkillRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
-        // Skills — list + detail. The list powers the Skill tool's
-        // `allowed_skills` multi-select `dataSource`; the detail
-        // endpoint surfaces the full SKILL.md body and sidecar listing
-        // for the admin UI's skill-detail view.
+        // Skills — list, detail, and one sidecar's contents. The list powers
+        // the Skill tool's `allowed_skills` multi-select `dataSource`; the
+        // detail endpoint surfaces the full SKILL.md body and sidecar
+        // listing for the admin UI's skill-detail view; the file endpoint is
+        // what makes a listed sidecar openable, which the detail alone
+        // cannot do — it carries sizes, not contents.
         $r->addRoute('GET', '/api/v1/skills', [SkillController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_SKILLS_SLUG, [SkillController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_SKILLS_SLUG . '/files/{path}', [SkillController::class, 'file'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // The ⌘K palette had no endpoint and filtered Pinia stores directly,
         // which left anything served by a plugin unsearchable.

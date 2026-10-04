@@ -7,6 +7,7 @@ use Spora\Http\SkillController;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Skills\Providers\FilesystemSkillProvider;
+use Spora\Skills\SkillProviderInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
 use Symfony\Component\HttpFoundation\Request;
@@ -330,4 +331,174 @@ test('a caller with no principal row still sees the shipped skills', function ()
         @rmdir($root . '/git');
         @rmdir($root);
     }
+});
+
+/**
+ * `GET /skills/{slug}/files/{path}`.
+ *
+ * The gap this closes: `show()` carries `files` as `{path, bytes}` and the
+ * `SKILL.md` body, so a shipped skill's sidecars were listed and unopenable. These
+ * pin that the read works, and — more importantly — that it cannot be turned into
+ * a way to read what a caller is not entitled to see.
+ */
+describe('GET /skills/{slug}/files/{path}', function (): void {
+
+    it('returns a sidecar listed by the detail endpoint', function (): void {
+        $userId = skillCtrlUser('file-own@example.com');
+        $GLOBALS['__skillCtrlUserId'] = $userId;
+        [$controller, $cleanup, $root] = makeSkillControllerFixture();
+        try {
+            // writeToySkillMd creates the skill directory; the sidecar goes inside it.
+            writeToySkillMd($root, 'git', '# Body', 'Git skill.');
+            $dir = $root . '/git';
+            mkdir($dir . '/templates', 0o755, true);
+            file_put_contents($dir . '/templates/report.typ', '#let title = "Report"');
+
+            // The detail endpoint has to list it, or there is nothing to click.
+            $show = Request::create('/api/v1/skills/git');
+            $show->attributes->set('slug', 'git');
+            $detail = json_decode((string) $controller->show($show)->getContent(), true);
+            expect(array_column($detail['data']['skill']['files'], 'path'))
+                ->toContain('templates/report.typ');
+
+            $request = Request::create('/api/v1/skills/git/files/templates/report.typ');
+            $request->attributes->set('slug', 'git');
+            $request->attributes->set('path', 'templates/report.typ');
+            $response = $controller->file($request);
+            $payload = json_decode((string) $response->getContent(), true);
+
+            expect($response->getStatusCode())->toBe(200)
+                ->and($payload['data']['path'])->toBe('templates/report.typ')
+                ->and($payload['data']['content'])->toBe('#let title = "Report"')
+                ->and($payload['data']['bytes'])->toBe(21);
+        } finally {
+            $cleanup();
+        }
+    });
+
+    it('refuses a path the skill does not contain', function (): void {
+        $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-missing@example.com');
+        [$controller, $cleanup, $root] = makeSkillControllerFixture();
+        try {
+            writeToySkillMd($root, 'git', '# Body', 'Git skill.');
+
+            $request = Request::create('/api/v1/skills/git/files/nope.txt');
+            $request->attributes->set('slug', 'git');
+            $request->attributes->set('path', 'nope.txt');
+            $response = $controller->file($request);
+
+            expect($response->getStatusCode())->toBe(404)
+                ->and(json_decode((string) $response->getContent(), true)['error']['code'])
+                ->toBe('SKILL_FILE_NOT_FOUND');
+        } finally {
+            $cleanup();
+        }
+    });
+
+    it('answers 404 for a traversal, and the provider never sees it', function (): void {
+        // The path is rejected by the provider's containment check. What matters
+        // here is that the answer is a 404 and not a 403 or a file: a traversal
+        // that *succeeded* would be a read of anything the process can open.
+        $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-traversal@example.com');
+        [$controller, $cleanup, $root] = makeSkillControllerFixture();
+        try {
+            writeToySkillMd($root, 'git', '# Body', 'Git skill.');
+            file_put_contents($root . '/secret.txt', 'TOP SECRET');
+
+            foreach (['../secret.txt', 'templates/../../secret.txt', '/etc/passwd'] as $path) {
+                $request = Request::create('/api/v1/skills/git/files/x');
+                $request->attributes->set('slug', 'git');
+                $request->attributes->set('path', $path);
+                $response = $controller->file($request);
+
+                expect($response->getStatusCode())->toBe(404)
+                    ->and((string) $response->getContent())->not->toContain('TOP SECRET');
+            }
+        } finally {
+            $cleanup();
+        }
+    });
+
+    it('answers 404 for another principal\'s skill rather than 403', function (): void {
+        // 403 would confirm the skill exists, which is the cross-tenant existence
+        // oracle the class docblock is about.
+        $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-cross@example.com');
+        [$controller, $cleanup] = makeSkillControllerFixture();
+        try {
+            $request = Request::create('/api/v1/skills/team-playbook/files/SKILL.md');
+            $request->attributes->set('slug', 'team-playbook');
+            $request->attributes->set('path', 'SKILL.md');
+            $response = $controller->file($request);
+
+            expect($response->getStatusCode())->toBe(404)
+                ->and((string) $response->getContent())->not->toContain('Team playbook');
+        } finally {
+            $cleanup();
+        }
+    });
+
+    it('answers 404 when the skill itself does not exist', function (): void {
+        $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-noskill@example.com');
+        [$controller, $cleanup] = makeSkillControllerFixture();
+        try {
+            $request = Request::create('/api/v1/skills/nope/files/SKILL.md');
+            $request->attributes->set('slug', 'nope');
+            $request->attributes->set('path', 'SKILL.md');
+
+            expect($controller->file($request)->getStatusCode())->toBe(404);
+        } finally {
+            $cleanup();
+        }
+    });
+
+    it('refuses a file over the cap even if a provider returns it anyway', function (): void {
+        // The interface makes the *caller* responsible for the cap, because a
+        // provider is plugin-supplied code. `SkillTool` re-asserts it for the same
+        // reason; this is that check on the HTTP surface.
+        $oversized = str_repeat('a', SkillProviderInterface::MAX_FILE_BYTES + 1);
+        $rogue = Mockery::mock(SkillProviderInterface::class);
+        $rogue->shouldReceive('source')->andReturn('rogue');
+        $rogue->shouldReceive('getSkills')->andReturn([]);
+        $rogue->shouldReceive('getSkillDetails')->andReturnNull();
+        // The registry picks the owning provider by asking for the *listing* first,
+        // so a mock that answers null there is never asked for the file at all —
+        // which would make the cap assertion below pass for the wrong reason.
+        $rogue->shouldReceive('getSkillFiles')->andReturn([['path' => 'huge.txt', 'bytes' => 1_000_000]]);
+        $rogue->shouldReceive('getSkillFile')->andReturn($oversized);
+
+        $userId = skillCtrlUser('file-cap@example.com');
+        $auth = Mockery::mock(AuthService::class);
+        $auth->shouldReceive('currentUserId')->andReturn($userId);
+        $controller = new SkillController(
+            $auth,
+            new SkillProviderRegistry([$rogue]),
+            new PrincipalService(new PrincipalResolver()),
+        );
+
+        $request = Request::create('/api/v1/skills/big/files/huge.txt');
+        $request->attributes->set('slug', 'big');
+        $request->attributes->set('path', 'huge.txt');
+        $response = $controller->file($request);
+
+        expect($response->getStatusCode())->toBe(404)
+            ->and((string) $response->getContent())->not->toContain('aaaa');
+    });
+
+    it('requires authentication', function (): void {
+        $auth = Mockery::mock(AuthService::class);
+        $auth->shouldReceive('currentUserId')->andReturn(null);
+        [$controller, $cleanup] = makeSkillControllerFixture($auth);
+        try {
+            $request = Request::create('/api/v1/skills/git/files/SKILL.md');
+            $request->attributes->set('slug', 'git');
+            $request->attributes->set('path', 'SKILL.md');
+            $response = $controller->file($request);
+
+            expect($response->getStatusCode())->toBe(401)
+                ->and(json_decode((string) $response->getContent(), true)['error']['code'])
+                ->toBe('UNAUTHENTICATED');
+        } finally {
+            $cleanup();
+        }
+    });
 });

@@ -8,6 +8,7 @@ use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\PrincipalService;
 use Spora\Skills\SkillDescriptor;
+use Spora\Skills\SkillProviderInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillSummary;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -107,6 +108,67 @@ final class SkillController
         }
 
         return $this->notFound('SKILL_NOT_FOUND', "Skill '{$name}' not found.");
+    }
+
+    /**
+     * One sidecar's contents.
+     *
+     * `show()` returns `files` as `{path, bytes}` metadata, so a shipped skill's
+     * sidecars were listed and unopenable — and since `SKILL.md`'s body rides along
+     * with the detail, the only readable file in such a skill was the one that needed
+     * no endpoint. The plugin's own skills never had this gap; it has
+     * `…/files/{path}`.
+     *
+     * The read goes through {@see SkillProviderRegistry::getSkillFile()}, which
+     * already refuses a path outside the skill's listing, resolves it inside the
+     * skill directory, and checks the size on the `stat` before reading. So the
+     * shape of the request cannot reach a file the skill does not contain.
+     *
+     * Two things are re-asserted here rather than trusted. The cap, because
+     * {@see SkillProviderInterface} requires the *caller* to enforce it and a
+     * provider is plugin-supplied code — the same reason `SkillTool` checks the
+     * callee's work. And the 404: a name the caller cannot see, a file the skill
+     * does not contain, and a file over the cap all answer identically, so this
+     * endpoint is not a probe for what exists in another tenant.
+     */
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'Narrow the lookup to one principal the caller controls, under the same discard-not-reject rule as the listing. A skill the caller cannot see answers 404, not 403.',
+        schema: new OA\Schema(type: 'integer'),
+    )]
+    public function file(Request $request): JsonResponse
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+
+        $name = strtolower(trim((string) $request->attributes->get('slug', '')));
+        $path = trim((string) $request->attributes->get('path', ''));
+
+        $visible = $this->visiblePrincipalIds($userId);
+        $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
+
+        foreach ($ids as $principalId) {
+            $contents = $this->skills->getSkillFile($name, $path, $principalId);
+            if ($contents === null) {
+                continue;
+            }
+            // The cap is the caller's to enforce, per the interface contract.
+            if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
+                break;
+            }
+
+            return new JsonResponse(['data' => [
+                'path'    => $path,
+                'content' => $contents,
+                'bytes'   => strlen($contents),
+            ]]);
+        }
+
+        return $this->notFound('SKILL_FILE_NOT_FOUND', "File '{$path}' not found in skill '{$name}'.");
     }
 
     /**
