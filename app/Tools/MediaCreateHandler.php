@@ -16,19 +16,14 @@ use Throwable;
 /**
  * Implements the `create_media` {@see MediaTool} operation — the one
  * primitive that lets an LLM put authored text into the Media Archive.
- * Extracted out of MediaTool for the same reason as
+ * Split out of MediaTool for the same reason as
  * {@see MediaDerivativeHandler}: MediaTool sits at Sonar's per-class
  * method budget.
  *
- * The declared `mime_type` is a hint, never a claim: the byte ingest
- * path always re-sniffs the bytes, so the row is re-gated on the MIME
- * that actually landed in the DB and deleted when it isn't allowlisted.
- * That post-ingest check is the real gate — the pre-gate on the hint
- * only catches a MIME the operator would never have accepted anyway.
- *
- * Inputs arrive already-resolved (`$agentId` / `$userId` / `$context`
- * come from the orchestrator); failures flow back through
- * {@see ToolResult::fail()} with operator-friendly hints.
+ * The declared `mime_type` is a hint, never a claim. The byte ingest path
+ * always re-sniffs, so the row is re-gated on the MIME that actually landed
+ * and discarded when it is not allowlisted; the pre-gate on the hint only
+ * catches a MIME the operator would never have accepted anyway.
  */
 final readonly class MediaCreateHandler
 {
@@ -80,11 +75,7 @@ final readonly class MediaCreateHandler
             : $this->judgeSniffed($stored, $agentId);
     }
 
-    /**
-     * The two content checks that need nothing but the bytes, kept out of
-     * `create()` so the flow there reads as the four stages it is —
-     * validate, gate, store, judge — instead of as six exit points.
-     */
+    /** The two byte-only checks, split out so `create()` reads as its four stages. */
     private function rejectUnusableContent(string $content): ?ToolResult
     {
         // Whitespace-only counts as empty: the op is non-idempotent, so a
@@ -121,11 +112,9 @@ final readonly class MediaCreateHandler
     ): MediaAsset|ToolResult {
         $prompt = (string) ($arguments['prompt'] ?? '');
 
-        // Without this the orchestrator's catch-all turns a store failure
-        // into `System Error: The tool encountered a fatal exception: …`
-        // plus a full stack trace in `data.trace`, all of it written to chat
-        // history — the LLM gets no size hint and no retry strategy, and the
-        // exception class leaks into a user-visible tool result.
+        // Without this the orchestrator's catch-all turns a store failure into
+        // `System Error: … fatal exception` plus a full stack trace in
+        // `data.trace`, all of it written to chat history.
         try {
             return $this->archive->ingest(new MediaIngestRequest(
                 bytes: $content,
@@ -153,24 +142,19 @@ final readonly class MediaCreateHandler
      */
     private function judgeSniffed(MediaAsset $asset, int $agentId): ToolResult
     {
-        // The pipeline ignored the declared type and stored what it sniffed,
-        // so the row is judged on that value — a good hint over bad bytes
-        // fails here, which the pre-gate cannot see.
         $sniffed = (string) ($asset->mime_type ?? '');
         if ($this->allowedTypes->isAllowed($sniffed, $agentId)) {
             return $this->created($asset);
         }
 
-        // `delete()` removes the row, which also removes the bytes in
-        // `data_url` mode. A `local`-mode row would leave its file on disk
-        // with no row pointing at it. Unreachable under the shipped
-        // defaults — `MAX_CONTENT_BYTES` equals the default
-        // `asset_store.auto_threshold_bytes` and `AutoAssetStore` compares
-        // `<=`, so a payload at the cap stays inline — but an operator who
-        // lowers the threshold or forces `local` would accumulate one
-        // orphaned file per rejected call. Fixing that belongs in
-        // `MediaArchiveService::delete()`, which has the same gap on every
-        // other delete path.
+        // `delete()` also removes the bytes in `data_url` mode; a `local`-mode
+        // row would leave its file on disk with no row pointing at it. Not
+        // reachable under the shipped defaults — `MAX_CONTENT_BYTES` equals the
+        // default `asset_store.auto_threshold_bytes` and `AutoAssetStore`
+        // compares `<=`, so a payload at the cap stays inline — but an operator
+        // who lowers the threshold or forces `local` would accumulate one
+        // orphaned file per rejected call. The fix belongs in
+        // `MediaArchiveService::delete()`, which has the same gap everywhere.
         $this->archive->delete($asset->id);
 
         return ToolResult::fail(sprintf(
@@ -180,11 +164,7 @@ final readonly class MediaCreateHandler
         ));
     }
 
-    /**
-     * Shared allowlist rejection so both gates — the declared hint and
-     * the sniffed result — name the same cause and list the same options.
-     * Returning null means the MIME passed.
-     */
+    /** Shared so both gates — the declared hint and the sniffed result — name the same cause. */
     private function gateMime(string $mime, int $agentId): ?ToolResult
     {
         if ($this->allowedTypes->isAllowed($mime, $agentId)) {
@@ -199,12 +179,11 @@ final readonly class MediaCreateHandler
     }
 
     /**
-     * `basename()` so a stored filename containing `../` cannot escape
-     * the card label or the download path, then a Unicode-safe
-     * allowlist plus a control-character strip (the value is echoed into
-     * a `Content-Disposition` header), then the 255-char column cap. The
-     * extension implied by the MIME hint is appended when the caller
-     * left it off so the asset URL and the archive's extension map agree.
+     * `basename()` so a stored filename containing `../` cannot escape the card
+     * label or the download path, a Unicode-safe allowlist, then a control-
+     * character strip — the value is echoed into a `Content-Disposition` header.
+     * The extension implied by the MIME hint is appended when the caller left it
+     * off so the asset URL and the archive's extension map agree.
      */
     private function sanitiseFilename(string $raw, string $hint): string
     {
@@ -212,9 +191,8 @@ final readonly class MediaCreateHandler
         $name = basename(trim($name));
         $name = preg_replace('/[^\p{L}\p{N}._\- ]/u', '_', $name) ?? '';
         $name = trim($name);
-        // A dot-only survivor (`.`, `..`) is what `basename()` leaves behind
-        // for a path that names a directory rather than a file, and it
-        // would be echoed straight into a `Content-Disposition` header.
+        // A dot-only survivor (`.`, `..`) is what `basename()` leaves for a path
+        // naming a directory rather than a file.
         if (trim($name, '.') === '') {
             $name = 'media';
         }
@@ -224,17 +202,22 @@ final readonly class MediaCreateHandler
             $name .= '.' . $extension;
         }
 
-        // Cap the stem, not the assembled name. Truncating the whole
-        // string drops the extension — the first thing to go — so a
-        // 400-character filename stored an operator-visible `Content-
-        // Disposition` name with no `.md` on it.
+        // Cap the stem, not the assembled name. Truncating the whole string
+        // drops the extension — the first thing to go — so a 400-character
+        // filename stored an operator-visible `Content-Disposition` name with
+        // no `.md` on it.
         //
-        // A name the archive has no extension for (`application/json`
-        // maps to nothing) must come back with no trailing dot, so the
-        // separator is only there when there is an extension to follow.
+        // The suffix is capped too: a pathological extension can be longer than
+        // the column itself, which would make the stem's budget negative and
+        // `mb_substr($stem, 0, -N)` return nothing, storing a name still over
+        // 255. The archive then rejects it on save and the caller gets
+        // "could not store" instead of a filename-too-long hint.
         $suffix = pathinfo($name, PATHINFO_EXTENSION);
         $suffix = $suffix === '' ? '' : '.' . $suffix;
-        $stem   = mb_substr(pathinfo($name, PATHINFO_FILENAME), 0, self::FILENAME_MAX_LENGTH - mb_strlen($suffix));
+        $suffix = mb_substr($suffix, 0, self::FILENAME_MAX_LENGTH);
+
+        $budget = max(0, self::FILENAME_MAX_LENGTH - mb_strlen($suffix));
+        $stem   = mb_substr(pathinfo($name, PATHINFO_FILENAME), 0, $budget);
 
         return $stem . $suffix;
     }

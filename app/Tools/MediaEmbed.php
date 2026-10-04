@@ -121,36 +121,30 @@ final class MediaEmbed
      * for the same reason — `AssetController` forces
      * `Content-Disposition: attachment` from the stored filename anyway.
      *
-     * `$byteSize` and `$mimeType` are both optional; the meta span is
-     * omitted entirely when neither is known rather than emitted empty.
+     * `$byteSize` is optional; the size span is omitted entirely when the
+     * archive does not know it rather than emitted empty. There is no MIME
+     * on the card — the filename's extension already says what the file is,
+     * and a MIME long enough to overflow the row squeezed the filename to
+     * nothing in a narrow bubble.
      */
     public static function fileCard(
         string $url,
         string $filename,
         ?int $byteSize = null,
     ): string {
-        // CR/LF are stripped before interpolation. The same stored filename
-        // reaches the `Content-Disposition` header that
-        // `AssetController::applyContentDisposition()` builds, so a value
-        // carrying a raw newline is worth neutralising on the way past — but
-        // note this is a render path and closes nothing there. That header
-        // strips only quotes and backslashes, and closing it properly is a
-        // separate change to `applyContentDisposition()`.
+        // Neutralised on the way past because the same stored filename reaches
+        // the `Content-Disposition` header. This closes nothing there: that
+        // header strips only quotes and backslashes, and doing it properly is
+        // a separate change to `AssetController::applyContentDisposition()`.
         $safeUrl = htmlspecialchars(self::stripLineBreaks($url), ENT_QUOTES, 'UTF-8');
         $name = basename(self::stripLineBreaks($filename));
         $safeName = htmlspecialchars($name === '' ? 'download' : $name, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         $card = '<div class="inline-flex max-w-120 my-[0.6rem] rounded-lg border border-foreground/10 bg-muted">'
             . '<a class="flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-inherit no-underline transition-colors hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-ring'
-            // Download glyph as a mask on the link's own ::before, for two
-            // reasons that both come back to the sanitizer. An icon element
-            // would need `aria-hidden`, which is not in ALLOWED_ATTR, so the
-            // glyph would be announced rather than hidden. Swapping that for
-            // `content: '↓'` does not fix it: generated content text IS in
-            // the accessible-name computation in Chrome and Firefox, so it
-            // would still be announced as "downwards arrow" — and it would
-            // also be un-annotatable. A mask has no text node at all, and
-            // picks up the theme through currentColor.
+            // The glyph is a CSS `::before` mask, not markup — see the
+            // `.spora-file-card__glyph` rules in spora-frontend/src/style.css
+            // for why the sanitizer rules it out as anything else.
             . ' spora-file-card__glyph" href="' . $safeUrl . '">'
             . '<span class="min-w-0 flex-auto truncate font-medium">' . $safeName . '</span>';
         if ($byteSize !== null) {

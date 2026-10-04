@@ -426,6 +426,35 @@ it('caps the filename at the 255-char column width', function (): void {
     }
 });
 
+it('caps the filename when the extension alone is longer than the column', function (): void {
+    // The cap is applied to the stem with a budget of 255 minus the suffix, so
+    // a suffix past 255 made that budget negative — and `mb_substr($stem, 0,
+    // -46)` returns an empty string, not a clamped one. The name came back at
+    // the full 301 chars, over the column width, and the archive rejected it on
+    // save, so the caller saw "could not store the document" instead of a
+    // filename hint. `pathinfo()` takes everything after the last dot as the
+    // extension, which a caller can reach without any unusual bytes.
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'   => 'create_media',
+                'filename' => 'report.' . str_repeat('x', 300),
+                'content'  => 'body',
+            ],
+            agentId: $agentId,
+            userId: 99,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect(mb_strlen((string) $result->data['filename']))->toBeLessThanOrEqual(255);
+    } finally {
+        $restore();
+    }
+});
+
 it('appends the extension implied by the mime hint when the caller omits one', function (): void {
     $agentId = seedMediaToolAgent();
     ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());

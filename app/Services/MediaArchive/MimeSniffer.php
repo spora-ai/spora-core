@@ -22,8 +22,8 @@ use Throwable;
  * round-trip. It is deliberately conservative: unrecognised extensions
  * return `application/octet-stream` rather than guessing.
  *
- * Both returners are pure and the class is stateless, so it is safe to
- * reuse as a long-lived service. `sniffFromBytes()` is not quite a
+ * Both returners are pure and the only state is an optional logger, so it is
+ * safe to reuse as a long-lived service. `sniffFromBytes()` is not quite a
  * function of its arguments alone, though: its final step consults
  * {@see MediaMimeRefinerDiscovery}, a process-global list, so a
  * registered plugin refiner can change the verdict for the same bytes.
@@ -32,12 +32,11 @@ use Throwable;
 final class MimeSniffer
 {
     public function __construct(
-        // Optional so `new MimeSniffer()` stays valid at the test call
-        // sites and in ContainerDefinitions; a null logger only costs the
-        // decline-and-continue path its diagnostic, not its behaviour.
+        // Optional so `new MimeSniffer()` stays valid at the test call sites;
+        // a null logger only costs the decline-and-continue path its
+        // diagnostic, not its behaviour.
         private readonly ?LoggerInterface $logger = null,
     ) {}
-
 
     /**
      * Fallback MIME returned when nothing matched. Centralised so callers and

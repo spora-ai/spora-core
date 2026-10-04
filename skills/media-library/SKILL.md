@@ -124,15 +124,17 @@ Re-rendering with the same `(parent_id, format, producer_plugin, producer_operat
 
 ## `create_media` is NOT idempotent
 
-`create_derivative` above can be retried blindly. `create_media` cannot. The byte ingest path has no natural key — dedup only exists on `(tool_call_id, source_url)`, and a tool call that carries authored text has neither — so **every call inserts a new row**. A retry after an ambiguous failure (timeout, dropped connection, approval you did not see the result of) leaves you with two near-identical assets and no way to tell which one the operator will see.
+`create_derivative` above can be retried blindly. `create_media` cannot. The byte ingest path has no natural key — dedup only exists on `(tool_call_id, source_url)`, and a tool call that carries authored text has neither — so **every call inserts a new row**. A retry after an ambiguous failure (a timeout, a dropped connection, a worker restart mid-write) leaves you with two near-identical assets and no way to tell which one the operator will see.
 
 So the retry pattern is inverted: **do not call `create_media` again to check whether it worked.** Instead, before retrying, `search` for the filename you used and inspect the newest `media_assets` row. If a matching asset exists, keep its `asset_id` and carry on. If it does not, it is genuinely safe to call `create_media` again. When you already hold an `asset_id` — from this call or any earlier one in the task — reuse it for every downstream `get_media` / `create_derivative` / `get_source` and treat it as the one true id for the document.
 
 To iterate on the content, call `get_source` on the existing asset, edit, then `create_media` under a *new* filename. Two versions side by side is the intended outcome; two rows with the same name is a mistake.
 
-## Approval preview
+## Approval
 
-`get_public_url`, `get_source`, `create_derivative`, and `create_media` all require operator approval per call. Expect an approval prompt before the call returns. Be ready to state what asset and why — a one-line "render report.pdf to PNG for inline preview" is enough. For `create_media` the operator is approving a *write*, so name the file and say what it is in one line ("write the quarterly report as quarterly-report.md").
+Only `get_public_url` asks the operator to approve each call, because it is the one operation that hands out a durable public link to stored bytes. Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `create_media` — is enabled and auto-approved, so there is no prompt to wait on and nothing to justify up front. `create_derivative` and `create_media` are writes, but they only create rows derived from, or owned by, the calling agent, and both show up in the operator's media library.
+
+An operator can narrow any op's approval for a given agent in the dashboard. If a call does come back as an approval request, that is the gate working: make the call once, state in one line what asset and why ("render report.pdf to PNG for inline preview"), and do not retry it in a loop.
 
 ## Examples
 

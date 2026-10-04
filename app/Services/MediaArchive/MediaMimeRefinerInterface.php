@@ -11,13 +11,10 @@ interface MediaMimeRefinerInterface
      * Returns null to decline. Pure, never throws.
      *
      * Implementations MUST be constructible without arguments:
-     * {@see MimeSniffer} instantiates them statically, which is what
-     * keeps {@see MimeSniffer}'s own constructor argument-free — it is
-     * `new MimeSniffer()`-ed at every test call site and bound with
-     * `new MimeSniffer()` in {@see \Spora\Core\ContainerDefinitions}.
-     * Same reasoning as {@see Producers\ImageDerivativeProducer}'s
-     * documented no-arg constructor: the consumers of a static registry
-     * have no container to resolve a refiner's collaborators with.
+     * {@see MimeSniffer} instantiates them statically and has no container
+     * to resolve a refiner's collaborators with — the same constraint as
+     * {@see Producers\ImageDerivativeProducer}. A refiner that needs one has
+     * to reach for it statically itself.
      */
     public function refine(string $bytes, ?string $filename, string $sniffedMime): ?string;
 }

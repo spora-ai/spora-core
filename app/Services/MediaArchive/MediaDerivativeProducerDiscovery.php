@@ -7,15 +7,12 @@ namespace Spora\Services\MediaArchive;
 use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
 
 /**
- * Static registry of {@see MediaDerivativeProducerInterface} FQCNs.
+ * Static registry of {@see MediaDerivativeProducerInterface} FQCNs, read by
+ * {@see MediaDerivativeProducerDiscovery}'s consumer at construction.
  *
- * Mirrors {@see MediaConverterDiscovery} exactly so plugin authors only
- * learn one registration pattern — the shared body now lives in
- * {@see DiscoversRegistrations} rather than being copy-pasted. PHP-DI
- * v7 does not expose a runtime taggable container, so a static list
- * populated by core in {@see \Spora\Core\ContainerDefinitions} and by
- * plugins in their `register(ContainerBuilder)` hook is the bridge
- * between the two.
+ * Mirrors {@see MediaConverterDiscovery} exactly so plugin authors only learn
+ * one registration pattern; the shared body is
+ * {@see DiscoversRegistrations}.
  */
 final class MediaDerivativeProducerDiscovery
 {

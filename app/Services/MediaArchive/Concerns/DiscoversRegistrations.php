@@ -8,7 +8,7 @@ use InvalidArgumentException;
 
 /**
  * Scaffolding for the media-archive static registries: a process-global
- * ordered list of FQCNs that a service reads at construction time.
+ * ordered list of FQCNs that a service reads.
  *
  * A trait, not an abstract base class, because a `private static`
  * property declared on a parent is *shared* by every subclass that does
@@ -20,7 +20,9 @@ use InvalidArgumentException;
  * PHP-DI v7 is the reason the list is static at all: it ships no runtime
  * queryable tag store, so core populates each list in
  * {@see \Spora\Core\ContainerDefinitions} and plugins append to it from
- * their `register(ContainerBuilder)` hook.
+ * their `register(ContainerBuilder)` hook. Reading is per-consumer, not
+ * per-construction: the refiner list is re-read on every sniff, so a
+ * plugin registering late is still picked up.
  *
  * @template T of object
  */
