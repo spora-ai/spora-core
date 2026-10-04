@@ -121,6 +121,7 @@ use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\Mail\MailTemplateSyncService;
 use Spora\Services\MailTemplateServiceInterface;
+use Spora\Services\MediaArchive\DerivativePayloadStore;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -455,6 +456,10 @@ final class ContainerDefinitions
         return [
             Paths::class => static function (): Paths {
                 return new Paths(self::resolveBasePath());
+            },
+
+            DerivativePayloadStore::class => static function (): DerivativePayloadStore {
+                return new DerivativePayloadStore(self::resolveBasePath());
             },
 
             // Plugins and the project App subscribe to lifecycle events via
@@ -1266,6 +1271,7 @@ final class ContainerDefinitions
                     $c->get(AssetStore::class),
                     $c->get(PrincipalService::class),
                     $c,
+                    $c->get(DerivativePayloadStore::class),
                     $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
                 );
             },

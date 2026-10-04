@@ -62,12 +62,19 @@ final class MediaDerivativeService
      */
     public const MARKDOWN_FORMAT = 'md';
 
+    private readonly DerivativePayloadStore $payloads;
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly PrincipalService $principalService,
         private readonly ContainerInterface $container,
+        ?DerivativePayloadStore $payloads = null,
         private readonly ?LoggerInterface $logger = null,
-    ) {}
+    ) {
+        $this->payloads = $payloads ?? new DerivativePayloadStore(
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
+    }
 
     /**
      * Produce a derivative end-to-end: resolve the producer, call
@@ -147,7 +154,7 @@ final class MediaDerivativeService
         }
 
         foreach (MediaAsset::query()->whereIn('id', $derivativeIds)->get() as $derivative) {
-            $this->unlinkStoredBytes($derivative);
+            $this->payloads->remove($derivative);
             $derivative->delete();
         }
 
@@ -225,7 +232,7 @@ final class MediaDerivativeService
         // every reader — the message builder, `get_source` — has to
         // special-case a derivative that carries no content, so decline
         // and let the caller fall through to its `get_source` pointer.
-        if (trim($this->storedBytes($derivative)) !== '') {
+        if (trim($this->payloads->read($derivative)) !== '') {
             return $derivative;
         }
 
@@ -262,36 +269,6 @@ final class MediaDerivativeService
      * The derivative's stored bytes, read through the same
      * data-url/local split {@see self::rewriteStoredBytes()} writes with.
      */
-    private function storedBytes(MediaAsset $derivative): string
-    {
-        if ($derivative->storage_mode === 'data_url') {
-            return is_string($derivative->payload) ? $derivative->payload : '';
-        }
-        if ($derivative->storage_mode !== 'local') {
-            return '';
-        }
-        $bytes = $this->readLocalFile($this->localFilePath($derivative));
-
-        return is_string($bytes) ? $bytes : '';
-    }
-
-    /**
-     * `file_get_contents` with warnings suppressed, so a missing or
-     * unreadable file yields false instead of a diagnostic on the way to
-     * a caller that has already decided a false is an acceptable answer.
-     */
-    private function readLocalFile(?string $path): string|false
-    {
-        if ($path === null || ! is_file($path)) {
-            return '';
-        }
-        set_error_handler(static fn(): bool => true, E_WARNING);
-        try {
-            return file_get_contents($path);
-        } finally {
-            restore_error_handler();
-        }
-    }
 
     /**
      * Walk {@see MediaDerivativeProducerDiscovery::all()} and return the
@@ -615,62 +592,10 @@ final class MediaDerivativeService
         if ($existing->storage_mode !== 'local') {
             return;
         }
-        $path = $this->localFilePath($existing);
-        if ($path === null) {
-            return;
-        }
-        // PHP 8.4+ no longer fully honours `@` for file writes; the
-        // explicit handler keeps a missing directory from surfacing as a
-        // runtime warning the test suite flags as risky.
-        set_error_handler(static fn(): bool => true, E_WARNING);
-        try {
-            file_put_contents($path, $bytes, LOCK_EX);
-        } finally {
-            restore_error_handler();
-        }
+        $this->payloads->rewrite($existing, $bytes);
     }
 
-    /**
-     * Absolute path of a `local`-mode asset's payload, or null when the
-     * row carries no token to resolve one from. Mirrors
-     * {@see \Spora\Services\LocalAssetStore::readFromAsset()}'s layout
-     * (`<storage>/assets/<asset_token>.<ext>`).
-     */
-    private function localFilePath(MediaAsset $asset): ?string
-    {
-        $token = $asset->asset_token;
-        if (!is_string($token) || $token === '') {
-            return null;
-        }
-        $ext = MediaArchiveService::extensionForMime($asset->mime_type);
-        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
-        return (new \Spora\Core\Paths($basePath))->storage('assets')
-            . '/' . $token . ($ext !== null ? '.' . $ext : '');
-    }
 
-    /**
-     * Drop a `local`-mode derivative's payload from disk. A `data_url`
-     * derivative's bytes live in the BLOB column the row delete removes
-     * for us, and an `external` row has no Spora-side file at all.
-     */
-    private function unlinkStoredBytes(MediaAsset $asset): void
-    {
-        if ($asset->storage_mode !== 'local') {
-            return;
-        }
-        $path = $this->localFilePath($asset);
-        if ($path === null) {
-            return;
-        }
-        set_error_handler(static fn(): bool => true, E_WARNING);
-        try {
-            if (is_file($path)) {
-                unlink($path);
-            }
-        } finally {
-            restore_error_handler();
-        }
-    }
 
     private function filenameFor(MediaAsset $parent, string $format): string
     {

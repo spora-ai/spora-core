@@ -43,6 +43,7 @@ function ensureTextDerivativeService(?object $assetStore = null): MediaDerivativ
         $store,
         new PrincipalService(new PrincipalResolver()),
         $container,
+        null,
         new \Psr\Log\NullLogger(),
     );
 }

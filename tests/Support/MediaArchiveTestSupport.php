@@ -135,6 +135,7 @@ final class MediaArchiveTestSupport
             $assetStore,
             new PrincipalService(new PrincipalResolver()),
             $container,
+            null,
             $logger ?? new NullLogger(),
         );
     }
