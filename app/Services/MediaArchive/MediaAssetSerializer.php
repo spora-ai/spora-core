@@ -133,6 +133,13 @@ final class MediaAssetSerializer
             $out[] = [
                 'format'             => $row['format'],
                 'label'              => $label,
+                // The derivative's own MIME. `format` is a producer-chosen
+                // slug and is not self-describing — `md` in particular says
+                // nothing about whether the bytes are markdown. Consumers that
+                // have to render a derivative (the media archive's preview
+                // pane resolves its preview kind from this) need the real type
+                // rather than re-deriving it from the slug.
+                'mime_type'          => $derivative->mime_type,
                 'media_id'           => $derivative->id,
                 'asset_url'          => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivative->id . ($ext !== null ? '.' . $ext : ''),
                 'producer_plugin'    => $row['producer_plugin'],
