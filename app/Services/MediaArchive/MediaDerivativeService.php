@@ -215,23 +215,8 @@ final class MediaDerivativeService
      */
     public function ensureTextDerivative(MediaAsset $parent): ?MediaAsset
     {
-        $existing = $this->findTextDerivative($parent);
-        if ($existing !== null) {
-            return $existing;
-        }
-
-        if ($this->findProducer($parent, self::MARKDOWN_FORMAT) === null) {
-            return null;
-        }
-
-        try {
-            $derivative = $this->createFromRequest(parent: $parent, format: self::MARKDOWN_FORMAT);
-        } catch (Throwable $e) {
-            $this->logger?->warning('MediaDerivativeService: text derivative failed', [
-                'asset_id' => $parent->id,
-                'mime'     => $parent->mime_type,
-                'error'    => $e->getMessage(),
-            ]);
+        $derivative = $this->findTextDerivative($parent) ?? $this->mintTextDerivative($parent);
+        if ($derivative === null) {
             return null;
         }
 
@@ -240,12 +225,37 @@ final class MediaDerivativeService
         // every reader — the message builder, `get_source` — has to
         // special-case a derivative that carries no content, so decline
         // and let the caller fall through to its `get_source` pointer.
-        if (trim($this->storedBytes($derivative)) === '') {
-            $this->deleteWithDerivatives($parent);
+        if (trim($this->storedBytes($derivative)) !== '') {
+            return $derivative;
+        }
+
+        $this->deleteWithDerivatives($parent);
+
+        return null;
+    }
+
+    /**
+     * Run the markdown producer for `$parent`, tolerating failure. Returns
+     * null when no producer claims the source or the producer threw, so a
+     * corrupt or unsupported document never fails the caller's upload.
+     */
+    private function mintTextDerivative(MediaAsset $parent): ?MediaAsset
+    {
+        if ($this->findProducer($parent, self::MARKDOWN_FORMAT) === null) {
             return null;
         }
 
-        return $derivative;
+        try {
+            return $this->createFromRequest(parent: $parent, format: self::MARKDOWN_FORMAT);
+        } catch (Throwable $e) {
+            $this->logger?->warning('MediaDerivativeService: text derivative failed', [
+                'asset_id' => $parent->id,
+                'mime'     => $parent->mime_type,
+                'error'    => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**
@@ -260,17 +270,27 @@ final class MediaDerivativeService
         if ($derivative->storage_mode !== 'local') {
             return '';
         }
-        $path = $this->localFilePath($derivative);
-        if ($path === null) {
+        $bytes = $this->readLocalFile($this->localFilePath($derivative));
+
+        return is_string($bytes) ? $bytes : '';
+    }
+
+    /**
+     * `file_get_contents` with warnings suppressed, so a missing or
+     * unreadable file yields false instead of a diagnostic on the way to
+     * a caller that has already decided a false is an acceptable answer.
+     */
+    private function readLocalFile(?string $path): string|false
+    {
+        if ($path === null || ! is_file($path)) {
             return '';
         }
         set_error_handler(static fn(): bool => true, E_WARNING);
         try {
-            $bytes = is_file($path) ? file_get_contents($path) : false;
+            return file_get_contents($path);
         } finally {
             restore_error_handler();
         }
-        return is_string($bytes) ? $bytes : '';
     }
 
     /**

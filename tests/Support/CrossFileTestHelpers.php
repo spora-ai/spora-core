@@ -335,7 +335,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             derivatives: $derivatives,
         );
         $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
-        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives, $sourceReader);
         $tool = new Spora\Tools\MediaTool(
             $ctx['service'],
             $auth ?? makeMediaToolNonAdminAuth(),
@@ -386,7 +386,7 @@ if (!function_exists('buildMediaToolForSchema')) {
             derivatives: $derivatives,
         );
         $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
-        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives, $sourceReader);
 
         return new Spora\Tools\MediaTool(
             $ctx['service'],

@@ -1582,6 +1582,7 @@ final class ContainerDefinitions
                 return new MediaDerivativeHandler(
                     new MediaAssetSerializer(true, $derivatives),
                     $derivatives,
+                    $c->get(MediaSourceReader::class),
                 );
             },
 

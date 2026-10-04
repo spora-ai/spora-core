@@ -248,7 +248,7 @@ final class MediaTool extends AbstractTool
      * Cap on the `md` derivative `get_source` inlines for a binary mime.
      *
      * Deliberately NOT the same constant as
-     * {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}: this op is the LLM's
+     * {@see MediaDerivativeHandler::PREVIEW_BYTES}: this op is the LLM's
      * explicit "read this document" round-trip, so it owes the caller the
      * whole extracted text up to a sane ceiling, whereas the `get_media`
      * preview is an unsolicited glance. Harmonising them would either
@@ -371,7 +371,6 @@ final class MediaTool extends AbstractTool
      * stays on `ToolResult.data.extracted_text` (which is never sent to
      * the LLM, only to the operator UI).
      */
-    private const GET_MEDIA_MARKDOWN_PREVIEW_BYTES = 8 * 1024;
 
     /**
      * @param  array<string, mixed> $arguments
@@ -419,13 +418,13 @@ final class MediaTool extends AbstractTool
         $prompt = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
             ? trim((string) $asset->prompt)
             : null;
-        $extractedText = $this->readTextDerivative($asset);
+        $extractedText = $this->derivativeHandler->readTextDerivative($asset);
 
         if ($prompt !== null) {
             $content .= "\n\nPrompt: " . $prompt;
         }
         if ($extractedText !== null) {
-            $content .= "\n\nExtracted text:\n" . $this->previewExtractedText($extractedText);
+            $content .= "\n\nExtracted text:\n" . $this->derivativeHandler->previewExtractedText($extractedText);
             $content .= "\n\nCall `get_source` to read the full extracted text.";
         }
 
@@ -443,53 +442,6 @@ final class MediaTool extends AbstractTool
         string $altText,
     ): string {
         return MediaEmbed::forAsset($asset, $mediaType, $assetUrl, $altText);
-    }
-
-    /**
-     * Truncate extracted text to `$limit` so a 200-page PDF doesn't blow
-     * the chat context. The full content is never inlined at this
-     * boundary — it stays on the asset's `md` derivative, which
-     * `get_source` reads.
-     */
-    private function previewExtractedText(string $text, int $limit = self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES): string
-    {
-        if (strlen($text) <= $limit) {
-            return $text;
-        }
-        return substr($text, 0, $limit)
-            . "\n\n[…truncated — call `get_source` for the full extracted text]";
-    }
-
-    /**
-     * Bytes of the asset's `md` derivative, or null when it has none.
-     * Pure read: `get_source` and `get_media` both surface what ingest
-     * or an explicit `create_derivative` already minted, and neither
-     * mints one on the spot — a lazy create here would make a read
-     * operation write to the archive, which is a different approval
-     * story than the one these ops are approved under.
-     */
-    private function readTextDerivative(MediaAsset $asset): ?string
-    {
-        $derivative = $this->derivatives->findTextDerivative($asset);
-        if ($derivative === null) {
-            return null;
-        }
-        return $this->readDerivativeBytes($derivative);
-    }
-
-    /**
-     * Derivative bytes, or null when they cannot be read or the producer
-     * returned nothing. An empty extraction is treated as absent on
-     * purpose — a scanned PDF with no text layer has no derivative worth
-     * surfacing, and an empty block reads as a broken tool to the LLM.
-     */
-    private function readDerivativeBytes(MediaAsset $derivative): ?string
-    {
-        $bytes = $this->sourceReader->read($derivative);
-        if ($bytes === null || trim($bytes) === '') {
-            return null;
-        }
-        return $bytes;
     }
 
     /**
@@ -649,7 +601,7 @@ final class MediaTool extends AbstractTool
     private function binarySourceFallback(MediaAsset $asset, string $mime): ToolResult
     {
         $derivative = $this->derivatives->findTextDerivative($asset);
-        $extracted  = $derivative !== null ? $this->readDerivativeBytes($derivative) : null;
+        $extracted  = $derivative !== null ? $this->derivativeHandler->readDerivativeBytes($derivative) : null;
         $filename   = (string) ($asset->filename ?? $asset->id);
 
         if ($extracted === null) {
@@ -664,7 +616,7 @@ final class MediaTool extends AbstractTool
             ));
         }
 
-        $preview   = $this->previewExtractedText($extracted, self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES);
+        $preview   = $this->derivativeHandler->previewExtractedText($extracted, self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES);
         $truncated = strlen($extracted) > self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES;
 
         return ToolResult::ok(
@@ -799,7 +751,7 @@ final class MediaTool extends AbstractTool
      *
      * `extracted_text` is the asset's `md` derivative content — the full
      * string, untruncated (the `content` the LLM sees is capped by
-     * {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}). It is null for an
+     * {@see MediaDerivativeHandler::PREVIEW_BYTES}). It is null for an
      * asset that has no `md` derivative, which includes every text
      * source: those are their own text, and `get_source` reads them
      * directly.

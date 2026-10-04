@@ -26,10 +26,68 @@ use Throwable;
  */
 final readonly class MediaDerivativeHandler
 {
+    /**
+     * Cap on the extracted text `get_media` and `get_source` inline. These
+     * ops are LLM-facing, so the full body stays on the derivative and the
+     * model is told to call `get_source` for it. Deliberately distinct from
+     * `AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES`, which bounds what a
+     * chat attachment may inline at all.
+     */
+    public const PREVIEW_BYTES = 8 * 1024;
+
     public function __construct(
         private MediaAssetSerializer $serializer,
         private MediaDerivativeService $derivatives,
+        private MediaSourceReader $sourceReader,
     ) {}
+
+    /**
+     * The asset's extracted text from its `md` derivative, or null when it
+     * has none.
+     *
+     * Pure read: `get_source` and `get_media` both surface what ingest or an
+     * explicit `create_derivative` already minted, and neither mints one on
+     * the spot. A lazy create here would make a read operation write to the
+     * archive, which is a different approval story than the one these ops are
+     * approved under.
+     */
+    public function readTextDerivative(MediaAsset $asset): ?string
+    {
+        $derivative = $this->derivatives->findTextDerivative($asset);
+
+        return $derivative !== null ? $this->readDerivativeBytes($derivative) : null;
+    }
+
+    /**
+     * Derivative bytes, or null when they cannot be read or the producer
+     * returned nothing. An empty extraction is treated as absent on purpose —
+     * a scanned PDF with no text layer has no derivative worth surfacing, and
+     * an empty block reads as a broken tool to the LLM.
+     */
+    public function readDerivativeBytes(MediaAsset $derivative): ?string
+    {
+        $bytes = $this->sourceReader->read($derivative);
+
+        return ($bytes === null || trim($bytes) === '') ? null : $bytes;
+    }
+
+    /**
+     * Truncate extracted text to the LLM-facing cap, appending a pointer to
+     * `get_source` when anything was dropped.
+     */
+    public function previewExtractedText(string $text, int $limit = self::PREVIEW_BYTES): string
+    {
+        if (strlen($text) <= $limit) {
+            return $text;
+        }
+
+        return substr($text, 0, $limit)
+            . "\n\n[…truncated — call `get_source` for the full extracted text]";
+    }
+
+    // ---------------------------------------------------------------------
+    // `list_derivatives` / `create_derivative`
+    // ---------------------------------------------------------------------
 
     /**
      * @param  array<string, mixed> $arguments

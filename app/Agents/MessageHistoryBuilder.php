@@ -677,19 +677,23 @@ final class AttachmentRowRenderer
      */
     private function loadInlinableDerivativeText(?MediaAsset $derivative): ?string
     {
-        if ($derivative === null) {
-            return null;
-        }
-        $byteSize = $derivative->byte_size;
-        if ($byteSize !== null && (int) $byteSize > self::MAX_INLINE_TEXT_BYTES) {
+        if ($derivative === null || ! $this->fitsInlineBudget((int) ($derivative->byte_size ?? 0))) {
             return null;
         }
 
         $bytes = $this->loadAssetBytes($derivative);
-        if ($bytes === null || $bytes === '' || strlen($bytes) > self::MAX_INLINE_TEXT_BYTES) {
-            return null;
-        }
-        return $bytes;
+        // The column is only trustworthy for a derivative whose `createNew()`
+        // set it. Re-check the real length for anything that predates it, so
+        // a stale `byte_size` cannot smuggle an oversized body into the
+        // context window.
+        return ($bytes === null || $bytes === '' || ! $this->fitsInlineBudget(strlen($bytes)))
+            ? null
+            : $bytes;
+    }
+
+    private function fitsInlineBudget(int $length): bool
+    {
+        return $length <= self::MAX_INLINE_TEXT_BYTES;
     }
 
     /**
