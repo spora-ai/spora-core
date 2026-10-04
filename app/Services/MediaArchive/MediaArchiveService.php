@@ -85,6 +85,11 @@ final class MediaArchiveService
             'application/pdf'  => 'pdf',
             'text/plain'       => 'txt',
             'text/x-typst'     => 'typ',
+            // Round-trips the sniffer's Markdown verdict. Without the entry
+            // `create_media` cannot append the extension it documents
+            // appending, because a hinted `text/markdown` was never a key
+            // this map held — so the skill's advice and the code disagreed.
+            'text/markdown'    => 'md',
             // Word OOXML. In the static map, not only on the byte path, so
             // `sniffFromExtension()` and the URL branch agree with the
             // sniffer. Neither static map entry is load-bearing on its own:
@@ -124,10 +129,12 @@ final class MediaArchiveService
             'gif' => 'image/gif',
             'webp' => 'image/webp',
             'svg' => 'image/svg+xml',
-            'pdf'  => 'application/pdf',
-            'txt'  => 'text/plain',
-            'typ'  => 'text/x-typst',
-            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'pdf'      => 'application/pdf',
+            'txt'      => 'text/plain',
+            'typ'      => 'text/x-typst',
+            'md'       => 'text/markdown',
+            'markdown' => 'text/markdown',
+            'docx'     => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
         return $reverse[strtolower(ltrim($ext, '.'))] ?? null;
     }

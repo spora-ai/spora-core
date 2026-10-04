@@ -237,7 +237,11 @@ it('accepts a hint that matches what the bytes actually sniff to', function (): 
 
         expect($result->success)->toBeTrue();
         expect(mediaAssetRowCount())->toBe(1);
-        expect(MediaAsset::query()->find($result->data['asset_id'])->mime_type)->toBe('text/plain');
+        // Stored as `text/markdown`, not the hinted `text/plain`: the `.md`
+        // filename refines the sniffed verdict, and the re-gate is applied to
+        // the stored value. The point of the case is unchanged — a type the
+        // bytes sniff to is on the allowlist, so nothing is rejected.
+        expect(MediaAsset::query()->find($result->data['asset_id'])->mime_type)->toBe('text/markdown');
     } finally {
         $restore();
     }

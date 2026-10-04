@@ -53,6 +53,20 @@ final class MimeSniffer
     private const string TYPST_MIME = 'text/x-typst';
 
     /**
+     * Markdown MIME. `finfo` reports every Markdown file as `text/plain` —
+     * it sniffs bytes, and Markdown is prose — so a `.md` upload is stored as
+     * `text/plain` and the only surviving evidence of what it was is the
+     * extension on the filename. That matters because
+     * {@see MediaDerivativeService::findProducer()} matches a producer on the
+     * parent's stored MIME *or* its extension, and because
+     * {@see MediaArchiveService::extensionForMime()} has no `text/plain` →
+     * `md` mapping to fall back on. Without this the whole Markdown-to-
+     * derivative chain silently depends on the caller having spelled the
+     * extension out.
+     */
+    private const string MARKDOWN_MIME = 'text/markdown';
+
+    /**
      * Magic-byte signatures indexed by their canonical MIME type. The
      * structure is `MIME => list<list<signature>>`. Each MIME has a list
      * of alternative signature *groups*; every signature inside one group
@@ -138,9 +152,11 @@ final class MimeSniffer
         'webm' => 'video/webm',
         'mov'  => 'video/quicktime',
         'pdf'  => 'application/pdf',
-        'txt'  => 'text/plain',
-        'typ'  => self::TYPST_MIME,
-        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'txt'      => 'text/plain',
+        'typ'      => self::TYPST_MIME,
+        'md'       => self::MARKDOWN_MIME,
+        'markdown' => self::MARKDOWN_MIME,
+        'docx'     => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
 
     /**
@@ -164,10 +180,17 @@ final class MimeSniffer
         $prefix = substr($bytes, 0, 4096);
 
         $detected = $this->sniffPrefix($prefix);
-        if ($detected === 'text/plain' && $filename !== null
-            && $this->sniffFromExtension($filename) === self::TYPST_MIME
-        ) {
-            $detected = self::TYPST_MIME;
+
+        // A filename refines a generic `text/plain` verdict, but only ever
+        // upward into a *more specific* text format — never sideways, and
+        // never off `text/plain` at all. `.md` beats prose on both counts:
+        // the bytes cannot tell Markdown from a plain-text log, and a
+        // caller-supplied extension is the only signal available.
+        if ($detected === 'text/plain' && $filename !== null) {
+            $byExtension = $this->sniffFromExtension($filename);
+            if ($byExtension === self::TYPST_MIME || $byExtension === self::MARKDOWN_MIME) {
+                $detected = $byExtension;
+            }
         }
 
         return $this->applyRegisteredRefiners($bytes, $filename, $detected);

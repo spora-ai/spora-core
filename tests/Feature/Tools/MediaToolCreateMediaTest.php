@@ -159,9 +159,13 @@ it('defaults the mime hint to text/markdown when none is given', function (): vo
         );
 
         expect($result->success)->toBeTrue();
-        // The hint is a hint: `finfo` labels a Markdown byte stream
-        // `text/plain`, and the pipeline stores what it sniffed.
-        expect($result->data['mime_type'])->toBe('text/plain');
+        // The declared hint is still only a hint — but a `.md` filename now
+        // refines the sniffed `text/plain` up to `text/markdown`, which is
+        // what lets a producer that advertises `text/markdown` match this
+        // parent at all. The bytes alone cannot tell Markdown from prose, so
+        // the extension is what the stored type is derived from.
+        expect($result->data['mime_type'])->toBe('text/markdown');
+        expect($result->data['filename'])->toBe('notes.md');
         expect(MediaAsset::query()->find($result->data['asset_id'])->media_type)->toBe('document');
     } finally {
         $restore();
@@ -290,9 +294,12 @@ it('neutralises a path-traversing filename', function (): void {
         );
 
         expect($result->success)->toBeTrue();
-        expect($result->data['filename'])->toBe('passwd');
+        // The traversal is reduced to the basename, then the hinted
+        // `text/markdown` appends `.md` — the extension is added, never a
+        // second path segment.
+        expect($result->data['filename'])->toBe('passwd.md');
         expect($result->data['filename'])->not->toContain('..');
-        expect($result->content)->toContain('>passwd</span>');
+        expect($result->content)->toContain('>passwd.md</span>');
     } finally {
         $restore();
     }
@@ -384,7 +391,10 @@ it('falls back to a name when the filename sanitises to nothing', function (): v
         );
 
         expect($result->success)->toBeTrue();
-        expect($result->data['filename'])->toBe('media');
+        // A dot-only survivor becomes `media`, and the hinted
+        // `text/markdown` still appends `.md` — the label is a stem, not an
+        // escape hatch from extension handling.
+        expect($result->data['filename'])->toBe('media.md');
     } finally {
         $restore();
     }

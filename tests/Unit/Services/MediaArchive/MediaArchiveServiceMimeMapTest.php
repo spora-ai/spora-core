@@ -66,9 +66,11 @@ describe('MediaArchiveService::mimeForExtension', function (): void {
             'webp' => 'image/webp',
             'svg' => 'image/svg+xml',
             'pdf' => 'application/pdf',
-            'txt' => 'text/plain',
-            'typ' => 'text/x-typst',
-            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt'      => 'text/plain',
+            'typ'      => 'text/x-typst',
+            'md'       => 'text/markdown',
+            'markdown' => 'text/markdown',
+            'docx'     => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
         foreach ($cases as $ext => $expected) {
             expect(MediaArchiveService::mimeForExtension($ext))->toBe($expected);
