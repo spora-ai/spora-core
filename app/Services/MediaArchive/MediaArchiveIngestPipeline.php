@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
-use Psr\Log\LoggerInterface;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
@@ -13,18 +12,17 @@ use Spora\Services\AssetTooLargeException;
 use Spora\Services\Exceptions\PrincipalMaterialisationException;
 use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
-use Throwable;
 
 /**
  * Owns the Media Archive ingest pipeline.
  *
  * Pulled out of {@see MediaArchiveService} so the service stays under
  * the Sonar S1448 20-method cap. Public API of the service is unchanged:
- * `MediaArchiveService::ingest()` and `MediaArchiveService::runConversionPipeline()`
- * delegate here, so callers (controllers, tests) don't have to know.
+ * `MediaArchiveService::ingest()` delegates here, so callers
+ * (controllers, tests) don't have to know.
  *
  * The ingest pipeline is the largest "shape" the service carries — it
- * owns the URL → bytes → persist → run-converter chain, plus the
+ * owns the URL → bytes → persist → mint-`md`-derivative chain, plus the
  * `findExisting` / `applyFieldsToExisting` / `insertNew` upsert path.
  * Keeping it in a sibling class lets {@see MediaArchiveService} focus
  * on the listing + ownership concerns the dashboard exposes.
@@ -37,9 +35,8 @@ final class MediaArchiveIngestPipeline
         private readonly MimeSniffer $sniffer,
         private readonly MetadataExtractor $metadata,
         private readonly AssetStore $assetStore,
-        private readonly MediaConverterRegistry $converters,
+        private readonly MediaDerivativeService $derivatives,
         private readonly PrincipalService $principalService,
-        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     public function ingest(MediaIngestRequest $request): MediaAsset
@@ -116,40 +113,6 @@ final class MediaArchiveIngestPipeline
     {
         $asset->payload = $bytes;
         $asset->save();
-    }
-
-    /**
-     * Best-effort converter invocation. A throw is logged and swallowed
-     * so a corrupt PDF or unsupported variant doesn't fail the upload.
-     * Skipped when markdown_content is already populated to keep re-ingest
-     * idempotent.
-     */
-    public function runConversionPipeline(MediaAsset $asset, string $bytes): void
-    {
-        if (!$this->shouldConvert($asset)) {
-            return;
-        }
-        try {
-            $markdown = $this->converters->convert($bytes, $asset->mime_type, $asset->filename);
-        } catch (Throwable $e) {
-            $this->logger?->warning('MediaArchiveService: converter failed', [
-                'asset_id' => $asset->id,
-                'mime'     => $asset->mime_type,
-                'error'    => $e->getMessage(),
-            ]);
-            return;
-        }
-        if ($markdown !== null) {
-            $asset->markdown_content = Utf8Sanitizer::scrubString($markdown);
-            $asset->save();
-        }
-    }
-
-    private function shouldConvert(MediaAsset $asset): bool
-    {
-        return ($asset->markdown_content === null || $asset->markdown_content === '')
-            && $asset->mime_type !== null
-            && $asset->mime_type !== '';
     }
 
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
@@ -232,9 +195,13 @@ final class MediaArchiveIngestPipeline
             $this->writePayloadToAsset($asset, $bytes);
         }
 
-        // Best-effort: converter throws don't roll back the upload.
+        // Best-effort: mint the `md` derivative a binary document needs
+        // for the LLM to see it. A producer throw is logged and
+        // swallowed inside `ensureTextDerivative()`, so a corrupt PDF
+        // doesn't roll back the upload — the reader falls back to a
+        // `get_source` pointer.
         if ($reference->mode !== 'external') {
-            $this->runConversionPipeline($asset, $bytes);
+            $this->derivatives->ensureTextDerivative($asset);
         }
 
         return $asset;

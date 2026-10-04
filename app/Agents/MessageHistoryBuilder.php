@@ -6,7 +6,9 @@ namespace Spora\Agents;
 
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 use Spora\Models\TaskHistory;
+use Spora\Services\MediaArchive\MediaDerivativeService;
 
 /**
  * Replays {@see TaskHistory} rows into the OpenAI-compatible message list sent
@@ -375,12 +377,22 @@ final class AttachmentRowRenderer
     private const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024;
 
     /**
-     * Hard cap on inline text bytes for the no-converter fallback.
-     * Smaller than the image cap because text is denser (~4 chars /
-     * token) and a 256 KB Typst file is already ~64K tokens — plenty
-     * for the LLM to reason over without blowing the context window.
+     * Hard cap on inline text bytes, applied to BOTH inline branches:
+     * the `md` derivative and the raw source text.
+     *
+     * 512 KB ≈ 131k tokens — the largest value that still fits a 200k
+     * context window with room for the system prompt and history. Text
+     * sources therefore get *looser* than the old 256 KB cap, which
+     * spares the common `get_source` round-trip.
+     *
+     * The derivative branch had no cap at all before this change, which
+     * meant a 200-page PDF's full markdown was inlined uncapped — the
+     * latent context bug this constant now bounds. Past the cap the
+     * caller falls through to the pointer branch, which names
+     * `get_source` so the LLM knows the content exists and where to
+     * read it. See {@see self::buildTextBlock()}.
      */
-    private const MAX_INLINE_TEXT_BYTES = 256 * 1024;
+    private const MAX_INLINE_TEXT_BYTES = 512 * 1024;
 
     /**
      * Leading bytes we sample to confirm the asset really is text
@@ -462,6 +474,9 @@ final class AttachmentRowRenderer
      * collected separately so they stay siblings of the content block
      * they refer to and never get composed into the prompt body.
      *
+     * The `md` derivatives are resolved in one batch before the loop
+     * ({@see resolveTextDerivatives()}) rather than per attachment.
+     *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
@@ -474,6 +489,7 @@ final class AttachmentRowRenderer
         $textBlocks     = [];
         $imageBlocks    = [];
         $metadataBlocks = [];
+        $derivatives    = $this->resolveTextDerivatives($row->attachments);
 
         foreach ($row->attachments as $ref) {
             $asset = $this->resolveAttachmentAsset($ref);
@@ -489,7 +505,7 @@ final class AttachmentRowRenderer
                 }
                 continue;
             }
-            $textBlocks[] = $this->buildTextBlock($asset);
+            $textBlocks[] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null);
         }
 
         return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
@@ -505,6 +521,62 @@ final class AttachmentRowRenderer
             return null;
         }
         return MediaAsset::query()->find($mediaId);
+    }
+
+    /**
+     * Batch-resolve each attachment's `md` derivative, keyed by parent
+     * asset id. Two queries for the whole row rather than a
+     * `media_derivatives` lookup plus a `MediaAsset::find()` per
+     * attachment — the builder runs on every turn, and this is the only
+     * part of the branch-1 path that can be done without touching bytes.
+     *
+     * A parent with several `md` rows (two producers emitting the same
+     * format) resolves to the oldest, so every reader of a given parent
+     * sees the same text.
+     *
+     * @param  array<array-key, mixed> $refs
+     * @return array<string, MediaAsset>
+     */
+    private function resolveTextDerivatives(array $refs): array
+    {
+        $parentIds = [];
+        foreach ($refs as $ref) {
+            if (!is_array($ref)) {
+                continue;
+            }
+            $mediaId = $ref['media_id'] ?? null;
+            if (is_string($mediaId) && $mediaId !== '') {
+                $parentIds[$mediaId] = true;
+            }
+        }
+        if ($parentIds === []) {
+            return [];
+        }
+
+        $pairs = MediaDerivative::query()
+            ->whereIn('parent_id', array_keys($parentIds))
+            ->where('format', MediaDerivativeService::MARKDOWN_FORMAT)
+            ->orderBy('created_at', 'asc')
+            ->get(['parent_id', 'derivative_id']);
+
+        if ($pairs->isEmpty()) {
+            return [];
+        }
+
+        $rows = MediaAsset::query()
+            ->whereIn('id', $pairs->pluck('derivative_id')->unique()->all())
+            ->get()
+            ->keyBy('id');
+
+        $out = [];
+        foreach ($pairs as $pair) {
+            $parentId = (string) $pair->parent_id;
+            $derivative = $rows->get((string) $pair->derivative_id);
+            if ($derivative instanceof MediaAsset && !isset($out[$parentId])) {
+                $out[$parentId] = $derivative;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -532,29 +604,42 @@ final class AttachmentRowRenderer
     /**
      * Produces the user-facing text block for a non-image attachment.
      *
+     * The invariant: a text-ish source within the inline budget is its
+     * own text; anything else gets an `md` derivative; and if neither
+     * fits, the LLM is told where to read it.
+     *
      * Resolution order:
-     *   1. A registered converter populated `markdown_content` — use it
-     *      verbatim (PDF, plain-text passthrough, etc.).
+     *   1. The asset has an `md` derivative (PDF, docx, …) and the
+     *      recorded `byte_size` is within {@see MAX_INLINE_TEXT_BYTES} —
+     *      inline the derivative's bytes. The size gate reads the column
+     *      rather than `strlen()` of the loaded payload: the derivative
+     *      path costs a `media_derivatives` lookup, a second
+     *      `MediaAsset::find()` and a real `file_get_contents()` per
+     *      attachment per turn, so a 200-page PDF must not be read off
+     *      disk only to be discarded.
      *   2. The asset's mime type looks text-safe AND the raw bytes fit
-     *      within {@see MAX_INLINE_TEXT_BYTES} AND the leading bytes
-     *      contain no NUL — inline the raw bytes so the LLM has the
-     *      actual file content (Typst, JSON, YAML, code, CSV, etc.)
-     *      even when no converter is registered.
-     *   3. Otherwise, the file is binary or oversized. Surface the
-     *      metadata-only fallback so the LLM is not misled into trying
-     *      `read_url file:///api/v1/assets/...` (the failure mode this
-     *      fix removes).
+     *      within the same budget AND the leading bytes contain no NUL —
+     *      inline the raw bytes. This is what keeps `create_media` and
+     *      `note.txt` from spawning a pointless `foo.md` derivative of
+     *      `foo.md`.
+     *   3. Out of bounds, NUL-containing, or binary with no derivative —
+     *      the LLM gets the metadata prefix block (a sibling) for the
+     *      asset_id plus a body naming `get_source`. The pointer is a
+     *      tail fallback, not the common path: `[no extractable text]`
+     *      would be actively wrong here, because an in-bounds-mime asset
+     *      whose bytes merely exceed the budget absolutely does have
+     *      text — the LLM would report "no text" and stop instead of
+     *      reading it. It also keeps the LLM from trying
+     *      `read_url file:///api/v1/assets/...`.
      *
      * @return array<string, mixed>
      */
-    private function buildTextBlock(MediaAsset $asset): array
+    private function buildTextBlock(MediaAsset $asset, ?MediaAsset $derivative): array
     {
         $displayName = $asset->filename ?? $asset->id;
 
-        // 1. Registered converter produced extracted text — always prefer it.
-        $extracted = $asset->markdown_content !== null && $asset->markdown_content !== ''
-            ? $asset->markdown_content
-            : null;
+        // 1. The `md` derivative of a binary document.
+        $extracted = $this->loadInlinableDerivativeText($derivative);
         if ($extracted !== null) {
             return [
                 'type' => 'text',
@@ -562,11 +647,7 @@ final class AttachmentRowRenderer
             ];
         }
 
-        // 2. No converter ran. For plain-text mime types we read the raw
-        // bytes from the asset's storage backend and inline them so the
-        // LLM can answer questions about the file. Capped at
-        // MAX_INLINE_TEXT_BYTES and re-checked for text-likeness so a
-        // mislabeled binary file does not slip through.
+        // 2. Text-ish source, in bounds: the bytes are their own text.
         if ($this->isLikelyTextMime($asset)) {
             $bytes = $this->loadAssetBytes($asset);
             if ($bytes !== null
@@ -580,13 +661,35 @@ final class AttachmentRowRenderer
             }
         }
 
-        // 3. Binary / oversized / unrecognised mime — the LLM gets the
-        // metadata prefix block (sibling) for the asset_id but no body
-        // here, so it cannot accidentally try `read_url file:///...`.
+        // 3. Nothing inlineable — point at the tool that can read it.
         return [
             'type' => 'text',
-            'text' => "# {$displayName} (no extracted text available)\n\n[no extractable text]",
+            'text' => "# {$displayName} (no inline text)\n\n"
+                . '[too large to inline — call `get_source` with the asset_id above to read the file]',
         ];
+    }
+
+    /**
+     * The derivative's bytes when it exists AND is within the inline
+     * budget, otherwise null. The `byte_size` column is the gate: it is
+     * populated at creation time, so an oversized derivative is rejected
+     * without touching the disk at all.
+     */
+    private function loadInlinableDerivativeText(?MediaAsset $derivative): ?string
+    {
+        if ($derivative === null) {
+            return null;
+        }
+        $byteSize = $derivative->byte_size;
+        if ($byteSize !== null && (int) $byteSize > self::MAX_INLINE_TEXT_BYTES) {
+            return null;
+        }
+
+        $bytes = $this->loadAssetBytes($derivative);
+        if ($bytes === null || $bytes === '' || strlen($bytes) > self::MAX_INLINE_TEXT_BYTES) {
+            return null;
+        }
+        return $bytes;
     }
 
     /**

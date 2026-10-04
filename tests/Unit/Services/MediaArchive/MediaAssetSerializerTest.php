@@ -24,7 +24,6 @@ function makeMediaAsset(array $attrs = []): MediaAsset
         'duration_seconds'    => null,
         'prompt'              => null,
         'filename'            => 'note.txt',
-        'markdown_content'    => null,
         'tags'                => null,
         'metadata'            => null,
         'asset_url'           => null,
@@ -66,25 +65,34 @@ test('serialize() includes every documented wire field', function (): void {
         'id', 'agent_id', 'task_id', 'tool_call_id', 'user_id',
         'plugin_slug', 'tool_name', 'media_type', 'mime_type',
         'byte_size', 'width', 'height', 'duration_seconds',
-        'prompt', 'filename', 'markdown_content', 'tags', 'metadata',
+        'prompt', 'filename', 'tags', 'metadata',
         'asset_url', 'source_url', 'storage_mode', 'upload_source',
-        'public_access_token', 'public_url', 'has_markdown',
+        'public_access_token', 'public_url',
         'created_at', 'updated_at',
     ]);
 
     expect($payload['filename'])->toBe('hello.txt');
-    expect($payload['has_markdown'])->toBeFalse();
+});
+
+test('serialize() no longer carries markdown_content or has_markdown', function (): void {
+    // Both died with the column. `has_markdown` in particular is worse
+    // than absent: a field that can never be true again is a second,
+    // permanently-false claim about the archive's state.
+    $payload = (new MediaAssetSerializer())->serialize(makeMediaAsset());
+
+    expect($payload)->not->toHaveKey('markdown_content');
+    expect($payload)->not->toHaveKey('has_markdown');
 });
 
 test('serialize() preserves valid UTF-8 strings untouched', function (): void {
     $serializer = new MediaAssetSerializer();
     $payload    = $serializer->serialize(makeMediaAsset([
-        'filename'         => 'résumé-2026.pdf',
-        'markdown_content' => 'Sévigné — été\n« café »',
+        'filename' => 'résumé-2026.pdf',
+        'prompt'   => 'Sévigné — été\n« café »',
     ]));
 
     expect($payload['filename'])->toBe('résumé-2026.pdf');
-    expect($payload['markdown_content'])->toBe('Sévigné — été\n« café »');
+    expect($payload['prompt'])->toBe('Sévigné — été\n« café »');
 });
 
 test('serialize() fully-garbage Latin-1 strings are reinterpreted under Windows-1252', function (): void {
@@ -149,15 +157,13 @@ test('serialize() scrubs inside nested arrays (tags + metadata)', function (): v
 test('serialize() preserves null values exactly', function (): void {
     $serializer = new MediaAssetSerializer();
     $payload    = $serializer->serialize(makeMediaAsset([
-        'prompt'           => null,
-        'markdown_content' => null,
-        'tags'             => null,
-        'metadata'         => null,
-        'source_url'       => null,
+        'prompt'     => null,
+        'tags'       => null,
+        'metadata'   => null,
+        'source_url' => null,
     ]));
 
     expect($payload['prompt'])->toBeNull();
-    expect($payload['markdown_content'])->toBeNull();
     expect($payload['tags'])->toBeNull();
     expect($payload['metadata'])->toBeNull();
     expect($payload['source_url'])->toBeNull();

@@ -64,6 +64,7 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
 
     $sniffer = new MimeSniffer();
     $logger  = new \Psr\Log\NullLogger();
+    $derivatives = \Tests\Support\MediaArchiveTestSupport::buildDerivativeService($assetStore, $logger);
     $resolver = new MediaArchiveUrlResolver(
         new RemoteMediaFetcher(HttpClient::create(), $logger, 30, 100 * 1024 * 1024),
         $sniffer,
@@ -77,11 +78,10 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
         $sniffer,
         new MetadataExtractor($logger, false),
         $assetStore,
-        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        $derivatives,
         new PrincipalService(new PrincipalResolver()),
-        $logger,
     );
-    $archive = new MediaArchiveService($pipeline);
+    $archive = new MediaArchiveService($pipeline, $derivatives);
 
     // Auth mock — by default, the test requester is treated as an admin
     // so the existing tests (which don't set up an owning user) still

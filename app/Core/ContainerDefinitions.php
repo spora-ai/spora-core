@@ -121,8 +121,6 @@ use Spora\Services\LlmConfigValidator;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\Mail\MailTemplateSyncService;
 use Spora\Services\MailTemplateServiceInterface;
-use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
-use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -130,14 +128,14 @@ use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
 use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\MediaArchive\PdfMarkdownExtractor;
 use Spora\Services\MediaArchive\Producers\ImageDerivativeProducer;
+use Spora\Services\MediaArchive\Producers\PdfToMarkdownProducer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
@@ -194,18 +192,16 @@ final class ContainerDefinitions
 {
     public static function all(): array
     {
-        // Self-register the core media converters with the static discovery
-        // list. Plugins add their own converters in their `register(ContainerBuilder)`
-        // hook (see docs/07_plugins.md). The list is read by
-        // MediaConverterRegistry at construction time.
-        MediaConverterDiscovery::add(PdfToMarkdownConverter::class);
-        MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
-
-        // Same pattern for derivative producers. The "Convert to" dropdown
-        // in `spora-plugin-media-archive-frontend` surfaces whatever this
-        // list contains — plugins ship heavier producers (PDF, video) in
-        // their own composer packages via the same registration hook.
+        // Self-register the core derivative producers with the static
+        // discovery list. Plugins add their own producers in their
+        // `register(ContainerBuilder)` hook (see docs/07_plugins.md).
+        // The "Convert to" dropdown in
+        // `spora-plugin-media-archive-frontend` surfaces whatever this list
+        // contains, and `MediaAllowedTypesService` unions the producers'
+        // `supportedSourceFormats()` into the upload allowlist — so
+        // registering a producer is what makes a document type uploadable.
         MediaDerivativeProducerDiscovery::add(ImageDerivativeProducer::class);
+        MediaDerivativeProducerDiscovery::add(PdfToMarkdownProducer::class);
 
         return array_merge(
             self::configDefinition(),
@@ -669,6 +665,7 @@ final class ContainerDefinitions
             MediaArchiveService::class => static function (ContainerInterface $c): MediaArchiveService {
                 return new MediaArchiveService(
                     $c->get(MediaArchiveIngestPipeline::class),
+                    $c->get(MediaDerivativeService::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
                     $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
                 );
@@ -689,9 +686,8 @@ final class ContainerDefinitions
                     $c->get(MimeSniffer::class),
                     $c->get(MetadataExtractor::class),
                     $c->get(AssetStore::class),
-                    $c->get(MediaConverterRegistry::class),
+                    $c->get(MediaDerivativeService::class),
                     $c->get(PrincipalService::class),
-                    $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
                 );
             },
 
@@ -706,26 +702,23 @@ final class ContainerDefinitions
 
             TaskMediaCapabilityService::class => static function (ContainerInterface $c): TaskMediaCapabilityService {
                 $factory = $c->has(DriverFactory::class) ? $c->get(DriverFactory::class) : null;
-                return new TaskMediaCapabilityService($factory);
+                $derivatives = $c->has(MediaDerivativeService::class) ? $c->get(MediaDerivativeService::class) : null;
+                return new TaskMediaCapabilityService($factory, $derivatives);
             },
 
-            // Core converters self-register with the static discovery list
-            // before the registry resolves them. Plugins add their own
-            // converters in their `register(ContainerBuilder)` hook.
-            PdfToMarkdownConverter::class => static function (ContainerInterface $c): PdfToMarkdownConverter {
-                return new PdfToMarkdownConverter(
-                    $c->get(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class),
-                );
-            },
+            // The PDF parser is the single core PDF→text dependency; both
+            // the archive's `md` derivative producer and
+            // `ReadUrlTool::fetch_pdf` extract through it, so there is one
+            // implementation rather than two.
             \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class => static fn(): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
                 => new \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser(),
-            PlainTextPassthroughConverter::class => static fn(): PlainTextPassthroughConverter
-                => new PlainTextPassthroughConverter(),
-            MediaConverterRegistry::class => static fn(ContainerInterface $c): MediaConverterRegistry
-                => new MediaConverterRegistry($c),
+            PdfMarkdownExtractor::class => static fn(ContainerInterface $c): PdfMarkdownExtractor
+                => new PdfMarkdownExtractor(
+                    $c->get(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class),
+                ),
             MediaAllowedTypesService::class => static fn(ContainerInterface $c): MediaAllowedTypesService
                 => new MediaAllowedTypesService(
-                    $c->get(MediaConverterRegistry::class),
+                    $c->get(MediaDerivativeService::class),
                     $c->get(DriverFactory::class),
                     $c->get('config')['media_archive']['allowed_image_types'] ?? null,
                 ),
@@ -1555,7 +1548,7 @@ final class ContainerDefinitions
                     $c->get(HttpClientInterface::class),
                     $c->get(ToolConfigService::class),
                     $c->get(LoggerInterface::class),
-                    $c->get(MediaConverterRegistry::class),
+                    $c->get(PdfMarkdownExtractor::class),
                 );
             },
 

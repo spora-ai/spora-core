@@ -52,6 +52,14 @@ function buildDerivativeOptionsControllerFixture(int $userId = 42, bool $isAdmin
     $principalService = new PrincipalService(new PrincipalResolver());
     $container = MediaArchiveTestSupport::buildProducerContainer();
     $derivatives = new MediaDerivativeService($assetStore, $principalService, $container);
+
+    // `buildService()` self-registers the core producers into the
+    // process-global discovery list, and `MediaDerivativeService` re-reads
+    // that list on every call. Clearing it keeps each test's assertion
+    // about *its own* registration rather than about whatever a sibling
+    // test in this parallel worker left behind — the "exactly one
+    // candidate format" and "no producers registered" cases depend on it.
+    MediaDerivativeProducerDiscovery::reset();
     $auth = new class ($userId, $isAdmin) extends AuthService {
         public function __construct(private readonly int $uid, private readonly bool $admin) {}
         public function currentUserId(): ?int
@@ -101,6 +109,31 @@ test('GET /media/{id}/derivatives/options returns each format with its available
         $byFormat[$opt['format']] = $opt['available'];
     }
     expect($byFormat)->toBe(['pdf' => true]);
+});
+
+test('GET /media/{id}/derivatives/options labels the md format "Markdown"', function (): void {
+    // The `md` entry rides on the same catalogue as the image presets.
+    // Without an explicit label it would fall through to
+    // `strtoupper('md')` and render as "MD" in the operator's
+    // "Convert to" dropdown.
+    [$controller] = buildDerivativeOptionsControllerFixture();
+    $parent = seedOptionsParent(42);
+    $parent->mime_type = 'application/pdf';
+    $parent->save();
+    MediaDerivativeProducerDiscovery::add(\Spora\Services\MediaArchive\Producers\PdfToMarkdownProducer::class);
+
+    $resp = $controller->index($parent->id);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
+    $body = json_decode($resp->getContent(), true);
+
+    $byFormat = [];
+    foreach ($body['data'] as $opt) {
+        $byFormat[$opt['format']] = $opt;
+    }
+    expect($byFormat)->toHaveKey('md');
+    expect($byFormat['md']['label'])->toBe('Markdown');
+    expect($byFormat['md']['available'])->toBeTrue();
 });
 
 test('GET /media/{id}/derivatives/options surfaces human labels from ImageDerivativeFormat for an image asset', function (): void {

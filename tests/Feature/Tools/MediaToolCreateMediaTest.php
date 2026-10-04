@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 
 /**
  * End-to-end coverage for `MediaTool`'s `create_media` operation — the
@@ -15,9 +16,9 @@ use Spora\Models\MediaAsset;
  * cover the whole chain and not just the tool's return value: the
  * `media_assets` row, the `plugin_slug` / `tool_name` / `upload_source`
  * attribution that tells the operator dashboard which tool minted the
- * file, and the `markdown_content` that
- * `PlainTextPassthroughConverter` writes so the content is readable back
- * out through `get_source` on a later turn.
+ * file, and the absence of any derivative row — authored text is its own
+ * text, so the bytes are stored exactly once and read straight back out
+ * through `get_source` on a later turn.
  *
  * Tests run with admin auth so the scope gate is bypassed; the scope
  * check itself is `MediaToolScopeTest`'s job.
@@ -86,10 +87,13 @@ it('attributes the row to the core media tool, not to a plugin', function (): vo
     }
 });
 
-it('populates markdown_content through PlainTextPassthroughConverter', function (): void {
-    // The whole point of ingesting text rather than writing bytes blind:
-    // on a later turn `get_source` reads the content back without the LLM
-    // having to keep the original string in its context.
+it('stores authored text once, with no derivative of it', function (): void {
+    // The duplicate-storage bug this change removes: the row is the
+    // storage, and `get_source` reads the same bytes back on a later turn
+    // without the LLM having to keep the original string in its context.
+    // Asserting the *absence* of a derivative is the part that bites —
+    // minting `quarterly-report.md` of `quarterly-report.md` would
+    // silently double every authored document's footprint.
     $agentId = seedMediaToolAgent();
     ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
 
@@ -106,8 +110,17 @@ it('populates markdown_content through PlainTextPassthroughConverter', function 
         );
 
         expect($result->success)->toBeTrue();
-        expect(MediaAsset::query()->find($result->data['asset_id'])->markdown_content)
-            ->toBe(trim($markdown));
+        $assetId = (string) $result->data['asset_id'];
+        expect(MediaDerivative::query()->where('parent_id', $assetId)->count())->toBe(0);
+
+        // And the bytes are readable straight back off the source row.
+        $sourceResult = $tool->execute(
+            ['action' => 'get_source', 'asset_id' => $assetId],
+            agentId: $agentId,
+            userId: 99,
+        );
+        expect($sourceResult->success)->toBeTrue();
+        expect($sourceResult->content)->toContain(trim($markdown));
     } finally {
         $restore();
     }

@@ -19,11 +19,19 @@ use Throwable;
  * Plan §8.3 — reject an image attachment when the agent's LLM cannot
  * consume image blocks, returning a clear HTTP 400 at the request boundary
  * rather than a silent image-strip during the first tick.
+ *
+ * Also hosts the attach-time `md`-derivative mint, because it is the same
+ * seam: the media ids have just been parsed and validated, and this is
+ * the last point before the turn is queued. Putting it here rather than
+ * in the three call sites is what makes "all three paths that accept
+ * `media_ids`" true by construction — a fourth caller that forgets is a
+ * silent bug, and partial coverage is exactly the failure mode.
  */
 final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
 {
     public function __construct(
         private readonly ?DriverFactory $driverFactory = null,
+        private readonly ?MediaDerivativeService $derivatives = null,
     ) {}
 
     /**
@@ -67,6 +75,28 @@ final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
             throw new MediaCapabilityMismatchException(
                 'One or more attachments are images but the agent\'s LLM does not support image input.',
             );
+        }
+    }
+
+    /**
+     * @param list<string> $mediaIds
+     */
+    public function ensureTextDerivatives(array $mediaIds): void
+    {
+        if ($mediaIds === [] || $this->derivatives === null) {
+            return;
+        }
+        foreach ($mediaIds as $mediaId) {
+            if ($mediaId === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mediaId);
+            if ($asset === null) {
+                continue;
+            }
+            // Swallows and logs a producer throw; a corrupt document
+            // must not block the user's turn.
+            $this->derivatives->ensureTextDerivative($asset);
         }
     }
 

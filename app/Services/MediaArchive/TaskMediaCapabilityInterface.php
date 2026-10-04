@@ -24,4 +24,21 @@ interface TaskMediaCapabilityInterface
      * @param list<string> $mediaIds
      */
     public function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void;
+
+    /**
+     * Mint the `md` derivative of every attached binary document that
+     * lacks one, so the turn's prompt is built from text that is already
+     * there.
+     *
+     * The attach-time seam, not a lazy create inside
+     * {@see \Spora\Agents\AttachmentRowBuilder}: a conversion failure then
+     * surfaces as an ordinary attach-time warning rather than vanishing
+     * mid-turn, and the message builder stays a pure read.
+     *
+     * Best-effort by contract — never throws, for the same reason the
+     * ingest-time mint is best-effort.
+     *
+     * @param list<string> $mediaIds
+     */
+    public function ensureTextDerivatives(array $mediaIds): void;
 }

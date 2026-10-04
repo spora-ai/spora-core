@@ -36,6 +36,7 @@ final class LocalAssetStore implements AssetStore
         'svg'  => 'image/svg+xml',
         'pdf'  => 'application/pdf',
         'txt'  => 'text/plain',
+        'md'   => 'text/markdown',
         'typ'  => 'text/x-typst',
     ];
 
@@ -192,6 +193,13 @@ final class LocalAssetStore implements AssetStore
                 'image/svg+xml' => 'svg',
                 'application/pdf' => 'pdf',
                 'text/plain'    => 'txt',
+                // `md` derivatives are a first-class local-mode format: a
+                // PDF or DOCX upload is extracted into a `text/markdown`
+                // asset whose bytes `store()` wrote as `<token>.md`. Without
+                // this entry `pickExtension()` falls through to `bin` and
+                // `readFromAsset()` looks for `<token>.bin` — so every
+                // local-mode derivative 404s on read.
+                'text/markdown' => 'md',
                 'text/x-typst'  => 'typ',
             ];
             if (isset($fromMime[strtolower($mime)])) {

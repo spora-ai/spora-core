@@ -14,9 +14,13 @@ use Throwable;
  * a PNG into text, or a Typst plugin that renders a source document
  * into PDF/PNG/SVG) by calling
  * {@see MediaDerivativeProducerDiscovery::add()} from their
- * `register(ContainerBuilder)` hook. The discovery registry mirrors
- * {@see MediaConverterInterface}'s shape so plugin authors only need to
- * learn one registration pattern.
+ * `register(ContainerBuilder)` hook — the same pattern the MIME-refiner
+ * registry uses, so plugin authors only learn one registration shape.
+ *
+ * `supportedSourceFormats()` doubles as the upload allowlist: core's
+ * {@see MediaAllowedTypesService} unions every registered producer's
+ * source formats into the set of accepted MIME types. Registering a
+ * producer is therefore what makes a document type uploadable at all.
  *
  * `supportedSourceFormats()` and `supportedDerivativeFormats()` are
  * advisory hints the controller uses to short-list producers; the

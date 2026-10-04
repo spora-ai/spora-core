@@ -85,7 +85,7 @@ test('isAssetInPrincipalScope returns true for an asset uploaded directly by the
         runnerUserId: $userId,
     );
 
-    $svc = new MediaArchiveService(makeIngestPipeline());
+    $svc = makePrincipalScopeService();
     expect($svc->isAssetInPrincipalScope($asset, $context, $userId))->toBeTrue();
 });
 
@@ -103,7 +103,7 @@ test('isAssetInPrincipalScope returns true when the asset is attached to an agen
         runnerUserId: $userId,
     );
 
-    $svc = new MediaArchiveService(makeIngestPipeline());
+    $svc = makePrincipalScopeService();
     expect($svc->isAssetInPrincipalScope($asset, $context, $userId))->toBeTrue();
 });
 
@@ -124,7 +124,7 @@ test('isAssetInPrincipalScope returns false when the asset is attached to an age
         runnerUserId: $userId,
     );
 
-    $svc = new MediaArchiveService(makeIngestPipeline());
+    $svc = makePrincipalScopeService();
     expect($svc->isAssetInPrincipalScope($asset, $context, $userId))->toBeFalse();
 });
 
@@ -140,7 +140,7 @@ test('isAssetInPrincipalScope returns false when the asset has no agent_id and t
         runnerUserId: $userId,
     );
 
-    $svc = new MediaArchiveService(makeIngestPipeline());
+    $svc = makePrincipalScopeService();
     expect($svc->isAssetInPrincipalScope($asset, $context, $userId))->toBeFalse();
 });
 
@@ -156,11 +156,11 @@ test('isAssetInPrincipalScope returns false when the PrincipalContext is cold (p
         runnerUserId: null,
     );
 
-    $svc = new MediaArchiveService(makeIngestPipeline());
+    $svc = makePrincipalScopeService();
     expect($svc->isAssetInPrincipalScope($asset, $cold, null))->toBeFalse();
 });
 
-function makeIngestPipeline(): \Spora\Services\MediaArchive\MediaArchiveIngestPipeline
+function makePrincipalScopeService(): MediaArchiveService
 {
     $tmp = sys_get_temp_dir() . '/spora-masips-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -175,7 +175,9 @@ function makeIngestPipeline(): \Spora\Services\MediaArchive\MediaArchiveIngestPi
     $assetStore = new \Spora\Services\AutoAssetStore($database, $local, 1024);
     $logger = new \Psr\Log\NullLogger();
 
-    return new \Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
+    $derivatives = \Tests\Support\MediaArchiveTestSupport::buildDerivativeService($assetStore, $logger);
+
+    $pipeline = new \Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
         new \Spora\Services\MediaArchive\MediaIngestDecoder(),
         new \Spora\Services\MediaArchive\MediaArchiveUrlResolver(
             new \Spora\Services\MediaArchive\RemoteMediaFetcher(
@@ -188,7 +190,9 @@ function makeIngestPipeline(): \Spora\Services\MediaArchive\MediaArchiveIngestPi
         new \Spora\Services\MediaArchive\MimeSniffer(),
         new \Spora\Services\MediaArchive\MetadataExtractor($logger, false),
         $assetStore,
-        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        $derivatives,
         new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
     );
+
+    return new MediaArchiveService($pipeline, $derivatives);
 }

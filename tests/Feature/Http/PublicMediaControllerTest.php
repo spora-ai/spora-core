@@ -11,13 +11,13 @@ use Spora\Models\MediaAsset;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 /**

@@ -4,33 +4,43 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
-use Mockery;
-use RuntimeException;
 use Spora\Agents\MessageHistoryBuilder;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 use Spora\Models\TaskHistory;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
+use Tests\Support\EmptyTextDerivativeProducer;
 use Tests\Support\MediaArchiveTestSupport;
-use Throwable;
-
-afterEach(function (): void {
-    MediaConverterDiscovery::reset();
-});
+use Tests\Support\TextDerivativeProducer;
+use Tests\Support\ThrowingTextDerivativeProducer;
 
 /**
- * End-to-end test that proves the full markdown pipeline:
- *   upload text/PDF file → MediaArchiveService::runConversionPipeline
- *   → MediaConverterInterface implementations → media_assets.markdown_content
- *   → MessageHistoryBuilder reads it back → emits text block in user message.
+ * End-to-end test of the `md` derivative pipeline:
+ *   upload text/PDF → MediaDerivativeService::ensureTextDerivative
+ *   → MediaDerivativeProducerInterface → media_assets + media_derivatives
+ *   → MessageHistoryBuilder reads it back → text block in the user message.
+ *
+ * The invariant under test: a text-ish source within the inline budget is
+ * its own text (no derivative at all — which is what stops
+ * `create_media` storing every document twice), a binary document gets an
+ * `md` derivative, and anything out of bounds gets a `get_source` pointer
+ * rather than a false claim that there is no text.
  */
-function buildMarkdownPipelineService(): \Spora\Services\MediaArchive\MediaArchiveService
+afterEach(function (): void {
+    MediaDerivativeProducerDiscovery::reset();
+});
+
+function buildMarkdownPipelineService(): MediaArchiveService
 {
     $tmp = sys_get_temp_dir() . '/spora-md-pipeline-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -46,7 +56,7 @@ function buildMarkdownPipelineService(): \Spora\Services\MediaArchive\MediaArchi
 
 function buildMarkdownPipelineAgent(int $userId): int
 {
-    $authService = bootAuthLayer();
+    bootAuthLayer();
     $config = LLMDriverConfiguration::create([
         'principal_id' => null,
         'name'         => 'Markdown Pipeline Config',
@@ -65,7 +75,60 @@ function buildMarkdownPipelineAgent(int $userId): int
     return $agent->id;
 }
 
-test('text upload populates markdown_content end-to-end', function (): void {
+/**
+ * A task with one prompt + one attachment row, in production order
+ * (Orchestrator::start writes the user row first).
+ *
+ * @param list<string> $mediaIds
+ */
+function markdownPipelineTask(int $userId, string $prompt, array $mediaIds, int $attachmentSequence = 1): \Spora\Models\Task
+{
+    $agentId = buildMarkdownPipelineAgent($userId);
+    $task = \Spora\Models\Task::create([
+        'agent_id'        => $agentId,
+        'principal_id'    => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'status'          => 'RUNNING',
+        'user_prompt'     => $prompt,
+        'step_count'      => 0,
+        'max_steps'       => 10,
+    ]);
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => $prompt,
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => $attachmentSequence,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => array_map(
+            static fn(string $id): array => ['media_id' => $id, 'kind' => 'text'],
+            $mediaIds,
+        ),
+    ]);
+
+    return $task;
+}
+
+/** The composed prompt+attachment body block, which is the last text block. */
+function composedText(array $messages): string
+{
+    $content = $messages[0]['content'];
+    expect($content)->toBeArray();
+    $blocks = array_values(array_filter(
+        $content,
+        static fn(array $b): bool => ($b['type'] ?? '') === 'text',
+    ));
+    $last = end($blocks);
+    expect($last)->not->toBeFalse();
+    return (string) $last['text'];
+}
+
+test('a text source gets no derivative — the bytes are its own text', function (): void {
     $service = buildMarkdownPipelineService();
     $asset = $service->ingest(new MediaIngestRequest(
         bytes: "Lorem ipsum dolor sit amet\nconsectetur adipiscing elit",
@@ -74,11 +137,15 @@ test('text upload populates markdown_content end-to-end', function (): void {
         userId: 1,
         uploadSource: 'upload',
     ));
-    expect($asset->markdown_content)->not->toBeNull();
-    expect($asset->markdown_content)->toContain('Lorem ipsum dolor sit amet');
+
+    // No producer claims `text/*` as a source, so `ensureTextDerivative()`
+    // declines. This is the half of the invariant that stops
+    // `create_media` from storing every document twice.
+    $derivatives = MediaDerivative::query()->where('parent_id', $asset->id)->count();
+    expect($derivatives)->toBe(0);
 });
 
-test('attachment row + user prompt produce a single user message with extracted text', function (): void {
+test('attachment row + user prompt produce a single user message with the file text inlined', function (): void {
     $service = buildMarkdownPipelineService();
     $asset = $service->ingest(new MediaIngestRequest(
         bytes: "Lorem ipsum dolor sit amet",
@@ -88,32 +155,8 @@ test('attachment row + user prompt produce a single user message with extracted 
         uploadSource: 'upload',
     ));
 
-    $authService = bootAuthLayer();
-    $userId = $authService->register('md-pipeline@example.com', 'Password1!', 'Md');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id'    => $agentId,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'Summarize this paper',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    TaskHistory::create([
-        'task_id'      => $task->id,
-        'sequence'     => 0,
-        'role'         => 'attachment',
-        'content'      => '',
-        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
-    TaskHistory::create([
-        'task_id'  => $task->id,
-        'sequence' => 1,
-        'role'     => 'user',
-        'content'  => 'Summarize this paper',
-    ]);
+    $userId = bootAuthLayer()->register('md-pipeline@example.com', 'Password1!', 'Md');
+    $task = markdownPipelineTask($userId, 'Summarize this paper', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
@@ -124,21 +167,16 @@ test('attachment row + user prompt produce a single user message with extracted 
     foreach ($messages as $msg) {
         expect($msg['role'])->not->toBe('attachment');
     }
-    $text = $messages[0]['content'][1]['text'];
+    $text = composedText($messages);
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
-    expect($text)->toContain('# paper.txt (extracted text)');
     expect($text)->toContain('Lorem ipsum dolor sit amet');
 });
 
-test('attachment + prompt does not duplicate extracted text across blocks', function (): void {
+test('attachment + prompt does not duplicate the body across blocks', function (): void {
     // Regression: buildAttachmentContent used to merge the original text blocks
     // back into the output even though composeTextContent() had already folded
-    // their text into the leading combined block. The combined block carries
-    // `prompt + --- + # filename (extracted text) + <markdown>`; the trailing
-    // originals added the same `# filename (extracted text) + <markdown>`
-    // again. The previous test only inspected content[0], so the duplication
-    // slipped through.
+    // their text into the leading combined block.
     $service = buildMarkdownPipelineService();
     $asset = $service->ingest(new MediaIngestRequest(
         bytes: "Lorem ipsum dolor sit amet",
@@ -148,57 +186,29 @@ test('attachment + prompt does not duplicate extracted text across blocks', func
         uploadSource: 'upload',
     ));
 
-    $authService = bootAuthLayer();
-    $userId = $authService->register('md-pipeline-dedupe@example.com', 'Password1!', 'Md');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id'    => $agentId,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'Summarize this paper',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    TaskHistory::create([
-        'task_id'      => $task->id,
-        'sequence'     => 0,
-        'role'         => 'attachment',
-        'content'      => '',
-        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
-    TaskHistory::create([
-        'task_id'  => $task->id,
-        'sequence' => 1,
-        'role'     => 'user',
-        'content'  => 'Summarize this paper',
-    ]);
+    $userId = bootAuthLayer()->register('md-pipeline-dedupe@example.com', 'Password1!', 'Md');
+    $task = markdownPipelineTask($userId, 'Summarize this paper', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     // Layout: [metadata_prefix, composedPromptBlock]. Metadata is a sibling
-    // block; the composed body carries the prompt + extracted text.
+    // block; the composed body carries the prompt + file text.
     expect($messages[0]['content'])->toHaveCount(2);
     expect($messages[0]['content'][0]['type'])->toBe('text');
     expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
     expect($messages[0]['content'][1]['type'])->toBe('text');
-    $text = $messages[0]['content'][1]['text'];
+    $text = (string) $messages[0]['content'][1]['text'];
     expect($text)->not->toContain('[Attached asset_id=');
 
-    // The marker phrase must appear exactly once across the composed block —
-    // not twice (once in the combined block, once in the duplicate).
-    expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
+    // The body must appear exactly once across the composed block.
     expect(substr_count($text, 'Lorem ipsum dolor sit amet'))->toBe(1);
 });
 
 test('multiple text attachments + prompt produces a single combined block', function (): void {
     // Regression sibling: the same duplication bug fires when more than one
-    // text attachment is attached alongside a typed prompt (or even with an
-    // empty prompt). composeTextContent folds every attachment into the
-    // leading block; the original blocks must NOT be appended after.
+    // text attachment is attached alongside a typed prompt.
     $service = buildMarkdownPipelineService();
     $assetA = $service->ingest(new MediaIngestRequest(
         bytes: 'Alpha section content.',
@@ -215,158 +225,29 @@ test('multiple text attachments + prompt produces a single combined block', func
         uploadSource: 'upload',
     ));
 
-    $authService = bootAuthLayer();
-    $userId = $authService->register('md-pipeline-multi@example.com', 'Password1!', 'Md');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id'    => $agentId,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'Compare these notes',
-        'step_count'  => 0,
-        'max_steps'   => 10,
-    ]);
-
-    TaskHistory::create([
-        'task_id'      => $task->id,
-        'sequence'     => 0,
-        'role'         => 'attachment',
-        'content'      => '',
-        'attachments'  => [
-            ['media_id' => $assetA->id, 'kind' => 'text'],
-            ['media_id' => $assetB->id, 'kind' => 'text'],
-        ],
-    ]);
-    TaskHistory::create([
-        'task_id'  => $task->id,
-        'sequence' => 1,
-        'role'     => 'user',
-        'content'  => 'Compare these notes',
-    ]);
+    $userId = bootAuthLayer()->register('md-pipeline-multi@example.com', 'Password1!', 'Md');
+    $task = markdownPipelineTask($userId, 'Compare these notes', [$assetA->id, $assetB->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
     expect($messages)->toHaveCount(1);
     // Layout: [metadata_a, metadata_b, composedPromptBlock].
     expect($messages[0]['content'])->toHaveCount(3);
-    expect($messages[0]['content'][0]['type'])->toBe('text');
-    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
     expect($messages[0]['content'][0]['text'])->toContain($assetA->id);
-    expect($messages[0]['content'][1]['type'])->toBe('text');
-    expect($messages[0]['content'][1]['text'])->toContain('[Attached asset_id=');
     expect($messages[0]['content'][1]['text'])->toContain($assetB->id);
-    $text = $messages[0]['content'][2]['text'];
+    $text = (string) $messages[0]['content'][2]['text'];
     expect($text)->toContain('Compare these notes');
     expect($text)->toContain('---');
-    expect($text)->toContain('# alpha.txt (extracted text)');
-    expect($text)->toContain('# beta.txt (extracted text)');
-    expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
-    expect(substr_count($text, '# beta.txt (extracted text)'))->toBe(1);
+    expect(substr_count($text, 'Alpha section content.'))->toBe(1);
+    expect(substr_count($text, 'Beta section content.'))->toBe(1);
 });
 
-/**
- * PDF fixture — `MimeSniffer` keys on the `%PDF-` magic bytes at offset 0
- * (see MimeSniffer::MAGIC_SIGNATURES), so the body content is irrelevant
- * to MIME detection. The PDF parser is replaced with a Mockery mock that
- * returns whatever the test wants — the conversion pipeline then writes
- * that into `markdown_content` and the message builder reads it back.
- */
-const PDF_MAGIC = "%PDF-1.4\n";
-
-function mockPdfParserReturning(string $markdown): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
-{
-    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
-    $parser->shouldReceive('parseContent')
-        ->andReturn($markdown);
-    return $parser;
-}
-
-function mockPdfParserThrowing(Throwable $error): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
-{
-    $parser = Mockery::mock(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
-    $parser->shouldReceive('parseContent')
-        ->andThrow($error);
-    return $parser;
-}
-
-/**
- * Build a {@see MediaArchiveService} whose {@see MediaConverterRegistry}
- * resolves {@see PdfToMarkdownConverter} with the supplied parser mock.
- *
- * The default {@see MediaArchiveTestSupport::buildConverterRegistry()}
- * builds converters through a PSR-11 stub that uses `Mockery::mock(...)`
- * with no `shouldReceive` setup, which gives us an empty return — useless
- * for asserting anything about the markdown pipeline. This helper wires
- * the caller's mock parser into the converter's constructor instead.
- */
-function makePdfPipelineServiceWithParser(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser $parser): \Spora\Services\MediaArchive\MediaArchiveService
-{
-    $tmp = sys_get_temp_dir() . '/spora-pdf-pipeline-' . bin2hex(random_bytes(4));
-    mkdir($tmp, 0755, recursive: true);
-    putenv("SPORA_STORAGE_DIR={$tmp}");
-    $_ENV['SPORA_STORAGE_DIR']    = $tmp;
-    $_SERVER['SPORA_STORAGE_DIR'] = $tmp;
-    $paths    = new Paths(BASE_PATH);
-    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $database = new DatabaseAssetStore(50 * 1024 * 1024);
-    $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
-
-    $container = new class ($parser) implements \Psr\Container\ContainerInterface {
-        public function __construct(private readonly \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser $parser) {}
-        public function get(string $id): mixed
-        {
-            return match ($id) {
-                \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class
-                    => new \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter($this->parser),
-                \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class
-                    => new \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter(),
-                default => throw new RuntimeException("Not registered: {$id}"),
-            };
-        }
-        public function has(string $id): bool
-        {
-            return in_array($id, [
-                \Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class,
-                \Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class,
-            ], true);
-        }
-    };
-
-    MediaConverterDiscovery::reset();
-    MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter::class);
-    MediaConverterDiscovery::add(\Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter::class);
-    $registry = new \Spora\Services\MediaArchive\MediaConverterRegistry($container);
-
-    $logger   = new \Psr\Log\NullLogger();
-    $sniffer  = new \Spora\Services\MediaArchive\MimeSniffer();
-    $metadata = new \Spora\Services\MediaArchive\MetadataExtractor($logger, false);
-    $resolver = new \Spora\Services\MediaArchive\MediaArchiveUrlResolver(
-        new \Spora\Services\MediaArchive\RemoteMediaFetcher(new \Symfony\Component\HttpClient\MockHttpClient([]), $logger, 30, 100 * 1024 * 1024),
-        $sniffer,
-        $logger,
-        true,
-        100 * 1024 * 1024,
-    );
-
-    $pipeline = new \Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
-        new \Spora\Services\MediaArchive\MediaIngestDecoder(),
-        $resolver,
-        $sniffer,
-        $metadata,
-        new AutoAssetStore($database, $local, 1_048_576),
-        $registry,
-        new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
-        $logger,
-    );
-    return new \Spora\Services\MediaArchive\MediaArchiveService($pipeline);
-}
-
-test('PDF upload: parser returns text → markdown_content populated → LLM gets the text', function (): void {
-    $service = makePdfPipelineServiceWithParser(mockPdfParserReturning("Chapter 1\n\nIt was the best of times."));
+test('a PDF gets an md derivative on ingest and the LLM sees the extracted text', function (): void {
+    MediaDerivativeProducerDiscovery::add(TextDerivativeProducer::class);
+    $service = buildMarkdownPipelineService();
 
     $asset = $service->ingest(new MediaIngestRequest(
-        bytes: PDF_MAGIC . '%PDF body content',
+        bytes: "%PDF-1.4\n%PDF body content",
         mime: 'application/pdf',
         filename: 'novel.pdf',
         userId: 1,
@@ -374,147 +255,86 @@ test('PDF upload: parser returns text → markdown_content populated → LLM get
     ));
 
     expect($asset->mime_type)->toBe('application/pdf');
-    expect($asset->markdown_content)->not->toBeNull();
-    expect($asset->markdown_content)->toContain('Chapter 1');
-    expect($asset->markdown_content)->toContain('best of times');
+    $derivative = MediaDerivative::query()->where('parent_id', $asset->id)->first();
+    expect($derivative)->not->toBeNull();
+    expect($derivative->format)->toBe('md');
 
     $userId = bootAuthLayer()->register('pdf-pipeline@example.com', 'Password1!', 'P');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status' => 'RUNNING', 'user_prompt' => 'Summarize chapter 1',
-        'step_count' => 0, 'max_steps' => 10,
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 0,
-        'role' => 'attachment', 'content' => '',
-        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 1,
-        'role' => 'user', 'content' => 'Summarize chapter 1',
-    ]);
+    $task = markdownPipelineTask($userId, 'Summarize chapter 1', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
-    expect($messages[0]['role'])->toBe('user');
     // Layout: [metadata_prefix, composedPromptBlock].
     expect($messages[0]['content'])->toHaveCount(2);
     expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
-    expect($messages[0]['content'][0]['text'])->toContain($asset->id);
-    $text = $messages[0]['content'][1]['text'];
+    $text = (string) $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize chapter 1');
     expect($text)->toContain('# novel.pdf (extracted text)');
-    expect($text)->toContain('Chapter 1');
-    expect($text)->toContain('best of times');
+    expect($text)->toContain('extracted text');
     expect($text)->not->toContain('[Attached asset_id=');
 });
 
-test('PDF upload: parser returns empty string → LLM gets [no extractable text] placeholder', function (): void {
-    // This is the "scanned PDF, no OCR layer" case: the parser succeeds,
-    // returns an empty string, and the converter trims it to "". The
-    // asset is saved with markdown_content = "" and the LLM sees the
-    // placeholder. This is the most likely reason a user observes "the
-    // LLM says it has no file content" — the upload succeeded but the
-    // PDF had no text layer.
-    $service = makePdfPipelineServiceWithParser(mockPdfParserReturning(''));
+test('a producer that yields nothing leaves the PDF without a derivative and the LLM gets a pointer', function (): void {
+    // The scanned-PDF case: extraction succeeds but returns nothing. No
+    // empty derivative row is persisted — every reader would otherwise
+    // have to special-case a contentless derivative — so the message falls
+    // through to the `get_source` pointer. The upload still succeeded.
+    MediaDerivativeProducerDiscovery::add(EmptyTextDerivativeProducer::class);
+    $service = buildMarkdownPipelineService();
 
     $asset = $service->ingest(new MediaIngestRequest(
-        bytes: PDF_MAGIC . 'scanned pages with no OCR',
+        bytes: "%PDF-1.4\nscanned pages with no OCR",
         mime: 'application/pdf',
         filename: 'scan.pdf',
         userId: 1,
         uploadSource: 'upload',
     ));
-
-    // markdown_content is set to "" (empty string), not null.
-    expect($asset->markdown_content)->toBe('');
+    expect(MediaAsset::query()->find((string) $asset->id))->not->toBeNull();
+    expect(MediaDerivative::query()->where('parent_id', $asset->id)->count())->toBe(0);
 
     $userId = bootAuthLayer()->register('pdf-empty@example.com', 'Password1!', 'P');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status' => 'RUNNING', 'user_prompt' => 'What does this PDF say?',
-        'step_count' => 0, 'max_steps' => 10,
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 0,
-        'role' => 'attachment', 'content' => '',
-        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 1,
-        'role' => 'user', 'content' => 'What does this PDF say?',
-    ]);
+    $task = markdownPipelineTask($userId, 'What does this PDF say?', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
-    // Layout: [metadata_prefix, composedPromptBlock].
-    expect($messages[0]['content'])->toHaveCount(2);
     expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
-    // The placeholder is the ONLY thing the LLM has to work with — no real
-    // file content reaches the prompt.
-    $text = $messages[0]['content'][1]['text'];
-    expect($text)->toContain('[no extractable text]');
+    $text = composedText($messages);
+    expect($text)->toContain('get_source');
     expect($text)->not->toContain('scanned pages with no OCR');
-    expect($text)->not->toContain('[Attached asset_id=');
 });
 
-test('PDF upload: parser throws → conversion swallowed → LLM gets [no extractable text] placeholder', function (): void {
-    // The corruption case. The parser raises, the registry propagates,
-    // MediaArchiveService catches it, logs a warning, and continues.
-    // The asset is saved without markdown_content; the LLM sees the
-    // same placeholder as the empty-string case.
-    $service = makePdfPipelineServiceWithParser(mockPdfParserThrowing(new RuntimeException('corrupt pdf')));
+test('a throwing producer is swallowed: the upload succeeds and the LLM gets a pointer', function (): void {
+    // The corruption case. The producer raises, `ensureTextDerivative()`
+    // logs and returns null, and the asset is stored anyway. The LLM is
+    // told where the content is rather than told it does not exist.
+    MediaDerivativeProducerDiscovery::add(ThrowingTextDerivativeProducer::class);
+    $service = buildMarkdownPipelineService();
 
     $asset = $service->ingest(new MediaIngestRequest(
-        bytes: PDF_MAGIC . 'corrupt garbage',
+        bytes: "%PDF-1.4\ncorrupt garbage",
         mime: 'application/pdf',
         filename: 'corrupt.pdf',
         userId: 1,
         uploadSource: 'upload',
     ));
-
-    // markdown_content stays null because the exception was caught.
-    expect($asset->markdown_content)->toBeNull();
+    expect(MediaAsset::query()->find((string) $asset->id))->not->toBeNull();
+    expect(MediaDerivative::query()->where('parent_id', $asset->id)->count())->toBe(0);
 
     $userId = bootAuthLayer()->register('pdf-corrupt@example.com', 'Password1!', 'P');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status' => 'RUNNING', 'user_prompt' => 'Read this PDF',
-        'step_count' => 0, 'max_steps' => 10,
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 0,
-        'role' => 'attachment', 'content' => '',
-        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 1,
-        'role' => 'user', 'content' => 'Read this PDF',
-    ]);
+    $task = markdownPipelineTask($userId, 'Read this PDF', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
-    // Layout: [metadata_prefix, composedPromptBlock].
-    expect($messages[0]['content'])->toHaveCount(2);
     expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
-    $text = $messages[0]['content'][1]['text'];
-    expect($text)->toContain('[no extractable text]');
+    $text = composedText($messages);
+    // The pointer names the tool that CAN read it. `[no extractable text]`
+    // would be a lie here: the content exists, it just is not inlined.
+    expect($text)->toContain('get_source');
+    expect($text)->not->toContain('[no extractable text]');
     expect($text)->not->toContain('corrupt garbage');
-    expect($text)->not->toContain('[Attached asset_id=');
 });
 
 test('production row order: user row first, attachment row second collapses to one user message', function (): void {
-    // Orchestrator::start writes the user row first (via appendHistory)
-    // and the attachment row second (via appendAttachmentRow). MessageHistoryBuilder
-    // merges the adjacent pair in either order, so this production path
-    // collapses to a single `user` message just like the reverse-order
-    // pipeline test.
     $service = buildMarkdownPipelineService();
     $asset = $service->ingest(new MediaIngestRequest(
         bytes: 'Lorem ipsum dolor sit amet',
@@ -525,49 +345,25 @@ test('production row order: user row first, attachment row second collapses to o
     ));
 
     $userId = bootAuthLayer()->register('md-prod-order@example.com', 'Password1!', 'P');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id' => $agentId, 'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status' => 'RUNNING', 'user_prompt' => 'Summarize this paper',
-        'step_count' => 0, 'max_steps' => 10,
-    ]);
-
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 0,
-        'role' => 'user', 'content' => 'Summarize this paper',
-    ]);
-    TaskHistory::create([
-        'task_id' => $task->id, 'sequence' => 1,
-        'role' => 'attachment', 'content' => '',
-        'attachments' => [['media_id' => $asset->id, 'kind' => 'text']],
-    ]);
+    $task = markdownPipelineTask($userId, 'Summarize this paper', [$asset->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    expect($messages[0]['content'])->toBeArray();
-    // Layout: [metadata_prefix, composedPromptBlock]. Metadata is a sibling
-    // block; the composed body carries the prompt + extracted text.
+    // Layout: [metadata_prefix, composedPromptBlock].
     expect($messages[0]['content'][0]['type'])->toBe('text');
     expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
     expect($messages[0]['content'][0]['text'])->toContain($asset->id);
-    $text = $messages[0]['content'][1]['text'];
+    $text = (string) $messages[0]['content'][1]['text'];
     expect($text)->toContain('Summarize this paper');
     expect($text)->toContain('---');
-    expect($text)->toContain('# paper.txt (extracted text)');
     expect($text)->toContain('Lorem ipsum dolor sit amet');
-    expect($text)->not->toContain('[no extractable text]');
     expect($text)->not->toContain('[Attached asset_id=');
-    expect(substr_count($text, '# paper.txt (extracted text)'))->toBe(1);
+    expect(substr_count($text, 'Lorem ipsum dolor sit amet'))->toBe(1);
 });
 
 test('multiple text attachments in production row order: one user message with dedup survives', function (): void {
-    // Production-order regression for the multi-attachment case: the
-    // builder must collapse user prompt + a single attachment row
-    // carrying multiple text refs into one `user` message, with each
-    // filename header + extracted body emitted exactly once.
     $service = buildMarkdownPipelineService();
     $assetA = $service->ingest(new MediaIngestRequest(
         bytes: 'Alpha section content.',
@@ -585,51 +381,17 @@ test('multiple text attachments in production row order: one user message with d
     ));
 
     $userId = bootAuthLayer()->register('md-prod-multi@example.com', 'Password1!', 'M');
-    $agentId = buildMarkdownPipelineAgent($userId);
-    $task = \Spora\Models\Task::create([
-        'agent_id'    => $agentId,
-        'principal_id' => createUserPrincipalPublic($userId),
-        'trigger_user_id' => $userId,
-        'status'      => 'RUNNING',
-        'user_prompt' => 'Compare these notes',
-        'max_steps'   => 10,
-    ]);
-
-    TaskHistory::create([
-        'task_id'  => $task->id,
-        'sequence' => 0,
-        'role'     => 'user',
-        'content'  => 'Compare these notes',
-    ]);
-    TaskHistory::create([
-        'task_id'      => $task->id,
-        'sequence'     => 1,
-        'role'         => 'attachment',
-        'content'      => '',
-        'attachments'  => [
-            ['media_id' => $assetA->id, 'kind' => 'text'],
-            ['media_id' => $assetB->id, 'kind' => 'text'],
-        ],
-    ]);
+    $task = markdownPipelineTask($userId, 'Compare these notes', [$assetA->id, $assetB->id]);
 
     $messages = (new MessageHistoryBuilder())->build($task->id);
 
     expect($messages)->toHaveCount(1);
-    expect($messages[0]['role'])->toBe('user');
-    expect($messages[0]['content'])->toBeArray();
     // Layout: [metadata_a, metadata_b, composedPromptBlock].
     expect($messages[0]['content'])->toHaveCount(3);
-    expect($messages[0]['content'][0]['text'])->toContain('[Attached asset_id=');
-    expect($messages[0]['content'][0]['text'])->toContain($assetA->id);
-    expect($messages[0]['content'][1]['text'])->toContain('[Attached asset_id=');
-    expect($messages[0]['content'][1]['text'])->toContain($assetB->id);
-    $text = $messages[0]['content'][2]['text'];
+    $text = (string) $messages[0]['content'][2]['text'];
     expect($text)->toContain('Compare these notes');
     expect($text)->toContain('---');
-    expect(substr_count($text, '# alpha.txt (extracted text)'))->toBe(1);
-    expect(substr_count($text, '# beta.txt (extracted text)'))->toBe(1);
-    expect($text)->toContain('Alpha section content.');
-    expect($text)->toContain('Beta section content.');
-    expect($text)->not->toContain('[no extractable text]');
+    expect(substr_count($text, 'Alpha section content.'))->toBe(1);
+    expect(substr_count($text, 'Beta section content.'))->toBe(1);
     expect($text)->not->toContain('[Attached asset_id=');
 });

@@ -425,11 +425,62 @@ if (!function_exists('makeMediaCreateHandlerForTest')) {
         return new Spora\Tools\MediaCreateHandler(
             $archive,
             new Spora\Services\MediaArchive\MediaAllowedTypesService(
-                Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+                Tests\Support\MediaArchiveTestSupport::buildDerivativeService(
+                    Tests\Support\MediaArchiveTestSupport::testAssetStore(),
+                ),
                 new Spora\Drivers\DriverFactory(new Psr\Log\NullLogger(), $llmService, 60),
                 [],
             ),
         );
+    }
+}
+
+if (!function_exists('seedTextDerivativeFor')) {
+    /**
+     * Attach a `data_url` `md` derivative carrying `$text` to `$parent`,
+     * joined through `media_derivatives` exactly as the real producer
+     * would.
+     *
+     * Most `get_media` / `get_source` tests need an asset that *has* an
+     * extraction without caring how the extraction happened. Building the
+     * two rows directly keeps the fixture readable and avoids standing up
+     * a producer + parser per test.
+     */
+    function seedTextDerivativeFor(Spora\Models\MediaAsset $parent, string $text): Spora\Models\MediaAsset
+    {
+        $derivativeId = testGenerateUuidV4();
+        $now = date('Y-m-d H:i:s');
+
+        $derivative = Spora\Models\MediaAsset::create([
+            'id'                 => $derivativeId,
+            'asset_url'          => Spora\Services\MediaArchive\MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivativeId . '.md',
+            'storage_mode'       => 'data_url',
+            'mime_type'          => 'text/markdown',
+            'media_type'         => 'document',
+            'byte_size'          => strlen($text),
+            'agent_id'           => $parent->agent_id,
+            'user_id'            => $parent->user_id,
+            'plugin_slug'        => 'tests-text-derivative',
+            'tool_name'          => 'text.extract',
+            'asset_token'        => bin2hex(random_bytes(16)),
+            'filename'           => 'extracted.md',
+            'payload'            => $text,
+            'is_temporary'       => (bool) $parent->is_temporary,
+            'migrated_from_inline_data_url' => false,
+        ]);
+
+        Spora\Models\MediaDerivative::create([
+            'id'                 => testGenerateUuidV4(),
+            'parent_id'          => $parent->id,
+            'derivative_id'      => $derivative->id,
+            'format'             => Spora\Services\MediaArchive\MediaDerivativeService::MARKDOWN_FORMAT,
+            'producer_plugin'    => 'tests-text-derivative',
+            'producer_operation' => 'text.extract',
+            'created_at'         => $now,
+            'updated_at'         => $now,
+        ]);
+
+        return $derivative;
     }
 }
 
@@ -535,21 +586,27 @@ if (!function_exists('makeMediaArchiveService')) {
             (int) ($overrides['maxPromoteBytes'] ?? 100 * 1024 * 1024),
         );
 
+        $derivatives = Tests\Support\MediaArchiveTestSupport::buildDerivativeService(
+            $ctx['assetStore'],
+            $ctx['logger'],
+        );
+
         $pipeline = new Spora\Services\MediaArchive\MediaArchiveIngestPipeline(
             new Spora\Services\MediaArchive\MediaIngestDecoder(),
             $resolver,
             $ctx['sniffer'],
             $ctx['metadata'],
             $ctx['assetStore'],
-            Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+            $derivatives,
             new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
         );
 
-        $service = new Spora\Services\MediaArchive\MediaArchiveService($pipeline);
+        $service = new Spora\Services\MediaArchive\MediaArchiveService($pipeline, $derivatives);
 
         return [
-            'service'    => $service,
-            'pipeline'   => $pipeline,
+            'service'     => $service,
+            'pipeline'    => $pipeline,
+            'derivatives' => $derivatives,
             'assetStore' => $ctx['assetStore'],
             'sniffer'    => $ctx['sniffer'],
             'metadata'   => $ctx['metadata'],

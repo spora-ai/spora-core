@@ -10,8 +10,7 @@ use Spora\Services\MediaArchive\MediaArchiveException;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MediaType;
@@ -19,6 +18,7 @@ use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Symfony\Component\HttpClient\MockHttpClient;
+use Tests\Support\MediaArchiveTestSupport;
 
 /**
  * A misconfigured AssetStore ceiling above DATA_URL_MAX_BYTES would
@@ -39,25 +39,26 @@ function mediumblobTestArchiveService(AssetStore $store): MediaArchiveService
         true,
         1024 * 1024,
     );
-    // `MediaConverterDiscovery` is a process-global static populated by
-    // other MediaArchive tests in the same worker (e.g. registry /
-    // read-url tests). Resetting here pins the fixture to the documented
-    // empty-registry shape for this test class — otherwise the
-    // constructor of `MediaConverterRegistry` calls `$container->get(...)`
-    // on the bare Mockery container and the parallel runner trips over
-    // `Mockery_…_ContainerInterface::get(), but no expectations were specified`.
-    MediaConverterDiscovery::reset();
+    // `MediaDerivativeProducerDiscovery` is a process-global static
+    // populated by other MediaArchive tests in the same worker. Resetting
+    // here pins the fixture to the documented empty-registry shape for
+    // this test class — otherwise the derivative service calls
+    // `$container->get(...)` on the bare Mockery container and the
+    // parallel runner trips over `Mockery_…_ContainerInterface::get(),
+    // but no expectations were specified`. None of these fixtures is a
+    // binary document, so no producer would be consulted anyway.
+    MediaDerivativeProducerDiscovery::reset();
+    $derivatives = MediaArchiveTestSupport::buildDerivativeService($store, $logger);
     $pipeline = new MediaArchiveIngestPipeline(
         new MediaIngestDecoder(),
         $resolver,
         $sniffer,
         new MetadataExtractor($logger, false),
         $store,
-        new MediaConverterRegistry(M::mock(Psr\Container\ContainerInterface::class)),
+        $derivatives,
         new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
-        $logger,
     );
-    return new MediaArchiveService($pipeline);
+    return new MediaArchiveService($pipeline, $derivatives);
 }
 
 test('data_url mode payload under DATA_URL_MAX_BYTES is accepted', function (): void {
@@ -112,13 +113,6 @@ test('local mode payload above DATA_URL_MAX_BYTES is accepted (no DB write)', fu
     expect($asset->storage_mode)->toBe('local');
 });
 
-// `MediaConverterDiscovery::all()` is a process-global static populated by
-// other MediaArchive tests in the same worker (e.g. registry / read-url
-// tests). Without this guard the constructor of `MediaConverterRegistry`
-// fires `$container->get($class)` on the bare Mockery container and the
-// parallel runner trips over `Mockery_…_Psr_Container_ContainerInterface:
-// get(), but no expectations were specified`. Resetting here pins the
-// fixture to the documented empty-registry shape for this test class.
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });

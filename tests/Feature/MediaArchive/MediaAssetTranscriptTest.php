@@ -48,7 +48,10 @@ function createMediaAssetsTable(): void
         Capsule::schema()->dropIfExists('media_assets');
         Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
             $t->string('id', 36)->primary();
-            $t->text('markdown_content')->nullable();
+            // Minimal stand-in for the real table: migration 0080 only
+            // needs the columns it touches plus something to hang the
+            // `after()` on.
+            $t->string('prompt')->nullable();
             $t->timestamps();
         });
     } finally {
@@ -126,10 +129,10 @@ test('migration is idempotent — running twice does not error', function (): vo
 test('existing rows survive migration with null transcript columns', function (): void {
     createMediaAssetsTable();
     Capsule::table('media_assets')->insert([
-        'id'               => 'legacy-uuid-1',
-        'markdown_content' => null,
-        'created_at'       => date('Y-m-d H:i:s'),
-        'updated_at'       => date('Y-m-d H:i:s'),
+        'id'         => 'legacy-uuid-1',
+        'prompt'     => null,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
     runTranscribeMigration()->up();
