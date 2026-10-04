@@ -350,7 +350,13 @@ final class RouteDefinitions
         // cannot do — it carries sizes, not contents.
         $r->addRoute('GET', '/api/v1/skills', [SkillController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_SKILLS_SLUG, [SkillController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_SKILLS_SLUG . '/files/{path}', [SkillController::class, 'file'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // The {path:.+} regex lets a sidecar's path contain slashes, which the
+        // skills spec's canonical layout needs (`references/REFERENCE.md`). The
+        // default `[^/]+` matched only a top-level file, so a nested sidecar was
+        // a router-level 404 rather than a refusal. Both the raw-slash and the
+        // percent-encoded form reach the controller; `RouteToOpenApi` strips the
+        // regex, so the published spec is unchanged.
+        $r->addRoute('GET', self::ROUTE_SKILLS_SLUG . '/files/{path:.+}', [SkillController::class, 'file'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // The ⌘K palette had no endpoint and filtered Pinia stores directly,
         // which left anything served by a plugin unsearchable.
