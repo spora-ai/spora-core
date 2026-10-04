@@ -113,23 +113,14 @@ final class SkillController
     /**
      * One sidecar's contents.
      *
-     * `show()` returns `files` as `{path, bytes}` metadata, so a shipped skill's
-     * sidecars were listed and unopenable — and since `SKILL.md`'s body rides along
-     * with the detail, the only readable file in such a skill was the one that needed
-     * no endpoint. The plugin's own skills never had this gap; it has
-     * `…/files/{path}`.
+     * Containment and the pre-read size check are the provider's to enforce — see
+     * {@see SkillProviderInterface::getSkillFile()}. The cap is re-asserted here
+     * because the interface makes the *caller* responsible and a provider is
+     * plugin-supplied code.
      *
-     * The read goes through {@see SkillProviderRegistry::getSkillFile()}, which
-     * already refuses a path outside the skill's listing, resolves it inside the
-     * skill directory, and checks the size on the `stat` before reading. So the
-     * shape of the request cannot reach a file the skill does not contain.
-     *
-     * Two things are re-asserted here rather than trusted. The cap, because
-     * {@see SkillProviderInterface} requires the *caller* to enforce it and a
-     * provider is plugin-supplied code — the same reason `SkillTool` checks the
-     * callee's work. And the 404: a name the caller cannot see, a file the skill
-     * does not contain, and a file over the cap all answer identically, so this
-     * endpoint is not a probe for what exists in another tenant.
+     * A skill the caller cannot see, a file the skill does not contain, and a file
+     * over the cap answer identically, so this is not a probe for what exists in
+     * another tenant.
      */
     #[OA\Parameter(
         name: 'principal_id',
@@ -146,7 +137,9 @@ final class SkillController
         }
 
         $name = strtolower(trim((string) $request->attributes->get('slug', '')));
-        $path = trim((string) $request->attributes->get('path', ''));
+        // Not trimmed: the interface defines this as an opaque exact-match key, so
+        // normalising it here would make a listed path unmatchable.
+        $path = (string) $request->attributes->get('path', '');
 
         $visible = $this->visiblePrincipalIds($userId);
         $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
@@ -156,9 +149,9 @@ final class SkillController
             if ($contents === null) {
                 continue;
             }
-            // The cap is the caller's to enforce, per the interface contract.
             if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
-                break;
+                // Rejected, not answered: keep looking, as `show()` does.
+                continue;
             }
 
             return new JsonResponse(['data' => [

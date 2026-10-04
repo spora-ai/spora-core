@@ -334,12 +334,8 @@ test('a caller with no principal row still sees the shipped skills', function ()
 });
 
 /**
- * `GET /skills/{slug}/files/{path}`.
- *
- * The gap this closes: `show()` carries `files` as `{path, bytes}` and the
- * `SKILL.md` body, so a shipped skill's sidecars were listed and unopenable. These
- * pin that the read works, and — more importantly — that it cannot be turned into
- * a way to read what a caller is not entitled to see.
+ * `GET /skills/{slug}/files/{path}` — pins that the read works, and that it cannot
+ * be turned into a read of what the caller is not entitled to.
  */
 describe('GET /skills/{slug}/files/{path}', function (): void {
 
@@ -348,7 +344,6 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
         $GLOBALS['__skillCtrlUserId'] = $userId;
         [$controller, $cleanup, $root] = makeSkillControllerFixture();
         try {
-            // writeToySkillMd creates the skill directory; the sidecar goes inside it.
             writeToySkillMd($root, 'git', '# Body', 'Git skill.');
             $dir = $root . '/git';
             mkdir($dir . '/templates', 0o755, true);
@@ -395,10 +390,9 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
         }
     });
 
-    it('answers 404 for a traversal, and the provider never sees it', function (): void {
-        // The path is rejected by the provider's containment check. What matters
-        // here is that the answer is a 404 and not a 403 or a file: a traversal
-        // that *succeeded* would be a read of anything the process can open.
+    it('answers 404 for a traversal path', function (): void {
+        // What matters is a 404 rather than a 403 or a file: a traversal that
+        // succeeded would read anything the process can open.
         $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-traversal@example.com');
         [$controller, $cleanup, $root] = makeSkillControllerFixture();
         try {
@@ -431,7 +425,15 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
             $response = $controller->file($request);
 
             expect($response->getStatusCode())->toBe(404)
-                ->and((string) $response->getContent())->not->toContain('Team playbook');
+                ->and(json_decode((string) $response->getContent(), true)['error']['code'])
+                ->toBe('SKILL_FILE_NOT_FOUND');
+
+            // A refusal only means something if the same read succeeds for a skill
+            // the caller *can* see — an empty fixture proves nothing.
+            $own = Request::create('/api/v1/skills/my-notes/files/SKILL.md');
+            $own->attributes->set('slug', 'my-notes');
+            $own->attributes->set('path', 'SKILL.md');
+            expect($controller->file($own)->getStatusCode())->toBe(200);
         } finally {
             $cleanup();
         }
@@ -452,17 +454,15 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
     });
 
     it('refuses a file over the cap even if a provider returns it anyway', function (): void {
-        // The interface makes the *caller* responsible for the cap, because a
-        // provider is plugin-supplied code. `SkillTool` re-asserts it for the same
-        // reason; this is that check on the HTTP surface.
+        // The interface makes the caller responsible; a provider is plugin-supplied code.
         $oversized = str_repeat('a', SkillProviderInterface::MAX_FILE_BYTES + 1);
         $rogue = Mockery::mock(SkillProviderInterface::class);
         $rogue->shouldReceive('source')->andReturn('rogue');
         $rogue->shouldReceive('getSkills')->andReturn([]);
         $rogue->shouldReceive('getSkillDetails')->andReturnNull();
-        // The registry picks the owning provider by asking for the *listing* first,
-        // so a mock that answers null there is never asked for the file at all —
-        // which would make the cap assertion below pass for the wrong reason.
+        // The registry picks the owner by asking for the *listing* first, so a mock
+        // answering null there is never asked for the file, and the cap assertion
+        // would pass for the wrong reason.
         $rogue->shouldReceive('getSkillFiles')->andReturn([['path' => 'huge.txt', 'bytes' => 1_000_000]]);
         $rogue->shouldReceive('getSkillFile')->andReturn($oversized);
 
