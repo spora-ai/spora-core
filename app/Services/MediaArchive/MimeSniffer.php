@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use finfo;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
@@ -21,11 +22,22 @@ use Throwable;
  * round-trip. It is deliberately conservative: unrecognised extensions
  * return `application/octet-stream` rather than guessing.
  *
- * Both returners are pure; the class is stateless and safe to reuse as a
- * long-lived service.
+ * Both returners are pure and the only state is an optional logger, so it is
+ * safe to reuse as a long-lived service. `sniffFromBytes()` is not quite a
+ * function of its arguments alone, though: its final step consults
+ * {@see MediaMimeRefinerDiscovery}, a process-global list, so a
+ * registered plugin refiner can change the verdict for the same bytes.
+ * That is the point of the seam — see the interface's docblock.
  */
 final class MimeSniffer
 {
+    public function __construct(
+        // Optional so `new MimeSniffer()` stays valid at the test call sites;
+        // a null logger only costs the decline-and-continue path its
+        // diagnostic, not its behaviour.
+        private readonly ?LoggerInterface $logger = null,
+    ) {}
+
     /**
      * Fallback MIME returned when nothing matched. Centralised so callers and
      * tests can refer to a single value rather than duplicating the literal.
@@ -38,6 +50,20 @@ final class MimeSniffer
      * extension confirms Typst.
      */
     private const string TYPST_MIME = 'text/x-typst';
+
+    /**
+     * Markdown MIME. `finfo` reports every Markdown file as `text/plain` —
+     * it sniffs bytes, and Markdown is prose — so a `.md` upload is stored as
+     * `text/plain` and the only surviving evidence of what it was is the
+     * extension on the filename. That matters because
+     * {@see MediaDerivativeService::findProducer()} matches a producer on the
+     * parent's stored MIME *or* its extension, and because
+     * {@see MediaArchiveService::extensionForMime()} has no `text/plain` →
+     * `md` mapping to fall back on. Without this the whole Markdown-to-
+     * derivative chain silently depends on the caller having spelled the
+     * extension out.
+     */
+    private const string MARKDOWN_MIME = 'text/markdown';
 
     /**
      * Magic-byte signatures indexed by their canonical MIME type. The
@@ -125,8 +151,11 @@ final class MimeSniffer
         'webm' => 'video/webm',
         'mov'  => 'video/quicktime',
         'pdf'  => 'application/pdf',
-        'txt'  => 'text/plain',
-        'typ'  => self::TYPST_MIME,
+        'txt'      => 'text/plain',
+        'typ'      => self::TYPST_MIME,
+        'md'       => self::MARKDOWN_MIME,
+        'markdown' => self::MARKDOWN_MIME,
+        'docx'     => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
 
     /**
@@ -136,6 +165,9 @@ final class MimeSniffer
      * refine generic `text/plain` detection for known text formats.
      * Always returns a non-empty string — falls back to
      * `application/octet-stream` when nothing matches.
+     *
+     * Receives the full byte string, not the 4 KiB prefix, so a
+     * registered refiner can inspect as much of the payload as it needs.
      */
     public function sniffFromBytes(string $bytes, ?string $filename = null): string
     {
@@ -147,13 +179,65 @@ final class MimeSniffer
         $prefix = substr($bytes, 0, 4096);
 
         $detected = $this->sniffPrefix($prefix);
-        if ($detected === 'text/plain' && $filename !== null
-            && $this->sniffFromExtension($filename) === self::TYPST_MIME
-        ) {
-            return self::TYPST_MIME;
+
+        // A filename refines a generic `text/plain` verdict, but only ever
+        // upward into a *more specific* text format — never sideways, and
+        // never off `text/plain` at all. `.md` beats prose on both counts:
+        // the bytes cannot tell Markdown from a plain-text log, and a
+        // caller-supplied extension is the only signal available.
+        if ($detected === 'text/plain' && $filename !== null) {
+            $byExtension = $this->sniffFromExtension($filename);
+            if ($byExtension === self::TYPST_MIME || $byExtension === self::MARKDOWN_MIME) {
+                $detected = $byExtension;
+            }
         }
 
-        return $detected;
+        return $this->applyRegisteredRefiners($bytes, $filename, $detected);
+    }
+
+    /**
+     * Last hop of the byte sniff: hand the verdict to every registered
+     * {@see MediaMimeRefinerInterface} and take the first upgrade any of
+     * them offers.
+     *
+     * Runs *after* the built-in Typst upgrade so a refiner always sees
+     * the most specific MIME core can produce — a refiner that only
+     * cared about `text/plain` would otherwise see a `text/x-typst`
+     * input and a `text/plain` output as the same call.
+     *
+     * A refiner that throws is declined, not propagated. Registry entries
+     * are plugin-supplied and therefore untrusted, and the exception
+     * would otherwise travel `sniffFromBytes()` → `ingestFromBytes()` →
+     * the upload controller and take down every media upload in the
+     * process over one MIME verdict. This mirrors
+     * `MediaArchiveIngestPipeline::runConversionPipeline()`, which wraps
+     * the plugin-supplied *converter* in the same `catch (Throwable)`.
+     */
+    private function applyRegisteredRefiners(string $bytes, ?string $filename, string $sniffedMime): string
+    {
+        foreach (MediaMimeRefinerDiscovery::all() as $class) {
+            // `new $class()` rather than a container lookup: the refiner
+            // contract requires a no-arg constructor, and a container
+            // round-trip here would make every MIME sniff depend on DI
+            // being booted.
+            try {
+                $refined = (new $class())->refine($bytes, $filename, $sniffedMime);
+            } catch (Throwable $e) {
+                $this->logger?->warning('MimeSniffer: registered MIME refiner failed', [
+                    'refiner' => $class,
+                    'mime'    => $sniffedMime,
+                    'error'   => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            if ($refined !== null) {
+                return $refined;
+            }
+        }
+
+        return $sniffedMime;
     }
 
     /**

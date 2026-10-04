@@ -32,6 +32,43 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
         expect($sniffer->sniffFromBytes('%PDF-1.4', 'source.typ'))->toBe('application/pdf');
     });
 
+    it('refines generic text MIME detection for Markdown filenames', function (): void {
+        // `finfo` sniffs bytes, and Markdown is prose, so every Markdown file
+        // detects as `text/plain`. The extension is the only signal that says
+        // what it actually is — and without it the whole Markdown→derivative
+        // chain hinges on the caller having spelled the extension out, which
+        // is not something the tool can rely on: `create_media` re-sniffs and
+        // stores the result, so a stored `text/plain` parent matches no
+        // producer that advertises `text/markdown`.
+        $sniffer = makeSniffer();
+        $source = "# Agenda\n\nTwo-day workshop.\n\n| Day | Topic |\n| --- | --- |\n";
+
+        expect($sniffer->sniffFromBytes($source, 'agenda.md'))->toBe('text/markdown');
+        expect($sniffer->sniffFromBytes($source, 'agenda.markdown'))->toBe('text/markdown');
+        // Still `text/plain` without the extension — the upgrade is driven by
+        // the filename, never guessed from the bytes.
+        expect($sniffer->sniffFromBytes($source, 'agenda'))->toBe('text/plain');
+        expect($sniffer->sniffFromBytes($source, 'agenda.txt'))->toBe('text/plain');
+        // A non-text verdict wins: the extension refines `text/plain`, it
+        // does not override a positive detection.
+        expect($sniffer->sniffFromBytes('%PDF-1.4', 'source.md'))->toBe('application/pdf');
+    });
+
+    it('does not upgrade text/plain into a type the extension cannot justify', function (): void {
+        // The Typst upgrade was written as a single `=== TYPST_MIME` check.
+        // Widening it to "whatever the extension says" would have turned any
+        // `.txt`-adjacent guess into a stored MIME, so the check is still an
+        // explicit allow-list of the two formats the bytes cannot distinguish
+        // from prose.
+        $sniffer = makeSniffer();
+
+        expect($sniffer->sniffFromBytes('plain notes', 'notes.md'))->toBe('text/markdown');
+        expect($sniffer->sniffFromBytes('plain notes', 'notes.typ'))->toBe('text/x-typst');
+        // Neither of these is in the allow-list, so the extension is ignored.
+        expect($sniffer->sniffFromBytes('plain notes', 'notes.json'))->toBe('text/plain');
+        expect($sniffer->sniffFromBytes('plain notes', 'notes.csv'))->toBe('text/plain');
+    });
+
     it('identifies PNG via the leading magic', function (): void {
         $bytes = "\x89PNG\r\n\x1a\n" . str_repeat("\x00", 32);
         expect(makeSniffer()->sniffFromBytes($bytes))->toBe('image/png');
@@ -149,8 +186,10 @@ describe('MimeSniffer::sniffFromExtension', function (): void {
             'foo.webm' => 'video/webm',
             'foo.mov'  => 'video/quicktime',
             'foo.pdf'  => 'application/pdf',
-            'foo.txt'  => 'text/plain',
-            'foo.typ'  => 'text/x-typst',
+            'foo.txt'      => 'text/plain',
+            'foo.typ'      => 'text/x-typst',
+            'foo.md'       => 'text/markdown',
+            'foo.markdown' => 'text/markdown',
         ];
         foreach ($cases as $filename => $expected) {
             expect($sniffer->sniffFromExtension($filename))->toBe($expected);

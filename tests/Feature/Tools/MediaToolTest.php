@@ -586,7 +586,7 @@ describe('MediaTool::get_media', function (): void {
         }
     });
 
-    it('emits a markdown link for document assets', function (): void {
+    it('emits a download card for document assets', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
@@ -606,9 +606,10 @@ describe('MediaTool::get_media', function (): void {
                 userId: 99,
             );
 
-            expect($result->content)->toContain(
-                '[sample.png](/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf)',
-            );
+            expect($result->content)->toContain('spora-file-card__glyph')
+                ->and($result->content)->toContain('href="/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf"')
+                ->and($result->content)->toContain('>sample.png</span>')
+                ->and($result->content)->not->toContain('](/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf)');
         } finally {
             $restore();
         }
@@ -1020,7 +1021,7 @@ describe('MediaTool::get_embed_code', function (): void {
         }
     });
 
-    it('returns a markdown link for document media', function (): void {
+    it('returns a download card for document media', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
@@ -1041,9 +1042,11 @@ describe('MediaTool::get_embed_code', function (): void {
             );
 
             expect($result->success)->toBeTrue();
-            expect($result->content)->toBe(
-                '[sample.png](/api/v1/assets/dddddddd-1111-2222-3333-444444444444.pdf)',
-            );
+            expect($result->content)
+                ->toContain('spora-file-card__glyph')
+                ->toContain('href="/api/v1/assets/dddddddd-1111-2222-3333-444444444444.pdf"')
+                ->toContain('>sample.png</span>')
+                ->toContain('>1.0 KB</span>');
             expect($result->data['media_type'])->toBe('document');
         } finally {
             $restore();
@@ -1081,7 +1084,7 @@ describe('MediaTool::get_embed_code', function (): void {
         }
     });
 
-    it('falls back to the asset_id when filename is null', function (): void {
+    it('labels the card "download" when filename is null', function (): void {
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(
             agentId: $agentA,
@@ -1102,9 +1105,13 @@ describe('MediaTool::get_embed_code', function (): void {
             );
 
             expect($result->success)->toBeTrue();
-            expect($result->content)->toBe(
-                '[ffffffff-1111-2222-3333-444444444444](/api/v1/assets/ffffffff-1111-2222-3333-444444444444.pdf)',
-            );
+            // The document arm no longer takes the asset id as alt text —
+            // the card falls back to a generic label so the `<a>` still
+            // has readable text instead of an empty span.
+            expect($result->content)
+                ->toContain('spora-file-card__glyph')
+                ->toContain('href="/api/v1/assets/ffffffff-1111-2222-3333-444444444444.pdf"')
+                ->toContain('>download</span>');
         } finally {
             $restore();
         }
