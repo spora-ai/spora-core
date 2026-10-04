@@ -24,7 +24,7 @@ use Spora\Tools\MediaEmbed;
  */
 
 it('emits the whole card on a single line', function (): void {
-    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400, 'application/pdf');
+    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400);
 
     expect($card)->not->toContain("\n")
         ->and($card)->not->toContain("\r");
@@ -32,15 +32,73 @@ it('emits the whole card on a single line', function (): void {
 
 it('emits the documented div > a > span structure', function (): void {
     expect(MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf'))->toBe(
-        '<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/abc.pdf">'
-        . '<span class="spora-file-card__name">report.pdf</span></a></div>',
+        '<div class="inline-flex max-w-120 my-[0.6rem] rounded-lg border border-foreground/10 bg-muted">'
+        . '<a class="flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-inherit no-underline'
+        . ' transition-colors hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-[-1px]'
+        . ' focus-visible:outline-ring spora-file-card__glyph" href="/api/v1/assets/abc.pdf">'
+        . '<span class="min-w-0 flex-auto truncate font-medium">report.pdf</span></a></div>',
     );
 });
 
-it('renders byte size and MIME in a single meta span', function (): void {
-    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400, 'application/pdf');
+it('renders the byte size alone, and no MIME', function (): void {
+    // The MIME used to sit after the size in the same span. A Word document's
+    // is 71 characters of
+    // `application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+    // which overflowed the card and — because the meta span was
+    // `flex-shrink: 0` — squeezed the filename to 0px, so the one part of the
+    // card a user actually needs was the part that disappeared. The extension
+    // on the filename already says what the file is, so the MIME bought
+    // nothing and cost the name.
+    $card = MediaEmbed::fileCard('/api/v1/assets/abc.docx', 'report.docx', 12_400);
 
-    expect($card)->toContain('<span class="spora-file-card__meta">12.1 KB · application/pdf</span>');
+    expect($card)->toContain('<span class="shrink-0 text-xs text-muted-foreground">12.1 KB</span>')
+        ->and($card)->not->toContain('application/')
+        ->and($card)->not->toContain('openxmlformats');
+});
+
+it('keeps the filename readable when the size is present', function (): void {
+    // The regression that motivated dropping the MIME, pinned as markup: the
+    // name carries the shrinking utilities, the size span cannot shrink, and
+    // no third span competes for the row.
+    $card = MediaEmbed::fileCard('/api/v1/assets/abc.docx', 'ai-agents-workshop-agenda.docx', 10_700);
+
+    expect($card)->toContain('<span class="min-w-0 flex-auto truncate font-medium">ai-agents-workshop-agenda.docx</span>')
+        ->and(substr_count($card, '<span'))->toBe(2);
+});
+
+it('registers every class it emits with the frontend, so none is silently dropped', function (): void {
+    // The card is styled by Tailwind utilities that live in a PHP string, which
+    // Tailwind's scanner never reads. spora-frontend makes them real with
+    // `@source inline(...)` in src/style.css, and a class missing from that
+    // list is not generated — no error, no warning, just an unstyled card.
+    // This is the only thing standing between the two repos drifting apart.
+    $style = @file_get_contents(
+        dirname(__DIR__, 3) . '/../spora-frontend/src/style.css',
+    );
+
+    if ($style === false) {
+        // The sibling checkout is optional in CI; the gate that matters runs
+        // where both repos are present. Skipping beats a false pass.
+        $this->markTestSkipped('spora-frontend/src/style.css is not reachable from this checkout.');
+    }
+
+    expect($style)->toMatch('/@source inline\("([^"]*)"\)/');
+
+    preg_match('/@source inline\("([^"]*)"\)/', $style, $m);
+    $registered = preg_split('/\s+/', trim($m[1]));
+
+    preg_match_all('/class="([^"]*)"/', MediaEmbed::fileCard('/u', 'f.docx', 900), $emitted);
+    $used = [];
+    foreach ($emitted[1] as $attr) {
+        foreach (preg_split('/\s+/', trim($attr)) as $class) {
+            if ($class !== '') {
+                $used[] = $class;
+            }
+        }
+    }
+
+    expect(array_values(array_diff(array_unique($used), $registered)))
+        ->toBe([], 'every class the card emits must appear in the frontend @source inline() list');
 });
 
 it('formats byte counts in binary units across every magnitude', function (int $size, string $expected): void {
@@ -53,16 +111,11 @@ it('formats byte counts in binary units across every magnitude', function (int $
     'gigabytes'     => [2 * 1024 * 1024 * 1024, '2.0 GB'],
 ]);
 
-it('omits the meta span entirely when neither size nor MIME is known', function (): void {
+it('omits the size span entirely when the size is unknown', function (): void {
     $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf');
 
-    expect($card)->not->toContain('spora-file-card__meta');
-});
-
-it('keeps the meta span when only one of size or MIME is known', function (): void {
-    expect(MediaEmbed::fileCard('/u', 'f', 900))->toContain('spora-file-card__meta">900 B<');
-    expect(MediaEmbed::fileCard('/u', 'f', null, 'text/markdown'))
-        ->toContain('spora-file-card__meta">text/markdown<');
+    expect($card)->not->toContain('text-muted-foreground')
+        ->and(substr_count($card, '<span'))->toBe(1);
 });
 
 it('HTML-escapes the href', function (): void {
@@ -84,12 +137,12 @@ it('cannot be broken out of the href by a double quote', function (): void {
 it('HTML-escapes the filename', function (): void {
     $card = MediaEmbed::fileCard('/u', 'a<b>"c"&d.pdf');
 
-    expect($card)->toContain('<span class="spora-file-card__name">a&lt;b&gt;&quot;c&quot;&amp;d.pdf</span>');
+    expect($card)->toContain('>a&lt;b&gt;&quot;c&quot;&amp;d.pdf</span>');
 });
 
 it('reduces a path-traversing filename to its basename', function (): void {
     expect(MediaEmbed::fileCard('/u', '../../etc/passwd'))
-        ->toContain('spora-file-card__name">passwd<');
+        ->toContain('>passwd</span>');
 });
 
 it('strips CR and LF from the href', function (): void {
@@ -105,12 +158,12 @@ it('strips CR and LF from the filename', function (): void {
 
     expect($card)->not->toContain("\r")
         ->and($card)->not->toContain("\n")
-        ->and($card)->toContain('spora-file-card__name">report.pdf<');
+        ->and($card)->toContain('>report.pdf</span>');
 });
 
 it('falls back to a generic label when the filename is empty', function (): void {
     expect(MediaEmbed::fileCard('/u', ''))
-        ->toContain('spora-file-card__name">download<');
+        ->toContain('>download</span>');
 });
 
 it('carries no icon element and no aria-hidden, so nothing can be stripped', function (): void {
@@ -118,7 +171,7 @@ it('carries no icon element and no aria-hidden, so nothing can be stripped', fun
     // spora-frontend, not a node: `aria-hidden` is absent from the
     // sanitizer's ALLOWED_ATTR, so shipping one would be silently
     // stripped and the glyph announced to screen readers.
-    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400, 'application/pdf');
+    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400);
 
     expect($card)->not->toContain('aria-hidden')
         ->and($card)->not->toContain('aria-label')
@@ -132,7 +185,7 @@ it('only uses tags and attributes the chat sanitizer already passes through', fu
     // spora-frontend's useMarkdown.ts ALLOWED_TAGS / ALLOWED_ATTR. If one
     // of these stops being whitelisted the card silently loses structure,
     // so pin the exact vocabulary here.
-    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400, 'application/pdf');
+    $card = MediaEmbed::fileCard('/api/v1/assets/abc.pdf', 'report.pdf', 12_400);
 
     preg_match_all('/<\/?([a-z0-9]+)/i', $card, $tags);
     expect(array_values(array_unique($tags[1])))->toBe(['div', 'a', 'span']);

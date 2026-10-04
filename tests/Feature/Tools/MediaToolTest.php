@@ -606,9 +606,9 @@ describe('MediaTool::get_media', function (): void {
                 userId: 99,
             );
 
-            expect($result->content)->toContain('class="spora-file-card"')
+            expect($result->content)->toContain('spora-file-card__glyph')
                 ->and($result->content)->toContain('href="/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf"')
-                ->and($result->content)->toContain('spora-file-card__name">sample.png<')
+                ->and($result->content)->toContain('>sample.png</span>')
                 ->and($result->content)->not->toContain('](/api/v1/assets/44444444-aaaa-bbbb-cccc-444444444444.pdf)');
         } finally {
             $restore();
@@ -1042,11 +1042,11 @@ describe('MediaTool::get_embed_code', function (): void {
             );
 
             expect($result->success)->toBeTrue();
-            expect($result->content)->toBe(
-                '<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/dddddddd-1111-2222-3333-444444444444.pdf">'
-                . '<span class="spora-file-card__name">sample.png</span>'
-                . '<span class="spora-file-card__meta">1.0 KB · application/pdf</span></a></div>',
-            );
+            expect($result->content)
+                ->toContain('spora-file-card__glyph')
+                ->toContain('href="/api/v1/assets/dddddddd-1111-2222-3333-444444444444.pdf"')
+                ->toContain('>sample.png</span>')
+                ->toContain('>1.0 KB</span>');
             expect($result->data['media_type'])->toBe('document');
         } finally {
             $restore();
@@ -1108,11 +1108,10 @@ describe('MediaTool::get_embed_code', function (): void {
             // The document arm no longer takes the asset id as alt text —
             // the card falls back to a generic label so the `<a>` still
             // has readable text instead of an empty span.
-            expect($result->content)->toBe(
-                '<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/ffffffff-1111-2222-3333-444444444444.pdf">'
-                . '<span class="spora-file-card__name">download</span>'
-                . '<span class="spora-file-card__meta">1.0 KB · application/pdf</span></a></div>',
-            );
+            expect($result->content)
+                ->toContain('spora-file-card__glyph')
+                ->toContain('href="/api/v1/assets/ffffffff-1111-2222-3333-444444444444.pdf"')
+                ->toContain('>download</span>');
         } finally {
             $restore();
         }

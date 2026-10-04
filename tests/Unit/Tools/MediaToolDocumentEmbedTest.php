@@ -59,11 +59,14 @@ it('renders a document asset as a download card, not a markdown link', function 
         );
 
         expect($result->success)->toBeTrue();
-        expect($result->content)->toBe(
-            '<div class="spora-file-card"><a class="spora-file-card__link" href="/api/v1/assets/a1000000-0000-4000-8000-000000000001.pdf">'
-            . '<span class="spora-file-card__name">quarterly-report.pdf</span>'
-            . '<span class="spora-file-card__meta">12.1 KB · application/pdf</span></a></div>',
-        );
+        // The exact markup is pinned once, in MediaEmbedFileCardTest. What
+        // matters here is that the Document branch of the dispatch is the one
+        // that ran, and that it produced a card pointing at this asset.
+        expect($result->content)
+            ->toContain('href="/api/v1/assets/a1000000-0000-4000-8000-000000000001.pdf"')
+            ->toContain('>quarterly-report.pdf</span>')
+            ->toContain('>12.1 KB</span>')
+            ->toContain('spora-file-card__glyph');
     } finally {
         $restore();
     }
@@ -85,8 +88,13 @@ it('buckets text/* mimes into the same document card as application/*', function
             userId: 99,
         );
 
-        expect($result->content)->toContain('class="spora-file-card"')
-            ->and($result->content)->toContain('spora-file-card__meta">12.1 KB · text/plain<');
+        // Same card as the PDF, and no MIME: `text/plain` and
+        // `application/pdf` must be indistinguishable here, which is the
+        // point of the bucket.
+        expect($result->content)->toContain('spora-file-card__glyph')
+            ->and($result->content)->toContain('>quarterly-report.pdf</span>')
+            ->and($result->content)->toContain('>12.1 KB</span>');
+        expect($result->content)->not->toContain('text/plain');
     } finally {
         $restore();
     }

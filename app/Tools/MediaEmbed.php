@@ -20,6 +20,15 @@ use Spora\Services\MediaArchive\MediaType;
  * tags and the `class` / `href` attributes the sanitizer already passes
  * through — so it has to be revisited whenever that list changes.
  *
+ * The card's classes are Tailwind utilities, so they look forensically wrong
+ * for a PHP string: nothing here greps them, and a typo produces a silently
+ * unstyled card rather than a lint error. That is the deliberate trade — one
+ * styling language across the app beats a second one reachable only from a
+ * stylesheet — and it is safe because spora-frontend registers the exact
+ * class list with `@source inline(...)` in `src/style.css`. A class not in
+ * that list is not generated, so the allow-list and this file have to move
+ * together.
+ *
  * The class is final and stateless. It does NOT log, write to disk, or
  * talk to the network — that's the {@see AssetStore}'s job. These
  * helpers only format strings.
@@ -119,7 +128,6 @@ final class MediaEmbed
         string $url,
         string $filename,
         ?int $byteSize = null,
-        ?string $mimeType = null,
     ): string {
         // CR/LF are stripped before interpolation. The same stored filename
         // reaches the `Content-Disposition` header that
@@ -132,18 +140,21 @@ final class MediaEmbed
         $name = basename(self::stripLineBreaks($filename));
         $safeName = htmlspecialchars($name === '' ? 'download' : $name, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        $meta = [];
+        $card = '<div class="inline-flex max-w-120 my-[0.6rem] rounded-lg border border-foreground/10 bg-muted">'
+            . '<a class="flex min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-inherit no-underline transition-colors hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-offset-[-1px] focus-visible:outline-ring'
+            // Download glyph as a mask on the link's own ::before, for two
+            // reasons that both come back to the sanitizer. An icon element
+            // would need `aria-hidden`, which is not in ALLOWED_ATTR, so the
+            // glyph would be announced rather than hidden. Swapping that for
+            // `content: '↓'` does not fix it: generated content text IS in
+            // the accessible-name computation in Chrome and Firefox, so it
+            // would still be announced as "downwards arrow" — and it would
+            // also be un-annotatable. A mask has no text node at all, and
+            // picks up the theme through currentColor.
+            . ' spora-file-card__glyph" href="' . $safeUrl . '">'
+            . '<span class="min-w-0 flex-auto truncate font-medium">' . $safeName . '</span>';
         if ($byteSize !== null) {
-            $meta[] = self::formatBytes($byteSize);
-        }
-        if ($mimeType !== null && trim($mimeType) !== '') {
-            $meta[] = htmlspecialchars(trim($mimeType), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        }
-
-        $card = '<div class="spora-file-card"><a class="spora-file-card__link" href="' . $safeUrl . '">'
-            . '<span class="spora-file-card__name">' . $safeName . '</span>';
-        if ($meta !== []) {
-            $card .= '<span class="spora-file-card__meta">' . implode(' · ', $meta) . '</span>';
+            $card .= '<span class="shrink-0 text-xs text-muted-foreground">' . self::formatBytes($byteSize) . '</span>';
         }
 
         return $card . '</a></div>';
@@ -206,7 +217,6 @@ final class MediaEmbed
                 $assetUrl,
                 (string) ($asset->filename ?? ''),
                 $asset->byte_size !== null ? (int) $asset->byte_size : null,
-                $asset->mime_type !== null ? (string) $asset->mime_type : null,
             ),
             default             => self::link($assetUrl, $altText),
         };

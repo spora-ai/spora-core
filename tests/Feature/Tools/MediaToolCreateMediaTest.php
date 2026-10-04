@@ -48,8 +48,8 @@ it('stores authored text and returns the asset id, url, and a download card', fu
         expect($result->data)->not->toHaveKey('op', 'files');
 
         expect($result->content)->toContain("Media asset {$result->data['asset_id']}: quarterly-report.md")
-            ->and($result->content)->toContain('class="spora-file-card"')
-            ->and($result->content)->toContain('spora-file-card__name">quarterly-report.md<')
+            ->and($result->content)->toContain('spora-file-card__glyph')
+            ->and($result->content)->toContain('>quarterly-report.md</span>')
             ->and($result->content)->toContain("href=\"{$result->data['asset_url']}\"")
             ->and($result->content)->toContain('verbatim')
             ->and($result->content)->toContain('not idempotent');
@@ -292,7 +292,7 @@ it('neutralises a path-traversing filename', function (): void {
         expect($result->success)->toBeTrue();
         expect($result->data['filename'])->toBe('passwd');
         expect($result->data['filename'])->not->toContain('..');
-        expect($result->content)->toContain('spora-file-card__name">passwd<');
+        expect($result->content)->toContain('>passwd</span>');
     } finally {
         $restore();
     }

@@ -344,8 +344,8 @@ describe('MediaTool::create_derivative', function (): void {
             expect($result->content)->toContain('Created derivative');
             // The PDF derivative embeds as a download card, so the operator
             // sees the artifact without a follow-up `get_media` call.
-            expect($result->content)->toContain('class="spora-file-card"');
-            expect($result->content)->toContain('spora-file-card__link');
+            expect($result->content)->toContain('spora-file-card__glyph');
+            expect($result->content)->toContain('>sample.pdf</span>');
             expect($result->data['parent_id'])->toBe('aaaaaaaa-1111-2222-3333-aaaaaaaaaaaa');
             expect($result->data['format'])->toBe('pdf');
             expect($result->data['mime_type'])->toBe('application/pdf');
@@ -389,8 +389,8 @@ describe('MediaTool::create_derivative', function (): void {
 
             expect($created->success)->toBeTrue();
             expect($created->content)->toContain('Created derivative')
-                ->and($created->content)->toContain('class="spora-file-card"')
-                ->and($created->content)->toContain('spora-file-card__link')
+                ->and($created->content)->toContain('spora-file-card__glyph')
+                ->and($created->content)->toContain('truncate')
                 ->and($created->content)->toContain($created->data['derivative_id'])
                 ->and($created->content)->toContain('Echo the block above verbatim');
 
@@ -403,7 +403,7 @@ describe('MediaTool::create_derivative', function (): void {
             );
 
             expect($read->success)->toBeTrue();
-            expect($read->content)->toContain('class="spora-file-card"')
+            expect($read->content)->toContain('spora-file-card__glyph')
                 ->and($read->content)->toContain($created->data['derivative_id']);
         } finally {
             $restore();
