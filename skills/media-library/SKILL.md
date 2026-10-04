@@ -88,6 +88,8 @@ Want to **put authored text into the archive** so it can be rendered, shared, or
 
 The response is the usual asset header plus a download card, and `data` carries `asset_id`, `asset_url`, `filename`, `mime_type`, and `byte_size`. There is no `files` array and no `op` discriminator: the card comes from the response content, so `data` stays a flat metadata bag you can read in one hop. Use the returned `asset_id` as the parent for a follow-up `create_derivative` — that is the whole intended chain (author Markdown → `create_derivative` → DOCX/PDF render).
 
+`data.asset_url` is the same `/api/v1/assets/<uuid>` route as the card's `href`, and that route is gated on the requester being the asset's owner or an admin. Treat it as a reference for your own follow-up calls, never as a link to hand over — another tool, another person, or a plain `fetch` of it resolves to nothing. The only URL on these operations that survives that is the one from `get_public_url`: a different path, `/api/v1/public/media/<id>?token=…`, resolved by token match with no session at all. So when the user asks for a link, mint one with `get_public_url` and expect the approval prompt — that is the operation the gate is on, and the token is why it is worth gating.
+
 ## Returned assets — never lose the id
 
 Every `media` op that produces or surfaces an asset returns its id on the wire. The wire key is NOT always `asset_id` — it varies per op:

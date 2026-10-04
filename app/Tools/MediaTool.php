@@ -93,7 +93,21 @@ use Symfony\Component\HttpFoundation\Request;
  *                           non-allowlisted MIME is deleted and rejected.
  *                           **Not idempotent** — a retry creates a second
  *                           asset, so reuse the returned `asset_id`.
- *                           Enabled and auto-approved.
+ *                           Enabled and auto-approved. Auto-approval is a
+ *                           deliberate trade-off here, and the one operation
+ *                           where it is worth arguing about: the byte ingest
+ *                           path has no natural key, so a looping or
+ *                           prompt-injected agent can insert unbounded
+ *                           permanent rows, capped only per call
+ *                           ({@see \Spora\Tools\MediaCreateHandler::MAX_CONTENT_BYTES}).
+ *                           It is not marked `isTemporary`, because an authored
+ *                           document is a deliverable and auto-deleting it on a
+ *                           retention count would be a worse bug than the one
+ *                           this avoids; `create_derivative` carries the same
+ *                           unbounded-write posture for the same reason, so
+ *                           closing this means bounding both. Operators who want
+ *                           a ceiling have one without a new mechanism: set
+ *                           `requiresApprovalByDefault` for this op per agent.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *

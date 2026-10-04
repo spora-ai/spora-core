@@ -261,6 +261,63 @@ test('GET /api/v1/assets/{uuid} sends a Cache-Control header', function (): void
     }
 });
 
+test('GET /api/v1/assets/{uuid} strips control characters out of Content-Disposition', function (): void {
+    // Ingested the way a plugin or a pre-sanitisation legacy row would, since
+    // `ingest()` stores the filename as given. Both tools that build a name
+    // (`MediaCreateHandler::sanitiseFilename`, `MediaEmbed::fileCard`) strip
+    // control characters, so the download route used to depend on every caller
+    // having done so — and a CR/LF in a header value is a header-splitting
+    // shape, which PHP's `header()` refuses outright, costing the download its
+    // filename rather than merely looking odd.
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'x',
+            mime: 'audio/mpeg',
+            filename: "speech\r\nX-Injected: 1.mp3",
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+        $response = $router->dispatch(Request::create($path, 'GET'));
+
+        $disposition = (string) $response->headers->get('Content-Disposition');
+
+        expect($disposition)->not->toContain("\r");
+        expect($disposition)->not->toContain("\n");
+        expect($disposition)->toContain('speechX-Injected: 1.mp3');
+        // A stripped name must not collapse the header to an empty filename.
+        expect($disposition)->not->toContain('filename=""');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
+test('GET /api/v1/assets/{uuid} falls back to a usable name when stripping empties the filename', function (): void {
+    // The control-character strip is new, so it is also a new way to arrive at
+    // an empty name — `"download"` keeps the header honest instead of
+    // advertising `filename=""`, which is what the fallback is for.
+    [$router, $archive, $tmp, $restore] = assetTestSetup();
+
+    try {
+        $asset = $archive->ingest(new \Spora\Services\MediaArchive\MediaIngestRequest(
+            bytes: 'x',
+            mime: 'audio/mpeg',
+            filename: "\r\n",
+        ));
+
+        $path = parse_url($asset->asset_url, PHP_URL_PATH);
+        $response = $router->dispatch(Request::create($path, 'GET'));
+
+        expect((string) $response->headers->get('Content-Disposition'))
+            ->toContain('filename="download"');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
 test('GET /api/v1/assets/{uuid} returns 404 when the requester is not the owner and not an admin', function (): void {
     // assetTestSetup() with $asAdmin=false: the mock returns isAdmin=false
     // and currentUserId=null, so canAccessAsset denies the request even
