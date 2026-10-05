@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Spora\AgentTemplates\AgentTemplateAgentCreator;
 use Spora\AgentTemplates\AgentTemplateImporter;
+use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\Core\Paths;
@@ -53,7 +54,7 @@ function makeImporter(): AgentTemplateImporter
     return new AgentTemplateImporter(
         $toolConfig,
         $plugins,
-        $paths,
+        new AgentTemplateScanner($paths->agentTemplateRoots()),
         $toolsApplier,
         $agentCreator,
         null,

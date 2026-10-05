@@ -31,13 +31,13 @@ function makeController(): AgentTemplateController
     $plugins = new PluginLoader([]);
     $paths = new Paths(BASE_PATH);
     $scanner = new AgentTemplateScanner(
-        directories: $paths->agentTemplatesPaths(),
+        roots: $paths->agentTemplateRoots(),
     );
     $validator = new AgentTemplateValidator();
     $importer = new AgentTemplateImporter(
         $toolConfig,
         $plugins,
-        $paths,
+        $scanner,
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );

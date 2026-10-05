@@ -51,19 +51,21 @@ final class Paths
     }
 
     /**
-     * Agent templates: project overrides win over framework defaults.
-     * Returns the list of directories to scan, in priority order (highest first).
-     * Mirrors {@see emailTemplatesPaths()}.
+     * Project and framework template roots, in priority order. Plugin and App
+     * roots are appended by the container binding; see
+     * {@see \Spora\AgentTemplates\AgentTemplateScanner} for what `source` is for.
      *
-     * @return list<string>
+     * @return list<array{path: string, source: string}>
      */
-    public function agentTemplatesPaths(): array
+    public function agentTemplateRoots(): array
     {
+        $roots = [];
         $project = $this->base('agent-templates');
-        $framework = $this->framework('agent-templates');
-        $paths = is_dir($project) ? [$project] : [];
-        $paths[] = $framework;
-        return $paths;
+        if (is_dir($project)) {
+            $roots[] = ['path' => $project, 'source' => 'project'];
+        }
+        $roots[] = ['path' => $this->framework('agent-templates'), 'source' => 'core'];
+        return $roots;
     }
 
     public function config(string $sub = ''): string

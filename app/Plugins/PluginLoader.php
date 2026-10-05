@@ -171,19 +171,20 @@ final class PluginLoader
     }
 
     /**
-     * All agent-template directory paths contributed by loaded plugins.
-     * The scanner aggregates these alongside core-shipped and
-     * app-contributed templates.
+     * All agent-template directory roots contributed by loaded plugins, paired
+     * with the contributing plugin's slug. Mirrors {@see skillPaths()}; the
+     * container aggregates these alongside
+     * {@see \Spora\Core\Paths::agentTemplateRoots()}.
      *
-     * @return string[]
+     * @return list<array{path: string, source: string}>
      */
     public function agentTemplatePaths(): array
     {
         $paths = [];
 
-        foreach ($this->plugins as $plugin) {
+        foreach ($this->plugins as $slug => $plugin) {
             foreach ($plugin->agentTemplatePaths() as $path) {
-                $paths[] = $path;
+                $paths[] = ['path' => $path, 'source' => $slug];
             }
         }
 

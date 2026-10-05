@@ -230,23 +230,6 @@ final class OrchestratorContainerBindings
     private static function templates(): array
     {
         return [
-            AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
-                $pluginLoader = $c->get(PluginLoader::class);
-                $paths = $c->get(Paths::class);
-
-                $appPaths = $c->has(AppLoader::class)
-                    ? ($c->get(AppLoader::class)->getApp()?->agentTemplatePaths() ?? [])
-                    : [];
-
-                $directories = array_merge(
-                    $paths->agentTemplatesPaths(),
-                    $pluginLoader->agentTemplatePaths(),
-                    $appPaths,
-                );
-
-                return new AgentTemplateScanner($directories);
-            },
-
             AgentTemplateValidator::class => static fn(): AgentTemplateValidator => new AgentTemplateValidator(),
 
             // Resolves `resolveAs: 'skill'` settings against the same registry
@@ -266,6 +249,27 @@ final class OrchestratorContainerBindings
             // failure produces an error.
             SkillListProjector::class => static function (ContainerInterface $c): SkillListProjector {
                 return new SkillListProjector($c->get(SkillProviderRegistry::class));
+            },
+
+            // Order is priority — the by-id endpoints return the first match.
+            // Roots are labelled here because the scanner cannot derive them.
+            AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
+                $paths = $c->get(Paths::class);
+
+                $appRoots = array_map(
+                    static fn(string $path): array => ['path' => $path, 'source' => 'app'],
+                    $c->has(AppLoader::class)
+                        ? ($c->get(AppLoader::class)->getApp()?->agentTemplatePaths() ?? [])
+                        : [],
+                );
+
+                $roots = array_merge(
+                    $paths->agentTemplateRoots(),
+                    $c->get(PluginLoader::class)->agentTemplatePaths(),
+                    $appRoots,
+                );
+
+                return new AgentTemplateScanner($roots);
             },
 
             // Skills are scanned in priority order: project, then framework,
@@ -363,11 +367,13 @@ final class OrchestratorContainerBindings
                 return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
             },
 
+            // No cycle: the scanner needs PluginLoader, Paths and AppLoader,
+            // none of which depend on the importer.
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
                 return new AgentTemplateImporter(
                     $c->get(ToolConfigService::class),
                     $c->get(PluginLoader::class),
-                    $c->get(Paths::class),
+                    $c->get(AgentTemplateScanner::class),
                     $c->get(AgentTemplateToolsApplier::class),
                     $c->get(AgentTemplateAgentCreator::class),
                     $c->get(AgentPictureService::class),
