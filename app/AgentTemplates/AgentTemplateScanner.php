@@ -13,22 +13,29 @@ use Throwable;
  * (.json / .yaml / .yml). Each file is parsed, validated, and returned
  * as an {@see AgentTemplate}. Files that fail to parse or validate are
  * NOT silently dropped — they return an AgentTemplate whose `warnings`
- * array carries a `PARSE_ERROR` or `VALIDATION_ERROR` entry plus the
- * parsed partial data where available.
+ * array carries a `PARSE_ERROR` entry for an unreadable or malformed
+ * file, or the specific code the validator raised (`ID_REQUIRED`,
+ * `TOOL_CLASS_REQUIRED`, `OPERATION_UNKNOWN`, `MAX_STEPS_RANGE`, …),
+ * plus the parsed partial data where available.
  *
- * This explicit-failure policy differs from {@see \Spora\Recipes\RecipeScanner}
- * (which silently swallows errors). Templates drive agent creation, so
- * operators must always see why a bundled template didn't make it.
+ * The `source` label on each root is what separates a bundled template
+ * from a plugin's, in the gallery and in the namespace check below — so
+ * it travels with the root rather than being derived from the directory
+ * basename (every template directory is called `agent-templates`).
+ *
+ * Templates drive agent creation, so operators must always see why a
+ * bundled template didn't make it — the failure is reported in the
+ * gallery, not swallowed into an absent entry.
  */
 final class AgentTemplateScanner
 {
     /**
-     * @param list<string> $directories Absolute paths to scan (depth 0).
-     * @param list<string> $coreSlugs Slugs that, when matched, mark a file as `source: 'core'`.
+     * @param list<array{path: string, source: string}> $roots Scan roots (depth 0),
+     *        each carrying the `source` label reported on every template it
+     *        yields. Typical sources: `'project'`, `'core'`, or a plugin slug.
      */
     public function __construct(
-        private readonly array $directories = [],
-        private readonly array $coreSlugs = ['core'],
+        private readonly array $roots = [],
         private readonly ?AgentTemplateValidator $validator = null,
     ) {}
 
@@ -40,8 +47,10 @@ final class AgentTemplateScanner
         $validator = $this->validator ?? new AgentTemplateValidator();
         $templates = [];
 
-        foreach ($this->directories as $dir) {
-            if (!is_dir($dir)) {
+        foreach ($this->roots as $root) {
+            $dir = $root['path'];
+            $source = $root['source'];
+            if ($dir === '' || !is_dir($dir)) {
                 continue;
             }
 
@@ -56,7 +65,7 @@ final class AgentTemplateScanner
                 $templates[] = $this->parseFile(
                     $file->getRealPath(),
                     $file->getFilename(),
-                    $dir,
+                    $source,
                     $validator,
                 );
             }
@@ -68,14 +77,12 @@ final class AgentTemplateScanner
     private function parseFile(
         string $path,
         string $filename,
-        string $dir,
+        string $source,
         AgentTemplateValidator $validator,
     ): AgentTemplate {
         $raw = $this->loadFileData($path, $filename);
         if ($raw === null) {
-            // loadFileData already captured the parse error into the
-            // returned placeholder; no further action needed.
-            return $this->errorTemplate($filename, $dir);
+            return $this->errorTemplate($filename, $source);
         }
 
         // loadFileData returns array<string, mixed>|null; after the null
@@ -88,13 +95,11 @@ final class AgentTemplateScanner
             ? $result->warnings()
             : array_merge($result->errors(), $result->warnings());
 
-        $source = $this->resolveSource($filename, $dir);
-
-        // Namespace enforcement: built-in and plugin-shipped templates
-        // must declare an id whose namespace prefix matches the file's
-        // source directory. Two plugins shipping the same short id can
-        // never collide because their namespaces differ. User-exported
-        // uploads (no source) keep whatever id they declared.
+        // Namespace enforcement: a plugin- or project-supplied template
+        // must declare an id whose namespace prefix is its own source
+        // label, so two contributors shipping the same short id stay
+        // distinguishable. Core and operator-uploaded templates are exempt
+        // — neither has a competitor to be confused with.
         $declaredId = is_string($raw['id'] ?? null) ? (string) $raw['id'] : '';
         if ($declaredId !== '' && $source !== 'core' && $source !== 'uploaded') {
             $namespace = strstr($declaredId, '/', true);
@@ -123,7 +128,7 @@ final class AgentTemplateScanner
 
     private function errorTemplate(
         string $filename,
-        string $dir,
+        string $source,
         string $code = 'PARSE_ERROR',
         ?string $message = null,
     ): AgentTemplate {
@@ -137,7 +142,7 @@ final class AgentTemplateScanner
                     'path'     => $filename,
                 ],
             ],
-            source: $this->resolveSource($filename, $dir),
+            source: $source,
             filename: $filename,
         );
     }
@@ -184,24 +189,5 @@ final class AgentTemplateScanner
     private function parseYaml(string $path): mixed
     {
         return Yaml::parseFile($path);
-    }
-
-    /**
-     * Map a template file to its logical source. Bundled core templates
-     * live under the framework's `agent-templates/` directory; anything
-     * contributed by a plugin is named after the plugin slug.
-     */
-    private function resolveSource(string $filename, string $dir): string
-    {
-        $normalized = strtolower(pathinfo($filename, PATHINFO_FILENAME));
-        if (in_array($normalized, $this->coreSlugs, true)) {
-            return 'core';
-        }
-        // Derive a per-directory slug from the basename of $dir (the
-        // directory the file lives in). Plugin-shipped paths look like
-        // `plugins/<slug>/agent-templates`, app paths like
-        // `<base>/agent-templates`. Falls back to the raw basename.
-        $slug = strtolower(basename($dir));
-        return $slug !== '' ? $slug : 'uploaded';
     }
 }

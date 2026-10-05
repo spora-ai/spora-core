@@ -8,7 +8,6 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Spora\AgentTemplates\Exceptions\AgentImportFailedException;
 use Spora\AgentTemplates\Exceptions\AgentTemplateNotFoundException;
-use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentPictures\AgentPictureService;
@@ -42,24 +41,22 @@ final class AgentTemplateImporter
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         private readonly PluginLoader $plugins,
-        private readonly Paths $paths,
+        private readonly AgentTemplateScanner $scanner,
         private readonly AgentTemplateToolsApplier $toolsApplier,
         private readonly AgentTemplateAgentCreator $agentCreator,
         private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
     /**
-     * Look up a built-in template by id and apply it.
+     * Look up a built-in template by id and apply it. Reads the
+     * container-wired scanner, so this resolves against exactly the roots
+     * the gallery shows.
      *
      * @throws AgentTemplateNotFoundException when the template id is unknown.
      */
     public function applyTemplate(int $userId, string $templateId, ?int $principalId = null): ImportResult
     {
-        $scanner = new AgentTemplateScanner(
-            directories: $this->collectDirectories(),
-        );
-
-        foreach ($scanner->scan() as $template) {
+        foreach ($this->scanner->scan() as $template) {
             if ($template->id() === $templateId) {
                 return $this->apply($userId, $template, $principalId);
             }
@@ -98,9 +95,9 @@ final class AgentTemplateImporter
 
         // The closure returns a tuple (agentId, toolsEnabled) so the
         // outer scope can unpack both without a by-ref parameter on
-        // applyTools. Skip the tools-application step when the payload
-        // has no `tools` block — the LLM-facing create_agent flow runs
-        // this path and applies the toolset separately via configure_tools.
+        // applyTools. `tools` is optional in the template schema, so a
+        // payload without it must still create the agent row rather than
+        // fail validation.
         [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
             function () use ($resolvedPrincipalId, $template, $registeredTools, &$warnings): array {
                 $agentId = $this->agentCreator->create($resolvedPrincipalId, $template);
@@ -204,27 +201,5 @@ final class AgentTemplateImporter
                 'path'     => 'required_plugins',
             ];
         }
-    }
-
-    /**
-     * Aggregate directories: project overrides win over framework default,
-     * plus everything contributed by loaded plugins.
-     *
-     * @return list<string>
-     */
-    private function collectDirectories(): array
-    {
-        $dirs = [];
-        foreach ($this->paths->agentTemplatesPaths() as $p) {
-            if (is_dir($p)) {
-                $dirs[] = $p;
-            }
-        }
-        foreach ($this->plugins->agentTemplatePaths() as $p) {
-            if (is_dir($p)) {
-                $dirs[] = $p;
-            }
-        }
-        return $dirs;
     }
 }

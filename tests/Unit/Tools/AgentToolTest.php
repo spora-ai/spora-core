@@ -40,7 +40,7 @@ function makeAgentTool(
     $importer = new AgentTemplateImporter(
         $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
-        new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
@@ -84,7 +84,7 @@ function makeAgentToolWithPlugins(): array
     $importer = new AgentTemplateImporter(
         $toolConfig,
         new Spora\Plugins\PluginLoader([], null),
-        new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );

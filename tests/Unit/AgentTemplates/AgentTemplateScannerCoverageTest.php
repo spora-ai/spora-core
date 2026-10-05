@@ -11,7 +11,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
  * surfaces. This file focuses on:
  *   - YAML parsing
  *   - Custom-code error templates (via the public scan() API)
- *   - Source resolution for the `core` slug and the per-directory fallback
+ *   - Source labelling per root, and the namespace check it drives
  */
 test('scan() parses YAML templates alongside JSON', function (): void {
     $dir = sys_get_temp_dir() . '/spora_tpl_yaml_' . uniqid();
@@ -31,7 +31,7 @@ metadata:
 YAML);
 
     try {
-        $scanner = new AgentTemplateScanner(directories: [$dir]);
+        $scanner = new AgentTemplateScanner(roots: [['path' => $dir, 'source' => 'core']]);
         $templates = $scanner->scan();
 
         expect($templates)->toHaveCount(1);
@@ -49,7 +49,7 @@ test('scan() surfaces a YAML parse error with PARSE_ERROR code', function (): vo
     file_put_contents($dir . '/broken.yaml', "id: x\n: invalid yaml here\n  : ::");
 
     try {
-        $scanner = new AgentTemplateScanner(directories: [$dir]);
+        $scanner = new AgentTemplateScanner(roots: [['path' => $dir, 'source' => 'core']]);
         $templates = $scanner->scan();
 
         expect($templates)->toHaveCount(1);
@@ -62,13 +62,12 @@ test('scan() surfaces a YAML parse error with PARSE_ERROR code', function (): vo
     }
 });
 
-test('scan() marks a file whose basename matches the core slugs list as source=core', function (): void {
+test('scan() reports a core root label and exempts it from the namespace check', function (): void {
     $dir = sys_get_temp_dir() . '/spora_tpl_src_' . uniqid();
     mkdir($dir);
-    // The scanner resolves `core` by stripping the extension and checking
-    // against $coreSlugs. Passing `coreSlugs: ['my-bundle']` here keeps
-    // the test deterministic without depending on the framework's
-    // bundled core-assistant.json.
+    // A bare id is a namespace mismatch under a plugin root but is fine
+    // under `core`: bundled templates predate the namespacing rule and
+    // the framework ships `core-assistant.json`, not `core.json`.
     file_put_contents($dir . '/my-bundle.json', json_encode([
         'id' => 'my-bundle',
         'name' => 'My Bundle',
@@ -80,13 +79,13 @@ test('scan() marks a file whose basename matches the core slugs list as source=c
     ]));
 
     try {
-        $scanner = new AgentTemplateScanner(
-            directories: [$dir],
-            coreSlugs: ['my-bundle'],
-        );
-        $templates = $scanner->scan();
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $dir, 'source' => 'core'],
+        ]))->scan();
 
         expect($templates[0]->source())->toBe('core');
+        expect(array_column($templates[0]->warnings(), 'code'))
+            ->not->toContain('NAMESPACE_MISMATCH');
     } finally {
         @unlink($dir . '/my-bundle.json');
         @rmdir($dir);
@@ -94,10 +93,6 @@ test('scan() marks a file whose basename matches the core slugs list as source=c
 });
 
 test('scan() emits a NAMESPACE_MISMATCH warning when a plugin file id lacks the source prefix', function (): void {
-    // The scanner derives source from the directory basename, so we
-    // use a fixed directory name that will resolve to source `weather`.
-    // The file's id `unscoped` carries no namespace, so the scanner
-    // flags the mismatch.
     $dir = sys_get_temp_dir() . '/weather';
     @mkdir($dir, 0777, true);
     $file = $dir . '/broken-' . uniqid() . '.json';
@@ -112,11 +107,9 @@ test('scan() emits a NAMESPACE_MISMATCH warning when a plugin file id lacks the 
     ]));
 
     try {
-        $scanner = new AgentTemplateScanner(
-            directories: [$dir],
-            coreSlugs: [],
-        );
-        $templates = $scanner->scan();
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $dir, 'source' => 'weather'],
+        ]))->scan();
 
         expect($templates)->toHaveCount(1);
         $codes = array_column($templates[0]->warnings(), 'code');
@@ -128,19 +121,8 @@ test('scan() emits a NAMESPACE_MISMATCH warning when a plugin file id lacks the 
 });
 
 test('scan() accepts a plugin file id with the matching source prefix (no warning)', function (): void {
-    // The scanner derives the source from the directory basename, so
-    // the temp dir name must match the namespace in the file's id.
-    // Uniqid suffix on the path can't break the comparison, so the
-    // directory basename needs to exactly match the id's namespace.
-    $dir = sys_get_temp_dir() . '/weather-' . uniqid('', true);
-    // Re-create the dir under a basename that matches the namespace.
-    if (is_dir($dir)) {
-        rmdir($dir);
-    }
     $dir = sys_get_temp_dir() . '/weather';
-    if (!is_dir($dir)) {
-        mkdir($dir, 0777, true);
-    }
+    @mkdir($dir, 0777, true);
     $file = $dir . '/ok-' . uniqid() . '.json';
     file_put_contents($file, json_encode([
         'id' => 'weather/ok',
@@ -153,11 +135,9 @@ test('scan() accepts a plugin file id with the matching source prefix (no warnin
     ]));
 
     try {
-        $scanner = new AgentTemplateScanner(
-            directories: [$dir],
-            coreSlugs: [],
-        );
-        $templates = $scanner->scan();
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $dir, 'source' => 'weather'],
+        ]))->scan();
 
         expect($templates)->toHaveCount(1);
         $codes = array_column($templates[0]->warnings(), 'code');
@@ -165,5 +145,100 @@ test('scan() accepts a plugin file id with the matching source prefix (no warnin
     } finally {
         @unlink($file);
         @rmdir($dir);
+    }
+});
+
+/**
+ * @param array<string, mixed> $overrides
+ */
+function writeTemplateFixture(string $dir, string $filename, array $overrides = []): string
+{
+    $path = $dir . '/' . $filename;
+    file_put_contents($path, json_encode(array_merge([
+        'name'        => 'Fixture',
+        'version'     => '1.0.0',
+        'agent'       => ['max_steps' => 5, 'system_prompt' => 'x'],
+        'tools'       => [],
+        'required_plugins' => [],
+        'metadata'    => ['category' => 'general', 'icon' => 'puzzle'],
+    ], $overrides)));
+    return $path;
+}
+
+test('a plugin root labels its templates with the plugin slug', function (): void {
+    $dir = sys_get_temp_dir() . '/spora_tpl_plugin_' . uniqid();
+    mkdir($dir);
+    $file = writeTemplateFixture($dir, 'assistant.json', ['id' => 'memories/assistant']);
+
+    try {
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $dir, 'source' => 'memories'],
+        ]))->scan();
+
+        // Regression: the shipped memories plugin declares `memories/assistant`
+        // and must not be warned about just because its directory is called
+        // `agent-templates`.
+        expect($templates[0]->source())->toBe('memories');
+        expect(array_column($templates[0]->warnings(), 'code'))
+            ->not->toContain('NAMESPACE_MISMATCH');
+    } finally {
+        @unlink($file);
+        @rmdir($dir);
+    }
+});
+
+test('project and app roots label their templates with their own source', function (): void {
+    $projectDir = sys_get_temp_dir() . '/spora_tpl_project_' . uniqid();
+    $appDir     = sys_get_temp_dir() . '/spora_tpl_app_' . uniqid();
+    mkdir($projectDir);
+    mkdir($appDir);
+    $projectFile = writeTemplateFixture($projectDir, 'mine.json', ['id' => 'project/mine']);
+    $appFile     = writeTemplateFixture($appDir, 'theirs.json', ['id' => 'app/theirs']);
+
+    try {
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $projectDir, 'source' => 'project'],
+            ['path' => $appDir, 'source' => 'app'],
+        ]))->scan();
+
+        $sources = [];
+        foreach ($templates as $t) {
+            $sources[$t->id()] = $t->source();
+        }
+        expect($sources)->toBe(['project/mine' => 'project', 'app/theirs' => 'app']);
+    } finally {
+        @unlink($projectFile);
+        @unlink($appFile);
+        @rmdir($projectDir);
+        @rmdir($appDir);
+    }
+});
+
+test('two plugin roots shipping the same short id both survive, earlier root first', function (): void {
+    // The scanner deliberately does not dedupe: two plugins may ship the
+    // same short id, and the first root in priority order is the one
+    // AgentTemplateImporter::applyTemplate() resolves. Pin the ordering
+    // the container's root order gives us.
+    $first  = sys_get_temp_dir() . '/spora_tpl_first_' . uniqid();
+    $second = sys_get_temp_dir() . '/spora_tpl_second_' . uniqid();
+    mkdir($first);
+    mkdir($second);
+    $firstFile  = writeTemplateFixture($first, 'dup.json', ['id' => 'dup', 'name' => 'First']);
+    $secondFile = writeTemplateFixture($second, 'dup.json', ['id' => 'dup', 'name' => 'Second']);
+
+    try {
+        $templates = (new AgentTemplateScanner(roots: [
+            ['path' => $first, 'source' => 'alpha'],
+            ['path' => $second, 'source' => 'beta'],
+        ]))->scan();
+
+        expect($templates)->toHaveCount(2);
+        expect($templates[0]->source())->toBe('alpha');
+        expect($templates[1]->source())->toBe('beta');
+    } finally {
+        @unlink($firstFile);
+        @unlink($secondFile);
+        @rmdir($first);
+        @rmdir($second);
     }
 });

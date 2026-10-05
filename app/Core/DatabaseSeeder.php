@@ -28,7 +28,7 @@ final class DatabaseSeeder
     /**
      * Template id installed by {@see run()} when no Spora Core Agent exists
      * yet. The template must be shippable from one of the directories
-     * {@see Paths::agentTemplatesPaths()} reports.
+     * {@see Paths::agentTemplateRoots()} reports.
      */
     public const CORE_AGENT_TEMPLATE_ID = 'core/core-assistant';
 

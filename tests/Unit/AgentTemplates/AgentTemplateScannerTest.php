@@ -10,7 +10,10 @@ const FIXTURE_AGENT_TEMPLATES = BASE_PATH . '/tests/Fixtures/agent-templates';
 function makeTemplateScanner(array $dirs = []): AgentTemplateScanner
 {
     return new AgentTemplateScanner(
-        directories: $dirs ?: [FIXTURE_AGENT_TEMPLATES],
+        roots: array_map(
+            static fn(string $dir): array => ['path' => $dir, 'source' => 'test'],
+            $dirs ?: [FIXTURE_AGENT_TEMPLATES],
+        ),
         validator: new AgentTemplateValidator(),
     );
 }
@@ -37,7 +40,7 @@ test('scan() flags broken JSON with PARSE_ERROR warning (does not silently drop)
     expect($warnings[0]['code'])->toBe('PARSE_ERROR');
 });
 
-test('scan() surfaces VALIDATION_ERROR for templates missing required fields', function (): void {
+test('scan() surfaces the validator code for templates missing required fields', function (): void {
     $templates = makeTemplateScanner()->scan();
     $missing = null;
     foreach ($templates as $t) {
@@ -51,10 +54,12 @@ test('scan() surfaces VALIDATION_ERROR for templates missing required fields', f
     expect($codes)->toContain('ID_REQUIRED');
 });
 
-test('scan() resolves source as "core" for the bundled slug', function (): void {
-    // Build a scanner over a directory containing a `core-assistant.json`
-    // file directly — exercises the source-resolution path.
-    $templates = makeTemplateScanner()->scan();
+test('scan() reports the source label the root carries', function (): void {
+    // The label travels with the root; the scanner never derives it from
+    // the path, because every template directory is called `agent-templates`.
+    $templates = (new AgentTemplateScanner([
+        ['path' => FIXTURE_AGENT_TEMPLATES, 'source' => 'core'],
+    ], new AgentTemplateValidator()))->scan();
     $minimal = null;
     foreach ($templates as $t) {
         if ($t->id() === 'minimal') {
@@ -62,11 +67,8 @@ test('scan() resolves source as "core" for the bundled slug', function (): void 
         }
     }
 
-    // The minimal fixture lives under tests/Fixtures/agent-templates,
-    // not under a `core` directory — so source falls back to the
-    // directory basename (`agent-templates`).
     expect($minimal)->not->toBeNull();
-    expect($minimal->source())->toBe('agent-templates');
+    expect($minimal->source())->toBe('core');
 });
 
 test('scan() merges results from multiple directories', function (): void {
@@ -95,7 +97,9 @@ test('scan() merges results from multiple directories', function (): void {
 });
 
 test('scan() with non-existent directory returns empty array', function (): void {
-    $templates = (new AgentTemplateScanner(['/tmp/spora_tpl_does_not_exist_' . uniqid()]))->scan();
+    $templates = (new AgentTemplateScanner([
+        ['path' => '/tmp/spora_tpl_does_not_exist_' . uniqid(), 'source' => 'core'],
+    ]))->scan();
     expect($templates)->toBe([]);
 });
 

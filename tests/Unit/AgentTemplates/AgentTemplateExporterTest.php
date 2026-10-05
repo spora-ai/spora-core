@@ -411,11 +411,12 @@ test('export() then importPayload() round-trips on the same loader with zero PLU
         $logger,
         [Spora\Tools\TimeTool::class, Spora\Tools\CalculatorTool::class, TestTool::class],
     );
-    $paths = new Spora\Core\Paths(BASE_PATH);
     $importer = new AgentTemplateImporter(
         $toolConfig,
         $loader,
-        $paths,
+        new Spora\AgentTemplates\AgentTemplateScanner(
+            (new Spora\Core\Paths(BASE_PATH))->agentTemplateRoots(),
+        ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
@@ -574,7 +575,7 @@ function makeTestToolImporter(): AgentTemplateImporter
     return new AgentTemplateImporter(
         $toolConfig,
         $loader,
-        new Spora\Core\Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );

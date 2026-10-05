@@ -43,7 +43,9 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
     $importer = new AgentTemplateImporter(
         $toolConfig,
         new PluginLoader([]),
-        new Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateScanner(
+            (new Paths(BASE_PATH))->agentTemplateRoots(),
+        ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
@@ -118,7 +120,7 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
     $importer = new AgentTemplateImporter(
         $toolConfig,
         new PluginLoader([]),
-        new Paths(BASE_PATH),
+        new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
