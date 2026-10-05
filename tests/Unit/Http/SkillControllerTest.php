@@ -333,10 +333,8 @@ test('a caller with no principal row still sees the shipped skills', function ()
     }
 });
 
-/**
- * `GET /skills/{slug}/files/{path}` — pins that the read works, and that it cannot
- * be turned into a read of what the caller is not entitled to.
- */
+/** `GET /skills/{slug}/files/{path}` — the read, and that it cannot be turned into a
+ *  read of what the caller is not entitled to. */
 describe('GET /skills/{slug}/files/{path}', function (): void {
 
     it('returns a sidecar listed by the detail endpoint', function (): void {
@@ -349,7 +347,6 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
             mkdir($dir . '/templates', 0o755, true);
             file_put_contents($dir . '/templates/report.typ', '#let title = "Report"');
 
-            // The detail endpoint has to list it, or there is nothing to click.
             $show = Request::create('/api/v1/skills/git');
             $show->attributes->set('slug', 'git');
             $detail = json_decode((string) $controller->show($show)->getContent(), true);
@@ -391,8 +388,7 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
     });
 
     it('answers 404 for a traversal path', function (): void {
-        // What matters is a 404 rather than a 403 or a file: a traversal that
-        // succeeded would read anything the process can open.
+        // A traversal that succeeded would read anything the process can open.
         $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-traversal@example.com');
         [$controller, $cleanup, $root] = makeSkillControllerFixture();
         try {
@@ -414,8 +410,6 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
     });
 
     it('answers 404 for another principal\'s skill rather than 403', function (): void {
-        // 403 would confirm the skill exists, which is the cross-tenant existence
-        // oracle the class docblock is about.
         $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('file-cross@example.com');
         [$controller, $cleanup] = makeSkillControllerFixture();
         try {
@@ -428,8 +422,7 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
                 ->and(json_decode((string) $response->getContent(), true)['error']['code'])
                 ->toBe('SKILL_FILE_NOT_FOUND');
 
-            // A refusal only means something if the same read succeeds for a skill
-            // the caller *can* see — an empty fixture proves nothing.
+            // A refusal only means something if the same read works for an own skill.
             $own = Request::create('/api/v1/skills/my-notes/files/SKILL.md');
             $own->attributes->set('slug', 'my-notes');
             $own->attributes->set('path', 'SKILL.md');
@@ -454,15 +447,13 @@ describe('GET /skills/{slug}/files/{path}', function (): void {
     });
 
     it('refuses a file over the cap even if a provider returns it anyway', function (): void {
-        // The interface makes the caller responsible; a provider is plugin-supplied code.
         $oversized = str_repeat('a', SkillProviderInterface::MAX_FILE_BYTES + 1);
         $rogue = Mockery::mock(SkillProviderInterface::class);
         $rogue->shouldReceive('source')->andReturn('rogue');
         $rogue->shouldReceive('getSkills')->andReturn([]);
         $rogue->shouldReceive('getSkillDetails')->andReturnNull();
         // The registry picks the owner by asking for the *listing* first, so a mock
-        // answering null there is never asked for the file, and the cap assertion
-        // would pass for the wrong reason.
+        // answering null there is never asked for the file at all.
         $rogue->shouldReceive('getSkillFiles')->andReturn([['path' => 'huge.txt', 'bytes' => 1_000_000]]);
         $rogue->shouldReceive('getSkillFile')->andReturn($oversized);
 

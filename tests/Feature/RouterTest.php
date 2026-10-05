@@ -332,14 +332,10 @@ test('Router error message names both the parameter and the controller method', 
 });
 
 /**
- * The path the application's real `{path}` skill route captures, or null when the
- * pattern does not match the URI at all.
+ * The path the real `{path}` skill route captures, or null when it does not match.
  *
- * Dispatched off the collected routes rather than through `Router`, so the check is
- * about the *pattern* and not about auth. A test that registers `{path:.+}` itself
- * would prove only that the pattern works and say nothing about what the application
- * registered — which is how a nested-sidecar 404 stayed invisible while every
- * controller test passed, since those hand-set the `path` attribute.
+ * Dispatched off the collected routes, not through `Router`, so this is about the
+ * pattern rather than about auth.
  */
 function capturedSidecarPath(string $uri): ?string
 {
@@ -356,22 +352,16 @@ function capturedSidecarPath(string $uri): ?string
         return null;
     }
 
-    // `Router::handleFound()` url-decodes a captured variable before the controller
-    // sees it, so the comparison has to be on the decoded form.
+    // Router url-decodes a captured variable before the controller sees it.
     return rawurldecode((string) ($vars['path'] ?? ''));
 }
 
 test('the real skills route captures a nested sidecar path written with raw slashes', function (): void {
-    // `references/REFERENCE.md` is the canonical sidecar layout in the skills spec.
-    // With the default `[^/]+` placeholder the pattern does not match at all, so the
-    // caller gets a router 404 it cannot act on rather than the endpoint's own answer.
     expect(capturedSidecarPath('/api/v1/skills/git/files/references/REFERENCE.md'))
         ->toBe('references/REFERENCE.md');
 });
 
 test('the real skills route also accepts the percent-encoded form', function (): void {
-    // What the client actually sends, since the router url-decodes a captured
-    // variable. Both forms must land on the same path.
     expect(capturedSidecarPath('/api/v1/skills/git/files/references%2FREFERENCE.md'))
         ->toBe('references/REFERENCE.md');
 });

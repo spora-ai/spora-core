@@ -111,16 +111,10 @@ final class SkillController
     }
 
     /**
-     * One sidecar's contents.
-     *
-     * Containment and the pre-read size check are the provider's to enforce — see
-     * {@see SkillProviderInterface::getSkillFile()}. The cap is re-asserted here
-     * because the interface makes the *caller* responsible and a provider is
-     * plugin-supplied code.
-     *
-     * A skill the caller cannot see, a file the skill does not contain, and a file
-     * over the cap answer identically, so this is not a probe for what exists in
-     * another tenant.
+     * One sidecar's contents. A provider is plugin-supplied code and the interface
+     * makes the *caller* enforce the cap, so it is re-asserted here. An invisible
+     * skill, an unlisted path and an over-cap file answer identically, so this is
+     * not a probe for another tenant's contents.
      */
     #[OA\Parameter(
         name: 'principal_id',
@@ -137,8 +131,6 @@ final class SkillController
         }
 
         $name = strtolower(trim((string) $request->attributes->get('slug', '')));
-        // Not trimmed: the interface defines this as an opaque exact-match key, so
-        // normalising it here would make a listed path unmatchable.
         $path = (string) $request->attributes->get('path', '');
 
         $visible = $this->visiblePrincipalIds($userId);
@@ -150,7 +142,6 @@ final class SkillController
                 continue;
             }
             if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
-                // Rejected, not answered: keep looking, as `show()` does.
                 continue;
             }
 
