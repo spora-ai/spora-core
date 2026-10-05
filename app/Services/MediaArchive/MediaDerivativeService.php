@@ -230,9 +230,24 @@ final class MediaDerivativeService
             return $derivative;
         }
 
-        $this->deleteWithDerivatives($parent);
+        $this->discardEmptyDerivative($derivative);
 
         return null;
+    }
+
+    /**
+     * Drop the one derivative that turned out to carry no bytes. Scoped to
+     * that row deliberately: the parent may already have a thumbnail or a
+     * render from another producer, and a failed text extraction is no
+     * reason to take those with it.
+     */
+    private function discardEmptyDerivative(MediaAsset $derivative): void
+    {
+        $this->payloads->remove($derivative);
+        MediaDerivative::query()
+            ->where('derivative_id', $derivative->id)
+            ->delete();
+        $derivative->delete();
     }
 
     /**

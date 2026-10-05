@@ -13,6 +13,7 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\Producers\ImageDerivativeProducer;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Tests\Support\EmptyTextDerivativeProducer;
 use Tests\Support\MediaArchiveTestSupport;
 use Tests\Support\TextDerivativeProducer;
 use Tests\Support\ThrowingTextDerivativeProducer;
@@ -518,3 +519,42 @@ final class ExtensionMixingProducer implements MediaDerivativeProducerInterface
         return new DerivativeOutput(bytes: 'docx', mime: 'application/octet-stream');
     }
 }
+
+test('an empty extraction discards only its own derivative, not the parent\'s siblings', function (): void {
+    $service = ensureTextDerivativeService();
+    $parent  = seedEnsureTextParent();
+
+    // A sibling derivative from an unrelated producer. The parent's `md`
+    // extraction is about to come back empty (a scanned document), and
+    // cleaning that up must not reach across and take this with it.
+    $sibling = MediaAsset::create([
+        'id'           => testGenerateUuidV4(),
+        'asset_url'    => '/api/v1/assets/' . testGenerateUuidV4() . '.png',
+        'storage_mode' => 'data_url',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/png',
+        'byte_size'    => 128,
+        'payload'      => 'PNG-bytes',
+    ]);
+    (new MediaDerivative([
+        'id'                 => testGenerateUuidV4(),
+        'parent_id'          => $parent->id,
+        'derivative_id'      => $sibling->id,
+        'format'             => 'thumbnail',
+        'producer_plugin'    => 'some-other-plugin',
+        'producer_operation' => 'render',
+    ]))->save();
+
+    // The `md` producer returns nothing, which reads as no content.
+    registerEnsureTextProducer(EmptyTextDerivativeProducer::class);
+
+    expect($service->ensureTextDerivative($parent))->toBeNull();
+
+    // The empty `md` row is gone...
+    expect(MediaDerivative::query()->where('parent_id', $parent->id)->where('format', 'md')->exists())->toBeFalse();
+    expect(MediaAsset::query()->find((string) $sibling->id))->not->toBeNull();
+
+    // ...and the sibling is untouched, join row and all.
+    expect(MediaDerivative::query()->where('derivative_id', $sibling->id)->exists())->toBeTrue();
+    expect((string) MediaAsset::query()->find((string) $sibling->id)?->payload)->toBe('PNG-bytes');
+});
