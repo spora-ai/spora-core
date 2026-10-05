@@ -153,12 +153,12 @@ final class SkillTool extends AbstractTool
     /**
      * The principal whose skills this call may see.
      *
-     * The execution's context, else the agent's own principal. **`$userId` is
-     * never used** — it is the runner, not the owner, so a group agent triggered
-     * by one member would otherwise resolve against that member's personal
-     * skills. The resolver fallback is what keeps a scheduled run working: there
-     * is no runner, but there is an agent. An unresolvable principal becomes
-     * `null` so a provider fails closed.
+     * The execution's context, else the agent's own principal. No user id is
+     * consulted — a group agent triggered by one member must resolve against
+     * the group, not that member's personal principal. The resolver fallback
+     * is what keeps a scheduled run working: there is no triggering member,
+     * but there is an agent. An unresolvable principal becomes `null` so a
+     * provider fails closed.
      */
     private function resolvePrincipalId(int $agentId, ?PrincipalContext $context): ?int
     {

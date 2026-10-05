@@ -35,15 +35,17 @@ interface ToolInterface
      *     attribution) and `PrincipalContext::runnerUserId` (the user who
      *     triggered the current task).
      *
-     * The legacy `$userId` parameter is gone as of 0.30.0. It was read from
-     * the calling agent's row, so it was always `$context->ownerUserId` — and
+     * The legacy `$userId` parameter is gone. It was read from the calling
+     * agent's row, so it was always `$context->ownerUserId` — and
      * `ToolConfigPrincipalCascade` ignored it outright whenever `$context` was
      * present, which the orchestrator always supplies. Read the context.
      *
      * Dropping it breaks every implementation that still declares the
-     * parameter, fatally, at class-load. Plugins read the value from
-     * `$context` in 0.29 (the parameter is deprecated but still present), so
-     * by 0.30 the declaration is the only thing left to remove.
+     * parameter, fatally, at class-load, so the interface change and the
+     * plugin updates that remove those declarations have to ship together. A
+     * plugin cannot make the change early either — declaring four parameters
+     * against a five-parameter interface is the same fatal. Both directions
+     * fail loudly, which is the intended migration signal.
      *
      * @param  array<string, mixed>   $arguments  Key-value pairs matching #[ToolParameter] names.
      * @param  int                    $agentId    The agent executing this tool.

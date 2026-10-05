@@ -48,9 +48,11 @@ final class OrchestratorConfig
         public readonly ?ToolConfigService $toolConfigService = null,
         public readonly ?ToolCallSerializer $toolCallSerializer = null,
         public readonly ?LLMConfigService $llmConfigService = null,
-        // Source of calling-user_id for tool dispatch. The Orchestrator
-        // resolves the calling user's id from the calling agent's row
-        // — tools never receive a session-derived userId.
+        // No longer read by the Orchestrator. It used to source the calling
+        // user id for tool dispatch, which is now carried by
+        // PrincipalContext::ownerUserId. Retained because it is public
+        // readonly constructor state that callers still pass; nothing in
+        // app/ reads it back off the Orchestrator.
         public readonly ?AgentServiceInterface $agentService = null,
         public readonly ?SubAgentServiceInterface $subAgent = null,
         public readonly ?LLMConfigPreferences $principalPreferences = null,
