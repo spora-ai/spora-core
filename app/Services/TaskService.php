@@ -47,7 +47,7 @@ final class TaskService implements TaskServiceInterface
         // This widens the legacy `where('user_id', $userId)` gate so a
         // group member can see every other member's runs on a shared
         // agent. Migrated from `tasks.user_id` to `tasks.principal_id`
-        // — see migration 0071.
+        // — see migration 0073.
         $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
         $query = Task::whereIn('principal_id', $visiblePrincipalIds)
             ->orderByDesc('updated_at')

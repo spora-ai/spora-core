@@ -172,12 +172,9 @@ final class ScheduledRunProcessor
         $task = null;
 
         try {
-            // Pass userId = the housekeeping caller so tasks.user_id = caller.
-            // If the synchronous tick fails partway and the task is left in
-            // RUNNING/QUEUED, only the caller's browser would try to tick it
-            // (and the reaper would flip it after the lease expires). Other
-            // group members' browsers do not race because their user_id filter
-            // does not match.
+            // Explicit caller id lands in `trigger_user_id`; null would fall
+            // back to the agent's most-recent trigger for credential
+            // resolution. `principal_id` comes from the agent, not this arg.
             $task = $this->orchestrator->start(
                 agentId: (int) $run->agent_id,
                 userPrompt: $prompt,
@@ -188,10 +185,10 @@ final class ScheduledRunProcessor
             );
 
             // CAS-claim the row inside a transaction so two /housekeeping calls
-            // (or a call racing with a browser tick on tasks.user_id = $userId)
-            // can't both observe QUEUED + no live lease and flip the same row
-            // to RUNNING. Without this claim `tick()` is a no-op on QUEUED rows
-            // (Phase 1 always-QUEUE invariant).
+            // (or a call racing with a browser tick) can't both observe
+            // QUEUED + no live lease and flip the same row to RUNNING. Without
+            // this claim `tick()` is a no-op on QUEUED rows (Phase 1 always-QUEUE
+            // invariant).
             $leaseUntil = Carbon::now()->modify('+' . $tickLeaseSeconds . ' seconds');
             $claimed = Capsule::connection()->transaction(function () use ($task, $leaseOwner, $leaseUntil): ?Task {
                 $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));

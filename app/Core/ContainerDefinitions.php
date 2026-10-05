@@ -462,10 +462,9 @@ final class ContainerDefinitions
                 return new DerivativePayloadStore(self::resolveBasePath());
             },
 
-            // Plugins and the project App subscribe to lifecycle events via
-            // Symfony\Contracts\EventDispatcher\EventSubscriberInterface. The
-            // dispatcher is built once and shared; subscribers are wired by
+            // Built once and shared. Subscribers are wired by
             // PluginLoader::wireEventSubscribers() / AppLoader::wireEventSubscribers()
+            // via Symfony\Component\EventDispatcher\EventSubscriberInterface,
             // once per process (see Kernel::__construct()).
             'event_dispatcher' => static fn(): \Symfony\Component\EventDispatcher\EventDispatcher
                 => EventDispatcherFactory::create(),

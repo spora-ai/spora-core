@@ -210,11 +210,8 @@ final class TaskTickController
      */
     private function loadDrivableTask(int $taskId, int $userId): Task
     {
-        // Group-scoped: any member of any principal that owns the task
-        // can drive the tick. The legacy runner-only guard
-        // (`tasks.user_id`) is widened to `tasks.principal_id IN
-        // visiblePrincipalIds(user)` — matches the per-task action
-        // gating semantics.
+        // Group-scoped: any member of the task's owning principal can drive
+        // the tick, not only the user who triggered it.
         $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
         $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
         if ($task === null) {

@@ -28,23 +28,24 @@ interface ToolInterface
      * so the LLM can reason about failures.
      *
      * Read access for ownership context:
-     *   - `$userId` (legacy): the calling user id from `tasks.user_id` — the
-     *     "who clicked" semantics. Retained for existing plugins that still
-     *     look up user-scoped settings or media by user id.
-     *   - `$context` (preferred): the principal context bundle. Plugins that
-     *     need to distinguish ownership from runner should read
-     *     `PrincipalContext::ownerUserId` (the paying user / group's
-     *     owner — drives credential encryption, settings scope, and audit
-     *     attribution) and `PrincipalContext::runnerUserId` (the user who
-     *     triggered the current task — drives memory write attribution
-     *     and Mercure publish targets).
+     *   - `$userId` (legacy): the agent owner's user id, read from the agent
+     *     row. Same value as `$context->ownerUserId` — the paying user, NOT
+     *     whoever clicked Send. Kept for plugins that still look up
+     *     user-scoped settings or media by user id; prefer `$context`.
+     *   - `$context` (preferred): the principal context bundle, for plugins
+     *     that need to tell owner from runner. `ownerUserId` drives
+     *     credential encryption, settings scope and audit attribution;
+     *     `runnerUserId` is who triggered this turn.
+     *
+     * Note the name collides: `OrchestratorInterface::start()` takes a
+     * `$userId` too, and that one is the clicker, not the payer.
      *
      * @param  array<string, mixed>   $arguments  Key-value pairs matching #[ToolParameter] names.
      * @param  int                    $agentId    The agent executing this tool.
-     * @param  int|null               $userId     Legacy user context (from task->user_id).
+     * @param  int|null               $userId     Legacy alias for $context->ownerUserId. Same value.
      * @param  int|null               $taskId     The current tick's task id. Available so chat-level
      *                                            tools (sub_agent, summarize, archive) can reference
-     *                                            the source Task without re-querying by user_id.
+     *                                            the source Task without re-querying by user id.
      * @param  PrincipalContext|null  $context    Principal context — owner/runner separation.
      */
     public function execute(
