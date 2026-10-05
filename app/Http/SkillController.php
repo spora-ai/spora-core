@@ -8,6 +8,7 @@ use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\PrincipalService;
 use Spora\Skills\SkillDescriptor;
+use Spora\Skills\SkillProviderInterface;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillSummary;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -107,6 +108,51 @@ final class SkillController
         }
 
         return $this->notFound('SKILL_NOT_FOUND', "Skill '{$name}' not found.");
+    }
+
+    /**
+     * One sidecar's contents. A provider is plugin-supplied code and the interface
+     * makes the *caller* enforce the cap, so it is re-asserted here. An invisible
+     * skill, an unlisted path and an over-cap file answer identically, so this is
+     * not a probe for another tenant's contents.
+     */
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'Narrow the lookup to one principal the caller controls, under the same discard-not-reject rule as the listing. A skill the caller cannot see answers 404, not 403.',
+        schema: new OA\Schema(type: 'integer'),
+    )]
+    public function file(Request $request): JsonResponse
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+
+        $name = strtolower(trim((string) $request->attributes->get('slug', '')));
+        $path = (string) $request->attributes->get('path', '');
+
+        $visible = $this->visiblePrincipalIds($userId);
+        $ids     = $this->requestedPrincipalId($request, $visible) ?? $visible;
+
+        foreach ($ids as $principalId) {
+            $contents = $this->skills->getSkillFile($name, $path, $principalId);
+            if ($contents === null) {
+                continue;
+            }
+            if (strlen($contents) > SkillProviderInterface::MAX_FILE_BYTES) {
+                continue;
+            }
+
+            return new JsonResponse(['data' => [
+                'path'    => $path,
+                'content' => $contents,
+                'bytes'   => strlen($contents),
+            ]]);
+        }
+
+        return $this->notFound('SKILL_FILE_NOT_FOUND', "File '{$path}' not found in skill '{$name}'.");
     }
 
     /**

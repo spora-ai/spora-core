@@ -330,3 +330,42 @@ test('Router error message names both the parameter and the controller method', 
             ->toContain('handle');
     }
 });
+
+/**
+ * The path the real `{path}` skill route captures, or null when it does not match.
+ *
+ * Dispatched off the collected routes, not through `Router`, so this is about the
+ * pattern rather than about auth.
+ */
+function capturedSidecarPath(string $uri): ?string
+{
+    $collector = new Spora\Core\MiddlewareRouteCollector(
+        new FastRoute\RouteParser\Std(),
+        new FastRoute\DataGenerator\GroupCountBased(),
+    );
+    Spora\Core\RouteDefinitions::register($collector);
+
+    $dispatcher = new FastRoute\Dispatcher\GroupCountBased($collector->getData());
+
+    [, $handler, $vars] = $dispatcher->dispatch('GET', $uri);
+    if (!is_array($handler)) {
+        return null;
+    }
+
+    // Router url-decodes a captured variable before the controller sees it.
+    return rawurldecode((string) ($vars['path'] ?? ''));
+}
+
+test('the real skills route captures a nested sidecar path written with raw slashes', function (): void {
+    expect(capturedSidecarPath('/api/v1/skills/git/files/references/REFERENCE.md'))
+        ->toBe('references/REFERENCE.md');
+});
+
+test('the real skills route also accepts the percent-encoded form', function (): void {
+    expect(capturedSidecarPath('/api/v1/skills/git/files/references%2FREFERENCE.md'))
+        ->toBe('references/REFERENCE.md');
+});
+
+test('the real skills route still captures a top-level sidecar', function (): void {
+    expect(capturedSidecarPath('/api/v1/skills/git/files/notes.txt'))->toBe('notes.txt');
+});
