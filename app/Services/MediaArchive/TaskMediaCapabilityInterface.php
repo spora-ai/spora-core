@@ -30,7 +30,7 @@ interface TaskMediaCapabilityInterface
      * one, so the turn's prompt is built from text that is already there.
      *
      * The attach-time seam, not a lazy create inside
-     * {@see \Spora\Agents\AttachmentRowBuilder}: a conversion failure then
+     * {@see \Spora\Agents\AttachmentRowRenderer}: a conversion failure then
      * surfaces as an ordinary attach-time warning rather than vanishing
      * mid-turn, and the message builder stays a pure read.
      *

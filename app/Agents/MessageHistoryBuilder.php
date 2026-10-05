@@ -612,11 +612,12 @@ final class AttachmentRowRenderer
      *   1. The asset has an `md` derivative (PDF, docx, …) and the
      *      recorded `byte_size` is within {@see MAX_INLINE_TEXT_BYTES} —
      *      inline the derivative's bytes. The size gate reads the column
-     *      rather than `strlen()` of the loaded payload: the derivative
-     *      path costs a `media_derivatives` lookup, a second
-     *      `MediaAsset::find()` and a real `file_get_contents()` per
-     *      attachment per turn, so a 200-page PDF must not be read off
-     *      disk only to be discarded.
+     *      first, so a 200-page PDF is never read off disk only to be
+     *      discarded — the derivative path costs a `media_derivatives`
+     *      lookup, a second `MediaAsset::find()` and a real
+     *      `file_get_contents()` per attachment per turn. The loaded bytes
+     *      are then re-measured, so a stale `byte_size` cannot smuggle an
+     *      oversized body into the context window.
      *   2. The asset's mime type looks text-safe AND the raw bytes fit
      *      within the same budget AND the leading bytes contain no NUL —
      *      inline the raw bytes. This is what keeps `create_media` and

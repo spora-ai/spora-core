@@ -35,6 +35,10 @@ storage/.plugins_stamp.cache.json
 # Keep the empty storage/ directory in the repo
 !storage/.gitkeep
 
+# Runtime asset payloads — written by DerivativePayloadStoreTest and the
+# ingest pipeline, never source
+storage/assets/
+
 # ── Logs ─────────────────────────────────────────────────────────────────────
 storage/*.log
 *.log
