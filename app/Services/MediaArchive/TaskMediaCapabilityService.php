@@ -20,12 +20,11 @@ use Throwable;
  * consume image blocks, returning a clear HTTP 400 at the request boundary
  * rather than a silent image-strip during the first tick.
  *
- * Also hosts the attach-time `md`-derivative mint, because it is the same
- * seam: the media ids have just been parsed and validated, and this is
- * the last point before the turn is queued. Putting it here rather than
- * in the three call sites is what makes "all three paths that accept
- * `media_ids`" true by construction — a fourth caller that forgets is a
- * silent bug, and partial coverage is exactly the failure mode.
+ * Also hosts the attach-time `md`-derivative mint: the media ids have
+ * just been parsed and validated, and this is the last point before the
+ * turn is queued. Hosting it here rather than in the callers is what
+ * makes "every `media_ids` path mints" true by construction — a caller
+ * that forgets is a silent bug, and partial coverage is the failure mode.
  */
 final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
 {

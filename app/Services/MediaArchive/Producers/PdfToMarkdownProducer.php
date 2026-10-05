@@ -15,23 +15,14 @@ use Throwable;
 /**
  * PDF → `md` derivative producer.
  *
- * Ships in core rather than a plugin so a fresh install accepts PDFs and
- * can read them back without installing anything: `application/pdf` is
- * allowlisted at the upload gate precisely because this producer declares
- * it (see {@see \Spora\Services\MediaArchive\MediaAllowedTypesService}),
- * and moving the producer to a package would make that allowlist
- * conditional on an extra install.
+ * Ships in core rather than a plugin so a fresh install accepts PDFs: the
+ * upload gate allowlists `application/pdf` precisely because this producer
+ * declares it, and moving the producer to a package would make that
+ * allowlist conditional on an extra install.
  *
- * The extraction itself is delegated to
- * {@see \Spora\Services\MediaArchive\PdfMarkdownExtractor}, the same
- * helper `ReadUrlTool::fetch_pdf` uses — a second extractor here would be
- * the exact duplication this producer replaced.
- *
- * The `md` format is the whole point: the archive's invariant is that a
- * text-ish source within the inline budget is its own text and anything
- * else gets an `md` derivative. A PDF is not text-ish, so this producer
- * is what turns "the LLM cannot see this PDF" into "the LLM sees its
- * text" — see `AttachmentRowRenderer::buildTextBlock()`.
+ * Extraction is delegated to {@see \Spora\Services\MediaArchive\PdfMarkdownExtractor},
+ * the same helper `ReadUrlTool::fetch_pdf` uses — a second extractor here
+ * would be the exact duplication this producer replaced.
  */
 final class PdfToMarkdownProducer implements MediaDerivativeProducerInterface
 {

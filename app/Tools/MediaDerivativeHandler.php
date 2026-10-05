@@ -30,8 +30,8 @@ final readonly class MediaDerivativeHandler
      * Cap on the extracted text `get_media` and `get_source` inline. These
      * ops are LLM-facing, so the full body stays on the derivative and the
      * model is told to call `get_source` for it. Deliberately distinct from
-     * `AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES`, which bounds what a
-     * chat attachment may inline at all.
+     * `AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES`, which bounds a chat
+     * attachment.
      */
     public const PREVIEW_BYTES = 8 * 1024;
 
@@ -45,11 +45,10 @@ final readonly class MediaDerivativeHandler
      * The asset's extracted text from its `md` derivative, or null when it
      * has none.
      *
-     * Pure read: `get_source` and `get_media` both surface what ingest or an
+     * Pure read: `get_source` and `get_media` surface what ingest or an
      * explicit `create_derivative` already minted, and neither mints one on
      * the spot. A lazy create here would make a read operation write to the
-     * archive, which is a different approval story than the one these ops are
-     * approved under.
+     * archive — a different approval story than the one these ops hold.
      */
     public function readTextDerivative(MediaAsset $asset): ?string
     {
@@ -84,10 +83,6 @@ final readonly class MediaDerivativeHandler
         return substr($text, 0, $limit)
             . "\n\n[…truncated — call `get_source` for the full extracted text]";
     }
-
-    // ---------------------------------------------------------------------
-    // `list_derivatives` / `create_derivative`
-    // ---------------------------------------------------------------------
 
     /**
      * @param  array<string, mixed> $arguments

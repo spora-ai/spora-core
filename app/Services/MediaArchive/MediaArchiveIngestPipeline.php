@@ -21,11 +21,11 @@ use Spora\Services\Text\Utf8Sanitizer;
  * `MediaArchiveService::ingest()` delegates here, so callers
  * (controllers, tests) don't have to know.
  *
- * The ingest pipeline is the largest "shape" the service carries — it
- * owns the URL → bytes → persist → mint-`md`-derivative chain, plus the
- * `findExisting` / `applyFieldsToExisting` / `insertNew` upsert path.
- * Keeping it in a sibling class lets {@see MediaArchiveService} focus
- * on the listing + ownership concerns the dashboard exposes.
+ * The ingest pipeline is the largest "shape" the service carries — it owns
+ * the URL → bytes → persist → mint-`md`-derivative chain, plus the
+ * `findExisting` / `applyFieldsToExisting` / `insertNew` upsert path — so
+ * {@see MediaArchiveService} can focus on the listing and ownership
+ * concerns the dashboard exposes.
  */
 final class MediaArchiveIngestPipeline
 {
@@ -195,11 +195,9 @@ final class MediaArchiveIngestPipeline
             $this->writePayloadToAsset($asset, $bytes);
         }
 
-        // Best-effort: mint the `md` derivative a binary document needs
-        // for the LLM to see it. A producer throw is logged and
-        // swallowed inside `ensureTextDerivative()`, so a corrupt PDF
-        // doesn't roll back the upload — the reader falls back to a
-        // `get_source` pointer.
+        // Best-effort: a producer throw is logged and swallowed inside
+        // `ensureTextDerivative()`, so a corrupt PDF doesn't roll back the
+        // upload — the reader falls back to a `get_source` pointer.
         if ($reference->mode !== 'external') {
             $this->derivatives->ensureTextDerivative($asset);
         }

@@ -131,16 +131,13 @@ final class MediaDerivativeService
      * join row, and its on-disk payload — before the parent itself goes
      * away.
      *
-     * This has to be explicit. `media_derivatives` carries foreign keys
-     * on *both* columns with `cascadeOnDelete`, so deleting the parent
-     * drops the join rows and leaves each derivative's own
-     * `media_assets` row behind. {@see \Spora\Services\MediaArchive\MediaArchiveService::list()}
-     * filters derivative rows out with
-     * `whereNotIn('id', MediaDerivative::select('derivative_id'))` — so
-     * the moment the join row is gone the orphan stops matching the
-     * filter and resurfaces as a stray top-level library asset with no
-     * route back to its source. In `local` mode its bytes stay on disk
-     * as well.
+     * This has to be explicit. `media_derivatives` cascades on *both* foreign
+     * keys, so deleting the parent drops the join rows and orphans each
+     * derivative's own `media_assets` row. {@see \Spora\Services\MediaArchive\MediaArchiveService::list()}
+     * filters derivative rows out via `whereNotIn('id', <derivative ids>)` —
+     * once the join row is gone the orphan stops matching that filter and
+     * resurfaces as a stray top-level library asset with no route back to its
+     * source, and in `local` mode its bytes stay on disk.
      */
     public function deleteWithDerivatives(MediaAsset $parent): void
     {
@@ -158,12 +155,9 @@ final class MediaDerivativeService
             $derivative->delete();
         }
 
-        // Explicit, not left to the FK cascade. Both cascades would
-        // normally do this, but a cascade that silently does not fire
-        // (SQLite without `PRAGMA foreign_keys=ON`, a partially applied
-        // migration) is precisely what leaves the orphan row behind in
-        // the first place. Deleting the join rows here makes the
-        // guarantee ours rather than the engine's.
+        // Explicit, not left to the FK cascade: a cascade that silently does
+        // not fire (SQLite without `PRAGMA foreign_keys=ON`, a partially
+        // applied migration) is exactly what leaves the orphan row behind.
         MediaDerivative::query()
             ->where('parent_id', $parent->id)
             ->delete();
@@ -266,11 +260,6 @@ final class MediaDerivativeService
     }
 
     /**
-     * The derivative's stored bytes, read through the same
-     * data-url/local split {@see self::rewriteStoredBytes()} writes with.
-     */
-
-    /**
      * Walk {@see MediaDerivativeProducerDiscovery::all()} and return the
      * first producer that accepts `$parent`'s MIME/extension and emits
      * `$format`. Mirrors the controller's `findProducer()` but lives
@@ -351,28 +340,22 @@ final class MediaDerivativeService
     }
 
     /**
-     * Every source format the registered producers accept, lowercased,
-     * MIMEs only. Backs
-     * {@see \Spora\Services\MediaArchive\MediaAllowedTypesService}'s
-     * upload allowlist: a binary document is uploadable precisely
-     * because some producer can extract its text, so the producer
-     * registry is the allowlist surface.
+     * Every source format the registered producers accept, lowercased and
+     * MIMEs only. Backs {@see \Spora\Services\MediaArchive\MediaAllowedTypesService}'s
+     * upload allowlist: a binary document is uploadable because some
+     * producer can extract its text, so the producer registry is the
+     * allowlist surface.
      *
-     * Entries without a `/` are bare extensions (`md`, `typ`,
-     * `markdown`) and are filtered out — `supportedSourceFormats()`
-     * returns both shapes. The leak is invisible in the upload UI, which
-     * maps MIME types through `extensionForMime()` and silently drops
-     * what it cannot resolve, so it would surface only in the LLM-facing
-     * "Allowed: %s" string as a bogus format name.
-     *
-     * `image/*` is excluded for a different reason: it would route
-     * around the operator's image policy. Core's
-     * {@see ImageDerivativeProducer} renders thumbnails, so its source
-     * list is `image/png` and friends — unioning that in would make every
-     * image type uploadable on every agent, defeating the
-     * `supportsImageInput()` gate and the `allowed_image_types` config in
-     * {@see MediaAllowedTypesService}. That list is the deliberate
-     * surface for images; this one is for documents something can read.
+     * Two exclusions, for different reasons. Entries without a `/` are bare
+     * extensions (`md`, `typ`) that `supportedSourceFormats()` also returns;
+     * leaking them is invisible in the upload UI, which drops unresolvable
+     * types, and would surface only in the LLM-facing "Allowed: %s" string
+     * as a bogus format name. `image/*` would route around the operator's
+     * image policy — core's {@see ImageDerivativeProducer} sources are
+     * `image/png` and friends, so unioning them in would make every image
+     * type uploadable on every agent and defeat the `supportsImageInput()`
+     * gate. `allowed_image_types` is the deliberate surface for images;
+     * this one is for documents something can read.
      *
      * @return list<string>
      */
@@ -484,26 +467,24 @@ final class MediaDerivativeService
         $derivative->principal_id = $principalId !== null ? (int) $principalId : null;
         $derivative->agent_id = $parent->agent_id !== null ? (int) $parent->agent_id : null;
         $derivative->user_id = $userId ?? ($parent->user_id !== null ? (int) $parent->user_id : null);
-        // A derivative is a child row in every sense the archive's
-        // access and lifecycle queries care about, so ownership and the
-        // temp flag are inherited and everything else is not:
+        // A derivative is a child row in every sense the archive's access
+        // and lifecycle queries care about, so ownership and the temp flag are
+        // inherited and everything else is not:
         //
         //   user_id / agent_id — `AssetController::ownsDirectly()` and
-        //     `MediaTool::assetInScope()` (scope=agent) are both hard
-        //     gates; a NULL on either makes the row unreadable by the
-        //     very agent that caused it to exist.
-        //   is_temporary — `MediaArchiveRetention::findExcessTempIds()`
-        //     filters `user_id + agent_id + is_temporary` together, so a
-        //     derivative that missed any one of the three is immune to
-        //     the sweep and grows without bound.
-        //   task_id / tool_call_id — deliberately NOT inherited. The
-        //     derivative outlives the turn, and a `tool_call_id` would
-        //     collide with the ingest dedup key
-        //     `(tool_call_id, source_url)`.
+        //     `MediaTool::assetInScope()` (scope=agent) are hard gates; a NULL
+        //     on either makes the row unreadable by the very agent that caused
+        //     it to exist.
+        //   is_temporary — `MediaArchiveRetention::findExcessTempIds()` filters
+        //     `user_id + agent_id + is_temporary` together, so a derivative
+        //     missing any one of the three is immune to the sweep.
+        //   task_id / tool_call_id — NOT inherited. The derivative outlives the
+        //     turn, and a `tool_call_id` would collide with the ingest dedup
+        //     key `(tool_call_id, source_url)`.
         //   tags / prompt — describe the source, not a render of it.
-        //   public_access_token — must never be inherited: copying it
-        //     would mint a second unauthenticated read path for a row
-        //     nobody chose to share.
+        //   public_access_token — must never be inherited: it would mint a
+        //     second unauthenticated read path for a row nobody chose to
+        //     share.
         $derivative->is_temporary = (bool) $parent->is_temporary;
         $derivative->plugin_slug = $producerPlugin;
         $derivative->tool_name = $producerOperation;
@@ -557,11 +538,11 @@ final class MediaDerivativeService
      *
      * The bytes are rewritten, not just the metadata: `create_derivative`
      * documents idempotency on the natural key `(parent_id, format,
-     * producer_plugin, producer_operation)`, so this is the path a
-     * re-render takes — and for an `md` derivative, stale bytes are
-     * silent text divergence, not a cosmetic issue. The LLM read paths
-     * (chat attachment, `get_source`) both resolve the same row, so a
-     * producer that fixes a bad extraction must be able to land it.
+     * producer_plugin, producer_operation)`, so this is the path a re-render
+     * takes — and for an `md` derivative, stale bytes are silent text
+     * divergence. The LLM read paths (chat attachment, `get_source`) resolve
+     * this same row, so a producer that fixes a bad extraction must be able
+     * to land it.
      */
     private function refresh(MediaAsset $existing, DerivativeOutput $output): MediaAsset
     {

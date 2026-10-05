@@ -35,19 +35,19 @@ use Throwable;
  *
  *  3. Producer-supplied MIME types — every registered
  *     {@see MediaDerivativeProducerInterface}'s
- *     `supportedSourceFormats()`. This is the seam that keeps a binary
+ *     `supportedSourceFormats()`. This union is what keeps a binary
  *     document uploadable *because* something can extract its text: the
- *     PDF producer ships in core, so PDFs are accepted out of the box,
- *     and plugins (Word-DOCX, Typst) extend the list by registering a
+ *     PDF producer ships in core, so PDFs work out of the box, and
+ *     plugins (Word-DOCX, Typst) extend the list by registering a
  *     producer rather than a separate converter. Losing this union is
  *     what made PDF uploads start rejecting at the gate, so it is
  *     load-bearing, not decorative.
  *
- *     Note this list is a *second* allowlist surface that has to stay
- *     in sync with the MIME-refiner chain: a `.docx` that sniffs as
- *     `application/zip` is corrected by a refiner before the gate, and
- *     only the refiner's target MIME can be allowlisted. Nothing
- *     structurally enforces the pairing.
+ *     This is a *second* allowlist surface that has to stay in sync with
+ *     the MIME-refiner chain: a `.docx` that sniffs as `application/zip`
+ *     is corrected by a refiner before the gate, and only the refiner's
+ *     target MIME can be allowlisted. Nothing structurally enforces the
+ *     pairing.
  *
  *  4. Configurable image MIME types — `image/*` is **additionally** allowed
  *     when the requesting user's agent's LLM reports

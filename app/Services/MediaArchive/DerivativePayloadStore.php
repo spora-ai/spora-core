@@ -9,17 +9,15 @@ use Spora\Models\MediaAsset;
 /**
  * Byte-level access to a derivative's stored payload.
  *
- * A derivative is stored the same way its parent is — a BLOB in the
- * `payload` column under `data_url`, a file under
- * `storage/assets/<token>.<ext>` under `local` — so reading, rewriting,
- * and removing those bytes is one concern that has nothing to do with
- * choosing a producer or tracking attribution. It lives here so
- * `MediaDerivativeService` can stay about the derivative row.
+ * A derivative is stored exactly like its parent — a BLOB in the `payload`
+ * column under `data_url`, a file under `storage/assets/<token>.<ext>`
+ * under `local` — so reading, rewriting and removing those bytes is a
+ * concern separate from choosing a producer or tracking attribution.
  *
- * The `local` layout mirrors {@see \Spora\Services\LocalAssetStore}, which
- * owns the same layout for the original asset. When the two drift, a
- * derivative written here cannot be read back by the original's reader,
- * so the path shape is asserted in `LocalAssetStoreTest` rather than
+ * Invariant: the `local` layout mirrors {@see \Spora\Services\LocalAssetStore},
+ * which owns the same layout for the original asset. If the two drift, a
+ * derivative written here cannot be read back by the original's reader, so
+ * the path shape is asserted in `LocalAssetStoreTest` instead of being
  * duplicated as configuration.
  */
 final readonly class DerivativePayloadStore
@@ -89,7 +87,6 @@ final readonly class DerivativePayloadStore
             }
         });
     }
-
     /**
      * Absolute path of a `local`-mode asset's payload, or null when the
      * row carries no token to resolve one from.
@@ -112,8 +109,7 @@ final readonly class DerivativePayloadStore
     /**
      * Run a filesystem operation with E_WARNING suppressed. PHP 8.4+ no
      * longer fully honours `@` for file writes, and a missing directory
-     * should not surface as a runtime warning on the way to a caller that
-     * has already decided a no-op is an acceptable answer.
+     * should not warn on the way to a caller that already accepts a no-op.
      */
     private function withSuppressedWarnings(callable $operation): mixed
     {

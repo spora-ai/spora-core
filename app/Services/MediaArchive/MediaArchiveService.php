@@ -284,12 +284,8 @@ final class MediaArchiveService
         if ($asset === null) {
             return;
         }
-        // Derivatives first: the join table cascades on both foreign
-        // keys, so deleting the parent would drop the join rows and leave
-        // each derivative's own `media_assets` row orphaned — and
-        // `list()`'s `whereNotIn('id', <derivative ids>)` filter would
-        // stop matching it, resurfacing it as a stray top-level library
-        // asset with no route back to its source. See
+        // Derivatives first — deleting the parent would cascade the join rows
+        // away and orphan the derivative assets. See
         // {@see MediaDerivativeService::deleteWithDerivatives()}.
         $this->derivatives->deleteWithDerivatives($asset);
         $asset->delete();

@@ -126,10 +126,9 @@ final class ContinueTaskDispatcher
     ): JsonResponse {
         try {
             $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
-            // Same attach-time seam as TaskController::store(): a
-            // follow-up attachment gets its `md` derivative before the
-            // turn is queued. Partial coverage across the three
-            // `media_ids` paths would be a silent bug.
+            // Same attach-time seam as TaskController::store(), and the
+            // ordering matters: after the ids are validated, before the
+            // turn is queued.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
             $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
 

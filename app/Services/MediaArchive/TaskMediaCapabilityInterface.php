@@ -26,9 +26,8 @@ interface TaskMediaCapabilityInterface
     public function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void;
 
     /**
-     * Mint the `md` derivative of every attached binary document that
-     * lacks one, so the turn's prompt is built from text that is already
-     * there.
+     * Mint the `md` derivative of every attached binary document that lacks
+     * one, so the turn's prompt is built from text that is already there.
      *
      * The attach-time seam, not a lazy create inside
      * {@see \Spora\Agents\AttachmentRowBuilder}: a conversion failure then

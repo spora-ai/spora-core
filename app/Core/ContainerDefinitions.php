@@ -194,13 +194,13 @@ final class ContainerDefinitions
     public static function all(): array
     {
         // Self-register the core derivative producers with the static
-        // discovery list. Plugins add their own producers in their
-        // `register(ContainerBuilder)` hook (see docs/07_plugins.md).
-        // The "Convert to" dropdown in
+        // discovery list. Plugins append from a `ContainerBuildingEvent`
+        // subscriber. The "Convert to" dropdown in
         // `spora-plugin-media-archive-frontend` surfaces whatever this list
         // contains, and `MediaAllowedTypesService` unions the producers'
-        // `supportedSourceFormats()` into the upload allowlist — so
-        // registering a producer is what makes a document type uploadable.
+        // `supportedSourceFormats()` (minus `image/*`) into the upload
+        // allowlist. See
+        // {@see \Spora\Services\MediaArchive\MediaDerivativeProducerInterface}.
         MediaDerivativeProducerDiscovery::add(ImageDerivativeProducer::class);
         MediaDerivativeProducerDiscovery::add(PdfToMarkdownProducer::class);
 
@@ -711,10 +711,9 @@ final class ContainerDefinitions
                 return new TaskMediaCapabilityService($factory, $derivatives);
             },
 
-            // The PDF parser is the single core PDF→text dependency; both
-            // the archive's `md` derivative producer and
-            // `ReadUrlTool::fetch_pdf` extract through it, so there is one
-            // implementation rather than two.
+            // One core PDF→text dependency behind
+            // {@see PdfMarkdownExtractor}, so the archive's `md` producer
+            // and `ReadUrlTool::fetch_pdf` cannot drift.
             \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class => static fn(): \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser
                 => new \Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser(),
             PdfMarkdownExtractor::class => static fn(ContainerInterface $c): PdfMarkdownExtractor

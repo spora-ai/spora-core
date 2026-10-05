@@ -31,8 +31,8 @@ use Symfony\Component\HttpFoundation\Response;
  * the same `MediaArchiveService::ingest()` pipeline that tools use.
  *
  * `ingest()` also mints the `md` derivative of a binary document, so a
- * PDF is readable by the LLM without a second operator action. Best
- * effort: a producer failure leaves the upload intact.
+ * PDF is readable by the LLM with no second operator action. Best effort:
+ * a producer failure leaves the upload intact.
  */
 final class MediaUploadController
 {

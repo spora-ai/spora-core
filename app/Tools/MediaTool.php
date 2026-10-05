@@ -247,12 +247,11 @@ final class MediaTool extends AbstractTool
     /**
      * Cap on the `md` derivative `get_source` inlines for a binary mime.
      *
-     * Deliberately NOT the same constant as
-     * {@see MediaDerivativeHandler::PREVIEW_BYTES}: this op is the LLM's
-     * explicit "read this document" round-trip, so it owes the caller the
-     * whole extracted text up to a sane ceiling, whereas the `get_media`
-     * preview is an unsolicited glance. Harmonising them would either
-     * starve `get_source` or flood `get_media`.
+     * Deliberately NOT {@see MediaDerivativeHandler::PREVIEW_BYTES}: this op
+     * is the LLM's explicit "read this document" round-trip, so it owes the
+     * caller the whole extracted text up to a sane ceiling, whereas the
+     * `get_media` preview is an unsolicited glance. Harmonising them would
+     * either starve `get_source` or flood `get_media`.
      */
     private const GET_SOURCE_DERIVATIVE_PREVIEW_BYTES = 64 * 1024;
 
@@ -363,14 +362,6 @@ final class MediaTool extends AbstractTool
             ],
         );
     }
-
-    /**
-     * Cap on the extracted-text preview inlined into `get_media`.
-     * 8 KB keeps a single PDF chapter under the typical tool-result
-     * cap; anything larger gets a truncation notice — the full content
-     * stays on `ToolResult.data.extracted_text` (which is never sent to
-     * the LLM, only to the operator UI).
-     */
 
     /**
      * @param  array<string, mixed> $arguments
@@ -590,13 +581,10 @@ final class MediaTool extends AbstractTool
     }
 
     /**
-     * Binary files don't return their raw bytes through `get_source`.
-     * The `md` derivative is the shape an LLM can actually iterate on
-     * (re-prompt on the doc, quote a page) — read it when the asset has
-     * one. When it doesn't, fail pointing at `create_derivative`, which
-     * mints it. Deliberately a pure read: minting here would make a
-     * read op write to the archive, and its auto-approval rests on
-     * "reads a row the calling agent already owns".
+     * Binary files don't return their raw bytes through `get_source`; the
+     * `md` derivative is the shape an LLM can iterate on. Deliberately a pure
+     * read: minting here would make a read op write to the archive, and its
+     * auto-approval rests on "reads a row the calling agent already owns".
      */
     private function binarySourceFallback(MediaAsset $asset, string $mime): ToolResult
     {

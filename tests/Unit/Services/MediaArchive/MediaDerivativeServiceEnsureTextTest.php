@@ -98,9 +98,8 @@ function seedEnsureTextParent(
 
     // `media_assets` carries real FKs on `agent_id` / `user_id`, so the
     // ownership-inheritance tests need the referenced rows to exist. The
-    // writer goes through the query builder rather than `update()` because
-    // Eloquent would re-issue the insert with the stale attributes when
-    // `is_temporary` is set on a just-created model.
+    // query builder rather than `update()` because Eloquent re-issues the
+    // insert with stale attributes on a just-created model.
     MediaAsset::query()->where('id', $parent->id)->update([
         'user_id'      => $userId,
         'agent_id'     => $agentId,

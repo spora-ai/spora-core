@@ -31,10 +31,9 @@ final class ImageDerivativeFormat
 
     /**
      * Formats that are not image presets but still need a human label.
-     * The catalogue below is walked by {@see self::for()} and
-     * {@see self::labelFor()}, so without these entries an `md`
-     * derivative would fall through to the `strtoupper()` fallback and
-     * render as "MD" in the "Convert to" dropdown.
+     * Without these entries an `md` derivative falls through to the
+     * `strtoupper()` fallback and renders as "MD" in the "Convert to"
+     * dropdown.
      *
      * @var array<string, string>
      */

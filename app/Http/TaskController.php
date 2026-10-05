@@ -142,9 +142,10 @@ final class TaskController
     ): JsonResponse {
         try {
             $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
-            // After the ids have been validated and before the turn is
-            // queued, so a binary attachment has its `md` derivative
-            // ready by the time the message builder reads it.
+            // After validation, before the turn is queued, so a binary
+            // attachment has its `md` derivative by the time the message
+            // builder reads it. See
+            // {@see \Spora\Services\MediaArchive\TaskMediaCapabilityService}.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
