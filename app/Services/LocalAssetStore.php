@@ -7,6 +7,7 @@ namespace Spora\Services;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaArchiveService;
 
 /**
  * Disk-backed {@see AssetStore}. Writes the payload to
@@ -19,27 +20,6 @@ use Spora\Models\MediaAsset;
  */
 final class LocalAssetStore implements AssetStore
 {
-    private const MIME_FOR_EXT = [
-        'mp3'  => 'audio/mpeg',
-        'wav'  => 'audio/wav',
-        'ogg'  => 'audio/ogg',
-        'm4a'  => 'audio/mp4',
-        'flac' => 'audio/flac',
-        'mp4'  => 'video/mp4',
-        'webm' => 'video/webm',
-        'mov'  => 'video/quicktime',
-        'jpg'  => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'png'  => 'image/png',
-        'gif'  => 'image/gif',
-        'webp' => 'image/webp',
-        'svg'  => 'image/svg+xml',
-        'pdf'  => 'application/pdf',
-        'txt'  => 'text/plain',
-        'md'   => 'text/markdown',
-        'typ'  => 'text/x-typst',
-    ];
-
     public function __construct(
         private readonly Paths $paths,
         private readonly SecurityManagerInterface $security,
@@ -134,7 +114,7 @@ final class LocalAssetStore implements AssetStore
 
         return [
             'path' => $path,
-            'mime' => self::MIME_FOR_EXT[strtolower($ext)] ?? 'application/octet-stream',
+            'mime' => self::mimeForExtension($ext),
         ];
     }
 
@@ -160,11 +140,19 @@ final class LocalAssetStore implements AssetStore
 
         return [
             'path'   => $path,
-            'mime'   => self::MIME_FOR_EXT[$ext] ?? 'application/octet-stream',
+            'mime'   => self::mimeForExtension($ext),
             'length' => (int) filesize($path),
         ];
     }
 
+    /**
+     * The extension this store writes and the extension
+     * {@see self::readFromAsset()} must find. Both sides resolve the MIME
+     * through {@see MediaArchiveService::extensionForMime()}, the single
+     * map — this class used to keep a private copy, which had already
+     * drifted: the OOXML MIME wrote `<token>.docx` (filename hint) and read
+     * back `<token>.bin`, so every local-mode `.docx` upload 404ed.
+     */
     private function pickExtension(?string $mime, ?string $filename): string
     {
         if (is_string($filename) && $filename !== '') {
@@ -173,38 +161,14 @@ final class LocalAssetStore implements AssetStore
                 return $ext;
             }
         }
-        if (is_string($mime) && $mime !== '') {
-            $fromMime = [
-                'audio/mpeg'    => 'mp3',
-                'audio/mp3'     => 'mp3',
-                'audio/wav'     => 'wav',
-                'audio/x-wav'   => 'wav',
-                'audio/ogg'     => 'ogg',
-                'audio/mp4'     => 'm4a',
-                'audio/x-m4a'   => 'm4a',
-                'audio/flac'    => 'flac',
-                'video/mp4'     => 'mp4',
-                'video/webm'    => 'webm',
-                'video/quicktime' => 'mov',
-                'image/jpeg'    => 'jpg',
-                'image/png'     => 'png',
-                'image/gif'     => 'gif',
-                'image/webp'    => 'webp',
-                'image/svg+xml' => 'svg',
-                'application/pdf' => 'pdf',
-                'text/plain'    => 'txt',
-                // `md` derivatives are stored as `<token>.md`. Without this
-                // entry `pickExtension()` falls through to `bin` and
-                // `readFromAsset()` looks for `<token>.bin`, so every
-                // local-mode derivative 404s on read.
-                'text/markdown' => 'md',
-                'text/x-typst'  => 'typ',
-            ];
-            if (isset($fromMime[strtolower($mime)])) {
-                return $fromMime[strtolower($mime)];
-            }
-        }
-        return 'bin';
+
+        return MediaArchiveService::extensionForMime($mime) ?? 'bin';
+    }
+
+    /** Canonical MIME for a stored extension, or octet-stream when unknown. */
+    private static function mimeForExtension(string $ext): string
+    {
+        return MediaArchiveService::mimeForExtension($ext) ?? 'application/octet-stream';
     }
 
     private function signToken(string $ext): string

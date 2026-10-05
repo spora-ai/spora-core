@@ -16,11 +16,10 @@ use Spora\Models\MediaAsset;
  *
  * Invariant: the `local` layout mirrors {@see \Spora\Services\LocalAssetStore},
  * which owns the same layout for the original asset. If the two drift, a
- * derivative written here cannot be read back by the original's reader. The
- * two resolve the extension from *separate* maps — `MediaArchiveService::
- * extensionForMime()` here, `LocalAssetStore::pickExtension()` there — so
- * adding a MIME means adding it to both. The path shape is asserted in
- * `DerivativePayloadStoreTest`.
+ * derivative written here cannot be read back by the original's reader. Both
+ * resolve the extension from the same single map,
+ * {@see MediaArchiveService::extensionForMime()}, so a new MIME only has to
+ * be added once. The path shape is asserted in `DerivativePayloadStoreTest`.
  */
 final readonly class DerivativePayloadStore
 {
