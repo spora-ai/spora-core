@@ -65,9 +65,6 @@ test('scan() surfaces a YAML parse error with PARSE_ERROR code', function (): vo
 test('scan() reports a core root label and exempts it from the namespace check', function (): void {
     $dir = sys_get_temp_dir() . '/spora_tpl_src_' . uniqid();
     mkdir($dir);
-    // A bare id is a namespace mismatch under a plugin root but is fine
-    // under `core`: bundled templates predate the namespacing rule and
-    // the framework ships `core-assistant.json`, not `core.json`.
     file_put_contents($dir . '/my-bundle.json', json_encode([
         'id' => 'my-bundle',
         'name' => 'My Bundle',
@@ -165,7 +162,7 @@ function writeTemplateFixture(string $dir, string $filename, array $overrides = 
     return $path;
 }
 
-test('a plugin root labels its templates with the plugin slug', function (): void {
+test('a plugin root labels its templates with the plugin slug, not the directory name', function (): void {
     $dir = sys_get_temp_dir() . '/spora_tpl_plugin_' . uniqid();
     mkdir($dir);
     $file = writeTemplateFixture($dir, 'assistant.json', ['id' => 'memories/assistant']);
@@ -175,9 +172,6 @@ test('a plugin root labels its templates with the plugin slug', function (): voi
             ['path' => $dir, 'source' => 'memories'],
         ]))->scan();
 
-        // Regression: the shipped memories plugin declares `memories/assistant`
-        // and must not be warned about just because its directory is called
-        // `agent-templates`.
         expect($templates[0]->source())->toBe('memories');
         expect(array_column($templates[0]->warnings(), 'code'))
             ->not->toContain('NAMESPACE_MISMATCH');
@@ -215,10 +209,8 @@ test('project and app roots label their templates with their own source', functi
 });
 
 test('two plugin roots shipping the same short id both survive, earlier root first', function (): void {
-    // The scanner deliberately does not dedupe: two plugins may ship the
-    // same short id, and the first root in priority order is the one
-    // AgentTemplateImporter::applyTemplate() resolves. Pin the ordering
-    // the container's root order gives us.
+    // No dedupe by design: namespace enforcement is what keeps two contributors
+    // apart, and the by-id endpoints take the first root in priority order.
     $first  = sys_get_temp_dir() . '/spora_tpl_first_' . uniqid();
     $second = sys_get_temp_dir() . '/spora_tpl_second_' . uniqid();
     mkdir($first);

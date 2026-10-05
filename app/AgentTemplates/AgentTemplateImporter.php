@@ -48,9 +48,8 @@ final class AgentTemplateImporter
     ) {}
 
     /**
-     * Look up a built-in template by id and apply it. Reads the
-     * container-wired scanner, so this resolves against exactly the roots
-     * the gallery shows.
+     * Look up a built-in template by id and apply it. Resolves against the
+     * same roots the gallery shows, so an id visible there always imports.
      *
      * @throws AgentTemplateNotFoundException when the template id is unknown.
      */
@@ -93,11 +92,9 @@ final class AgentTemplateImporter
 
         $resolvedPrincipalId = $this->resolvePrincipalId($userId, $principalId);
 
-        // The closure returns a tuple (agentId, toolsEnabled) so the
-        // outer scope can unpack both without a by-ref parameter on
-        // applyTools. `tools` is optional in the template schema, so a
-        // payload without it must still create the agent row rather than
-        // fail validation.
+        // The closure returns a tuple so the outer scope can unpack both
+        // without a by-ref parameter on applyTools. `tools` is optional in the
+        // schema, so a payload without it still creates the agent row.
         [$agentId, $toolsEnabled] = Capsule::connection()->transaction(
             function () use ($resolvedPrincipalId, $template, $registeredTools, &$warnings): array {
                 $agentId = $this->agentCreator->create($resolvedPrincipalId, $template);

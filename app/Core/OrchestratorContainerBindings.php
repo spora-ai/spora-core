@@ -251,13 +251,8 @@ final class OrchestratorContainerBindings
                 return new SkillListProjector($c->get(SkillProviderRegistry::class));
             },
 
-            // Templates are scanned in priority order: project, then
-            // framework, then each plugin, then the project App. The
-            // `source` label on each root is what AgentTemplateScanner
-            // reports on the template and checks its id's namespace prefix
-            // against, so it has to be set here — every template directory
-            // is called `agent-templates`, so a label derived from the
-            // path would collapse every source into one group.
+            // Order is priority — the by-id endpoints return the first match.
+            // Roots are labelled here because the scanner cannot derive them.
             AgentTemplateScanner::class => static function (ContainerInterface $c): AgentTemplateScanner {
                 $paths = $c->get(Paths::class);
 
@@ -372,10 +367,8 @@ final class OrchestratorContainerBindings
                 return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
             },
 
-            // Takes the same wired AgentTemplateScanner the gallery reads, so
-            // a template an App contributes is importable by id, not just
-            // visible. There is no cycle: the scanner needs PluginLoader,
-            // Paths and AppLoader, none of which depend on the importer.
+            // No cycle: the scanner needs PluginLoader, Paths and AppLoader,
+            // none of which depend on the importer.
             AgentTemplateImporter::class => static function (ContainerInterface $c): AgentTemplateImporter {
                 return new AgentTemplateImporter(
                     $c->get(ToolConfigService::class),

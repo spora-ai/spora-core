@@ -55,8 +55,6 @@ test('scan() surfaces the validator code for templates missing required fields',
 });
 
 test('scan() reports the source label the root carries', function (): void {
-    // The label travels with the root; the scanner never derives it from
-    // the path, because every template directory is called `agent-templates`.
     $templates = (new AgentTemplateScanner([
         ['path' => FIXTURE_AGENT_TEMPLATES, 'source' => 'core'],
     ], new AgentTemplateValidator()))->scan();

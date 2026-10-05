@@ -51,14 +51,9 @@ final class Paths
     }
 
     /**
-     * Agent templates: project overrides win over framework defaults.
-     * Returns the scan roots in priority order (highest first), each
-     * carrying the `source` label the scanner reports on a template and
-     * checks its id's namespace prefix against. Plugin- and App-contributed
-     * roots are returned by
-     * {@see \Spora\Plugins\PluginLoader::agentTemplatePaths()} and appended
-     * downstream by the container binding — this method only knows about
-     * the project and framework roots.
+     * Project and framework template roots, in priority order. Plugin and App
+     * roots are appended by the container binding; see
+     * {@see \Spora\AgentTemplates\AgentTemplateScanner} for what `source` is for.
      *
      * @return list<array{path: string, source: string}>
      */

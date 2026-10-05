@@ -9,30 +9,22 @@ use Symfony\Component\Yaml\Yaml;
 use Throwable;
 
 /**
- * Scans one or more directories for agent template definition files
- * (.json / .yaml / .yml). Each file is parsed, validated, and returned
- * as an {@see AgentTemplate}. Files that fail to parse or validate are
- * NOT silently dropped — they return an AgentTemplate whose `warnings`
- * array carries a `PARSE_ERROR` entry for an unreadable or malformed
- * file, or the specific code the validator raised (`ID_REQUIRED`,
- * `TOOL_CLASS_REQUIRED`, `OPERATION_UNKNOWN`, `MAX_STEPS_RANGE`, …),
- * plus the parsed partial data where available.
+ * Scans agent template definition files (.json / .yaml / .yml), parsing and
+ * validating each into an {@see AgentTemplate}. A file that fails either is
+ * returned carrying a `PARSE_ERROR` or the validator's own code rather than
+ * dropped: a template that silently fails to appear is indistinguishable from
+ * one that was never installed.
  *
- * The `source` label on each root is what separates a bundled template
- * from a plugin's, in the gallery and in the namespace check below — so
- * it travels with the root rather than being derived from the directory
- * basename (every template directory is called `agent-templates`).
- *
- * Templates drive agent creation, so operators must always see why a
- * bundled template didn't make it — the failure is reported in the
- * gallery, not swallowed into an absent entry.
+ * Each root carries the `source` label its templates report and are
+ * namespace-checked against. It travels with the root because every template
+ * directory is named `agent-templates` — deriving it from the path would
+ * collapse every contributor onto one label.
  */
 final class AgentTemplateScanner
 {
     /**
-     * @param list<array{path: string, source: string}> $roots Scan roots (depth 0),
-     *        each carrying the `source` label reported on every template it
-     *        yields. Typical sources: `'project'`, `'core'`, or a plugin slug.
+     * @param list<array{path: string, source: string}> $roots Scan roots (depth 0).
+     *        `source` is `'project'`, `'core'`, `'app'`, or a plugin slug.
      */
     public function __construct(
         private readonly array $roots = [],
@@ -95,11 +87,8 @@ final class AgentTemplateScanner
             ? $result->warnings()
             : array_merge($result->errors(), $result->warnings());
 
-        // Namespace enforcement: a plugin- or project-supplied template
-        // must declare an id whose namespace prefix is its own source
-        // label, so two contributors shipping the same short id stay
-        // distinguishable. Core and operator-uploaded templates are exempt
-        // — neither has a competitor to be confused with.
+        // `core` and `uploaded` are exempt: neither has a second contributor
+        // for a matching namespace to keep apart.
         $declaredId = is_string($raw['id'] ?? null) ? (string) $raw['id'] : '';
         if ($declaredId !== '' && $source !== 'core' && $source !== 'uploaded') {
             $namespace = strstr($declaredId, '/', true);
