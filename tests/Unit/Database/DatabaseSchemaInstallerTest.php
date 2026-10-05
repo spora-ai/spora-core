@@ -447,37 +447,29 @@ test('implicit resolver finds migrations when BASE_PATH/database/migrations exis
 })->afterEach(fn() => Database::resetBootState());
 
 test('resolveCoreMigrationsPath() throws a clear exception when no migrations exist', function (): void {
-    // We hide the project-local dir temporarily; BASE_PATH can't be changed (it's
-    // a constant), so we rely on the framework vendor path also being absent in
-    // this checkout (vendor/spora-ai/spora-core/ isn't populated for spora-core
-    // itself). The dir is always restored.
+    // Hermetic: the resolver's two candidates both come from the injected
+    // `Paths` (project-local `<base>/database/migrations`, framework
+    // `<framework>/database/migrations`), so a throwaway root with neither
+    // populated makes both branches fail. The previous version renamed the
+    // REAL `database/migrations` directory out of the way, which any
+    // concurrent reader in any of the 4 parallel Pest workers saw as
+    // missing — a real CI flake, not a missing file.
     Database::resetBootState();
 
-    $local = BASE_PATH . '/database/migrations';
-    $hide  = $local . '.hidden-for-test';
-
-    if (!is_dir($local)) {
-        expect(true)->toBeTrue();
-        return;
-    }
-
-    expect(rename($local, $hide))->toBeTrue();
+    $root = sys_get_temp_dir() . '/spora-mig-resolver-' . bin2hex(random_bytes(6));
+    $projectLocal = $root . '/project/database/migrations';
+    $framework    = $root . '/framework/database/migrations';
+    mkdir($projectLocal, 0755, true);
+    mkdir($framework, 0755, true);
 
     try {
-        $framework = BASE_PATH . '/vendor/spora-ai/spora-core/database/migrations';
-        if (is_dir($framework)) {
-            // Framework path is present — the resolver would succeed. Skip.
-            expect(true)->toBeTrue();
-            return;
-        }
+        $paths = new Spora\Core\Paths($root . '/project', $root . '/framework');
 
-        expect(fn() => new DatabaseSchemaInstaller(null, null, null))
+        expect(fn() => new DatabaseSchemaInstaller(null, null, null, $paths))
             ->toThrow(Spora\Core\Exceptions\SchemaInstallFailedException::class, 'No core migrations found');
     } finally {
-        // Re-rename could fail if an earlier rename already failed; ignore to
-        // keep teardown best-effort.
-        if (is_dir($hide)) {
-            rename($hide, $local);
+        foreach ([$projectLocal, $framework, $root . '/project/database', $root . '/project', $root . '/framework/database', $root . '/framework', $root] as $dir) {
+            @rmdir($dir);
         }
         Database::resetBootState();
     }

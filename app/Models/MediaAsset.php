@@ -26,7 +26,6 @@ use Spora\Services\MediaArchive\MediaType;
  * @property float|null                             $duration_seconds
  * @property string|null                            $prompt
  * @property string|null                            $filename
- * @property string|null                            $markdown_content
  * @property string|null                            $transcript
  * @property string|null                            $transcript_language
  * @property array<string>|null                      $tags
@@ -78,7 +77,6 @@ final class MediaAsset extends Model
         'duration_seconds',
         'prompt',
         'filename',
-        'markdown_content',
         'transcript',
         'transcript_language',
         'tags',

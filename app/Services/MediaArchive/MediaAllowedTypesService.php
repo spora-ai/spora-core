@@ -14,8 +14,10 @@ use Throwable;
  * Four sources, combined:
  *
  *  1. Static text allowlist — file types an LLM can read directly
- *     (TXT, MD, CSV, JSON, HTML, XML, YAML). Always allowed; the
- *     bytes are passed through via {@see PlainTextPassthroughConverter}.
+ *     (TXT, MD, CSV, JSON, HTML, XML, YAML). Always allowed, and
+ *     independent of source 3: a text source is its own text, so it
+ *     needs no derivative — {@see \Spora\Agents\AttachmentRowRenderer}
+ *     inlines the raw bytes whenever they fit the budget.
  *
  *  2. Static audio allowlist — the recording pipeline's input surface
  *     (see {@see \Spora\Speech\OpenAiCompatibleTranscriber}). Always
@@ -31,10 +33,21 @@ use Throwable;
  *     audio-only-WebM case (see
  *     {@see \Spora\Speech\OpenAiCompatibleTranscriber::extensionFor()}).
  *
- *  3. Converter-supplied MIME types — every {@see MediaConverterInterface}
- *     registered with {@see MediaConverterRegistry}. The PDF converter
- *     ships in core; plugins (e.g. a Word-DOCX plugin) extend this
- *     list automatically.
+ *  3. Producer-supplied MIME types — every registered
+ *     {@see MediaDerivativeProducerInterface}'s
+ *     `supportedSourceFormats()`. This union is what keeps a binary
+ *     document uploadable *because* something can extract its text: the
+ *     PDF producer ships in core, so PDFs work out of the box, and
+ *     plugins (Word-DOCX, Typst) extend the list by registering a
+ *     producer rather than a separate converter. Losing this union is
+ *     what made PDF uploads start rejecting at the gate, so it is
+ *     load-bearing, not decorative.
+ *
+ *     This is a *second* allowlist surface that has to stay in sync with
+ *     the MIME-refiner chain: a `.docx` that sniffs as `application/zip`
+ *     is corrected by a refiner before the gate, and only the refiner's
+ *     target MIME can be allowlisted. Nothing structurally enforces the
+ *     pairing.
  *
  *  4. Configurable image MIME types — `image/*` is **additionally** allowed
  *     when the requesting user's agent's LLM reports
@@ -61,11 +74,10 @@ final class MediaAllowedTypesService
     public const DEFAULT_IMAGE_EXTENSIONS = ['png', 'jpeg', 'webp'];
 
     /**
-     * Static text allowlist. The bytes are stored verbatim in
-     * `markdown_content` via {@see PlainTextPassthroughConverter}.
-     * Plugins can override this with their own text converter by
-     * adding it BEFORE PlainTextPassthroughConverter in the discovery
-     * list.
+     * Static text allowlist. A text source needs no extraction pipeline:
+     * the bytes are stored once and inlined directly into the prompt
+     * when they fit {@see \Spora\Agents\AttachmentRowRenderer}'s inline
+     * budget, which is why this list is self-sufficient.
      */
     public const TEXT_MIME_TYPES = [
         'text/plain',
@@ -106,7 +118,7 @@ final class MediaAllowedTypesService
      *        Strings are normalized through {@see normalizeImageExtensions()}.
      */
     public function __construct(
-        private readonly MediaConverterRegistry $converters,
+        private readonly MediaDerivativeService $derivatives,
         private readonly DriverFactory $driverFactory,
         ?array $imageExtensions = null,
     ) {
@@ -142,7 +154,7 @@ final class MediaAllowedTypesService
         foreach (self::AUDIO_MIME_TYPES as $mime) {
             $set[strtolower($mime)] = true;
         }
-        foreach ($this->converters->allSupportedMimeTypes() as $mime) {
+        foreach ($this->derivatives->producerSourceMimeTypes() as $mime) {
             $set[strtolower($mime)] = true;
         }
         $agentSupportsImages = $agentId === null

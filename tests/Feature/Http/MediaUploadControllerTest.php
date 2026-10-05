@@ -12,44 +12,26 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterInterface;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Support\MediaArchiveTestSupport;
+use Tests\Support\TypstSourceDerivativeProducer;
 
 beforeEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
-
-final class TypstUploadTestConverter implements MediaConverterInterface
-{
-    public function supportedMimeTypes(): array
-    {
-        return ['text/x-typst'];
-    }
-
-    public function supportedExtensions(): array
-    {
-        return ['typ'];
-    }
-
-    public function toMarkdown(string $bytes, string $mime, ?string $filename = null): string
-    {
-        return 'converted:' . trim($bytes);
-    }
-}
 
 /**
  * Plan §12 B2b — MediaUploadController end-to-end surface tests.
  */
-test('multipart upload with a text file populates markdown_content via PlainTextPassthroughConverter', function (): void {
+test('multipart upload with a text file stores the bytes with no derivative', function (): void {
     [, $service, , , , $controller] = buildUploadControllerFixtures();
     $tmp = tempnam(sys_get_temp_dir(), 'txt');
     file_put_contents($tmp, "hello\nworld");
@@ -61,13 +43,14 @@ test('multipart upload with a text file populates markdown_content via PlainText
     $body = json_decode($resp->getContent(), true);
     $asset = $service->find($body['data']['id']);
     expect($asset)->not->toBeNull();
-    // PlainTextPassthroughConverter returns the bytes verbatim (trimmed).
-    expect($asset->markdown_content)->not->toBeNull();
-    expect($asset->markdown_content)->toContain('hello');
+    // A text source is its own text: the bytes are stored once and no
+    // derivative is minted for them.
+    expect($asset->byte_size)->toBeGreaterThan(0);
+    expect(\Spora\Models\MediaDerivative::query()->where('parent_id', $asset->id)->count())->toBe(0);
     unlink($tmp);
 });
 
-test('multipart upload rejects Typst source without its converter', function (): void {
+test('multipart upload rejects Typst source when no producer claims it', function (): void {
     [, , , , , $controller] = buildUploadControllerFixtures();
     $tmp = tempnam(sys_get_temp_dir(), 'typst');
     file_put_contents($tmp, "= Hello\n");
@@ -82,7 +65,10 @@ test('multipart upload rejects Typst source without its converter', function ():
 });
 
 test('multipart Typst upload persists its canonical MIME and local asset', function (): void {
-    MediaConverterDiscovery::add(TypstUploadTestConverter::class);
+    // A plugin producer's `supportedSourceFormats()` is what puts
+    // `text/x-typst` in the upload allowlist — the replacement for the
+    // deleted converter seam, and the reason `.typ` uploads work at all.
+    MediaDerivativeProducerDiscovery::add(TypstSourceDerivativeProducer::class);
     [, $service, , , , $controller] = buildUploadControllerFixtures(null, 4);
     $tmp = tempnam(sys_get_temp_dir(), 'typst');
     $source = str_repeat("= Hello\n", 1000);
@@ -99,7 +85,6 @@ test('multipart Typst upload persists its canonical MIME and local asset', funct
     expect($asset->mime_type)->toBe('text/x-typst');
     expect($asset->storage_mode)->toBe('local');
     expect($asset->asset_url)->toEndWith('.typ');
-    expect($asset->markdown_content)->toBe('converted:' . trim($source));
     unlink($tmp);
 });
 
@@ -272,10 +257,10 @@ function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null, in
     $database = new DatabaseAssetStore(50 * 1024 * 1024);
     $local    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
     $assetStore = new AutoAssetStore($database, $local, $thresholdBytes);
-    $service = MediaArchiveTestSupport::buildService($assetStore);
+    $derivatives = MediaArchiveTestSupport::buildDerivativeService($assetStore);
+    $service = MediaArchiveTestSupport::buildService($assetStore, derivatives: $derivatives);
     $auth ??= MediaArchiveTestSupport::buildAuth();
-    $registry = MediaArchiveTestSupport::buildConverterRegistry();
-    $allowed = new MediaAllowedTypesService($registry, new \Spora\Drivers\DriverFactory(
+    $allowed = new MediaAllowedTypesService($derivatives, new \Spora\Drivers\DriverFactory(
         new \Psr\Log\NullLogger(),
         new \Spora\Services\LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
         300,

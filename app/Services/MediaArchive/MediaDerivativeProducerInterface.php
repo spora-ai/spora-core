@@ -11,12 +11,23 @@ use Throwable;
  * Contract for producers that mint a derivative of a media asset.
  *
  * Plugins ship their own implementations (e.g. an OCR plugin that turns
- * a PNG into text, or a Typst plugin that renders a source document
- * into PDF/PNG/SVG) by calling
- * {@see MediaDerivativeProducerDiscovery::add()} from their
- * `register(ContainerBuilder)` hook. The discovery registry mirrors
- * {@see MediaConverterInterface}'s shape so plugin authors only need to
- * learn one registration pattern.
+ * a scanned document into text, or a Typst plugin that renders a source
+ * document into PDF/PNG/SVG) by calling
+ * {@see MediaDerivativeProducerDiscovery::add()} from a
+ * {@see \Spora\Events\ContainerBuildingEvent} subscriber — the same
+ * registration shape the MIME-refiner registry uses, so plugin authors
+ * only learn one. The list holds FQCNs and the consumer resolves them
+ * through the container, so a producer may take constructor arguments;
+ * bind anything the container cannot autowire (an interface) on the same
+ * event.
+ *
+ * `supportedSourceFormats()` doubles as the upload allowlist — core's
+ * {@see MediaAllowedTypesService} unions every registered producer's source
+ * formats into the accepted MIME types, so registering a producer is what
+ * makes a *document* type uploadable. The union drops `image/*` on purpose:
+ * image uploads are governed by the agent's `supportsImageInput()` and the
+ * `allowed_image_types` config instead, so a thumbnail producer cannot route
+ * around the operator's image policy.
  *
  * `supportedSourceFormats()` and `supportedDerivativeFormats()` are
  * advisory hints the controller uses to short-list producers; the

@@ -1069,16 +1069,17 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
                 $ctx['sniffer'],
                 $ctx['logger'],
             );
+            $rejectionDerivatives = \Tests\Support\MediaArchiveTestSupport::buildDerivativeService($rejectingStore, $ctx['logger']);
             $pipeline = new MediaArchiveIngestPipeline(
                 new MediaIngestDecoder(),
                 $resolver,
                 $ctx['sniffer'],
                 $ctx['metadata'],
                 $rejectingStore,
-                \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+                $rejectionDerivatives,
                 new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
             );
-            $service = new MediaArchiveService($pipeline);
+            $service = new MediaArchiveService($pipeline, $rejectionDerivatives);
             $png = base64_decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
                 strict: true,

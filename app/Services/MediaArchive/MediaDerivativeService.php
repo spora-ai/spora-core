@@ -33,6 +33,11 @@ use Throwable;
  * NULL — matching the precedence chain used by the ingest pipeline so
  * LIST and CREATE agree on a row's "principal".
  *
+ * `ensureTextDerivative()` is the automatic counterpart to the
+ * operator-driven "Convert to" dropdown: the `md` extraction the LLM
+ * reads for a binary document is a derivative, not a column, so ingest
+ * and attach both mint one on the way in.
+ *
  * Producer resolution: each registered
  * {@see MediaDerivativeProducerInterface} is instantiated through the
  * DI container rather than via `new $class()` — plugin producers
@@ -49,12 +54,27 @@ final class MediaDerivativeService
 {
     private const DB_DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    /**
+     * The one derivative format the LLM read path knows how to inline.
+     * `AttachmentRowRenderer` and `MediaTool::get_source` both resolve
+     * exactly this format, so it is a named contract rather than a
+     * string literal repeated at each call site.
+     */
+    public const MARKDOWN_FORMAT = 'md';
+
+    private readonly DerivativePayloadStore $payloads;
+
     public function __construct(
         private readonly AssetStore $assetStore,
         private readonly PrincipalService $principalService,
         private readonly ContainerInterface $container,
+        ?DerivativePayloadStore $payloads = null,
         private readonly ?LoggerInterface $logger = null,
-    ) {}
+    ) {
+        $this->payloads = $payloads ?? new DerivativePayloadStore(
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
+    }
 
     /**
      * Produce a derivative end-to-end: resolve the producer, call
@@ -107,6 +127,43 @@ final class MediaDerivativeService
     }
 
     /**
+     * Remove every derivative of `$parent` — the derivative row, its
+     * join row, and its on-disk payload — before the parent itself goes
+     * away.
+     *
+     * This has to be explicit. `media_derivatives` cascades on *both* foreign
+     * keys, so deleting the parent drops the join rows and orphans each
+     * derivative's own `media_assets` row. {@see \Spora\Services\MediaArchive\MediaArchiveService::list()}
+     * filters derivative rows out via `whereNotIn('id', <derivative ids>)` —
+     * once the join row is gone the orphan stops matching that filter and
+     * resurfaces as a stray top-level library asset with no route back to its
+     * source, and in `local` mode its bytes stay on disk.
+     */
+    public function deleteWithDerivatives(MediaAsset $parent): void
+    {
+        $derivativeIds = MediaDerivative::query()
+            ->where('parent_id', $parent->id)
+            ->pluck('derivative_id')
+            ->all();
+
+        if ($derivativeIds === []) {
+            return;
+        }
+
+        foreach (MediaAsset::query()->whereIn('id', $derivativeIds)->get() as $derivative) {
+            $this->payloads->remove($derivative);
+            $derivative->delete();
+        }
+
+        // Explicit, not left to the FK cascade: a cascade that silently does
+        // not fire (SQLite without `PRAGMA foreign_keys=ON`, a partially
+        // applied migration) is exactly what leaves the orphan row behind.
+        MediaDerivative::query()
+            ->where('parent_id', $parent->id)
+            ->delete();
+    }
+
+    /**
      * Reverse lookup: given a derivative `media_assets` id, return the
      * parent asset id (or null when the asset isn't a derivative of
      * anything in the Spora archive). Mirrors the join shape used by
@@ -119,6 +176,102 @@ final class MediaDerivativeService
             ->where('derivative_id', $derivativeId)
             ->value('parent_id');
         return $parentId !== null ? (string) $parentId : null;
+    }
+
+    /**
+     * The `md` derivative of `$parent`, if one exists. Read-only — the
+     * counterpart of {@see ensureTextDerivative()}, for callers that
+     * must not mint one (the LLM's read path; see
+     * {@see \Spora\Agents\AttachmentRowRenderer}).
+     */
+    public function findTextDerivative(MediaAsset $parent): ?MediaAsset
+    {
+        $derivativeId = MediaDerivative::query()
+            ->where('parent_id', $parent->id)
+            ->where('format', self::MARKDOWN_FORMAT)
+            ->orderBy('created_at', 'asc')
+            ->value('derivative_id');
+
+        if ($derivativeId === null) {
+            return null;
+        }
+        return MediaAsset::query()->find((string) $derivativeId);
+    }
+
+    /**
+     * Get-or-create the `md` derivative of `$parent`, the single shared
+     * entry point for every automatic extraction: the ingest pipeline,
+     * the attach-time seam in the task controllers, and (indirectly)
+     * `get_source`.
+     *
+     * Best-effort by construction. Returns null — never throws — when
+     * no registered producer accepts the parent (the common case: a
+     * `text/*` source is its own text and needs no derivative) or when
+     * the producer throws, so a corrupt PDF degrades to "the LLM gets a
+     * `get_source` pointer" instead of failing the upload.
+     *
+     * Idempotent: a second call for the same parent returns the row the
+     * first one created instead of re-running the producer, so re-ingest
+     * and a blind retry are both safe.
+     */
+    public function ensureTextDerivative(MediaAsset $parent): ?MediaAsset
+    {
+        $derivative = $this->findTextDerivative($parent) ?? $this->mintTextDerivative($parent);
+        if ($derivative === null) {
+            return null;
+        }
+
+        // A producer that returns nothing (a scanned PDF with no text
+        // layer) has nothing to store. Persisting an empty row would mean
+        // every reader — the message builder, `get_source` — has to
+        // special-case a derivative that carries no content, so decline
+        // and let the caller fall through to its `get_source` pointer.
+        if (trim($this->payloads->read($derivative)) !== '') {
+            return $derivative;
+        }
+
+        $this->discardEmptyDerivative($derivative);
+
+        return null;
+    }
+
+    /**
+     * Drop the one derivative that turned out to carry no bytes. Scoped to
+     * that row deliberately: the parent may already have a thumbnail or a
+     * render from another producer, and a failed text extraction is no
+     * reason to take those with it.
+     */
+    private function discardEmptyDerivative(MediaAsset $derivative): void
+    {
+        $this->payloads->remove($derivative);
+        MediaDerivative::query()
+            ->where('derivative_id', $derivative->id)
+            ->delete();
+        $derivative->delete();
+    }
+
+    /**
+     * Run the markdown producer for `$parent`, tolerating failure. Returns
+     * null when no producer claims the source or the producer threw, so a
+     * corrupt or unsupported document never fails the caller's upload.
+     */
+    private function mintTextDerivative(MediaAsset $parent): ?MediaAsset
+    {
+        if ($this->findProducer($parent, self::MARKDOWN_FORMAT) === null) {
+            return null;
+        }
+
+        try {
+            return $this->createFromRequest(parent: $parent, format: self::MARKDOWN_FORMAT);
+        } catch (Throwable $e) {
+            $this->logger?->warning('MediaDerivativeService: text derivative failed', [
+                'asset_id' => $parent->id,
+                'mime'     => $parent->mime_type,
+                'error'    => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**
@@ -202,12 +355,48 @@ final class MediaDerivativeService
     }
 
     /**
+     * Every source format the registered producers accept, lowercased and
+     * MIMEs only. Backs {@see \Spora\Services\MediaArchive\MediaAllowedTypesService}'s
+     * upload allowlist: a binary document is uploadable because some
+     * producer can extract its text, so the producer registry is the
+     * allowlist surface.
+     *
+     * Two exclusions, for different reasons. Entries without a `/` are bare
+     * extensions (`md`, `typ`) that `supportedSourceFormats()` also returns;
+     * leaking them is invisible in the upload UI, which drops unresolvable
+     * types, and would surface only in the LLM-facing "Allowed: %s" string
+     * as a bogus format name. `image/*` would route around the operator's
+     * image policy — core's {@see ImageDerivativeProducer} sources are
+     * `image/png` and friends, so unioning them in would make every image
+     * type uploadable on every agent and defeat the `supportsImageInput()`
+     * gate. `allowed_image_types` is the deliberate surface for images;
+     * this one is for documents something can read.
+     *
+     * @return list<string>
+     */
+    public function producerSourceMimeTypes(): array
+    {
+        $mimes = [];
+        foreach (MediaDerivativeProducerDiscovery::all() as $class) {
+            /** @var MediaDerivativeProducerInterface $producer */
+            $producer = $this->container->get($class);
+            foreach ($producer->supportedSourceFormats() as $format) {
+                $format = strtolower(trim($format));
+                if (str_contains($format, '/') && !str_starts_with($format, 'image/')) {
+                    $mimes[$format] = true;
+                }
+            }
+        }
+        return array_keys($mimes);
+    }
+
+    /**
      * Walk {@see MediaDerivativeProducerDiscovery::all()} and ask each
      * producer which derivative formats it can emit, marked with
      * `available` based on whether the producer's
      * `supportedSourceFormats()` contains the parent's MIME or
-     * extension. Mirrors {@see MediaConverterRegistry::findFor()} but
-     * returns multiple candidates for UI dropdowns.
+     * extension. Returns multiple candidates for UI dropdowns, one entry
+     * per format across all producers.
      *
      * @return list<array{format: string, label: string, available: bool}>
      */
@@ -291,7 +480,27 @@ final class MediaDerivativeService
         $derivative = new MediaAsset();
         $derivative->id = self::generateUuid();
         $derivative->principal_id = $principalId !== null ? (int) $principalId : null;
-        $derivative->user_id = $userId;
+        $derivative->agent_id = $parent->agent_id !== null ? (int) $parent->agent_id : null;
+        $derivative->user_id = $userId ?? ($parent->user_id !== null ? (int) $parent->user_id : null);
+        // A derivative is a child row in every sense the archive's access
+        // and lifecycle queries care about, so ownership and the temp flag are
+        // inherited and everything else is not:
+        //
+        //   user_id / agent_id — `AssetController::ownsDirectly()` and
+        //     `MediaTool::assetInScope()` (scope=agent) are hard gates; a NULL
+        //     on either makes the row unreadable by the very agent that caused
+        //     it to exist.
+        //   is_temporary — `MediaArchiveRetention::findExcessTempIds()` filters
+        //     `user_id + agent_id + is_temporary` together, so a derivative
+        //     missing any one of the three is immune to the sweep.
+        //   task_id / tool_call_id — NOT inherited. The derivative outlives the
+        //     turn, and a `tool_call_id` would collide with the ingest dedup
+        //     key `(tool_call_id, source_url)`.
+        //   tags / prompt — describe the source, not a render of it.
+        //   public_access_token — must never be inherited: it would mint a
+        //     second unauthenticated read path for a row nobody chose to
+        //     share.
+        $derivative->is_temporary = (bool) $parent->is_temporary;
         $derivative->plugin_slug = $producerPlugin;
         $derivative->tool_name = $producerOperation;
         $derivative->mime_type = $output->mime;
@@ -339,6 +548,17 @@ final class MediaDerivativeService
         return $derivative;
     }
 
+    /**
+     * Re-render in place on the existing derivative row.
+     *
+     * The bytes are rewritten, not just the metadata: `create_derivative`
+     * documents idempotency on the natural key `(parent_id, format,
+     * producer_plugin, producer_operation)`, so this is the path a re-render
+     * takes — and for an `md` derivative, stale bytes are silent text
+     * divergence. The LLM read paths (chat attachment, `get_source`) resolve
+     * this same row, so a producer that fixes a bad extraction must be able
+     * to land it.
+     */
     private function refresh(MediaAsset $existing, DerivativeOutput $output): MediaAsset
     {
         $existing->mime_type = $output->mime;
@@ -348,9 +568,30 @@ final class MediaDerivativeService
         $existing->height = $output->height;
         $existing->duration_seconds = $output->durationSeconds;
         $existing->updated_at = Carbon::now();
+        $this->rewriteStoredBytes($existing, $output->bytes);
         $existing->save();
         return $existing;
     }
+
+    /**
+     * Overwrite the derivative's stored payload in place — the BLOB
+     * column in `data_url` mode, the on-disk file in `local` mode. The
+     * `asset_token` is deliberately left alone: a fresh token would
+     * orphan the previous file on every re-render.
+     */
+    private function rewriteStoredBytes(MediaAsset $existing, string $bytes): void
+    {
+        if ($existing->storage_mode === 'data_url') {
+            $existing->payload = $bytes;
+            return;
+        }
+        if ($existing->storage_mode !== 'local') {
+            return;
+        }
+        $this->payloads->rewrite($existing, $bytes);
+    }
+
+
 
     private function filenameFor(MediaAsset $parent, string $format): string
     {

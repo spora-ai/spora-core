@@ -154,7 +154,12 @@ describe('MediaTool::get_media derivative enrichment', function (): void {
             expect($derivatives[0]['producer_plugin'])->toBe('fake-derivative-producer');
             expect($derivatives[0]['producer_operation'])->toBe('render');
             expect($derivatives[0])->toHaveKey('label');
+            // `format` is a producer-chosen slug, so a consumer that has to
+            // render the derivative cannot infer its type from it. `mime_type`
+            // carries the real thing.
+            expect($derivatives[0]['mime_type'])->toBe('application/pdf');
             expect($derivatives[1]['format'])->toBe('txt');
+            expect($derivatives[1]['mime_type'])->toBe('application/pdf');
         } finally {
             $restore();
         }

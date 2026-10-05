@@ -14,6 +14,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\Exceptions\ImageDerivativeProducerException;
 use Spora\Services\MediaArchive\ImageDerivativeFormat;
+use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Throwable;
 
@@ -60,21 +61,6 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
         'image/jpeg',
         'image/webp',
         'image/gif',
-    ];
-
-    /**
-     * Mime → file extension map. Mirrors the small lookup
-     * {@see \Spora\Services\LocalAssetStore::pickExtension()} keeps
-     * private; duplicating it here keeps the producer a leaf with no
-     * injected dependencies.
-     *
-     * @var array<string, string>
-     */
-    private const MIME_TO_EXT = [
-        'image/png'  => 'png',
-        'image/jpeg' => 'jpg',
-        'image/webp' => 'webp',
-        'image/gif'  => 'gif',
     ];
 
     public function pluginSlug(): string
@@ -218,7 +204,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
                 $asset->id,
             ));
         }
-        $ext = self::MIME_TO_EXT[strtolower((string) $asset->mime_type)] ?? null;
+        $ext = MediaArchiveService::extensionForMime($asset->mime_type);
         if ($ext === null) {
             throw new ImageDerivativeProducerException(sprintf(
                 'ImageDerivativeProducer: cannot derive local-file extension for MIME "%s"',

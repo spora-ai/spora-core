@@ -48,6 +48,13 @@ function createMediaAssetsTable(): void
         Capsule::schema()->dropIfExists('media_assets');
         Capsule::schema()->create('media_assets', static function (Blueprint $t): void {
             $t->string('id', 36)->primary();
+            // Migration 0080 — the subject of this file — still places
+            // `transcript` with `->after('markdown_content')`, and that
+            // anchor only exists until migration 0091 drops it. The
+            // fixture therefore models the *pre-0091* schema, which is the
+            // correct shape for a test that runs 0080 in isolation. (On
+            // MySQL/MariaDB a missing anchor column is a hard 1054, not a
+            // no-op like SQLite's.)
             $t->text('markdown_content')->nullable();
             $t->timestamps();
         });

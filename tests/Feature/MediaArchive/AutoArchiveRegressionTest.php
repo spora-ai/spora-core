@@ -13,7 +13,7 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MetadataExtractor;
@@ -23,11 +23,11 @@ use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 beforeEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 /**
@@ -78,6 +78,19 @@ test('URL ingest returns the local archive URL even when optional columns are mi
         $table->string('storage_mode', 16);
         $table->timestamps();
     });
+    // The ingest pipeline now consults `media_derivatives` for the `md`
+    // mint. This fixture is deliberately a reduced schema, so the join
+    // table has to exist for the lookup not to blow up — even though no
+    // producer in this test claims `audio/mpeg` and no row is written.
+    $capsule->schema()->create('media_derivatives', function (Blueprint $table): void {
+        $table->uuid('id')->primary();
+        $table->uuid('parent_id');
+        $table->uuid('derivative_id');
+        $table->string('format', 32);
+        $table->string('producer_plugin', 64)->nullable();
+        $table->string('producer_operation', 64)->nullable();
+        $table->timestamps();
+    });
 
     $logger   = new NullLogger();
     $sniffer  = new MimeSniffer();
@@ -98,17 +111,17 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     $paths    = new Paths($tmp);
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $store    = new LocalAssetStore($paths, $security, 50 * 1024 * 1024);
+    $derivatives = \Tests\Support\MediaArchiveTestSupport::buildDerivativeService($store, $logger);
     $pipeline = new MediaArchiveIngestPipeline(
         new MediaIngestDecoder(),
         $resolver,
         $sniffer,
         $meta,
         $store,
-        \Tests\Support\MediaArchiveTestSupport::buildConverterRegistry(),
+        $derivatives,
         new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()),
-        $logger,
     );
-    $service  = new MediaArchiveService($pipeline);
+    $service  = new MediaArchiveService($pipeline, $derivatives);
 
     $asset = $service->ingest(new MediaIngestRequest(
         url: 'https://cdn.example/song.mp3',

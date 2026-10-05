@@ -19,7 +19,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LocalAssetStore;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Symfony\Component\HttpFoundation\Request;
@@ -36,7 +36,7 @@ use Tests\Unit\Http\StubTaskService;
  * `tests/Unit/Services/TaskHistorySerializerTest.php`.
  */
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 test('continue accepts media_ids on a vision-capable agent and returns 200', function (): void {

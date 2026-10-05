@@ -10,9 +10,9 @@ use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
  * Static registry of {@see MediaDerivativeProducerInterface} FQCNs, read by
  * {@see MediaDerivativeProducerDiscovery}'s consumer at construction.
  *
- * Mirrors {@see MediaConverterDiscovery} exactly so plugin authors only learn
- * one registration pattern; the shared body is
- * {@see DiscoversRegistrations}.
+ * Shares the registration pattern with
+ * {@see MediaMimeRefinerDiscovery} — one body,
+ * {@see DiscoversRegistrations} — so plugin authors only learn one shape.
  */
 final class MediaDerivativeProducerDiscovery
 {

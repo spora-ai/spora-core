@@ -14,6 +14,7 @@ use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaArchiveService;
 
 function tmpAssetsDir(): string
 {
@@ -155,6 +156,75 @@ test('LocalAssetStore::readFromAsset() resolves Typst files by MIME', function (
     } finally {
         $restore();
     }
+});
+
+describe('LocalAssetStore extension agreement with the archive', function (): void {
+    // Writer and reader must resolve the same MIME to the same extension, or
+    // a local-mode asset is written under one suffix and looked for under
+    // another — a 404 on every read. The two maps have drifted before
+    // (`text/markdown` was in one and not the other, then the OOXML MIME
+    // was in the archive's and not the store's), so the agreement is
+    // asserted over a table rather than one MIME: an addition to either
+    // side is caught here.
+    //
+    // No filename is passed to store(), which is exactly the condition that
+    // exposed the drift: with a filename the writer takes its extension from
+    // the name, while readFromAsset() only ever has the MIME.
+    $mimes = [
+        'application/pdf',
+        'text/markdown',
+        'text/x-typst',
+        'text/plain',
+        'audio/mpeg',
+        'audio/flac',
+        'audio/mp4',
+        'video/mp4',
+        'video/quicktime',
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/svg+xml',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
+
+    it('writes and reads the same extension for every supported MIME', function (string $mime): void {
+        [$store, $dir, $restore] = buildLocalStore();
+        try {
+            $ref = $store->store('payload', mime: $mime);
+
+            expect($ref->url)->toEndWith('.' . MediaArchiveService::extensionForMime($mime));
+
+            $asset = new MediaAsset();
+            $asset->asset_token  = $ref->token;
+            $asset->mime_type    = $mime;
+            $asset->storage_mode = 'local';
+
+            $resolved = $store->readFromAsset($asset);
+            expect($resolved['path'])->toBe($dir . '/assets/' . $ref->token . '.' . MediaArchiveService::extensionForMime($mime));
+            expect($resolved['mime'])->toBe($mime);
+        } finally {
+            $restore();
+        }
+    })->with($mimes);
+
+    it('falls back to a .bin suffix for a MIME neither side knows', function (): void {
+        [$store, $dir, $restore] = buildLocalStore();
+        try {
+            $ref = $store->store('payload', mime: 'application/x-unknown-thing');
+
+            expect($ref->url)->toEndWith('.bin');
+
+            $asset = new MediaAsset();
+            $asset->asset_token  = $ref->token;
+            $asset->mime_type    = 'application/x-unknown-thing';
+            $asset->storage_mode = 'local';
+
+            expect($store->readFromAsset($asset)['mime'])->toBe('application/octet-stream');
+        } finally {
+            $restore();
+        }
+    });
 });
 
 test('LocalAssetStore::resolve() returns null for an unknown filename', function (): void {

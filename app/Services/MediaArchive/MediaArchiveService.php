@@ -145,6 +145,7 @@ final class MediaArchiveService
 
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
+        private readonly MediaDerivativeService $derivatives,
         ?PrincipalService $principalService = null,
         ?MediaAssetResolver $resolver = null,
     ) {
@@ -283,6 +284,10 @@ final class MediaArchiveService
         if ($asset === null) {
             return;
         }
+        // Derivatives first — deleting the parent would cascade the join rows
+        // away and orphan the derivative assets. See
+        // {@see MediaDerivativeService::deleteWithDerivatives()}.
+        $this->derivatives->deleteWithDerivatives($asset);
         $asset->delete();
     }
 
@@ -345,17 +350,6 @@ final class MediaArchiveService
         Capsule::table('media_assets')
             ->where('id', $mediaId)
             ->update($updates);
-    }
-
-    /**
-     * Best-effort converter invocation. A throw is logged and swallowed
-     * so a corrupt PDF or unsupported variant doesn't fail the upload.
-     * Skipped when markdown_content is already populated to keep re-ingest
-     * idempotent. Delegates to {@see MediaArchiveIngestPipeline}.
-     */
-    public function runConversionPipeline(MediaAsset $asset, string $bytes): void
-    {
-        $this->ingestPipeline->runConversionPipeline($asset, $bytes);
     }
 
     public function countForAgent(int $agentId): int

@@ -23,7 +23,7 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\PrincipalResolver;
@@ -39,7 +39,7 @@ use Tests\Unit\Http\StubTaskService;
  * behaviour for `store()` and `continue()`.
  */
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 test('store returns 400 when an image is attached to a non-vision agent', function (): void {

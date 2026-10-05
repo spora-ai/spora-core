@@ -16,7 +16,7 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -25,7 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Tests\Support\MediaArchiveTestSupport;
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
     clearSession();
 });
 

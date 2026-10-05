@@ -14,8 +14,8 @@ use Symfony\Component\HttpFoundation\Request;
  * - GET /api/v1/media/allowed-types
  *
  * Combines the static text allowlist, every registered
- * {@see \Spora\Services\MediaArchive\MediaConverterInterface}'s
- * supported MIME types, and (when `?agent_id=` resolves an agent
+ * {@see \Spora\Services\MediaArchive\MediaDerivativeProducerInterface}'s
+ * source MIME types, and (when `?agent_id=` resolves an agent
  * whose LLM reports `supportsImageInput=true`) the image MIME types.
  *
  * The frontend fetches this once per composer mount and uses the

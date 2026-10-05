@@ -19,10 +19,10 @@ use InvalidArgumentException;
  *
  * PHP-DI v7 is the reason the list is static at all: it ships no runtime
  * queryable tag store, so core populates each list in
- * {@see \Spora\Core\ContainerDefinitions} and plugins append to it from
- * their `register(ContainerBuilder)` hook. Reading is per-consumer, not
- * per-construction: the refiner list is re-read on every sniff, so a
- * plugin registering late is still picked up.
+ * {@see \Spora\Core\ContainerDefinitions} and plugins append to it from a
+ * {@see \Spora\Events\ContainerBuildingEvent} subscriber. Reading is
+ * per-consumer, not per-construction: the refiner list is re-read on every
+ * sniff, so a plugin registering late is still picked up.
  *
  * @template T of object
  */

@@ -51,7 +51,8 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->once()->with(['mid-image-1', 'mid-image-2'])->andReturn(['mid-image-1', 'mid-image-2']);
-        $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible')->once()->with(7, ['mid-image-1', 'mid-image-2']);
+        $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with(['mid-image-1', 'mid-image-2']);
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, [
@@ -73,6 +74,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
@@ -193,7 +195,8 @@ describe('ContinueTaskDispatcher::handleContinue — task lookup', function (): 
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
-        $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible')->once()->with(42, []);
+        $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with([]);
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
@@ -236,6 +239,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
@@ -255,6 +259,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
@@ -273,6 +278,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
 
@@ -314,6 +320,7 @@ describe('ContinueTaskDispatcher — input shape', function (): void {
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);

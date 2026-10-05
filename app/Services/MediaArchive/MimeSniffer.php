@@ -209,9 +209,9 @@ final class MimeSniffer
      * are plugin-supplied and therefore untrusted, and the exception
      * would otherwise travel `sniffFromBytes()` → `ingestFromBytes()` →
      * the upload controller and take down every media upload in the
-     * process over one MIME verdict. This mirrors
-     * `MediaArchiveIngestPipeline::runConversionPipeline()`, which wraps
-     * the plugin-supplied *converter* in the same `catch (Throwable)`.
+     * process over one MIME verdict. Same posture as the derivative
+     * producer: a plugin's throw degrades the extraction, never the
+     * upload.
      */
     private function applyRegisteredRefiners(string $bytes, ?string $filename, string $sniffedMime): string
     {

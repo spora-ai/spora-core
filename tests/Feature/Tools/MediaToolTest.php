@@ -641,14 +641,13 @@ describe('MediaTool::get_media', function (): void {
         }
     });
 
-    it('surfaces markdown_content in the content when present and small', function (): void {
-        // PDF / plain-text converters populate `markdown_content`;
-        // surfacing it saves a second tool call.
+    it('surfaces the md derivative text in the content when present and small', function (): void {
+        // The extraction the LLM reads for a binary document now lives
+        // in a derivative row, not on the asset. Surfacing it here saves
+        // a second tool call; `get_source` is the full-text path.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
-        Illuminate\Database\Capsule\Manager::table('media_assets')
-            ->where('id', $asset->id)
-            ->update(['markdown_content' => "Chapter 1\n\nIt was the best of times."]);
+        seedTextDerivativeFor($asset, "Chapter 1\n\nIt was the best of times.");
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
@@ -663,22 +662,20 @@ describe('MediaTool::get_media', function (): void {
                 ->toContain('Chapter 1')
                 ->toContain('best of times');
             expect($result->content)->not->toContain('truncated');
-            expect($result->data['markdown_content'])->toContain('best of times');
+            expect($result->data['extracted_text'])->toContain('best of times');
         } finally {
             $restore();
         }
     });
 
-    it('truncates markdown_content in the content when it exceeds the preview cap', function (): void {
-        // Prevents a 200-page PDF from ballooning the chat context —
-        // the LLM gets a preview + pointer to the data channel, where
-        // the full text is preserved for the operator UI.
+    it('truncates the extracted-text preview in the content when it exceeds the preview cap', function (): void {
+        // Prevents a 200-page PDF from ballooning the chat context — the
+        // LLM gets a preview and a pointer to `get_source`, which is where
+        // the full text is readable.
         $agentA = seedMediaToolAgent();
         $asset = seedMediaAsset(agentId: $agentA, userId: 99);
         $huge = str_repeat('A', 16 * 1024);
-        Illuminate\Database\Capsule\Manager::table('media_assets')
-            ->where('id', $asset->id)
-            ->update(['markdown_content' => $huge]);
+        seedTextDerivativeFor($asset, $huge);
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
@@ -691,10 +688,10 @@ describe('MediaTool::get_media', function (): void {
             expect($result->content)
                 ->toContain('Extracted text:')
                 ->toContain('truncated')
-                ->toContain('ToolResult.data.markdown_content');
+                ->toContain('get_source');
             // The data channel carries the full content even when the
             // content channel was truncated — operator UI gets the whole text.
-            expect($result->data['markdown_content'])->toBe($huge);
+            expect($result->data['extracted_text'])->toBe($huge);
         } finally {
             $restore();
         }
@@ -717,7 +714,6 @@ describe('MediaTool::get_media', function (): void {
                 'height'            => 1080,
                 'duration_seconds'  => 12.5,
                 'prompt'            => 'A stormtrooper baking sourdough',
-                'markdown_content'  => null,
                 'tags'              => json_encode(['demo', 'stormtrooper']),
                 'metadata'          => json_encode(['source' => 'unit-test']),
             ]);
@@ -738,7 +734,9 @@ describe('MediaTool::get_media', function (): void {
             expect($result->data['height'])->toBe(1080);
             expect($result->data['duration_seconds'])->toBe(12.5);
             expect($result->data['prompt'])->toBe('A stormtrooper baking sourdough');
-            expect($result->data['markdown_content'])->toBeNull();
+            // An asset with no `md` derivative — every text source, for
+            // instance — reports null rather than a stale column value.
+            expect($result->data['extracted_text'])->toBeNull();
             expect($result->data['tags'])->toBe(['demo', 'stormtrooper']);
             expect($result->data['metadata'])->toBe(['source' => 'unit-test']);
             expect($result->data['public_url'])

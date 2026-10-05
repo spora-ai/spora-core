@@ -12,17 +12,25 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\LLMConfigService;
-use Spora\Services\MediaArchive\Converters\PdfToMarkdownConverter;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Services\MediaArchive\Producers\PdfToMarkdownProducer;
 use Tests\Support\MediaArchiveTestSupport;
+use Tests\Support\TypstSourceDerivativeProducer;
 
 /**
  * Plan §12 B2b — pinning MediaAllowedTypesService behaviour.
+ *
+ * The dynamic part of the allowlist is now the union of every registered
+ * derivative producer's `supportedSourceFormats()`. That is the seam that
+ * keeps a binary document uploadable: a PDF is accepted out of the box
+ * because core ships `PdfToMarkdownProducer`, and docx stays accepted via
+ * the word plugin's producer. Losing this union is what made PDF uploads
+ * start rejecting at the gate, so it is load-bearing.
  */
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 test('allowedMimeTypes returns the static text allowlist without an agent', function (): void {
@@ -33,11 +41,59 @@ test('allowedMimeTypes returns the static text allowlist without an agent', func
     expect($mimes)->toContain('application/json');
 });
 
-test('allowedMimeTypes unions in converter-supplied MIME types', function (): void {
-    MediaConverterDiscovery::add(PdfToMarkdownConverter::class);
+test('allowedMimeTypes unions in producer-supplied MIME types', function (): void {
+    MediaDerivativeProducerDiscovery::add(PdfToMarkdownProducer::class);
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
     expect($mimes)->toContain('application/pdf');
+});
+
+test('a bare extension in supportedSourceFormats does not leak into allowedMimeTypes', function (): void {
+    // `supportedSourceFormats()` returns MIMEs *and* bare extensions —
+    // `MarkdownToDocxProducer` returns `['text/markdown', 'md',
+    // 'markdown']`, `TypstRenderProducer` merges its MIME list with its
+    // extension list. Without the `/` filter a bogus `md` would land in
+    // the LLM-facing "Allowed: %s" string. It is invisible in the upload
+    // UI, which maps mimes through `extensionForMime()` and drops what it
+    // cannot resolve, so only a direct assertion on the MIME list catches
+    // it.
+    MediaDerivativeProducerDiscovery::add(new class implements \Spora\Services\MediaArchive\MediaDerivativeProducerInterface {
+        /** @return list<string> */
+        public function supportedSourceFormats(): array
+        {
+            return ['text/markdown', 'md', 'markdown'];
+        }
+
+        /** @return list<string> */
+        public function supportedDerivativeFormats(): array
+        {
+            return ['docx'];
+        }
+
+        public function pluginSlug(): string
+        {
+            return 'tests-extension-leak';
+        }
+
+        public function operationName(): string
+        {
+            return 'markdown.to_docx';
+        }
+
+        public function produce(\Spora\Models\MediaAsset $source, string $format, array $options = []): \Spora\Services\MediaArchive\DerivativeOutput
+        {
+            return new \Spora\Services\MediaArchive\DerivativeOutput('', 'application/octet-stream');
+        }
+    }::class);
+
+    [$service] = buildAllowedTypesService();
+    $mimes = $service->allowedMimeTypes();
+
+    // The real MIME is picked up...
+    expect($mimes)->toContain('text/markdown');
+    // ...the bare extensions are not.
+    expect($mimes)->not->toContain('md');
+    expect($mimes)->not->toContain('markdown');
 });
 
 test('allowedMimeTypes without an agent DOES include image/* (direct operator upload)', function (): void {
@@ -96,27 +152,41 @@ test('isAllowed reports text MIME as allowed and binary executable as not', func
 
 test('isAllowed accepts the audio allowlist (incl. video/webm and video/mp4 for MediaRecorder audio-only WebM/MP4)', function (): void {
     [$service] = buildAllowedTypesService();
-    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'video/webm', 'video/mp4'] as $mime) {
+    foreach (['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/flac', 'video/webm', 'video/mp4'] as $mime) {
         expect($service->isAllowed($mime, null))->toBeTrue();
     }
 });
 
 /**
- * @return array{0: MediaAllowedTypesService, 1: MediaConverterRegistry}
+ * @return array{0: MediaAllowedTypesService, 1: MediaDerivativeService}
  */
 function buildAllowedTypesService(?array $imageExtensions = null): array
 {
-    $registry = MediaArchiveTestSupport::buildConverterRegistry();
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $llmService = new LLMConfigService($security, [
         OpenAICompatibleDriver::class,
         AnthropicCompatibleDriver::class,
     ]);
     $factory = new DriverFactory(new NullLogger(), $llmService, 60);
+    $derivatives = buildAllowedTypesDerivativeService();
     return [
-        new MediaAllowedTypesService($registry, $factory, $imageExtensions),
-        $registry,
+        new MediaAllowedTypesService($derivatives, $factory, $imageExtensions),
+        $derivatives,
     ];
+}
+
+function buildAllowedTypesDerivativeService(): MediaDerivativeService
+{
+    $store = new \Spora\Services\AutoAssetStore(
+        new \Spora\Services\DatabaseAssetStore(50 * 1024 * 1024),
+        new \Spora\Services\LocalAssetStore(
+            new \Spora\Core\Paths(BASE_PATH),
+            new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            50 * 1024 * 1024,
+        ),
+        1_048_576,
+    );
+    return MediaArchiveTestSupport::buildDerivativeService($store);
 }
 
 function seedLlmConfig(int $id, int $userId, string $driverClass, string $model): void
@@ -261,30 +331,16 @@ test('normalizeImageExtensions preserves an empty list', function (): void {
     expect(MediaAllowedTypesService::normalizeImageExtensions([]))->toBe([]);
 });
 
-final class TypstStubConverter implements \Spora\Services\MediaArchive\MediaConverterInterface
-{
-    public function supportedMimeTypes(): array
-    {
-        return ['text/x-typst'];
-    }
-
-    public function supportedExtensions(): array
-    {
-        return ['typ'];
-    }
-
-    public function toMarkdown(string $bytes, string $mime, ?string $filename = null): string
-    {
-        return trim($bytes);
-    }
-}
-
-test('a plugin-registered text/x-typst converter adds the MIME and the typ extension to the allowlist', function (): void {
+test('a plugin-registered text/x-typst producer adds the MIME and the typ extension to the allowlist', function (): void {
+    // The plugin seam, re-anchored from the deleted converter: a plugin
+    // makes a format uploadable by registering a *producer*, and the
+    // upload UI's `accept=` attribute is derived from the same union.
     [$serviceWithout] = buildAllowedTypesService();
     expect($serviceWithout->allowedMimeTypes())->not->toContain('text/x-typst');
     expect($serviceWithout->allowedExtensions())->not->toContain('typ');
 
-    MediaConverterDiscovery::add(TypstStubConverter::class);
+    MediaDerivativeProducerDiscovery::add(TypstSourceDerivativeProducer::class);
+
     [$serviceWith] = buildAllowedTypesService();
     expect($serviceWith->allowedMimeTypes())->toContain('text/x-typst');
     expect($serviceWith->allowedExtensions())->toContain('typ');

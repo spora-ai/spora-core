@@ -2,21 +2,42 @@
 
 declare(strict_types=1);
 
+use Mockery;
 use Psr\Log\LoggerInterface;
-use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterInterface;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\PdfMarkdownExtractor;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\ReadUrlTool;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
+use Throwable;
 
 function makeReadUrlToolConfig(): ToolConfigService
 {
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->andReturn([]);
     return $config;
+}
+
+/**
+ * The PDF extractor backed by a parser mock, which is what
+ * {@see ReadUrlTool::fetch_pdf} extracts through — the same helper the
+ * archive's `md` derivative producer uses, so a remote PDF and an
+ * uploaded one read identically.
+ *
+ * @param string|Throwable $result A Throwable makes the parser throw.
+ */
+function makePdfExtractor(string|Throwable $result): PdfMarkdownExtractor
+{
+    $parser = Mockery::mock(Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class);
+    $parser->shouldReceive('parseContent')->andReturnUsing(
+        static function () use ($result): string {
+            if ($result instanceof Throwable) {
+                throw $result;
+            }
+            return $result;
+        },
+    );
+    return new PdfMarkdownExtractor($parser);
 }
 
 it('fetches valid html and converts to markdown', function () {
@@ -127,33 +148,11 @@ it('gracefully handles http client exceptions', function () {
         ->and($result->content)->toContain('Network timeout');
 });
 
-afterEach(function (): void {
-    MediaConverterDiscovery::reset();
-});
-
 // ---------------------------------------------------------------------
-// fetch_pdf operation + SSRF deny-list (plan §12 m2-m3 + m2-m9)
+// fetch_pdf: extraction + the SSRF / size guards on the way in
 // ---------------------------------------------------------------------
 
-function pdfRegistry(MediaConverterInterface $converter): MediaConverterRegistry
-{
-    MediaConverterDiscovery::reset();
-    MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
-    $stub = new class ($converter) implements Psr\Container\ContainerInterface {
-        public function __construct(private readonly MediaConverterInterface $converter) {}
-        public function get(string $id): mixed
-        {
-            return $this->converter;
-        }
-        public function has(string $id): bool
-        {
-            return true;
-        }
-    };
-    return new MediaConverterRegistry($stub);
-}
-
-it('fetches a PDF and converts it to markdown via the registry', function () {
+it('fetches a PDF and returns its text as markdown', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
     $response->allows('getStatusCode')->andReturn(200);
@@ -161,12 +160,7 @@ it('fetches a PDF and converts it to markdown via the registry', function () {
 
     $client->expects('request')->with('GET', 'https://example.com/doc.pdf', Mockery::any())->andReturn($response);
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-    $converter->shouldReceive('toMarkdown')->once()->andReturn('# Heading\n\nbody text');
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor("# Heading\n\nbody text"));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeTrue()
@@ -174,38 +168,16 @@ it('fetches a PDF and converts it to markdown via the registry', function () {
         ->and($result->content)->toContain('# Heading');
 });
 
-it('returns an error when no PDF converter is registered', function () {
-    $client = Mockery::mock(HttpClientInterface::class);
-    MediaConverterDiscovery::reset();
-    $stub = new class implements Psr\Container\ContainerInterface {
-        public function get(string $id): mixed
-        {
-            throw new RuntimeException("no converters: {$id}");
-        }
-        public function has(string $id): bool
-        {
-            return false;
-        }
-    };
-    $registry = new MediaConverterRegistry($stub);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, $registry);
-    $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
-
-    expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('No PDF converter is registered');
-});
-
-it('returns an error when the converter registry is not wired', function () {
+it('returns an error when no PDF extractor is wired', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeFalse()
-        ->and($result->content)->toContain('no converter registry is wired');
+        ->and($result->content)->toContain('no PDF extractor is wired');
 });
 
-it('returns an error when the converter throws during conversion', function () {
+it('returns an error when the extractor throws during conversion', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
     $response->allows('getStatusCode')->andReturn(200);
@@ -213,16 +185,11 @@ it('returns an error when the converter throws during conversion', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-    $converter->shouldReceive('toMarkdown')->once()->andThrow(new RuntimeException('corrupt pdf'));
-
     $logger = Mockery::mock(LoggerInterface::class);
     $logger->allows('error');
     $logger->allows('debug');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), $logger, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), $logger, makePdfExtractor(new RuntimeException('corrupt pdf')));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -237,11 +204,7 @@ it('returns an error when the PDF fetch itself fails (HTTP 4xx)', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/missing.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -258,18 +221,14 @@ it('returns an error when the PDF is over the 50 MiB cap', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/big.pdf'], 1);
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('PDF too large');
 });
 
-it('returns an error when the converter returns empty markdown', function () {
+it('returns an error when the extractor yields no readable text', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $response = Mockery::mock(ResponseInterface::class);
     $response->allows('getStatusCode')->andReturn(200);
@@ -277,12 +236,7 @@ it('returns an error when the converter returns empty markdown', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-    $converter->shouldReceive('toMarkdown')->once()->andReturn('   ');
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('   '));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/scanned.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -293,11 +247,7 @@ it('refuses to fetch a PDF over the cloud-metadata IP (SSRF guard)', function ()
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://169.254.169.254/latest/meta-data/'], 1);
 
     expect($result->success)->toBeFalse()
@@ -308,11 +258,7 @@ it('refuses to fetch a PDF from a loopback hostname', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://localhost/secret.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -323,11 +269,7 @@ it('refuses to fetch a PDF from a private RFC1918 IP', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://10.0.0.5/internal.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -341,11 +283,7 @@ it('returns a helpful error when the fetch_pdf URL has no hostname after validat
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $converter = Mockery::mock(MediaConverterInterface::class);
-    $converter->allows('supportedMimeTypes')->andReturn(['application/pdf']);
-    $converter->allows('supportedExtensions')->andReturn(['pdf']);
-
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, pdfRegistry($converter));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
     // `http://%20/path` is a syntactically valid URL whose host part
     // (%20) cannot resolve; verify it isn't fetched.
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://%20/path.pdf'], 1);

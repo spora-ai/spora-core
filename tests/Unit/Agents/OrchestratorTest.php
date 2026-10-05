@@ -20,6 +20,7 @@ use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\MediaAsset;
+use Spora\Models\MediaDerivative;
 use Spora\Models\PrincipalPreference;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -4068,9 +4069,10 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
 describe('Orchestrator::start — attachment serialization round-trip', function (): void {
     function seedTextAsset(int $agentId, int $userId, string $body): MediaAsset
     {
-        return MediaAsset::create([
-            'id'                => testGenerateUuidV4(),
-            'asset_url'         => '/api/v1/assets/' . bin2hex(random_bytes(16)) . '.pdf',
+        $id = testGenerateUuidV4();
+        $asset = MediaAsset::create([
+            'id'                => $id,
+            'asset_url'         => '/api/v1/assets/' . $id . '.pdf',
             'storage_mode'      => 'data_url',
             'mime_type'         => 'application/pdf',
             'media_type'        => 'text',
@@ -4081,9 +4083,41 @@ describe('Orchestrator::start — attachment serialization round-trip', function
             'asset_token'       => bin2hex(random_bytes(16)),
             'public_access_token' => null,
             'filename'          => 'cv.pdf',
-            'markdown_content'  => $body,
             'migrated_from_inline_data_url' => false,
         ]);
+
+        // A binary document's text lives in its `md` derivative, which is
+        // what the message builder inlines. The regression under test is
+        // about the attachment ref surviving the round-trip, so the
+        // derivative is what makes "the file content reached the prompt"
+        // an observable outcome.
+        $derivativeId = testGenerateUuidV4();
+        MediaAsset::create([
+            'id'                => $derivativeId,
+            'asset_url'         => '/api/v1/assets/' . $derivativeId . '.md',
+            'storage_mode'      => 'data_url',
+            'mime_type'         => 'text/markdown',
+            'media_type'        => 'text',
+            'byte_size'         => strlen($body),
+            'agent_id'          => $agentId,
+            'principal_id' => createUserPrincipalPublic($userId),
+            'asset_token'       => bin2hex(random_bytes(16)),
+            'filename'          => 'cv.md',
+            'payload'           => $body,
+            'migrated_from_inline_data_url' => false,
+        ]);
+        MediaDerivative::create([
+            'id'                 => testGenerateUuidV4(),
+            'parent_id'          => $id,
+            'derivative_id'      => $derivativeId,
+            'format'             => 'md',
+            'producer_plugin'    => 'tests-text-derivative',
+            'producer_operation' => 'text.extract',
+            'created_at'         => date('Y-m-d H:i:s'),
+            'updated_at'         => date('Y-m-d H:i:s'),
+        ]);
+
+        return $asset;
     }
 
     it('stores attachments as a JSON list (not a double-encoded string) so MessageHistoryBuilder emits the file content', function (): void {

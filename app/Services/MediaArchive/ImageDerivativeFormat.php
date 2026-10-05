@@ -29,6 +29,18 @@ final class ImageDerivativeFormat
     public const KIND_RESIZE = 'resize';
     public const KIND_CONVERT = 'convert';
 
+    /**
+     * Formats that are not image presets but still need a human label.
+     * Without these entries an `md` derivative falls through to the
+     * `strtoupper()` fallback and renders as "MD" in the "Convert to"
+     * dropdown.
+     *
+     * @var array<string, string>
+     */
+    private const EXTRA_LABELS = [
+        'md' => 'Markdown',
+    ];
+
     private const TARGET_MIME_WEBP = 'image/webp';
     private const TARGET_MIME_PNG = 'image/png';
     private const TARGET_MIME_JPEG = 'image/jpeg';
@@ -109,15 +121,19 @@ final class ImageDerivativeFormat
     }
 
     /**
-     * Resolve a human label for `$format`. Falls back to an
-     * upper-cased slug when no preset matches — future producers that
-     * ship without a corresponding row in {@see FORMAT_PRESETS} still
-     * get a presentable label instead of `null`/empty.
+     * Resolve a human label for `$format`. Falls back to
+     * {@see EXTRA_LABELS} for non-image formats core knows by name
+     * (`md` → "Markdown"), then to an upper-cased slug — future
+     * producers that ship without an entry still get a presentable label
+     * instead of `null`/empty.
      */
     public static function labelFor(string $format): string
     {
         $preset = self::for($format);
-        return $preset !== null ? $preset['label'] : strtoupper($format);
+        if ($preset !== null) {
+            return $preset['label'];
+        }
+        return self::EXTRA_LABELS[$format] ?? strtoupper($format);
     }
 
     /**
@@ -138,6 +154,7 @@ final class ImageDerivativeFormat
             'format-png'    => 'PNG',
             'format-jpeg'   => 'JPEG',
             'format-webp'   => 'WebP',
+            'md'            => 'Markdown',
             default         => strtoupper($format),
         };
     }

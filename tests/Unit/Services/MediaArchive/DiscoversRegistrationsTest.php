@@ -3,9 +3,6 @@
 declare(strict_types=1);
 
 use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
-use Spora\Services\MediaArchive\Converters\PlainTextPassthroughConverter;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
-use Spora\Services\MediaArchive\MediaConverterInterface;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaMimeRefinerDiscovery;
@@ -14,12 +11,11 @@ use Tests\Support\FakeDerivativeProducer;
 use Tests\Support\FakeMimeRefiner;
 
 /**
- * Contract of {@see DiscoversRegistrations} — the scaffolding all three
- * media-archive registries share. Asserting it against every registry at
- * once is what pins the extraction: the two pre-existing registries and
- * the new refiner one must behave identically, so a future fourth
- * registry gets the guard, the idempotence and the message shape for
- * free.
+ * Contract of {@see DiscoversRegistrations} — the scaffolding the two
+ * remaining media-archive registries share. Asserting it against both at
+ * once is what pins the extraction: they must behave identically, so a
+ * future registry gets the guard, the idempotence and the message shape
+ * for free.
  *
  * Rows are class-strings rather than bound callables because Pest cannot
  * resolve a closure inside a dataset row, and `$registry::add()` on a
@@ -28,11 +24,6 @@ use Tests\Support\FakeMimeRefiner;
  * @return array<string, array{class-string, class-string, class-string}>
  */
 dataset('discovery registries', [
-    'converter' => [
-        MediaConverterDiscovery::class,
-        MediaConverterInterface::class,
-        PlainTextPassthroughConverter::class,
-    ],
     'producer' => [
         MediaDerivativeProducerDiscovery::class,
         MediaDerivativeProducerInterface::class,
@@ -46,13 +37,11 @@ dataset('discovery registries', [
 ]);
 
 beforeEach(function (): void {
-    MediaConverterDiscovery::reset();
     MediaDerivativeProducerDiscovery::reset();
     MediaMimeRefinerDiscovery::reset();
 });
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
     MediaDerivativeProducerDiscovery::reset();
     MediaMimeRefinerDiscovery::reset();
 });
@@ -107,26 +96,22 @@ test('reset() empties the registry', function (string $registry, string $interfa
  * The reason the scaffolding is a trait and not an abstract base: a
  * `private static` property on a parent is shared by every subclass that
  * does not redeclare it, so an abstract `ClassListDiscovery` would merge
- * all three registries into one list.
+ * both registries into one list.
  */
-test('the three registries do not share storage', function (): void {
-    MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
+test('the two registries do not share storage', function (): void {
     MediaDerivativeProducerDiscovery::add(FakeDerivativeProducer::class);
     MediaMimeRefinerDiscovery::add(FakeMimeRefiner::class);
 
-    expect(MediaConverterDiscovery::all())->toBe([PlainTextPassthroughConverter::class]);
     expect(MediaDerivativeProducerDiscovery::all())->toBe([FakeDerivativeProducer::class]);
     expect(MediaMimeRefinerDiscovery::all())->toBe([FakeMimeRefiner::class]);
 });
 
-test('resetting one registry leaves the others intact', function (): void {
-    MediaConverterDiscovery::add(PlainTextPassthroughConverter::class);
+test('resetting one registry leaves the other intact', function (): void {
     MediaDerivativeProducerDiscovery::add(FakeDerivativeProducer::class);
     MediaMimeRefinerDiscovery::add(FakeMimeRefiner::class);
 
     MediaMimeRefinerDiscovery::reset();
 
     expect(MediaMimeRefinerDiscovery::all())->toBe([]);
-    expect(MediaConverterDiscovery::all())->toBe([PlainTextPassthroughConverter::class]);
     expect(MediaDerivativeProducerDiscovery::all())->toBe([FakeDerivativeProducer::class]);
 });

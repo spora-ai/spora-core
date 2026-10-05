@@ -29,7 +29,7 @@ use Spora\Services\MediaArchive\PersistedAssetFields;
  * and assert the bytes that come out are valid UTF-8.
  */
 afterEach(function (): void {
-    \Spora\Services\MediaArchive\MediaConverterDiscovery::reset();
+    \Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery::reset();
 });
 
 test('applyFieldsToExisting sanitises Latin-1 bytes in filename to valid UTF-8', function (): void {

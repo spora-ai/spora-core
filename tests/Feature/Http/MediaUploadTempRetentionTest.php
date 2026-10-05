@@ -99,12 +99,14 @@ function buildUploadController(int $userId = 1): MediaUploadController
             return true;
         }
     };
-    $registry = MediaArchiveTestSupport::buildConverterRegistry();
-    $allowed = new MediaAllowedTypesService($registry, new Spora\Drivers\DriverFactory(
-        new Psr\Log\NullLogger(),
-        new Spora\Services\LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
-        300,
-    ));
+    $allowed = new MediaAllowedTypesService(
+        MediaArchiveTestSupport::buildDerivativeService($assetStore),
+        new Spora\Drivers\DriverFactory(
+            new Psr\Log\NullLogger(),
+            new Spora\Services\LLMConfigService(new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), []),
+            300,
+        ),
+    );
     $sniffer = new MimeSniffer();
     return new MediaUploadController(
         $service,

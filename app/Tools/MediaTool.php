@@ -30,12 +30,15 @@ use Symfony\Component\HttpFoundation\Request;
  *                           derivative via `get_media` on its parent id.
  *   - `get_media`         — fetch one asset + a markdown embed snippet the LLM
  *                           can echo verbatim so the chat UI renders the
- *                           asset inline. The response now includes a
+ *                           asset inline. The response includes a
  *                           `derivatives[]` array (every render of this
  *                           asset, e.g. PNG/PDF/SVG siblings) and a
  *                           `parent_id` (set when this asset is itself a
  *                           derivative of another), so the LLM can walk
  *                           both directions without a second round-trip.
+ *                           Documents additionally carry an `md`
+ *                           entry here — that is the extraction the LLM
+ *                           reads, and `get_source` is how it reads it.
  *                           Auto-approved read.
  *   - `get_public_url`    — mint or fetch the public shareable URL of a single
  *                           asset. The only operation that requires approval
@@ -54,16 +57,15 @@ use Symfony\Component\HttpFoundation\Request;
  *                           mimes (text/*, JSON, XML, YAML, SVG, CSV, x-typst)
  *                           inline up to {@see self::GET_SOURCE_TEXT_MAX};
  *                           binary mimes do NOT return raw bytes — instead
- *                           the asset's extracted `markdown_content` is
- *                           surfaced (truncated to
- *                           {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) so
- *                           the LLM gets something it can actually iterate
- *                           on. When no markdown_content exists, fail with a
- *                           hint pointing at `get_media` /
- *                           `list_derivatives`. Enabled and auto-approved: it
- *                           reads a row the calling agent already owns under
- *                           the same scope rules as `get_media`, so it grants
- *                           no reach the agent did not already have.
+ *                           the asset's `md` derivative is surfaced
+ *                           (truncated to
+ *                           {@see self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES})
+ *                           so the LLM gets something it can actually iterate
+ *                           on. When no `md` derivative exists, fail with a
+ *                           hint pointing at `create_derivative`. A pure
+ *                           read: it never mints the derivative itself, so
+ *                           it keeps the "reads a row the calling agent
+ *                           already owns" auto-approval rationale intact.
  *   - `list_derivatives`  — return the derivative rows of a parent asset
  *                           (e.g. the PNG/PDF renders of a `.typ` source).
  *                           Takes an optional `format` filter to narrow
@@ -156,7 +158,7 @@ use Symfony\Component\HttpFoundation\Request;
 )]
 #[ToolOperation(
     name: 'get_source',
-    description: 'Read source bytes (text mimes) or extracted markdown preview (binary mimes). See skill for mime handling.',
+    description: 'Read source bytes (text mimes) or the markdown derivative (binary mimes). See skill for mime handling.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -241,6 +243,17 @@ final class MediaTool extends AbstractTool
      * `get_media`'s public URL, not inlined into the LLM context.
      */
     private const GET_SOURCE_TEXT_MAX = 5 * 1024 * 1024;
+
+    /**
+     * Cap on the `md` derivative `get_source` inlines for a binary mime.
+     *
+     * Deliberately NOT {@see MediaDerivativeHandler::PREVIEW_BYTES}: this op
+     * is the LLM's explicit "read this document" round-trip, so it owes the
+     * caller the whole extracted text up to a sane ceiling, whereas the
+     * `get_media` preview is an unsolicited glance. Harmonising them would
+     * either starve `get_source` or flood `get_media`.
+     */
+    private const GET_SOURCE_DERIVATIVE_PREVIEW_BYTES = 64 * 1024;
 
     private readonly array $config;
 
@@ -351,15 +364,6 @@ final class MediaTool extends AbstractTool
     }
 
     /**
-     * Cap on the `markdown_content` preview inlined into `get_media`.
-     * 8 KB keeps a single PDF chapter under the typical tool-result
-     * cap; anything larger gets a truncation notice — the full content
-     * stays on `ToolResult.data.markdown_content` (which is never sent
-     * to the LLM, only to the operator UI).
-     */
-    private const GET_MEDIA_MARKDOWN_PREVIEW_BYTES = 8 * 1024;
-
-    /**
      * @param  array<string, mixed> $arguments
      * @return MediaAsset|ToolResult
      */
@@ -405,16 +409,20 @@ final class MediaTool extends AbstractTool
         $prompt = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
             ? trim((string) $asset->prompt)
             : null;
-        $markdownContent = $asset->markdown_content;
+        $extractedText = $this->derivativeHandler->readTextDerivative($asset);
 
         if ($prompt !== null) {
             $content .= "\n\nPrompt: " . $prompt;
         }
-        if (is_string($markdownContent) && $markdownContent !== '') {
-            $content .= "\n\nExtracted text:\n" . $this->previewMarkdownContent($markdownContent);
+        if ($extractedText !== null) {
+            $content .= "\n\nExtracted text:\n" . $this->derivativeHandler->previewExtractedText($extractedText);
+            $content .= "\n\nCall `get_source` to read the full extracted text.";
         }
 
-        return ToolResult::ok($content, $this->describeAsset($asset, $mediaType, $assetUrl));
+        return ToolResult::ok(
+            $content,
+            $this->describeAsset($asset, $mediaType, $assetUrl, $extractedText),
+        );
     }
 
     /** Shared by `get_media` and `get_embed_code` so the two stay in lockstep. */
@@ -425,19 +433,6 @@ final class MediaTool extends AbstractTool
         string $altText,
     ): string {
         return MediaEmbed::forAsset($asset, $mediaType, $assetUrl, $altText);
-    }
-
-    /**
-     * Truncate `markdown_content` to {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}
-     * so a 200-page PDF doesn't blow the chat context.
-     */
-    private function previewMarkdownContent(string $markdownContent): string
-    {
-        if (strlen($markdownContent) <= self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES) {
-            return $markdownContent;
-        }
-        return substr($markdownContent, 0, self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES)
-            . "\n\n[…truncated — full extracted text is on ToolResult.data.markdown_content]";
     }
 
     /**
@@ -504,14 +499,14 @@ final class MediaTool extends AbstractTool
      *    application/csv, application/x-typst): read the bytes
      *    inline, capped at {@see self::GET_SOURCE_TEXT_MAX}.
      *  - Binary (everything else): do NOT read bytes. Return the
-     *    asset's extracted `markdown_content` (truncated to
-     *    {@see self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES}) when the
-     *    operator already populated it during ingestion — that's
-     *    the natural shape for an LLM to iterate on. When no
-     *    markdown_content exists, fail with a hint pointing at
-     *    `get_media` and `list_derivatives`. Base64-encoding raw
-     *    binary bytes into the chat context is not useful for an
-     *    LLM and ballooned the previous tool, so it was removed.
+     *    asset's `md` derivative (truncated to
+     *    {@see self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES}) — that's
+     *    the natural shape for an LLM to iterate on, and ingest
+     *    mints it for every binary document it accepts. When no `md`
+     *    derivative exists, fail pointing at `create_derivative`,
+     *    which is how the LLM gets one. Base64-encoding raw binary
+     *    bytes into the chat context is not useful for an LLM and
+     *    ballooned the previous tool, so it was removed.
      *
      * Storage handling:
      *  - `data_url` / `local`: read bytes via the asset stores
@@ -531,7 +526,7 @@ final class MediaTool extends AbstractTool
 
         // External assets never have a Spora-side payload — surface that
         // first so the LLM isn't routed to the binary-fallback path
-        // (which would say "no markdown_content" and miss the real reason).
+        // (which would say "no md derivative" and miss the real reason).
         if ($asset->storage_mode === 'external') {
             return ToolResult::fail(sprintf(
                 'Asset %s is stored externally (storage_mode=external) and has no '
@@ -586,40 +581,39 @@ final class MediaTool extends AbstractTool
     }
 
     /**
-     * Binary files don't return their raw bytes through `get_source`.
-     * If the operator already extracted a markdown/text preview during
-     * ingestion, surface that — it's the shape an LLM can actually
-     * iterate on (re-typeset from `.typ`, re-prompt on the doc). When
-     * nothing was extracted, fail with a clear hint pointing at
-     * `get_media` and `list_derivatives` so the LLM doesn't keep
-     * guessing.
+     * Binary files don't return their raw bytes through `get_source`; the
+     * `md` derivative is the shape an LLM can iterate on. Deliberately a pure
+     * read: minting here would make a read op write to the archive, and its
+     * auto-approval rests on "reads a row the calling agent already owns".
      */
     private function binarySourceFallback(MediaAsset $asset, string $mime): ToolResult
     {
-        $markdownContent = $asset->markdown_content;
-        if (!is_string($markdownContent) || $markdownContent === '') {
+        $derivative = $this->derivatives->findTextDerivative($asset);
+        $extracted  = $derivative !== null ? $this->derivativeHandler->readDerivativeBytes($derivative) : null;
+        $filename   = (string) ($asset->filename ?? $asset->id);
+
+        if ($extracted === null) {
             return ToolResult::fail(sprintf(
                 'Asset %s (%s) is a binary mime; `get_source` does not return raw bytes '
-                    . 'for binary mimes, and no extracted markdown_content is available. '
-                    . 'Use `get_media` for the asset URL or `list_derivatives` to see '
-                    . 'rendered alternatives.',
+                    . 'for binary mimes, and this asset has no readable `md` derivative. '
+                    . 'Call `create_derivative(asset_id: %s, format: "md")` to extract its '
+                    . 'text, or `get_media` for the asset URL.',
                 $asset->id,
                 $mime,
+                $asset->id,
             ));
         }
 
-        $preview  = $this->previewMarkdownContent($markdownContent);
-        $truncated = strlen($markdownContent) > self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES;
-        $filename = (string) ($asset->filename ?? $asset->id);
+        $preview   = $this->derivativeHandler->previewExtractedText($extracted, self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES);
+        $truncated = strlen($extracted) > self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES;
 
         return ToolResult::ok(
             sprintf(
-                "⚠ Asset %s (%s) is a binary mime; `get_source` does not return raw bytes. "
-                    . "Returning the extracted markdown_content%s instead. Use `get_media` "
-                    . "for the asset URL.\n\n%s",
-                $asset->id,
+                "⚠ %s is a binary mime (%s); `get_source` does not return raw bytes, "
+                    . "showing its markdown derivative%s.\n\n%s",
+                $filename,
                 $mime,
-                $truncated ? ' (truncated to ' . self::GET_MEDIA_MARKDOWN_PREVIEW_BYTES . ' bytes)' : '',
+                $truncated ? ' (truncated to ' . self::GET_SOURCE_DERIVATIVE_PREVIEW_BYTES . ' bytes)' : '',
                 $preview,
             ),
             [
@@ -627,7 +621,8 @@ final class MediaTool extends AbstractTool
                 'filename'      => $filename,
                 'mime_type'     => $mime,
                 'byte_size'     => $asset->byte_size,
-                'fallback'      => 'markdown_content',
+                'fallback'      => 'md_derivative',
+                'derivative_id' => $derivative?->id,
                 'truncated'     => $truncated,
                 'content'       => $preview,
             ],
@@ -737,17 +732,25 @@ final class MediaTool extends AbstractTool
     /**
      * Richer per-asset payload for `get_media` — superset of {@see summarizeAsset()}
      * with the metadata the operator UI needs (width / height, prompt,
-     * extracted text, public URL when minted) plus the derivative
-     * graph an LLM needs to walk the parent → child relationship in
-     * one round-trip. `search` stays on the leaner {@see summarizeAsset()}
-     * to avoid N KB of converter output per row.
+     * public URL when minted) plus the derivative graph an LLM needs to
+     * walk the parent → child relationship in one round-trip. `search`
+     * stays on the leaner {@see summarizeAsset()} to avoid N KB of
+     * extracted text per row.
+     *
+     * `extracted_text` is the asset's `md` derivative content — the full
+     * string, untruncated (the `content` the LLM sees is capped by
+     * {@see MediaDerivativeHandler::PREVIEW_BYTES}). It is null for an
+     * asset that has no `md` derivative, which includes every text
+     * source: those are their own text, and `get_source` reads them
+     * directly.
      *
      * Derivative enrichment:
      *  - `derivatives[]` is empty for non-parents; for parents it
      *    reuses {@see MediaAssetSerializer::derivativeRowsFor()} so the
      *    LLM-visible row shape is byte-for-byte identical to the
      *    operator dashboard's VersionsStrip (label, asset_url,
-     *    producer_plugin, producer_operation, created_at).
+     *    producer_plugin, producer_operation, created_at). The `md`
+     *    entry is what `get_source` and the chat-attachment path read.
      *  - `parent_id` is null for non-derivatives; for derivatives it
      *    is the parent asset's id (one-shot reverse lookup on
      *    `media_derivatives.derivative_id`), so the LLM can fetch the
@@ -756,8 +759,12 @@ final class MediaTool extends AbstractTool
      *
      * @return array<string, mixed>
      */
-    private function describeAsset(MediaAsset $asset, MediaType $mediaType, string $assetUrl): array
-    {
+    private function describeAsset(
+        MediaAsset $asset,
+        MediaType $mediaType,
+        string $assetUrl,
+        ?string $extractedText = null,
+    ): array {
         return [
             'id'               => $asset->id,
             'filename'         => $asset->filename,
@@ -768,7 +775,7 @@ final class MediaTool extends AbstractTool
             'height'           => $asset->height,
             'duration_seconds' => $asset->duration_seconds,
             'prompt'           => $asset->prompt,
-            'markdown_content' => $asset->markdown_content,
+            'extracted_text'   => $extractedText,
             'tags'             => $asset->tags,
             'metadata'         => $asset->metadata,
             'asset_url'        => $assetUrl,

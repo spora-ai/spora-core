@@ -6,8 +6,7 @@ namespace Spora\Tools;
 
 use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
-use Spora\Services\MediaArchive\MediaConverterInterface;
-use Spora\Services\MediaArchive\MediaConverterRegistry;
+use Spora\Services\MediaArchive\PdfMarkdownExtractor;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -24,9 +23,12 @@ use Throwable;
  * Two operations:
  *   - `fetch`      — HTML pages converted to Markdown, plus raw XML/RSS
  *                    and JSON passthroughs.
- *   - `fetch_pdf`  — fetches a remote PDF, runs the registered PDF
- *                    converter (`PdfToMarkdownConverter` by default),
- *                    returns the markdown text. Uses the same
+ *   - `fetch_pdf`  — fetches a remote PDF and returns its text as
+ *                    Markdown via
+ *                    {@see \Spora\Services\MediaArchive\PdfMarkdownExtractor}
+ *                    — the same extraction the archive's `md`
+ *                    derivative producer uses, so a remote PDF and an
+ *                    uploaded one read identically. Uses the same
  *                    HttpClient and `validateUrl()` as `fetch`.
  *
  * Both share the URL-validation guard (http/https only) and the
@@ -64,7 +66,7 @@ final class ReadUrlTool extends AbstractTool
     /** Hard cap on PDF bytes — protects against multi-hundred-MB PDFs. */
     private const MAX_PDF_BYTES = 50 * 1024 * 1024;
 
-    /** PDF MIME type — referenced by the registry lookup and Accept header. */
+    /** PDF MIME type — sent as the `Accept` header on `fetch_pdf`. */
     private const PDF_MIME = 'application/pdf';
 
     /**
@@ -92,7 +94,7 @@ final class ReadUrlTool extends AbstractTool
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
         private readonly ?LoggerInterface    $logger = null,
-        private readonly ?MediaConverterRegistry $converters = null,
+        private readonly ?PdfMarkdownExtractor $pdfExtractor = null,
     ) {}
 
     private function effectiveTimeout(array $settings): int
@@ -199,9 +201,8 @@ final class ReadUrlTool extends AbstractTool
      */
     private function processFetchedPdfContent(string $url, array $settings): ToolResult
     {
-        $converter = $this->resolvePdfConverter($url);
-        if ($converter instanceof ToolResult) {
-            return $converter;
+        if ($this->pdfExtractor === null) {
+            return new ToolResult(false, 'PDF fetching is unavailable: no PDF extractor is wired.');
         }
 
         $payload = $this->fetchPdfBytes($url, $settings);
@@ -209,20 +210,7 @@ final class ReadUrlTool extends AbstractTool
             return $payload;
         }
 
-        return $this->convertPdf($converter, $payload, $url);
-    }
-
-    private function resolvePdfConverter(string $url): MediaConverterInterface|ToolResult
-    {
-        if ($this->converters === null) {
-            return new ToolResult(false, 'PDF fetching is unavailable: no converter registry is wired.');
-        }
-        $converter = $this->converters->findFor(self::PDF_MIME, basename(parse_url($url, PHP_URL_PATH) ?? ''));
-        if ($converter === null) {
-            return new ToolResult(false, 'No PDF converter is registered. Install a plugin that provides one.');
-        }
-
-        return $converter;
+        return $this->convertPdf($payload, $url);
     }
 
     /** @param array<string, mixed> $settings */
@@ -307,10 +295,10 @@ final class ReadUrlTool extends AbstractTool
         return null;
     }
 
-    private function convertPdf(MediaConverterInterface $converter, string $bytes, string $url): ToolResult
+    private function convertPdf(string $bytes, string $url): ToolResult
     {
         try {
-            $markdown = $converter->toMarkdown($bytes, self::PDF_MIME, basename(parse_url($url, PHP_URL_PATH) ?? null));
+            $markdown = $this->pdfExtractor?->extract($bytes) ?? '';
         } catch (Throwable $e) {
             $this->logger?->error('ReadUrlTool: PDF conversion failed', ['url' => $url, 'exception' => $e]);
             return new ToolResult(false, 'PDF conversion failed: ' . $e->getMessage());

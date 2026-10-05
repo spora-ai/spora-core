@@ -30,8 +30,9 @@ use Symfony\Component\HttpFoundation\Response;
  * computed by {@see MediaAllowedTypesService}, and routed through
  * the same `MediaArchiveService::ingest()` pipeline that tools use.
  *
- * The conversion pipeline runs as part of `ingest()` and populates
- * `markdown_content` when a registered converter handles the asset.
+ * `ingest()` also mints the `md` derivative of a binary document, so a
+ * PDF is readable by the LLM with no second operator action. Best effort:
+ * a producer failure leaves the upload intact.
  */
 final class MediaUploadController
 {

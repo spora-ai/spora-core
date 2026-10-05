@@ -50,7 +50,6 @@ final class MediaAssetSerializer
             'duration_seconds'    => $asset->duration_seconds,
             'prompt'              => $asset->prompt,
             'filename'            => $asset->filename,
-            'markdown_content'    => $asset->markdown_content,
             'transcript'          => $asset->transcript,
             'transcript_language'  => $asset->transcript_language,
             'tags'                => $asset->tags,
@@ -62,7 +61,6 @@ final class MediaAssetSerializer
             'is_temporary'        => (bool) $asset->is_temporary,
             'public_access_token' => $asset->public_access_token,
             'public_url'          => $this->buildPublicUrl($asset, $baseUrl),
-            'has_markdown'        => $asset->markdown_content !== null && $asset->markdown_content !== '',
             'derivatives'         => $this->loadDerivatives($asset),
             'created_at'          => $asset->created_at?->toIso8601String(),
             'updated_at'          => $asset->updated_at?->toIso8601String(),
@@ -135,6 +133,11 @@ final class MediaAssetSerializer
             $out[] = [
                 'format'             => $row['format'],
                 'label'              => $label,
+                // The derivative's own MIME. `format` is a producer-chosen
+                // slug, not self-describing — `md` says nothing about whether
+                // the bytes are markdown, and the preview pane resolves its
+                // kind from this rather than re-deriving it from the slug.
+                'mime_type'          => $derivative->mime_type,
                 'media_id'           => $derivative->id,
                 'asset_url'          => MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $derivative->id . ($ext !== null ? '.' . $ext : ''),
                 'producer_plugin'    => $row['producer_plugin'],

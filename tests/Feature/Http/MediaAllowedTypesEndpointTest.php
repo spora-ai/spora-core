@@ -10,18 +10,18 @@ use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\MediaAllowedTypesController;
 use Spora\Services\LLMConfigService;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Symfony\Component\HttpFoundation\Request;
 use Tests\Support\MediaArchiveTestSupport;
 
 afterEach(function (): void {
-    MediaConverterDiscovery::reset();
+    MediaDerivativeProducerDiscovery::reset();
 });
 
 /**
  * Plan §12 B2b — MediaAllowedTypesController endpoint tests.
  */
-test('returns text + converter types without an agent_id query param', function (): void {
+test('returns text + producer types without an agent_id query param', function (): void {
     $controller = buildAllowedEndpoint();
     $req = Request::create('/api/v1/media/allowed-types', 'GET');
     $resp = $controller->index($req);
@@ -66,11 +66,24 @@ test('with ?agent_id does not add image types when the agent\'s LLM is text-only
 
 function buildAllowedEndpoint(): MediaAllowedTypesController
 {
-    $registry = MediaArchiveTestSupport::buildConverterRegistry();
+    // The PDF producer is what puts `application/pdf` in the allowlist,
+    // so it has to be registered for this endpoint to advertise it.
+    MediaDerivativeProducerDiscovery::add(\Spora\Services\MediaArchive\Producers\PdfToMarkdownProducer::class);
+    $derivatives = MediaArchiveTestSupport::buildDerivativeService(
+        new \Spora\Services\AutoAssetStore(
+            new \Spora\Services\DatabaseAssetStore(50 * 1024 * 1024),
+            new \Spora\Services\LocalAssetStore(
+                new \Spora\Core\Paths(BASE_PATH),
+                new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+                50 * 1024 * 1024,
+            ),
+            1_048_576,
+        ),
+    );
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $llmService = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
     $factory = new DriverFactory(new \Psr\Log\NullLogger(), $llmService, 60);
-    $allowed = new MediaAllowedTypesService($registry, $factory);
+    $allowed = new MediaAllowedTypesService($derivatives, $factory);
     return new MediaAllowedTypesController($allowed);
 }
 
