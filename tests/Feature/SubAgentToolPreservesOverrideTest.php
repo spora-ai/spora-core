@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
+use Spora\Models\Principal;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SubAgentTool;
 
@@ -71,10 +73,21 @@ it('does not modify the agent_tool_overrides row when the SubAgentTool is invoke
         'max_steps'   => 5,
     ]);
 
+    // execute() no longer takes the user id as an argument; the tool reads
+    // `PrincipalContext::ownerUserId`, so the context is what supplies the
+    // authenticated caller.
+    $context = new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+
     $result = $tool->execute(
         arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         taskId: $source->id,
+        context: $context,
     );
     expect($result->success)->toBeTrue("Tool rejected valid target: {$result->content}");
 
@@ -137,13 +150,26 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
         'max_steps'   => 5,
     ]);
 
+    // The caller is authenticated, so the allowlist is the only thing that
+    // can reject this call. Without a context the tool would fail earlier
+    // on its auth guard and the blob comparison below would prove nothing
+    // about the rejection path this test is named for.
+    $context = new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+
     // Target an agent NOT in the allowlist — tool rejects.
     $result = $tool->execute(
         arguments: ['target_agent_id' => 9999, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
         taskId: $source->id,
+        context: $context,
     );
     expect($result->success)->toBeFalse();
+    expect($result->content)->toContain('not in the allowed_target_agents list');
 
     $blobAfter = Spora\Models\AgentToolOverride::where('agent_id', $sourceAgent->id)
         ->where('tool_class', SubAgentTool::class)
