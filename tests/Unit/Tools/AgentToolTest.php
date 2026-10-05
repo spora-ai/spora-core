@@ -6,8 +6,10 @@ use Mockery\MockInterface;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Models\Agent;
+use Spora\Models\Principal;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Services\PrincipalContext;
 use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -143,6 +145,35 @@ function stubAgent(int $id = 1, string $name = 'Test Agent', ?string $notes = nu
     return $agent;
 }
 
+if (!function_exists('agentToolContext')) {
+    /**
+     * The `PrincipalContext` a real orchestrator call for a user-owned agent
+     * would carry, for `execute(..., context: agentToolContext($userId))`.
+     *
+     * `AgentTool::execute()` reads the paying user from
+     * `$context?->ownerUserId`, and the writing paths — `update_agent`,
+     * `read_agent`, `configure_tools` — refuse outright when that is null
+     * ("requires an authenticated user"). A bare `?int $userId` argument can
+     * no longer express "this call runs as user 99", so the identity has to
+     * travel as the context `PrincipalResolver::resolveForToolExecute()`
+     * builds from the agent's own row: the user's principal, that user as
+     * owner, and — because a task with no `trigger_user_id` falls back to
+     * the owner — the same id as the runner.
+     *
+     * Guarded so the parallel runner, which may load several of these files
+     * into one worker, does not redeclare it.
+     */
+    function agentToolContext(int $userId): PrincipalContext
+    {
+        return new PrincipalContext(
+            principalId: createUserPrincipalPublic($userId),
+            type: Principal::TYPE_USER,
+            ownerUserId: $userId,
+            runnerUserId: $userId,
+        );
+    }
+}
+
 /**
  * Build a fully-populated Agent fixture for the canonical manifest path.
  * AgentManifest reads `max_steps`, `allow_followup`, `is_pinned`, etc.
@@ -204,6 +235,7 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $result = $tool->execute(
             ['action' => 'read_agent_configuration'],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -228,6 +260,7 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $result = $tool->execute(
             ['action' => 'read_agent_configuration'],
             999,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -261,7 +294,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $agent->notes = null;
         $service->allows('getAgentByAgentId')->andReturn($agent);
 
-        $result = $tool->execute(['action' => 'write_notes'], 7, 99);
+        $result = $tool->execute(['action' => 'write_notes'], 7, context: agentToolContext(99));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('content is required');
@@ -281,7 +314,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => 'x', 'mode' => 'nuke'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -306,7 +339,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => '', 'mode' => 'append'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeTrue()
@@ -332,7 +365,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => 'new content'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeTrue();
@@ -361,7 +394,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => 'new content', 'mode' => 'prepend'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeTrue();
@@ -397,7 +430,7 @@ describe('AgentTool::execute — write_notes', function (): void {
                 'mode'    => 'append', // ignored — write_notes_overwrite forces overwrite
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeTrue();
@@ -416,7 +449,7 @@ describe('AgentTool::execute — write_notes', function (): void {
         $result = $tool->execute(
             ['action' => 'write_notes', 'content' => 'x'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -436,7 +469,7 @@ describe('AgentTool::execute — read_notes', function (): void {
         $agent->notes    = '# runbook';
         $service->allows('getAgentByAgentId')->andReturn($agent);
 
-        $result = $tool->execute(['action' => 'read_notes'], 7, 99);
+        $result = $tool->execute(['action' => 'read_notes'], 7, context: agentToolContext(99));
 
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
@@ -479,7 +512,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         ]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         expect($result->success)->toBeTrue();
         // `$data` keeps the legacy shape for the operator UI / audit log.
@@ -535,7 +568,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         ]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         /** @var list<array<string, mixed>> $rows */
         $rows = $result->data;
@@ -593,7 +626,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
 
         $iconResolver->allows('resolve')->andReturn('search');
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $row = $payload['tools'][0];
@@ -644,7 +677,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
             ],
         ]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $opsByName = [];
@@ -683,7 +716,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         ]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
         $opsByName = [];
@@ -706,7 +739,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(null);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not found');
@@ -733,7 +766,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         /** @var array<string, mixed> $payload */
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
@@ -762,7 +795,7 @@ describe('AgentTool::execute — get_available_tools', function (): void {
         $toolSettings->allows('getAllToolsStatus')->andReturn([]);
         $toolSettings->allows('getToolsOperations')->andReturn([]);
 
-        $result = $tool->execute(['action' => 'get_available_tools'], 7, 99);
+        $result = $tool->execute(['action' => 'get_available_tools'], 7, context: agentToolContext(99));
 
         /** @var array<string, mixed> $payload */
         $payload = json_decode($result->content, true, 512, JSON_THROW_ON_ERROR);
@@ -803,7 +836,7 @@ describe('AgentTool::execute — create_agent', function (): void {
         /** @var AgentServiceInterface&MockInterface $service */
         $service->allows('getAgentByAgentId')->andReturn(stubManifestAgent(id: 7));
 
-        $result = $tool->execute(['action' => 'create_agent'], 7, null);
+        $result = $tool->execute(['action' => 'create_agent'], 7);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`payload`');
@@ -1050,7 +1083,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $result = $tool->execute(
             ['action' => 'configure_tools', 'tools' => 'not-an-array'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1063,7 +1096,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $result = $tool->execute(
             ['action' => 'configure_tools', 'tools' => [['enabled' => true]]],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1083,7 +1116,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1137,6 +1170,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1185,6 +1219,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => false]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1234,6 +1269,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1275,6 +1311,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1309,6 +1346,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -1340,6 +1378,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -1370,6 +1409,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -1406,6 +1446,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1430,6 +1471,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -1450,7 +1492,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1473,7 +1515,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1493,7 +1535,7 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1545,6 +1587,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'read_agent'],
             $callingId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1583,7 +1626,7 @@ describe('AgentTool::execute — read_agent', function (): void {
             'updated_at'           => date('Y-m-d H:i:s'),
         ]);
 
-        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, $ownerId);
+        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, context: agentToolContext($ownerId));
 
         expect($result->success)->toBeTrue();
         /** @var array<string, mixed> $data */
@@ -1626,7 +1669,7 @@ describe('AgentTool::execute — read_agent', function (): void {
 
         // The cross-user read returns "Agent not found or not owned by this user."
         // — never the underlying agent's payload.
-        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, $otherId);
+        $result = $tool->execute(['action' => 'read_agent', 'agent_id' => $agentId], 7, context: agentToolContext($otherId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not found or not owned');
@@ -1642,7 +1685,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'read_agent', 'template_id' => 'weather-agent'],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1659,7 +1702,7 @@ describe('AgentTool::execute — read_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'read_agent', 'agent_id' => 0],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1709,6 +1752,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
                 'tools'    => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -1743,7 +1787,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
                 'agent'    => ['name' => 'Hacked'],
             ],
             7,
-            $otherId,
+            context: agentToolContext($otherId),
         );
 
         expect($result->success)->toBeFalse()
@@ -1763,7 +1807,7 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
                 'tools'       => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true]],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -1896,7 +1940,7 @@ test('update_agent silently drops unknown keys (confirmed via read_agent_configu
             ],
         ],
         7,
-        99,
+        context: agentToolContext(99),
     );
 
     expect($writeResult->success)->toBeTrue();
@@ -1927,7 +1971,7 @@ test('update_agent silently drops unknown keys (confirmed via read_agent_configu
         'created_at'           => date('Y-m-d H:i:s'),
         'updated_at'           => date('Y-m-d H:i:s'),
     ]);
-    $readResult = $tool->execute(['action' => 'read_agent'], 7, $ownerId);
+    $readResult = $tool->execute(['action' => 'read_agent'], 7, context: agentToolContext($ownerId));
     expect($readResult->success)->toBeTrue();
     /** @var array<string, mixed> $readData */
     $readData = $readResult->data;
@@ -1989,6 +2033,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 'tools'    => ['item' => [$entry]],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue(
@@ -2039,6 +2084,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ]],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue(
@@ -2076,6 +2122,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ]],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -2094,7 +2141,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 'tools'  => ['item' => ['enabled' => true], 'foo' => 'bar'],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeFalse()
@@ -2134,6 +2181,7 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -2218,6 +2266,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 'agent'    => ['name' => 'Renamed'],
             ],
             $callerId,
+            context: agentToolContext($ownerId),
         );
 
         expect($result->success)->toBeTrue();
@@ -2248,7 +2297,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 'agent'  => ['description' => 'patched'],
             ],
             7,
-            99,
+            context: agentToolContext(99),
         );
 
         expect($result->success)->toBeTrue();
@@ -2268,10 +2317,12 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ->with(99)
                 ->andReturn([]);
 
-            // The handler sources user_id from the calling Agent, not
-            // from the dispatcher param — pass null to make the
-            // "user_id comes from the agent" invariant explicit.
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            // The handler sources user_id from the calling Agent's row, not
+            // from the context — pass no context at all to make the
+            // "user_id comes from the agent" invariant explicit. The `with(99)`
+            // above is what proves it: 99 is only reachable via the stubbed
+            // agent's principal.
+            $result = $tool->execute(['action' => 'list_agents'], 7);
 
             expect($result->success)->toBeTrue()
                 ->and($result->content)->toContain('No agents')
@@ -2298,7 +2349,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                     ['id' => 11, 'name' => 'Travel',        'description' => '', 'is_archived' => true],
                 ]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            $result = $tool->execute(['action' => 'list_agents'], 7);
 
             expect($result->success)->toBeTrue()
                 ->and($result->data['agents'])->toBe([
@@ -2322,7 +2373,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ['id' => 11, 'name' => 'Retired', 'description' => null, 'is_archived' => true],
             ]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            $result = $tool->execute(['action' => 'list_agents'], 7);
 
             // Still listed: `update_agent` can set is_archived back to false, so
             // hiding it would strand the agent with no way back through this tool.
@@ -2342,7 +2393,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 ['id' => 4, 'name' => 'No flag', 'description' => null],
             ]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            $result = $tool->execute(['action' => 'list_agents'], 7);
 
             expect($result->data['agents'][0]['is_archived'])->toBeFalse()
                 ->and($result->content)->toContain('#4 No flag')
@@ -2360,7 +2411,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
             $service->allows('getAgentByAgentId')->andReturn(null);
             $service->shouldNotReceive('getAgentsForUser');
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            $result = $tool->execute(['action' => 'list_agents'], 7);
 
             expect($result->success)->toBeFalse()
                 ->and($result->content)->toContain('Agent not found');
@@ -2391,7 +2442,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                     'is_pinned'      => true,
                 ]]);
 
-            $result = $tool->execute(['action' => 'list_agents'], 7, null);
+            $result = $tool->execute(['action' => 'list_agents'], 7);
             /** @var array{agents: array<int, array<string, mixed>>} $data */
             $data = $result->data;
             $row  = $data['agents'][0];
@@ -2424,7 +2475,7 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 'agent'    => ['name' => 'Hacked'],
             ],
             7,
-            $otherId,
+            context: agentToolContext($otherId),
         );
 
         expect($result->success)->toBeFalse()
@@ -2480,7 +2531,7 @@ describe('AgentTool::execute — update_agent (canonical)', function (): void {
                 'agent'    => ['name' => 'Hacked'],
             ],
             7,
-            $otherId,
+            context: agentToolContext($otherId),
         );
 
         expect($result->success)->toBeFalse()
