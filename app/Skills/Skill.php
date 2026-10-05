@@ -108,6 +108,24 @@ final class Skill
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    /**
+     * The tool names this skill declares it uses.
+     *
+     * A declaration, not a grant: Spora implements neither the spec's
+     * pre-approval nor its requirement enforcement, so nothing here is
+     * enforced. {@see allowedTools()} keeps the raw string for spec
+     * compatibility on the wire; this is the comparable form, so a consumer can
+     * put the names next to the installed tool set.
+     *
+     * @return list<string>
+     */
+    public function declaredToolNames(): array
+    {
+        $raw = $this->allowedTools();
+
+        return $raw === null ? [] : AllowedTools::names($raw);
+    }
+
     public function body(): string
     {
         return $this->body;

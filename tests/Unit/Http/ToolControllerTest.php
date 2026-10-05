@@ -38,6 +38,20 @@ describe('ToolController::index', function (): void {
         expect($names)->toContain(TimeTool::class);
     });
 
+    test('returns the tool description the SPA renders under each row', function (): void {
+        // The presenter computes it; the controller was not copying it across,
+        // so every tool row read an undefined description and the block gated on
+        // it could never render.
+        [$controller] = makeToolController();
+
+        $body = json_decode($controller->index()->getContent(), true);
+        $byClass = array_column($body['data']['tools'], null, 'tool_class');
+
+        expect($byClass[CalculatorTool::class]['description'])
+            ->toContain('Evaluates a mathematical expression')
+            ->and($byClass[TimeTool::class]['description'])->not->toBe('');
+    });
+
     test('returns empty tools list when no tool classes are registered', function (): void {
         $authService = bootAuthLayer();
         $security    = new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));

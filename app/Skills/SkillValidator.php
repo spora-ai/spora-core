@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Skills;
 
+use Spora\Services\ToolConfigNameResolver;
+use Spora\Tools\Attributes\Tool;
+
 /**
  * Validates a parsed skill frontmatter block.
  *
@@ -16,7 +19,9 @@ namespace Spora\Skills;
  * on the skill's summary (oversize body, unknown optional field, etc.).
  *
  * The validator never reads the filesystem — it works on the in-memory
- * frontmatter array. The scanner calls it after parsing the YAML block.
+ * frontmatter array, plus an optional injected tool-name resolver that
+ * reflects `#[Tool]` attributes rather than touching disk. The scanner calls it
+ * after parsing the YAML block.
  */
 final class SkillValidator
 {
@@ -34,10 +39,29 @@ final class SkillValidator
     private const BODY_SOFT_LINE_LIMIT = 500;
     private const BODY_SOFT_BYTE_LIMIT = 50_000;
 
+    /**
+     * One string, quoted by both `allowed-tools` errors, so an author reading
+     * either message learns the same rule.
+     */
+    private const ALLOWED_TOOLS_GRAMMAR = "Field 'allowed-tools' must be a string of space-separated tool names (e.g. 'agent read_url'); commas, scoped forms like 'Bash(git:*)' and fully-qualified class names are not accepted.";
+
     private const ALLOWED_TOP_KEYS = [
         '$schema', 'name', 'description', 'license', 'compatibility',
         'metadata', 'allowed-tools',
     ];
+
+    /**
+     * @param ToolConfigNameResolver|null $toolNames  Resolves a declared name to
+     *        an installed tool so a typo can be reported. Nullable because the
+     *        resolver is a service and this validator is also constructed bare,
+     *        with only frontmatter, by unit tests and build-time checks — the
+     *        same guard {@see \Spora\Services\ToolsRecommendsSkillsValidator}
+     *        uses for its registry. Null skips resolution and leaves the syntax
+     *        checks intact.
+     */
+    public function __construct(
+        private readonly ?ToolConfigNameResolver $toolNames = null,
+    ) {}
 
     /**
      * @param array<string, mixed> $frontmatter
@@ -266,19 +290,21 @@ final class SkillValidator
     }
 
     /**
-     * The field is spec-experimental and unenforced: it is carried onto the
-     * descriptor and echoed by the API, and no tool, resolver or approval path
-     * reads it. So the only thing worth checking is that it is a string —
-     * parsing the list would be validating a value nothing consumes.
+     * `allowed-tools` declares the tools a skill uses. It grants nothing —
+     * Spora implements neither the spec's pre-approval nor its requirement
+     * enforcement — so the whole check is whether a consumer can read the
+     * value, and that splits on two different failures.
      *
-     * Both separators are named in the message because both are in use: the
-     * space-separated form is what the message used to promise, and the
-     * comma-separated form is what shipped skills such as
-     * `spora-plugin-minimax/skills/minimax-image-to-video` actually write. The
-     * old message called the comma form invalid while the code accepted it,
-     * which is the worst of both: an author who read it and complied was told
-     * their own skill was fine, and one who did not read it had no way to find
-     * out that commas were fine too.
+     * A value the grammar cannot read is an **error**: a non-string, a comma, a
+     * fully-qualified class name. Nothing downstream can act on it, and the
+     * plugin skills that shipped FQCNs while the field went unexamined need to
+     * be told rather than left rendering a name no tool answers to.
+     *
+     * A legal name no installed tool answers to is only a **warning**. The
+     * grammar is satisfied, and a skill may name a tool the deployment it was
+     * installed into does not have. Rejecting that would make the field
+     * un-servable on a partial install, which is worse than the typo it would
+     * catch.
      *
      * @param array<string, mixed> $frontmatter
      */
@@ -291,7 +317,64 @@ final class SkillValidator
             $result->addError([
                 'code'     => 'ALLOWED_TOOLS_INVALID',
                 'severity' => 'error',
-                'message'  => "Field 'allowed-tools' must be a string listing tool names separated by spaces or commas.",
+                'message'  => self::ALLOWED_TOOLS_GRAMMAR,
+                'path'     => 'allowed-tools',
+            ]);
+            return;
+        }
+
+        $raw = $frontmatter['allowed-tools'];
+
+        $malformed = false;
+        foreach (AllowedTools::entries($raw) as $entry) {
+            if (preg_match(Tool::NAME_REGEX, $entry) === 1) {
+                continue;
+            }
+            $malformed = true;
+            $result->addError([
+                'code'     => 'ALLOWED_TOOLS_INVALID',
+                'severity' => 'error',
+                'message'  => sprintf(
+                    "Field 'allowed-tools' entry '%s' is not a tool name (each entry must match %s). %s",
+                    $entry,
+                    Tool::NAME_REGEX,
+                    self::ALLOWED_TOOLS_GRAMMAR,
+                ),
+                'path'     => 'allowed-tools',
+            ]);
+        }
+
+        // Resolution only makes sense once every entry parses: a value the
+        // grammar rejected is already reported, and warning about a name that
+        // is not a name would be noise on top of the error.
+        if ($malformed) {
+            return;
+        }
+
+        $this->validateDeclaredToolsResolve($raw, $result);
+    }
+
+    /**
+     * Warn for each declared name that resolves to no installed tool, naming it
+     * so the author can see which one to fix.
+     */
+    private function validateDeclaredToolsResolve(string $raw, ValidationResult $result): void
+    {
+        if ($this->toolNames === null) {
+            return;
+        }
+
+        foreach (AllowedTools::names($raw) as $name) {
+            if ($this->toolNames->resolveToolClass($name) !== null) {
+                continue;
+            }
+            $result->addWarning([
+                'code'     => 'ALLOWED_TOOLS_UNKNOWN_TOOL',
+                'severity' => 'warning',
+                'message'  => sprintf(
+                    "Field 'allowed-tools' declares '%s', which is not the name of an installed tool.",
+                    $name,
+                ),
                 'path'     => 'allowed-tools',
             ]);
         }

@@ -218,6 +218,7 @@ final class ToolController
             'tool_class'        => $summary['tool_class'],
             'tool_name'         => $summary['tool_name'],
             'display_name'      => $summary['display_name'],
+            'description'       => $summary['description'],
             'category'          => $summary['category'],
             'icon'              => $summary['icon'],
             'settings_schema'   => $schema,

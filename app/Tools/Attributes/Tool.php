@@ -31,7 +31,13 @@ use InvalidArgumentException;
 #[Attribute(Attribute::TARGET_CLASS)]
 final class Tool
 {
-    private const NAME_REGEX = '/^[a-z][a-z0-9_]*$/';
+    /**
+     * The one rule for a wire tool name. Public because a skill's
+     * `allowed-tools` declares tool names too, and a skill naming a tool the
+     * attribute would reject is an authoring error worth reporting — see
+     * {@see \Spora\Skills\AllowedTools}.
+     */
+    public const NAME_REGEX = '/^[a-z][a-z0-9_]*$/';
 
     /**
      * Agentskills.io slug rule: 1-64 lowercase alphanumeric + hyphen, no

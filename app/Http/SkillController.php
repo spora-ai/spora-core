@@ -217,12 +217,14 @@ final class SkillController
     private static function summarize(SkillSummary $s): array
     {
         return [
-            'name'        => $s->name,
-            'description' => $s->description,
-            'source'      => $s->source,
-            'license'     => $s->license,
-            'files_count' => $s->fileCount,
-            'has_warnings' => $s->hasWarnings,
+            'name'           => $s->name,
+            'slug'           => $s->slug,
+            'description'    => $s->description,
+            'source'         => $s->source,
+            'license'        => $s->license,
+            'files_count'    => $s->fileCount,
+            'has_warnings'   => $s->hasWarnings,
+            'required_tools' => $s->requiredTools,
         ];
     }
 
@@ -232,16 +234,20 @@ final class SkillController
     private static function detail(SkillDescriptor $d): array
     {
         return [
-            'name'          => $d->summary->name,
-            'description'   => $d->summary->description,
-            'license'       => $d->summary->license,
-            'compatibility' => $d->compatibility,
-            'metadata'      => $d->metadata,
-            'allowed_tools' => $d->allowedTools,
-            'body'          => $d->body,
-            'body_bytes'    => $d->bodyBytes(),
-            'files'         => $d->files,
-            'warnings'      => $d->warnings,
+            'name'           => $d->summary->name,
+            'description'    => $d->summary->description,
+            'license'        => $d->summary->license,
+            'compatibility'  => $d->compatibility,
+            'metadata'       => $d->metadata,
+            // Raw string, for spec compatibility with what a SKILL.md says.
+            'allowed_tools'  => $d->allowedTools,
+            // The same value parsed, which is what a consumer can compare
+            // against the installed tool list. A declaration, not a grant.
+            'required_tools' => $d->requiredTools,
+            'body'           => $d->body,
+            'body_bytes'     => $d->bodyBytes(),
+            'files'          => $d->files,
+            'warnings'       => $d->warnings,
         ];
     }
 }
