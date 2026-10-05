@@ -301,7 +301,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $principalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -346,7 +346,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $callerPrincipalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -380,7 +380,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $principalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -411,7 +411,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: 0,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: null,
