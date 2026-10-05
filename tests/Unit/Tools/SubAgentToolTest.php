@@ -62,7 +62,7 @@ describe('SubAgentTool::execute (handover op)', function (): void {
     test('returns failure when target_agent_id is missing', function (): void {
         [$tool] = makeSubAgentTool();
 
-        $result = $tool->execute([], SUB_AGENT_AGENT_ID, SUB_AGENT_USER_ID, SUB_AGENT_TASK_ID);
+        $result = $tool->execute([], SUB_AGENT_AGENT_ID, SUB_AGENT_TASK_ID);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toBe('target_agent_id is required.');
@@ -74,7 +74,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -88,7 +87,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            null,
             SUB_AGENT_TASK_ID,
         );
 
@@ -118,7 +116,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => 1, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -138,7 +135,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -160,7 +156,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -193,7 +188,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'do the thing'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -210,7 +204,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -225,7 +218,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -242,7 +234,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => 1, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -262,7 +253,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -290,7 +280,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -451,7 +440,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => 'SubAgent Target Agent (#' . SUB_AGENT_TARGET_AGENT . ')', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -473,7 +461,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => '#' . SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -487,7 +474,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['target_agent_id' => 'not a label', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -502,7 +488,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['target_agent_id' => '', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -539,7 +524,6 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -564,7 +548,6 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -601,7 +584,6 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -629,7 +611,6 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 

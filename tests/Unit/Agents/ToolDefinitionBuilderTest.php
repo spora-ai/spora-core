@@ -51,7 +51,6 @@ final class StubToolWithoutOperations extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -86,7 +85,6 @@ final class AnotherStubToolWithoutOperations extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -211,7 +209,6 @@ final class ToolDefinitionBuilderEnumSourceStub extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -284,7 +281,6 @@ describe('ToolDefinitionBuilder wires #[ToolParameter(enumSource)] into the LLM-
             public function execute(
                 array $arguments,
                 int $agentId,
-                ?int $userId = null,
                 ?int $taskId = null,
                 ?Spora\Services\PrincipalContext $context = null,
             ): ToolResult {

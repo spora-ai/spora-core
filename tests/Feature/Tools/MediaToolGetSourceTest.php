@@ -59,7 +59,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'aaaaaaaa-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -92,7 +91,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'bbbbbbbb-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -131,7 +129,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'b2bbbbbb-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -159,7 +156,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'dddddddd-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -189,7 +185,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'abababab-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -215,7 +210,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'cccccccc-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -233,7 +227,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'ffffffff-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -257,7 +250,6 @@ describe('MediaTool::get_source', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_source', 'asset_id' => 'eeeeeeee-1111-2222-3333-444444444444'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();

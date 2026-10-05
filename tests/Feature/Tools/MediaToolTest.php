@@ -146,7 +146,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search'], agentId: $agentA, userId: 99, taskId: 999);
+            $result = $tool->execute(['action' => 'search'], agentId: $agentA, taskId: 999);
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(4);
@@ -188,7 +188,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -223,7 +222,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
-                userId: 42,
                 context: $context,
             );
 
@@ -244,7 +242,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -295,7 +292,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentB->id,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -337,7 +333,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -372,7 +367,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -404,7 +398,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: 99,
                 context: $context,
             );
 
@@ -433,7 +426,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
-                userId: 88,
                 context: $context,
             );
 
@@ -466,7 +458,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -485,7 +476,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -511,7 +501,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -542,7 +531,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain(
@@ -574,7 +562,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain(
@@ -603,7 +590,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain('spora-file-card__glyph')
@@ -630,7 +616,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -654,7 +639,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -682,7 +666,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -727,7 +710,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['width'])->toBe(1920);
@@ -761,7 +743,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['public_url'])->toBeNull();
@@ -785,7 +766,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -815,7 +795,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -838,7 +817,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -856,7 +834,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -889,7 +866,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -912,7 +888,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['public_url'])->toContain('configured.example');
@@ -937,7 +912,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -971,7 +945,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1005,7 +978,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1036,7 +1008,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1068,7 +1039,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1099,7 +1069,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1137,7 +1106,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -1157,7 +1125,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();

@@ -101,10 +101,10 @@ final class SubAgentTool extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
+        $userId = $context?->ownerUserId;
         $op = $this->getOperationName($arguments);
 
         // sub_agent is declared first, so `HasOperations::getOperationName()`

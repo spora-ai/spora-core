@@ -109,10 +109,10 @@ final class SkillTool extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
+        $userId = $context?->ownerUserId;
         $operation = $this->getOperationName($arguments);
         $name = strtolower(trim((string) ($arguments['name'] ?? '')));
 

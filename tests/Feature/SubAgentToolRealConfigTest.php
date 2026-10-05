@@ -84,7 +84,6 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     $result = $tool->execute(
         arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
     );
 
@@ -148,7 +147,6 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
     $result = $tool->execute(
         arguments: ['target_agent_id' => $otherAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
     );
 

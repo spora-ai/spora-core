@@ -20,7 +20,6 @@ final class ThrowingTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {

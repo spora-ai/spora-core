@@ -11,19 +11,19 @@ function askUserQuestionTool(): AskUserQuestionTool
 }
 
 it('rejects when questions argument is missing', function (): void {
-    $result = askUserQuestionTool()->execute([], 1, null, 1);
+    $result = askUserQuestionTool()->execute([], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain("'questions' is missing");
 });
 
 it('rejects when questions is not a list', function (): void {
-    $result = askUserQuestionTool()->execute(['questions' => 'not-list'], 1, null, 1);
+    $result = askUserQuestionTool()->execute(['questions' => 'not-list'], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('list');
 });
 
 it('rejects when fewer than 1 question is supplied', function (): void {
-    $result = askUserQuestionTool()->execute(['questions' => []], 1, null, 1);
+    $result = askUserQuestionTool()->execute(['questions' => []], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('1-4 questions');
 });
@@ -33,7 +33,7 @@ it('rejects when more than 4 questions are supplied', function (): void {
     for ($i = 0; $i < 5; $i++) {
         $questions[] = validQuestion("header {$i}", 'Q?');
     }
-    $result = askUserQuestionTool()->execute(['questions' => $questions], 1, null, 1);
+    $result = askUserQuestionTool()->execute(['questions' => $questions], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('1-4 questions');
 });
@@ -43,7 +43,7 @@ it('rejects a question without text', function (): void {
         'questions' => [
             ['question' => '', 'header' => 'H', 'options' => [['label' => 'a'], ['label' => 'b']]],
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain("missing its 'question' text");
 });
@@ -53,7 +53,7 @@ it('rejects a question without header', function (): void {
         'questions' => [
             ['question' => 'why', 'header' => '', 'options' => [['label' => 'a'], ['label' => 'b']]],
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain("missing its 'header'");
 });
@@ -63,7 +63,7 @@ it('rejects a header longer than 30 characters', function (): void {
         'questions' => [
             validQuestion(str_repeat('h', 31), 'Q?'),
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('31 chars')
         ->and($result->content)->toContain('30');
@@ -74,7 +74,7 @@ it('rejects fewer than 2 options per question', function (): void {
         'questions' => [
             ['question' => 'q', 'header' => 'h', 'options' => [['label' => 'a']]],
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('2-4 options');
 });
@@ -85,7 +85,7 @@ it('rejects more than 4 options per question', function (): void {
         'questions' => [
             ['question' => 'q', 'header' => 'h', 'options' => $options],
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('2-4 options');
 });
@@ -95,7 +95,7 @@ it('rejects an option with empty label', function (): void {
         'questions' => [
             ['question' => 'q', 'header' => 'h', 'options' => [['label' => ''], ['label' => 'b']]],
         ],
-    ], 1, null, 1);
+    ], 1, 1);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('empty label');
 });
@@ -103,7 +103,7 @@ it('rejects an option with empty label', function (): void {
 it('rejects when running without a task id', function (): void {
     $result = askUserQuestionTool()->execute([
         'questions' => [validQuestion('h', 'q')],
-    ], 1, null, null);
+    ], 1, null);
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('task id');
 });
@@ -112,7 +112,7 @@ it('returns the pending-questions placeholder for valid input', function (): voi
     $taskId = createAskTestTask();
     $result = askUserQuestionTool()->execute([
         'questions' => [validQuestion('db', 'Which database?')],
-    ], 1, null, $taskId);
+    ], 1, $taskId);
     expect($result->success)->toBeTrue()
         ->and($result->content)->toContain('Waiting for user answers')
         ->and($result->data['pending_questions'])->toBeTrue();
@@ -129,7 +129,7 @@ it('defaults multiple=false and allowFreeText=true', function (): void {
                 'options'  => [['label' => 'A'], ['label' => 'B']],
             ],
         ],
-    ], 1, null, $taskId);
+    ], 1, $taskId);
     expect($result->success)->toBeTrue();
 
     $pendingQuestion = PendingQuestion::fromLlmInput([

@@ -164,7 +164,6 @@ describe('ScheduleTool::list_schedules', function (): void {
         $result = $tool->execute(
             ['action' => 'list_schedules'],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue()
@@ -181,7 +180,6 @@ describe('ScheduleTool::list_schedules', function (): void {
         $result = $tool->execute(
             ['action' => 'list_schedules'],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue();
@@ -207,7 +205,6 @@ describe('ScheduleTool::list_schedules', function (): void {
         $result = $tool->execute(
             ['action' => 'list_schedules', 'agent_id' => $strangerAgentId],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeFalse()
@@ -223,7 +220,6 @@ describe('ScheduleTool::list_prompt_templates', function (): void {
         $result = $tool->execute(
             ['action' => 'list_prompt_templates'],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue()
@@ -239,7 +235,6 @@ describe('ScheduleTool::list_prompt_templates', function (): void {
         $result = $tool->execute(
             ['action' => 'list_prompt_templates'],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue();
@@ -264,7 +259,6 @@ describe('ScheduleTool::read_schedule', function (): void {
         $result = $tool->execute(
             ['action' => 'read_schedule', 'schedule_id' => $run->id],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue()
@@ -280,7 +274,6 @@ describe('ScheduleTool::read_schedule', function (): void {
             $result = $tool->execute(
                 ['action' => 'read_schedule', 'schedule_id' => $bad],
                 $agentId,
-                $userId,
             );
             expect($result->success)->toBeFalse()
                 ->and($result->content)->toContain('schedule_id')
@@ -322,7 +315,6 @@ describe('ScheduleTool::read_prompt_template', function (): void {
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => $tpl->id],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue()
@@ -336,7 +328,6 @@ describe('ScheduleTool::read_prompt_template', function (): void {
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => 999_999_999],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeFalse()
@@ -920,7 +911,6 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
         $result = $tool->execute(
             ['action' => 'read_schedule', 'schedule_id' => $schedule->id, 'agent_id' => 0],
             $agentId,
-            $userId,
         );
 
         // `agent_id` of 0 falls back to the calling agent.
@@ -937,7 +927,6 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
                 'raw_prompt'      => 'who am I?',
             ]],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeFalse()
@@ -960,7 +949,6 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
                 'raw_prompt'      => 'hostile takeover',
             ]],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeFalse()
@@ -979,7 +967,6 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => $template->id],
             $agentId,
-            $userId,
         );
 
         expect($result->success)->toBeTrue()

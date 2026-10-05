@@ -28,21 +28,25 @@ interface ToolInterface
      * so the LLM can reason about failures.
      *
      * Read access for ownership context:
-     *   - `$userId` (legacy): the agent owner's user id, read from the agent
-     *     row. Same value as `$context->ownerUserId` — the paying user, NOT
-     *     whoever clicked Send. Kept for plugins that still look up
-     *     user-scoped settings or media by user id; prefer `$context`.
-     *   - `$context` (preferred): the principal context bundle, for plugins
-     *     that need to tell owner from runner. `ownerUserId` drives
-     *     credential encryption, settings scope and audit attribution;
-     *     `runnerUserId` is who triggered this turn.
+     *   - `$context` (preferred): the principal context bundle. Plugins that
+     *     need to tell owner from runner should read
+     *     `PrincipalContext::ownerUserId` (the paying user / group's
+     *     owner — drives credential encryption, settings scope, and audit
+     *     attribution) and `PrincipalContext::runnerUserId` (the user who
+     *     triggered the current task).
      *
-     * Note the name collides: `OrchestratorInterface::start()` takes a
-     * `$userId` too, and that one is the clicker, not the payer.
+     * The legacy `$userId` parameter is gone as of 0.30.0. It was read from
+     * the calling agent's row, so it was always `$context->ownerUserId` — and
+     * `ToolConfigPrincipalCascade` ignored it outright whenever `$context` was
+     * present, which the orchestrator always supplies. Read the context.
+     *
+     * Dropping it breaks every implementation that still declares the
+     * parameter, fatally, at class-load. Plugins read the value from
+     * `$context` in 0.29 (the parameter is deprecated but still present), so
+     * by 0.30 the declaration is the only thing left to remove.
      *
      * @param  array<string, mixed>   $arguments  Key-value pairs matching #[ToolParameter] names.
      * @param  int                    $agentId    The agent executing this tool.
-     * @param  int|null               $userId     Legacy alias for $context->ownerUserId. Same value.
      * @param  int|null               $taskId     The current tick's task id. Available so chat-level
      *                                            tools (sub_agent, summarize, archive) can reference
      *                                            the source Task without re-querying by user id.
@@ -51,7 +55,6 @@ interface ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult;

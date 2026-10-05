@@ -55,7 +55,6 @@ it('renders a document asset as a download card, not a markdown link', function 
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -85,7 +84,6 @@ it('buckets text/* mimes into the same document card as application/*', function
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         // Same card as the PDF, and no MIME: `text/plain` and
@@ -111,7 +109,6 @@ it('leaves the image arm on a markdown image embed', function (): void {
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->content)->toBe(
@@ -133,7 +130,6 @@ it('leaves the audio arm on an <audio> element', function (): void {
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->content)->toBe(
@@ -155,7 +151,6 @@ it('leaves the video arm on a <video> element', function (): void {
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->content)->toBe(
@@ -179,7 +174,6 @@ it('keeps an unclassifiable asset on a plain markdown link', function (): void {
         $result = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->content)->toBe(
@@ -224,12 +218,10 @@ it('keeps get_media and get_embed_code on the same card for one document', funct
         $embedCode = $tool->execute(
             ['action' => 'get_embed_code', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
         $getMedia = $tool->execute(
             ['action' => 'get_media', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($getMedia->content)->toContain($embedCode->content);

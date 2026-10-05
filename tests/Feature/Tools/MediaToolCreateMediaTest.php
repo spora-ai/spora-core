@@ -36,7 +36,6 @@ it('stores authored text and returns the asset id, url, and a download card', fu
                 'content'  => "# Q3\n\nRevenue up 12%.\n",
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -71,7 +70,6 @@ it('attributes the row to the core media tool, not to a plugin', function (): vo
                 'content'  => 'scratch notes',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -106,7 +104,6 @@ it('stores authored text once, with no derivative of it', function (): void {
                 'content'  => $markdown,
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -117,7 +114,6 @@ it('stores authored text once, with no derivative of it', function (): void {
         $sourceResult = $tool->execute(
             ['action' => 'get_source', 'asset_id' => $assetId],
             agentId: $agentId,
-            userId: 99,
         );
         expect($sourceResult->success)->toBeTrue();
         expect($sourceResult->content)->toContain(trim($markdown));
@@ -139,7 +135,6 @@ it('records the prompt as provenance', function (): void {
                 'prompt'   => 'Q3 revenue summary for the board deck',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -148,7 +143,6 @@ it('records the prompt as provenance', function (): void {
         $getMedia = $tool->execute(
             ['action' => 'get_media', 'asset_id' => $result->data['asset_id']],
             agentId: $agentId,
-            userId: 99,
         );
         expect($getMedia->data['prompt'])->toBe('Q3 revenue summary for the board deck');
     } finally {
@@ -168,7 +162,6 @@ it('defaults the mime hint to text/markdown when none is given', function (): vo
                 'content'  => '# hello',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -197,7 +190,6 @@ it('round-trips the returned asset_id through get_media under scope: agent', fun
                 'content'  => '# chain',
             ],
             agentId: $agentId,
-            userId: 99,
         );
         expect($created->success)->toBeTrue();
 
@@ -206,7 +198,6 @@ it('round-trips the returned asset_id through get_media under scope: agent', fun
         $fetched = $tool->execute(
             ['action' => 'get_media', 'asset_id' => $created->data['asset_id']],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($fetched->success)->toBeTrue();
@@ -227,7 +218,6 @@ it('rejects empty content', function (): void {
             $result = $tool->execute(
                 ['action' => 'create_media', 'filename' => 'empty.md'] + $arguments,
                 agentId: $agentId,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -253,7 +243,6 @@ it('rejects content over 1 MiB with both byte counts', function (): void {
                 'content'  => $oversize,
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeFalse();
@@ -281,7 +270,6 @@ it('accepts content of exactly 1 MiB', function (): void {
                 'content'  => str_repeat('a', 1024 * 1024),
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -303,7 +291,6 @@ it('neutralises a path-traversing filename', function (): void {
                 'content'  => 'nope',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -332,7 +319,6 @@ it('strips control characters from the filename', function (): void {
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -356,7 +342,6 @@ it('replaces characters outside the allowlist in the filename', function (): voi
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -378,7 +363,6 @@ it('keeps only the last path segment of a slash-bearing filename', function (): 
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -400,7 +384,6 @@ it('falls back to a name when the filename sanitises to nothing', function (): v
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -425,7 +408,6 @@ it('caps the filename at the 255-char column width', function (): void {
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -458,7 +440,6 @@ it('caps the filename when the extension alone is longer than the column', funct
                 'content'  => 'body',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -481,7 +462,6 @@ it('appends the extension implied by the mime hint when the caller omits one', f
                 'content'   => '{"quarter":3}',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();

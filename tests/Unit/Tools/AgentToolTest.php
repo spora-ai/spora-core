@@ -204,7 +204,6 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $result = $tool->execute(
             ['action' => 'read_agent_configuration'],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -229,7 +228,6 @@ describe('AgentTool::execute — read_agent_configuration (deprecated, soft-redi
         $result = $tool->execute(
             ['action' => 'read_agent_configuration'],
             999,
-            $ownerId,
         );
 
         expect($result->success)->toBeFalse()
@@ -794,7 +792,6 @@ describe('AgentTool::execute — create_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'create_agent', 'payload' => ['name' => 'X']],
             7,
-            null,
         );
 
         expect($result->success)->toBeFalse()
@@ -826,7 +823,6 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            null,
         );
 
         expect($out->success)->toBeFalse()
@@ -847,7 +843,6 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            null,
         );
 
         expect($out->success)->toBeFalse()
@@ -874,7 +869,6 @@ describe('AgentTool::execute — create_agent', function (): void {
                     ],
                 ],
                 7,
-                null,
             );
 
             expect($out->success)->toBeFalse()
@@ -915,7 +909,6 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            null,
         );
 
         expect($out->success)->toBeTrue();
@@ -959,7 +952,6 @@ describe('AgentTool::execute — create_agent', function (): void {
                 ],
             ],
             7,
-            null,
         );
 
         expect($out->success)->toBeTrue();
@@ -1046,7 +1038,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
         $result = $tool->execute(
             ['action' => 'configure_tools', 'tools' => []],
             7,
-            null,
         );
 
         expect($result->success)->toBeFalse()
@@ -1146,7 +1137,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1195,7 +1185,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 'tools'  => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => false]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1245,7 +1234,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1287,7 +1275,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1322,7 +1309,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeFalse()
@@ -1354,7 +1340,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeFalse()
@@ -1385,7 +1370,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeFalse()
@@ -1422,7 +1406,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1447,7 +1430,6 @@ describe('AgentTool::execute — configure_tools', function (): void {
                 ]],
             ],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeFalse()
@@ -1526,7 +1508,6 @@ describe('AgentTool::execute — read_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'read_agent', 'agent_id' => 7],
             7,
-            null,
         );
 
         expect($result->success)->toBeFalse()
@@ -1564,7 +1545,6 @@ describe('AgentTool::execute — read_agent', function (): void {
         $result = $tool->execute(
             ['action' => 'read_agent'],
             $callingId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1729,7 +1709,6 @@ describe('AgentTool::execute — configure_tools (agent_id scoped)', function ()
                 'tools'    => [['tool_class' => 'Spora\\Tools\\TimeTool', 'enabled' => true, 'operations' => []]],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -1812,7 +1791,6 @@ test('create_agent validation errors append the agent-creation skill pointer', f
             ],
         ],
         7,
-        null,
     );
 
     expect($result->success)->toBeFalse()
@@ -2011,7 +1989,6 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 'tools'    => ['item' => [$entry]],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue(
@@ -2062,7 +2039,6 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ]],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue(
@@ -2100,7 +2076,6 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ]],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -2159,7 +2134,6 @@ describe('AgentTool::execute — configure_tools {item: [...]} unwrap', function
                 ],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();
@@ -2193,7 +2167,6 @@ describe('AgentTool::execute — create_agent {item: [...]} unwrap', function ()
                 ],
             ],
             7,
-            null,
         );
 
         expect($out->success)->toBeFalse()
@@ -2245,7 +2218,6 @@ describe('AgentTool::execute — update_agent (agent_id scoped)', function (): v
                 'agent'    => ['name' => 'Renamed'],
             ],
             $callerId,
-            $ownerId,
         );
 
         expect($result->success)->toBeTrue();

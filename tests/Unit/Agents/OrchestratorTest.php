@@ -3112,7 +3112,6 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
         public function execute(
             array $arguments,
             int $agentId,
-            ?int $userId = null,
             ?int $taskId = null,
             ?Spora\Services\PrincipalContext $context = null,
         ): ToolResult {
@@ -3225,7 +3224,6 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
         public function execute(
             array $arguments,
             int $agentId,
-            ?int $userId = null,
             ?int $taskId = null,
             ?Spora\Services\PrincipalContext $context = null,
         ): ToolResult {

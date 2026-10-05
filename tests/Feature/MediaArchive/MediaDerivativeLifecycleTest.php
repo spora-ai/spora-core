@@ -310,7 +310,6 @@ describe('per-field inheritance — the two access failures and the storage leak
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => (string) $derivative->id],
                 agentId: $agentId,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();

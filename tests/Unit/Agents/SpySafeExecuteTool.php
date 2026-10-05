@@ -27,10 +27,10 @@ final class SpySafeExecuteTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
+        $userId = $context?->ownerUserId;
         self::$lastUserId = $userId;
         self::$lastTaskId = $taskId;
         return new ToolResult(true, 'ok');

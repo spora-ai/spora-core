@@ -29,7 +29,6 @@ final class RecEmptyTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -53,7 +52,6 @@ final class RecAllPresentTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -77,7 +75,6 @@ final class RecOneMissingTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -101,7 +98,6 @@ final class RecMixedTool implements ToolInterface
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?\Spora\Services\PrincipalContext $context = null,
     ): ToolResult {
@@ -273,7 +269,6 @@ test('validate returns [] when the registered class has no #[Tool] attribute', f
         public function execute(
             array $arguments,
             int $agentId,
-            ?int $userId = null,
             ?int $taskId = null,
             ?\Spora\Services\PrincipalContext $context = null,
         ): ToolResult {

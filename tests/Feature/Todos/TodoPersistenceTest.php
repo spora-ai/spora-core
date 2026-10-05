@@ -80,7 +80,7 @@ it('TodoTool persists replace semantics', function (): void {
             ['content' => 'one', 'status' => 'completed'],
             ['content' => 'two', 'status' => 'in_progress'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $stored = (new TodoStore($task->id))->read();
     expect($stored->items)->toHaveCount(2)
@@ -91,7 +91,7 @@ it('TodoTool persists replace semantics', function (): void {
         'todos' => [
             ['content' => 'replaced', 'status' => 'pending'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $stored = (new TodoStore($task->id))->read();
     expect($stored->items)->toHaveCount(1)
@@ -105,7 +105,7 @@ it('keeps task.data.todos untouched when MessageHistoryBuilder runs compaction',
         'todos' => [
             ['content' => 'survive compaction', 'status' => 'pending'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $snapshot = (new TodoStore($task->id))->read();
 
@@ -129,7 +129,7 @@ it('survives a task_history row deletion (mirrors compaction)', function (): voi
     $tool = new TodoTool(new TodoStoreRegistry());
     $tool->execute([
         'todos' => [['content' => 'survive', 'status' => 'pending']],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $rows = TaskHistory::where('task_id', $task->id)->get();
     foreach ($rows as $row) {
@@ -150,12 +150,12 @@ it('TodoTool persists op=add end-to-end', function (): void {
         'todos' => [
             ['content' => 'First',  'status' => 'pending', 'id' => 'first'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $tool->execute([
         'op'   => 'add',
         'item' => ['content' => 'Second', 'status' => 'in_progress'],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $stored = (new TodoStore($task->id))->read();
     expect($stored->items)->toHaveCount(2)
@@ -180,13 +180,13 @@ it('TodoTool persists op=set_status end-to-end', function (): void {
             ['content' => 'One', 'status' => 'pending', 'id' => 'one'],
             ['content' => 'Two', 'status' => 'pending', 'id' => 'two'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $tool->execute([
         'op'     => 'set_status',
         'id'     => 'one',
         'status' => 'completed',
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $stored = (new TodoStore($task->id))->read();
     expect($stored->items)->toHaveCount(2)
@@ -208,7 +208,7 @@ it('op=set_status on a missing id does not mutate the persisted state', function
     $tool->execute([
         'op'    => 'write',
         'todos' => [['content' => 'Only', 'status' => 'pending', 'id' => 'only']],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $before = (new TodoStore($task->id))->read();
 
@@ -216,7 +216,7 @@ it('op=set_status on a missing id does not mutate the persisted state', function
         'op'     => 'set_status',
         'id'     => 'ghost',
         'status' => 'completed',
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     expect($result->success)->toBeFalse();
 
@@ -236,7 +236,7 @@ it('op=set_status is hard-rejected when applying would leave more than one in_pr
             ['content' => 'A', 'status' => 'in_progress', 'id' => 'a'],
             ['content' => 'B', 'status' => 'pending',     'id' => 'b'],
         ],
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     $before = (new TodoStore($task->id))->read();
     $beforeUpdatedAt = $before->updatedAt?->toIso8601String();
@@ -246,7 +246,7 @@ it('op=set_status is hard-rejected when applying would leave more than one in_pr
         'op'     => 'set_status',
         'id'     => 'b',
         'status' => 'in_progress',
-    ], 1, null, $task->id);
+    ], 1, $task->id);
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain("Cannot mark 'b' as 'in_progress'")

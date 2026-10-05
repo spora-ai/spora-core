@@ -74,7 +74,6 @@ it('does not modify the agent_tool_overrides row when the SubAgentTool is invoke
     $result = $tool->execute(
         arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
     );
     expect($result->success)->toBeTrue("Tool rejected valid target: {$result->content}");
@@ -142,7 +141,6 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $result = $tool->execute(
         arguments: ['target_agent_id' => 9999, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
     );
     expect($result->success)->toBeFalse();
