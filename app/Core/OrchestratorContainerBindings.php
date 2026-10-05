@@ -298,19 +298,7 @@ final class OrchestratorContainerBindings
                     }
                 }
 
-                // So a skill's `allowed-tools` can be checked against the
-                // installed tool set. Guarded on both entries it needs: a test
-                // container assembled from this slice alone defines neither
-                // `tool_classes` nor a logger, and a skill scan must not depend
-                // on a tool registry to produce its summaries.
-                $toolNames = $c->has('tool_classes') && $c->has(LoggerInterface::class)
-                    ? new ToolConfigNameResolver(
-                        $c->get(LoggerInterface::class),
-                        InstalledToolClasses::for($c),
-                    )
-                    : null;
-
-                return new SkillScanner($roots, $toolNames);
+                return new SkillScanner($roots, self::skillToolNameResolver($c));
             },
 
             // Core's skill provider is listed first and the plugin classes are
@@ -446,5 +434,28 @@ final class OrchestratorContainerBindings
 
             MailTemplate::class => static fn(): MailTemplate => new MailTemplate(),
         ];
+    }
+
+    /**
+     * The name→class map a skill's `allowed-tools` is checked against, so a
+     * declared name that no installed tool answers to is reported as a warning
+     * instead of rendering as a tool the operator cannot find.
+     *
+     * Null when either entry it needs is absent: a test container assembled
+     * from the templates slice alone defines neither `tool_classes` nor a
+     * logger. A skill scan must not depend on a tool registry to produce its
+     * summaries, so the absence degrades to no name checking rather than
+     * failing the scan.
+     */
+    private static function skillToolNameResolver(ContainerInterface $c): ?ToolConfigNameResolver
+    {
+        if (!$c->has('tool_classes') || !$c->has(LoggerInterface::class)) {
+            return null;
+        }
+
+        return new ToolConfigNameResolver(
+            $c->get(LoggerInterface::class),
+            InstalledToolClasses::for($c),
+        );
     }
 }
