@@ -22,7 +22,7 @@ interface OrchestratorInterface
      * @param  int|null $parentTaskId Optional parent task for follow-up chaining.
      * @param  int|null $runId       Optional scheduled run ID for tracking.
      * @param  int|null $userId      Optional explicit caller id for task
-     *                                attribution (`tasks.user_id`). When
+     *                                attribution (`tasks.trigger_user_id`). When
      *                                omitted, the orchestrator falls back
      *                                to the agent's runner (used by worker
      *                                and scheduled-run paths that legitimately

@@ -58,7 +58,7 @@ final class AgentPrincipalService implements AgentPrincipalServiceInterface
             //
             // `tasks.trigger_user_id` is intentionally NOT touched: the
             // historical "user X started this chat" attribution outlives
-            // ownership changes (post-0071 schema split).
+            // ownership changes (post-0073 schema split).
             Capsule::table('tasks')
                 ->where('agent_id', $agent->id)
                 ->update(['principal_id' => $targetPrincipalId]);

@@ -65,7 +65,7 @@ final class PrincipalResolver
      * initial execution.
      *
      * Source column is `tasks.trigger_user_id` (not `user_id`): the
-     * post-0071 schema separates the immutable clicker attribution
+     * post-0073 schema separates the immutable clicker attribution
      * (`trigger_user_id`) from the mutable ownership marker
      * (`principal_id`). Resolving credentials from `trigger_user_id`
      * preserves the original "clicker runs the tick" semantic even

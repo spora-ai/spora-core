@@ -16,8 +16,8 @@ namespace Spora\Extensions;
  * hooks were `autoload()`, `drivers()`, `recipePaths()`, `register()`,
  * `routes()`, `boot()`. The first three had no callers; the last three
  * became PSR-14 events — extensions that need them implement
- * `Symfony\Contracts\EventDispatcher\EventSubscriberInterface` and react to
- * the matching `Spora\Events\*` events. See
+ * `Symfony\Component\EventDispatcher\EventSubscriberInterface` and react
+ * to the matching `Spora\Events\*` events. See
  * `spora-workspace/plans/extension-interface-events.md` for the
  * migration guide and the design rationale.
  */

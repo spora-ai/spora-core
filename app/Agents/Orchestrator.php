@@ -152,21 +152,16 @@ final class Orchestrator implements OrchestratorInterface
 
         $taskData = $runId !== null ? ['run_id' => $runId] : [];
 
-        // `tasks` carries two identity columns (post-0071) plus the
-        // historical `user_id`-derived ones:
-        // - `tasks.principal_id` — the agent's owner principal. Drives
-        //   visibility + per-task action gating. Copied from the agent
-        //   here, then re-bulk-updated by AgentPrincipalService when the
-        //   agent is transferred.
-        // - `tasks.trigger_user_id` — the user who clicked "Send".
-        //   Drives credential resolution (via PrincipalResolver::
-        //   runnerUserId) and Mercure topic routing. Nullable for
-        //   system-generated tasks (cron / scheduled / webhook).
-        // For interactive callers (`POST /tasks`) the HTTP controller
-        // passes `$userId` explicitly and we skip the runner fallback.
-        // Worker / scheduled-run paths leave it null and fall through to
-        // the runner (the agent's most recent trigger) so the LLM still
-        // runs under a valid principal.
+        // Migration 0073 split the old conflated user_id into two:
+        // - `tasks.principal_id` — the owning principal. Drives visibility and
+        //   per-task action gating; copied from the agent, then re-bulk-updated
+        //   by AgentPrincipalService on transfer.
+        // - `tasks.trigger_user_id` — who clicked Send, null for
+        //   system-generated tasks. Credential resolution only, via
+        //   PrincipalResolver::runnerUserId(); carries no access-control weight.
+        //   Interactive callers pass it explicitly to skip the runner fallback;
+        //   worker and scheduled paths leave it null and fall through to the
+        //   agent's most recent trigger so the LLM still resolves a principal.
         $resolver = $this->principalResolver ?? new PrincipalResolver();
         $resolvedUserId = $userId;
         if ($resolvedUserId === null) {

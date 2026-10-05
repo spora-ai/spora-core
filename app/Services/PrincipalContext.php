@@ -17,9 +17,8 @@ namespace Spora\Services;
  *     encryption keys, audit attribution, and any API that requires "the
  *     paying user". Sharing semantics: owner's settings always apply.
  *
- *   - `runnerUserId` — the user who triggered the current task. Used by
- *     memory write attribution, Mercure publish targets, and the
- *     `tasks.user_id` column. Records who clicked, not who paid.
+ *   - `runnerUserId` — the user who triggered the current task, read from
+ *     `tasks.trigger_user_id`. Records who clicked, not who paid.
  *
  * Make both nullable so partially-resolved contexts (test stubs, controller
  * preview paths) keep type-safety.
