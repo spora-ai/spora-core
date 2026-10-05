@@ -68,13 +68,19 @@ function makeSkillControllerFixture(AuthService|Mockery\MockInterface|null $auth
     return [$controller, $cleanup, $root, $ownPrincipal];
 }
 
-function writeToySkillMd(string $root, string $slug, string $body, string $description = 'Test skill.'): void
+function writeToySkillMd(string $root, string $slug, string $body, string $description = 'Test skill.', ?string $allowedTools = null): void
 {
     $dir = $root . '/' . $slug;
     mkdir($dir, 0o755, true);
+    $frontmatter = "name: {$slug}\ndescription: {$description}\n";
+    if ($allowedTools !== null) {
+        // Quoted, so a folded/multi-line declaration survives as the string the
+        // parser is meant to see.
+        $frontmatter .= 'allowed-tools: ' . json_encode($allowedTools) . "\n";
+    }
     file_put_contents(
         $dir . '/SKILL.md',
-        "---\nname: {$slug}\ndescription: {$description}\n---\n\n" . ltrim($body, "\n"),
+        "---\n" . $frontmatter . "---\n\n" . ltrim($body, "\n"),
     );
 }
 
@@ -155,6 +161,60 @@ test('GET /skills/{slug} returns 404 for an unknown skill', function (): void {
 
         expect($response->getStatusCode())->toBe(404)
             ->and($payload['error']['code'])->toBe('SKILL_NOT_FOUND');
+    } finally {
+        $cleanup();
+    }
+});
+
+test('GET /skills emits slug and the declared tool list', function (): void {
+    // `slug` was computed and populated all along and dropped on the wire, so a
+    // consumer had no stable identifier for a row it was rendering.
+    $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('skilltools@example.com');
+    [$controller, $cleanup, $root] = makeSkillControllerFixture();
+    try {
+        writeToySkillMd($root, 'git', '# Body', 'Git skill.', "read_url\nagent");
+
+        $skills = json_decode((string) $controller->index(Request::create('/api/v1/skills'))->getContent(), true)['data']['skills'];
+        $git = array_values(array_filter($skills, static fn(array $s): bool => $s['name'] === 'git'))[0];
+
+        expect($git['slug'])->toBe('git')
+            ->and($git['required_tools'])->toBe(['read_url', 'agent']);
+    } finally {
+        $cleanup();
+    }
+});
+
+test('GET /skills/{slug} emits the raw and the parsed tool declaration', function (): void {
+    $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('skilldetailtools@example.com');
+    [$controller, $cleanup, $root] = makeSkillControllerFixture();
+    try {
+        writeToySkillMd($root, 'git', '# Body', 'Git skill.', 'read_url agent');
+
+        $request = Request::create('/api/v1/skills/git');
+        $request->attributes->set('slug', 'git');
+        $skill = json_decode((string) $controller->show($request)->getContent(), true)['data']['skill'];
+
+        // Raw stays for spec compatibility; the parsed list is what a consumer
+        // can compare against the installed tools.
+        expect($skill['allowed_tools'])->toBe('read_url agent')
+            ->and($skill['required_tools'])->toBe(['read_url', 'agent']);
+    } finally {
+        $cleanup();
+    }
+});
+
+test('GET /skills/{slug} emits an empty tool list for a skill that declares none', function (): void {
+    $GLOBALS['__skillCtrlUserId'] = skillCtrlUser('skillnotools@example.com');
+    [$controller, $cleanup, $root] = makeSkillControllerFixture();
+    try {
+        writeToySkillMd($root, 'git', '# Body', 'Git skill.');
+
+        $request = Request::create('/api/v1/skills/git');
+        $request->attributes->set('slug', 'git');
+        $skill = json_decode((string) $controller->show($request)->getContent(), true)['data']['skill'];
+
+        expect($skill['allowed_tools'])->toBeNull()
+            ->and($skill['required_tools'])->toBe([]);
     } finally {
         $cleanup();
     }

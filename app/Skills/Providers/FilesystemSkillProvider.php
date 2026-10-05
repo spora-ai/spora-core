@@ -62,6 +62,7 @@ final class FilesystemSkillProvider implements SkillProviderInterface
             metadata: $skill->metadata(),
             files: $skill->files(),
             warnings: $skill->warnings(),
+            requiredTools: $skill->declaredToolNames(),
         );
     }
 
@@ -152,6 +153,7 @@ final class FilesystemSkillProvider implements SkillProviderInterface
             slug: $skill->slug(),
             fileCount: count($skill->files()),
             hasWarnings: $skill->hasWarnings(),
+            requiredTools: $skill->declaredToolNames(),
         );
     }
 

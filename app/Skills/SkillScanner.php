@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Skills;
 
+use Spora\Services\ToolConfigNameResolver;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Yaml\Yaml;
 use Throwable;
@@ -46,9 +47,14 @@ final class SkillScanner
      *        Scan roots, each carrying a `source` label used to bucket
      *        same-named skills and to populate `Skill::source()`.
      *        Typical sources: `'project'`, `'core'`, or a plugin slug.
+     * @param ToolConfigNameResolver|null $toolNames  Passed through to
+     *        {@see SkillValidator} so a skill's `allowed-tools` can be checked
+     *        against the installed tools. Optional, so a scan over a fixture
+     *        root needs no tool registry.
      */
     public function __construct(
         private readonly array $roots = [],
+        private readonly ?ToolConfigNameResolver $toolNames = null,
     ) {}
 
     /**
@@ -56,7 +62,7 @@ final class SkillScanner
      */
     public function scan(): array
     {
-        $validator = new SkillValidator();
+        $validator = new SkillValidator($this->toolNames);
         $seen = [];
         $skills = [];
 

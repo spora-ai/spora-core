@@ -2,8 +2,11 @@
 
 declare(strict_types=1);
 
+use Psr\Log\NullLogger;
+use Spora\Services\ToolConfigNameResolver;
 use Spora\Skills\Skill;
 use Spora\Skills\SkillScanner;
+use Spora\Tools\CalculatorTool;
 
 /**
  * Build a SkillScanner over a synthesised set of scan roots under sys_get_temp_dir.
@@ -316,6 +319,37 @@ test('scan() skips directories that do not contain a SKILL.md', function (): voi
         $skills = $scanner->scan();
         $names = array_map(static fn(Skill $s) => $s->name(), $skills);
         expect($names)->toBe(['present']);
+    } finally {
+        $cleanup();
+    }
+});
+
+test('scan() reports a declared tool name that no installed tool answers to', function (): void {
+    [$scanner, $cleanup, $paths] = makeSkillScanner();
+    $root = $paths[0];
+    try {
+        writeSkill(
+            $root,
+            'uses-tools',
+            "name: uses-tools\ndescription: Declares tools.\nallowed-tools: \"calculator nope_tool\"",
+            "# body",
+        );
+
+        // A resolver over real tool classes, so `calculator` is answered by an
+        // actual #[Tool(name:)] and only `nope_tool` is left over.
+        $withResolver = new SkillScanner(
+            [['path' => $root, 'source' => 'project']],
+            new ToolConfigNameResolver(new NullLogger(), [CalculatorTool::class]),
+        );
+        $warnings = $withResolver->scan()[0]->warnings();
+
+        expect(array_column($warnings, 'code'))->toBe(['ALLOWED_TOOLS_UNKNOWN_TOOL'])
+            ->and(array_column($warnings, 'severity'))->toBe(['warning'])
+            // The skill is still served: a declaration nothing grants.
+            ->and($withResolver->scan()[0]->name())->toBe('uses-tools')
+            ->and($withResolver->scan()[0]->declaredToolNames())->toBe(['calculator', 'nope_tool'])
+            // Without a resolver the same skill scans clean.
+            ->and($scanner->scan()[0]->warnings())->toBe([]);
     } finally {
         $cleanup();
     }

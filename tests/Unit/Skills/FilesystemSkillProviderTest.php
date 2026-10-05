@@ -196,6 +196,30 @@ it('maps a skill to a summary and a descriptor', function (): void {
     }
 });
 
+it('carries the declared tool list onto both the summary and the detail', function (): void {
+    $root = sys_get_temp_dir() . '/spora_fs_provider_tools_' . uniqid('', true);
+    mkdir($root . '/demo', 0o755, true);
+    file_put_contents(
+        $root . '/demo/SKILL.md',
+        "---\nname: demo\ndescription: A demo skill\nallowed-tools: \"read_url  agent\\nread_url\"\n---\n\n# Demo\n",
+    );
+
+    try {
+        $provider = new FilesystemSkillProvider(new SkillScanner([['path' => $root, 'source' => 'project']]));
+
+        // Both shapes: the summary is what a list fetch carries, the descriptor
+        // what a detail read does.
+        expect($provider->getSkills(null)[0]->requiredTools)->toBe(['read_url', 'agent'])
+            ->and($provider->getSkillDetails('demo', null)->requiredTools)->toBe(['read_url', 'agent'])
+            ->and($provider->getSkillDetails('demo', null)->allowedTools)
+                ->toBe("read_url  agent\nread_url");
+    } finally {
+        @unlink($root . '/demo/SKILL.md');
+        @rmdir($root . '/demo');
+        @rmdir($root);
+    }
+});
+
 it('carries scanner warnings onto the summary', function (): void {
     // A skill that fails validation is still surfaced, with the reason — the
     // operator has to be able to see why a bundled skill did not load.

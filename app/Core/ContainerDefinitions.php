@@ -573,10 +573,7 @@ final class ContainerDefinitions
                 return new ToolConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
-                    array_values(array_unique(array_merge(
-                        $c->get('tool_classes'),
-                        $c->get(PluginLoader::class)->toolClasses(),
-                    ))),
+                    InstalledToolClasses::for($c),
                     // Guarded because some build/test contexts resolve this
                     // graph without the orchestrator slice; null yields an
                     // empty skills map, matching a bare `new` call site.
@@ -591,10 +588,7 @@ final class ContainerDefinitions
                 return new ToolIconResolver(
                     new ToolConfigNameResolver(
                         $c->get(LoggerInterface::class),
-                        array_values(array_unique(array_merge(
-                            $c->get('tool_classes'),
-                            $c->get(PluginLoader::class)->toolClasses(),
-                        ))),
+                        InstalledToolClasses::for($c),
                     ),
                     $c->get(PluginLoader::class),
                 );
@@ -609,10 +603,7 @@ final class ContainerDefinitions
                 return new ToolsRecommendsSkillsValidator(
                     new ToolConfigNameResolver(
                         $c->get(LoggerInterface::class),
-                        array_values(array_unique(array_merge(
-                            $c->get('tool_classes'),
-                            $c->get(PluginLoader::class)->toolClasses(),
-                        ))),
+                        InstalledToolClasses::for($c),
                     ),
                     $c->has(SkillProviderRegistry::class) ? $c->get(SkillProviderRegistry::class) : null,
                 );
@@ -1212,10 +1203,7 @@ final class ContainerDefinitions
                 return new ToolController(
                     $c->get(AuthService::class),
                     $c->get(ToolConfigService::class),
-                    array_values(array_unique(array_merge(
-                        $c->get('tool_classes'),
-                        $c->get(PluginLoader::class)->toolClasses(),
-                    ))),
+                    InstalledToolClasses::for($c),
                     $c->get(ToolIconResolver::class),
                     $c->get(ToolsRecommendsSkillsValidator::class),
                 );

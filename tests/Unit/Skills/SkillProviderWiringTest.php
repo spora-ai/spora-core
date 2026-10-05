@@ -8,6 +8,7 @@ use Spora\Core\Kernel;
 use Spora\Core\OrchestratorContainerBindings;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
+use Spora\Services\ToolConfigNameResolver;
 use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderInterface;
 use Spora\Skills\SkillProviderRegistry;
@@ -139,6 +140,17 @@ it('the container resolves the filesystem provider over the scanner', function (
     $provider = $c->get(FilesystemSkillProvider::class);
 
     expect($provider->getSkills(null))->not->toBe([]);
+});
+
+it('the container gives the scanner a tool-name resolver', function (): void {
+    // Without it the scanner cannot tell a typo'd `allowed-tools` entry from a
+    // tool the install simply does not have, and the finding is silent.
+    $c = (new Kernel())->getContainer();
+
+    $toolNames = (new ReflectionProperty(SkillScanner::class, 'toolNames'))
+        ->getValue($c->get(SkillScanner::class));
+
+    expect($toolNames)->toBeInstanceOf(ToolConfigNameResolver::class);
 });
 
 it('the scanner and the filesystem provider agree on what exists', function (): void {

@@ -13,6 +13,12 @@ namespace Spora\Skills;
  */
 final readonly class SkillSummary
 {
+    /**
+     * @param list<string> $requiredTools  The tool names the skill declares it
+     *        uses, parsed. A declaration, not a grant — Spora pre-approves
+     *        nothing and enforces no requirement. The default keeps a provider
+     *        that never parsed the field constructible.
+     */
     public function __construct(
         public string $name,
         public string $description,
@@ -21,5 +27,6 @@ final readonly class SkillSummary
         public ?string $slug = null,
         public int $fileCount = 0,
         public bool $hasWarnings = false,
+        public array $requiredTools = [],
     ) {}
 }

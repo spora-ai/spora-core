@@ -17,6 +17,9 @@ final readonly class SkillDescriptor
      * @param list<array{path: string, bytes: int}>                 $files
      * @param array<string, string>                                 $metadata
      * @param list<array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @param list<string>                                          $requiredTools  Parsed
+     *        `allowed-tools`; a declaration, not a grant. Last so a reorder
+     *        cannot silently repoint an existing positional call site.
      */
     public function __construct(
         public SkillSummary $summary,
@@ -26,6 +29,7 @@ final readonly class SkillDescriptor
         public array $metadata = [],
         public array $files = [],
         public array $warnings = [],
+        public array $requiredTools = [],
     ) {}
 
     public function name(): string

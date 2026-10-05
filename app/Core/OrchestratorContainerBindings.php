@@ -57,6 +57,7 @@ use Spora\Services\SkillListProjector;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
 use Spora\Services\ToolCallSerializer;
+use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Skills\Providers\FilesystemSkillProvider;
@@ -297,7 +298,19 @@ final class OrchestratorContainerBindings
                     }
                 }
 
-                return new SkillScanner($roots);
+                // So a skill's `allowed-tools` can be checked against the
+                // installed tool set. Guarded on both entries it needs: a test
+                // container assembled from this slice alone defines neither
+                // `tool_classes` nor a logger, and a skill scan must not depend
+                // on a tool registry to produce its summaries.
+                $toolNames = $c->has('tool_classes') && $c->has(LoggerInterface::class)
+                    ? new ToolConfigNameResolver(
+                        $c->get(LoggerInterface::class),
+                        InstalledToolClasses::for($c),
+                    )
+                    : null;
+
+                return new SkillScanner($roots, $toolNames);
             },
 
             // Core's skill provider is listed first and the plugin classes are

@@ -18,6 +18,7 @@ use Spora\Http\ToolController;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\CalculatorTool;
+use Spora\Tools\TimeTool;
 use Tests\Fixtures\TestTool;
 
 /**
@@ -97,6 +98,38 @@ function makeContainerForToolFactories(
         AuthService::class => static fn(Container $c): AuthService => bootAuthLayer(),
     ], $extra));
     return $builder->build();
+}
+
+/**
+ * A loaded AppLoader over a throwaway `app/App.php` that contributes one tool.
+ *
+ * The App class name is unique per call: `AppLoader::discoverApp()` diffs the
+ * declared classes across a `require_once`, so a second load of the same file is
+ * a no-op it would read as "no App found".
+ *
+ * @return array{0: AppLoader, 1: string} [loader, base path the App lives in]
+ */
+function makeAppContributingTool(string $toolClass = TimeTool::class): array
+{
+    $base = sys_get_temp_dir() . '/spora_app_tools_' . uniqid('', true);
+    if (!mkdir($base . '/app', 0o755, true) && !is_dir($base . '/app')) {
+        throw new RuntimeException("Cannot create app dir: {$base}/app");
+    }
+
+    $class = 'AppContributing' . uniqid();
+    file_put_contents(
+        $base . '/app/App.php',
+        "<?php\n\ndeclare(strict_types=1);\n\n"
+        . "final class {$class} extends \\Spora\\Extensions\\AbstractExtension\n{\n"
+        . "    public function getName(): string { return 'app-contributing'; }\n"
+        . "    public function tools(): array { return [\\{$toolClass}::class]; }\n"
+        . "}\n",
+    );
+
+    $loader = new AppLoader();
+    $loader->load(new Paths($base));
+
+    return [$loader, $base];
 }
 
 beforeEach(function (): void {
@@ -407,7 +440,7 @@ it('llmDefinitions includes all expected entries', function (): void {
     expect($def)->toHaveKey('app_apps');
 
     expect($def)->toHaveKey('tool_classes');
-    expect($def['tool_classes'])->toContain(Spora\Tools\TimeTool::class);
+    expect($def['tool_classes'])->toContain(TimeTool::class);
     expect($def['tool_classes'])->toContain(CalculatorTool::class);
     expect($def['tool_classes'])->toContain(Spora\Tools\UserInfoTool::class);
 
@@ -558,7 +591,7 @@ it('toolDefinitions includes all tools and tool_instances', function (): void {
 
     expect($def)->toHaveKey('tool_instances');
     expect($def)->toHaveKey(Spora\Services\ToolCallSerializer::class);
-    expect($def)->toHaveKey(Spora\Tools\TimeTool::class);
+    expect($def)->toHaveKey(TimeTool::class);
     expect($def)->toHaveKey(CalculatorTool::class);
     expect($def)->toHaveKey(Spora\Tools\UserInfoTool::class);
 });
@@ -762,6 +795,51 @@ it('tool_instances factory returns only core tools when no plugin is loaded', fu
     expect($instances)->toHaveKey(CalculatorTool::class);
     expect($instances)->not->toHaveKey(TestTool::class);
     expect($instances[CalculatorTool::class])->toBeInstanceOf(CalculatorTool::class);
+});
+
+// A tool contributed by an App was executable at runtime — `tool_instances` has
+// always gone through InstalledToolClasses — while the list the operator and the
+// API see was assembled by hand at four sites that forgot the App. The symptom
+// was a tool the agent could call but the UI could not find, which for the
+// skill declarations now on the wire reads as "not a registered tool".
+
+it('every hand-assembled tool list includes tools an App contributes', function (): void {
+    [$appLoader, $appBase] = makeAppContributingTool();
+
+    try {
+        $c = makeContainerForToolFactories([CalculatorTool::class], extra: [
+            AppLoader::class => $appLoader,
+        ]);
+
+        $coreService = callContainerMethod('coreServiceDefinitions');
+        $controllers = callContainerMethod('apiResourceControllerDefinitions');
+
+        /** @var ToolConfigService $service */
+        $service = ($coreService[ToolConfigService::class])($c);
+        $resolver = (new ReflectionProperty($service, 'nameResolver'))->getValue($service);
+        $serviceClasses = (new ReflectionProperty($resolver, 'toolClasses'))->getValue($resolver);
+
+        /** @var ToolController $controller */
+        $controller = ($controllers[ToolController::class])($c);
+        $controllerClasses = (new ReflectionProperty($controller, 'toolClasses'))->getValue($controller);
+
+        $iconResolver = ($coreService[Spora\Services\ToolIconResolver::class])($c);
+        $iconResolverTool = (new ReflectionProperty($iconResolver, 'nameResolver'))->getValue($iconResolver);
+        $iconClasses = (new ReflectionProperty($iconResolverTool, 'toolClasses'))->getValue($iconResolverTool);
+
+        $strictValidator = ($coreService[Spora\Services\ToolsRecommendsSkillsValidator::class])($c);
+        $strictResolver = (new ReflectionProperty($strictValidator, 'resolver'))->getValue($strictValidator);
+        $strictClasses = (new ReflectionProperty($strictResolver, 'toolClasses'))->getValue($strictResolver);
+
+        expect($serviceClasses)->toContain(TimeTool::class)
+            ->and($controllerClasses)->toContain(TimeTool::class)
+            ->and($iconClasses)->toContain(TimeTool::class)
+            ->and($strictClasses)->toContain(TimeTool::class);
+    } finally {
+        @unlink($appBase . '/app/App.php');
+        @rmdir($appBase . '/app');
+        @rmdir($appBase);
+    }
 });
 
 // llm_driver_classes_merged factory
