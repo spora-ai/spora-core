@@ -10,6 +10,7 @@ use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AgentTool;
 use Spora\Tools\CalculatorTool;
@@ -50,6 +51,34 @@ function makeAgentToolWithRealSettings(): array
     $userId = bootAuth($auth, "agent-tool-semantics-{$seq}@example.com", AGENT_TOOL_SEMANTICS_PASSWORD);
 
     return [new AgentTool($agentService, $toolSettings, $manifest), $agentService, $toolSettings, $userId];
+}
+
+if (!function_exists('agentToolContext')) {
+    /**
+     * The `PrincipalContext` a real orchestrator call for a user-owned agent
+     * would carry, for `execute(..., context: agentToolContext($userId))`.
+     *
+     * `configure_tools` and `read_agent` read the acting user from
+     * `$context?->ownerUserId`, and both refuse outright when that is null
+     * ("requires an authenticated user"), so the user each test creates its
+     * agents with has to travel as the context
+     * `PrincipalResolver::resolveForToolExecute()` builds from the agent's
+     * own row: the user's principal, that user as owner, and — because a
+     * task with no `trigger_user_id` falls back to the owner — the same id
+     * as the runner.
+     *
+     * Guarded so the parallel runner, which may load several of these files
+     * into one worker, does not redeclare it.
+     */
+    function agentToolContext(int $userId): PrincipalContext
+    {
+        return new PrincipalContext(
+            principalId: createUserPrincipalPublic($userId),
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $userId,
+            runnerUserId: $userId,
+        );
+    }
 }
 
 /**
@@ -102,7 +131,7 @@ describe('configure_tools — enablement is tri-state', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Round Trip']);
 
-        $fresh = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, $userId);
+        $fresh = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, context: agentToolContext($userId));
         expect(countEnabledIn($fresh->data))->toBe(0, 'a fresh agent has no tools enabled');
 
         $on = $tool->execute([
@@ -112,7 +141,7 @@ describe('configure_tools — enablement is tri-state', function (): void {
                 ['tool_class' => CalculatorTool::class, 'enabled' => true],
                 ['tool_class' => TimeTool::class, 'enabled' => true],
             ],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($on->success)->toBeTrue()
             ->and(countEnabledIn($on->data))->toBe(2)
@@ -122,7 +151,7 @@ describe('configure_tools — enablement is tri-state', function (): void {
             'action'   => 'configure_tools',
             'agent_id' => $target->id,
             'tools'    => [['tool_class' => CalculatorTool::class, 'enabled' => false]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         // The call that does the disabling must report it, not echo a stale state.
         expect($off->success)->toBeTrue()
@@ -131,7 +160,7 @@ describe('configure_tools — enablement is tri-state', function (): void {
             ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
 
         // And a read that did not perform the write must agree.
-        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, $userId);
+        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, context: agentToolContext($userId));
         expect(manifestTool($read->data, CalculatorTool::class)['enabled'])->toBeFalse()
             ->and($read->content)->toContain(CalculatorTool::class);
     });
@@ -144,7 +173,7 @@ describe('configure_tools — enablement is tri-state', function (): void {
             'action'   => 'configure_tools',
             'agent_id' => $target->id,
             'tools'    => [['tool_class' => CalculatorTool::class]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         // The regression this pins: a dropped or omitted `enabled` used to
         // default to true, so anything that lost the key — a provider
@@ -161,11 +190,11 @@ describe('configure_tools — enablement is tri-state', function (): void {
         $first = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => false]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         $second = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => false]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($first->success)->toBeTrue()
             ->and($second->success)->toBeTrue()
@@ -180,11 +209,11 @@ describe('configure_tools — enablement is tri-state', function (): void {
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => true]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         $result = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id, 'tools' => [],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         // Revoke-all is not a thing here; the skills used to claim it was.
         expect($result->success)->toBeTrue()
@@ -205,7 +234,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $on = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'true']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect($on->success)->toBeTrue()
             ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
 
@@ -214,11 +243,11 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $off = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'false']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect($off->success)->toBeTrue()
             ->and(persistedToolsFor($target->id))->toBe([]);
 
-        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, $userId);
+        $read = $tool->execute(['action' => 'read_agent', 'agent_id' => $target->id], $target->id, context: agentToolContext($userId));
         expect(manifestTool($read->data, TimeTool::class)['enabled'])->toBeFalse();
     });
 
@@ -229,13 +258,13 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => ' TRUE ']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect(persistedToolsFor($target->id))->toBe([TimeTool::class]);
 
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 'False']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect(persistedToolsFor($target->id))->toBe([]);
     });
 
@@ -247,7 +276,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
             $result = $tool->execute([
                 'action' => 'configure_tools', 'agent_id' => $target->id,
                 'tools'  => [['tool_class' => TimeTool::class, 'enabled' => $value]],
-            ], $target->id, $userId);
+            ], $target->id, context: agentToolContext($userId));
 
             expect($result->success)->toBeFalse();
         }
@@ -262,19 +291,19 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 1]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect(persistedToolsFor($target->id))->toBe([TimeTool::class]);
 
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => 0]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect(persistedToolsFor($target->id))->toBe([]);
 
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => '0']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
         expect(persistedToolsFor($target->id))->toBe([]);
     });
 
@@ -285,14 +314,14 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => true]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         // The shared helper maps "" to false, but tri-state makes "no change"
         // representable here, so a malformed empty value must not revoke.
         $result = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => '  ']],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and(persistedToolsFor($target->id))->toBe([TimeTool::class]);
@@ -312,7 +341,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
                     ['name' => 'format', 'auto_approve' => 'true'],
                 ],
             ]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         $byName = [];
         foreach (manifestTool($result->data, TimeTool::class)['operations'] as $op) {
@@ -331,7 +360,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
         $result = $tool->execute([
             'action' => 'configure_tools', 'agent_id' => $target->id,
             'tools'  => [['tool_class' => TimeTool::class, 'enabled' => null]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('must be true or false')
@@ -349,7 +378,7 @@ describe('configure_tools — a non-boolean enablement flag is refused', functio
                 'enabled'    => true,
                 'operations' => [['name' => 'now', 'enabled' => 'maybe']],
             ]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('operations[0][0]')
@@ -434,7 +463,7 @@ describe('configure_tools — operation names are validated', function (): void 
                 'enabled'    => true,
                 'operations' => [['name' => 'get_time', 'enabled' => false]],
             ]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         // The reported shape: success, a junk row persisted, and an empty
         // `overrides` — which reads to the caller as "nothing landed" while a
@@ -460,7 +489,7 @@ describe('configure_tools — operation names are validated', function (): void 
                     ['name' => 'format', 'auto_approve' => true],
                 ],
             ]],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         $ops = manifestTool($result->data, TimeTool::class)['operations'];
         $byName = [];
@@ -484,7 +513,7 @@ describe('configure_tools — operation names are validated', function (): void 
                 ['tool_class' => TimeTool::class, 'enabled' => true],
                 ['tool_class' => CalculatorTool::class, 'settings' => ['nope' => 'x']],
             ],
-        ], $target->id, $userId);
+        ], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('is not a setting on')
@@ -499,9 +528,9 @@ describe('write_notes_overwrite — empty content', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Notes Empty']);
 
-        $tool->execute(['action' => 'write_notes_overwrite', 'content' => 'KEEP ME'], $target->id, $userId);
+        $tool->execute(['action' => 'write_notes_overwrite', 'content' => 'KEEP ME'], $target->id, context: agentToolContext($userId));
 
-        $result = $tool->execute(['action' => 'write_notes_overwrite', 'content' => ''], $target->id, $userId);
+        $result = $tool->execute(['action' => 'write_notes_overwrite', 'content' => ''], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('content is empty')
@@ -513,8 +542,8 @@ describe('write_notes_overwrite — empty content', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Notes Space']);
 
-        $tool->execute(['action' => 'write_notes_overwrite', 'content' => 'x'], $target->id, $userId);
-        $result = $tool->execute(['action' => 'write_notes_overwrite', 'content' => ' '], $target->id, $userId);
+        $tool->execute(['action' => 'write_notes_overwrite', 'content' => 'x'], $target->id, context: agentToolContext($userId));
+        $result = $tool->execute(['action' => 'write_notes_overwrite', 'content' => ' '], $target->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and((string) Capsule::table('agents')->where('id', $target->id)->value('notes'))->toBe(' ');
@@ -524,9 +553,9 @@ describe('write_notes_overwrite — empty content', function (): void {
         [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
         $target = $agents->createAgent($userId, ['name' => 'Notes Append']);
 
-        $tool->execute(['action' => 'write_notes', 'content' => 'BASE'], $target->id, $userId);
-        $empty = $tool->execute(['action' => 'write_notes', 'content' => ''], $target->id, $userId);
-        $tail  = $tool->execute(['action' => 'write_notes', 'content' => 'tail'], $target->id, $userId);
+        $tool->execute(['action' => 'write_notes', 'content' => 'BASE'], $target->id, context: agentToolContext($userId));
+        $empty = $tool->execute(['action' => 'write_notes', 'content' => ''], $target->id, context: agentToolContext($userId));
+        $tail  = $tool->execute(['action' => 'write_notes', 'content' => 'tail'], $target->id, context: agentToolContext($userId));
 
         // An empty append is a no-op so repeated calls don't stack separators
         // or drift updated_at — a different situation from a replace.

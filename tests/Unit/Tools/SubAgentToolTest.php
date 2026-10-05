@@ -57,12 +57,57 @@ function seedSubAgentAgents(int $userId = SUB_AGENT_USER_ID): int
     return $principalId;
 }
 
+/**
+ * The user-principal `PrincipalContext` an execute() call site needs.
+ *
+ * `ToolInterface::execute()` no longer takes a legacy `$userId` argument —
+ * the only way to tell a tool which user is calling is
+ * `PrincipalContext::ownerUserId`, which `SubAgentTool` reads as
+ * `$userId = $context?->ownerUserId`. Any test that gets past the
+ * argument guards therefore has to pass one of these, or it trips
+ * "requires an authenticated user" instead of the behaviour it means to
+ * exercise.
+ *
+ * Both ids derive from `$userId` so the context is the one
+ * `PrincipalResolver` would hand the orchestrator for an agent owned by
+ * that user.
+ */
+function subAgentUserContext(int $userId = SUB_AGENT_USER_ID): Spora\Services\PrincipalContext
+{
+    return new Spora\Services\PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Spora\Models\Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+}
+
+/**
+ * The group-principal counterpart of {@see subAgentUserContext()}, for
+ * the scenarios where the source agent sits on a group. `ownerUserId` is
+ * the group's `owner` member, which is what `PrincipalResolver::ownerUserId()`
+ * resolves for a group principal — the tool only needs it non-null, but
+ * keeping it truthful means the fixture matches a real group.
+ *
+ * @see createGroupPrincipalPublicForSubAgent() which materialises that
+ *      `owner` membership.
+ */
+function subAgentGroupContext(int $principalId, int $ownerUserId = SUB_AGENT_USER_ID): Spora\Services\PrincipalContext
+{
+    return new Spora\Services\PrincipalContext(
+        principalId: $principalId,
+        type: Spora\Models\Principal::TYPE_GROUP,
+        ownerUserId: $ownerUserId,
+        runnerUserId: $ownerUserId,
+    );
+}
+
 describe('SubAgentTool::execute (handover op)', function (): void {
 
     test('returns failure when target_agent_id is missing', function (): void {
         [$tool] = makeSubAgentTool();
 
-        $result = $tool->execute([], SUB_AGENT_AGENT_ID, SUB_AGENT_USER_ID, SUB_AGENT_TASK_ID);
+        $result = $tool->execute([], SUB_AGENT_AGENT_ID, SUB_AGENT_TASK_ID);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toBe('target_agent_id is required.');
@@ -74,7 +119,6 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -82,13 +126,17 @@ describe('SubAgentTool::execute (handover op)', function (): void {
             ->and($result->content)->toBe('prompt is required.');
     });
 
-    test('returns failure when userId is null', function (): void {
+    test('returns failure when the principal context carries no owner user id', function (): void {
         [$tool] = makeSubAgentTool();
 
+        // No context at all is the way to say "no owner user id" now that
+        // the legacy `$userId` argument is gone: the tool reads
+        // `$userId = $context?->ownerUserId`, which is null for a missing
+        // context — and equally null for a context whose principal has no
+        // resolvable owner. Either way the auth guard must fire.
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            null,
             SUB_AGENT_TASK_ID,
         );
 
@@ -99,11 +147,16 @@ describe('SubAgentTool::execute (handover op)', function (): void {
     test('returns failure when taskId is null', function (): void {
         [$tool] = makeSubAgentTool();
 
+        // The user is authenticated via the context and the task id is
+        // explicitly absent, so the guard that fires is the task-context
+        // one — not the auth one. Named arguments keep that distinction
+        // readable now that a bare `null` in position three would be the
+        // task id by default.
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
-            null,
+            taskId: null,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeFalse()
@@ -118,8 +171,8 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => 1, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeFalse()
@@ -138,8 +191,8 @@ describe('SubAgentTool::execute (handover op)', function (): void {
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeFalse()
@@ -157,11 +210,16 @@ describe('SubAgentTool::execute (handover op)', function (): void {
             ->with(SUB_AGENT_TASK_ID, SUB_AGENT_TARGET_AGENT, 'ctx', SUB_AGENT_USER_ID)
             ->andReturn($newTask);
 
+        // The `with()` constraint above is the real assertion on the
+        // context: SUB_AGENT_TASK_ID must land in the `sourceTaskId` slot
+        // and SUB_AGENT_USER_ID in the `userId` slot, which only happens if
+        // the third positional argument is still the task id and the user
+        // arrives via `context->ownerUserId`.
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeTrue()
@@ -193,8 +251,8 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'do the thing'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeTrue()
@@ -210,7 +268,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -225,7 +282,6 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -242,8 +298,8 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => 1, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeFalse()
@@ -262,8 +318,8 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeFalse()
@@ -290,8 +346,8 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeTrue()
@@ -451,8 +507,8 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => 'SubAgent Target Agent (#' . SUB_AGENT_TARGET_AGENT . ')', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeTrue()
@@ -473,8 +529,8 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => '#' . SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
         );
 
         expect($result->success)->toBeTrue()
@@ -487,7 +543,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['target_agent_id' => 'not a label', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -502,7 +557,6 @@ describe('SubAgentTool::execute (target_agent_id accepts label, #id, or int)', f
         $result = $tool->execute(
             ['target_agent_id' => '', 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
         );
 
@@ -539,8 +593,8 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(SUB_AGENT_USER_ID),
         );
 
         expect($result->success)->toBeFalse()
@@ -564,8 +618,8 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(SUB_AGENT_USER_ID),
         );
 
         expect($result->success)->toBeFalse()
@@ -601,8 +655,8 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentGroupContext($groupPrincipalId),
         );
 
         expect($result->success)->toBeTrue();
@@ -629,8 +683,8 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
         $result = $tool->execute(
             ['target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'ctx'],
             SUB_AGENT_AGENT_ID,
-            SUB_AGENT_USER_ID,
             SUB_AGENT_TASK_ID,
+            context: subAgentGroupContext($groupPrincipalId),
         );
 
         expect($result->success)->toBeFalse()
@@ -649,6 +703,12 @@ describe('SubAgentTool::isTargetAllowed (intra-principal defense in depth)', fun
  * Calls {@see createUserPrincipalPublic()} first so the `groups.created_by_user_id`
  * FK points at a real `users` row — the user-principal helper inserts a
  * stub user with id `SUB_AGENT_USER_ID` when one isn't already there.
+ *
+ * The `owner` membership is what makes the group context honest:
+ * `PrincipalResolver::ownerUserId()` resolves a group principal's owner
+ * from `group_memberships.role = 'owner'`, so without it the
+ * `ownerUserId` handed to the tool would be a value production could
+ * never produce.
  */
 function createGroupPrincipalPublicForSubAgent(): int
 {
@@ -667,6 +727,15 @@ function createGroupPrincipalPublicForSubAgent(): int
             'created_by_user_id'  => SUB_AGENT_USER_ID,
             'created_at'          => date('Y-m-d H:i:s'),
             'updated_at'          => date('Y-m-d H:i:s'),
+        ],
+    );
+
+    Illuminate\Database\Capsule\Manager::table('group_memberships')->updateOrInsert(
+        ['group_id' => 9001, 'user_id' => SUB_AGENT_USER_ID],
+        [
+            'role'       => Spora\Models\GroupMembership::ROLE_OWNER,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ],
     );
 

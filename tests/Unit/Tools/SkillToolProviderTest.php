@@ -46,7 +46,6 @@ describe('the principal gate', function (): void {
         $result = $tool->execute(
             ['action' => 'read', 'name' => 'my-skill'],
             1,
-            1,
             null,
             providerContext(10),
         );
@@ -66,7 +65,6 @@ describe('the principal gate', function (): void {
 
         $result = $tool->execute(
             ['action' => 'read', 'name' => 'my-skill'],
-            1,
             1,
             null,
             providerContext(11),
@@ -98,7 +96,6 @@ describe('the principal gate', function (): void {
         // dangling non-zero id, which no structural check can catch.
         $result = $tool->execute(
             ['action' => 'read', 'name' => 'my-skill'],
-            1,
             1,
             null,
             providerContext(0),
@@ -139,7 +136,6 @@ describe('the principal gate', function (): void {
         expect($tool->execute(
             ['action' => 'read', 'name' => 'my-skill'],
             1,
-            1,
             null,
             providerContext(999),
         )->success)->toBeTrue();
@@ -158,7 +154,6 @@ describe('the membership check', function (): void {
         $result = $tool->execute(
             ['action' => 'read', 'name' => 'my-skill', 'filename' => 'etc/passwd'],
             1,
-            1,
             null,
             providerContext(10),
         );
@@ -175,7 +170,6 @@ describe('the membership check', function (): void {
         foreach (['../SKILL.md', '/etc/passwd', "SKILL.md\0.png", './././x'] as $filename) {
             $result = $tool->execute(
                 ['action' => 'read', 'name' => 'my-skill', 'filename' => $filename],
-                1,
                 1,
                 null,
                 providerContext(10),
@@ -268,7 +262,6 @@ it('lists files through the provider for a visible skill', function (): void {
     $result = $tool->execute(
         ['action' => 'files', 'name' => 'my-skill'],
         1,
-        1,
         null,
         providerContext(10),
     );
@@ -319,7 +312,6 @@ describe('gate 1 and gate 2 resolve the same principal', function (): void {
         $result = $tool->execute(
             ['action' => 'read', 'name' => 'my-skill'],
             1,
-            999,
             null,
             providerContext($principalId),
         );

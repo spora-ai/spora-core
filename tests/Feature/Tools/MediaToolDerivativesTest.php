@@ -105,7 +105,6 @@ describe('MediaTool::get_media derivative enrichment', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => '11111111-aaaa-bbbb-cccc-111111111111'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -140,7 +139,6 @@ describe('MediaTool::get_media derivative enrichment', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => '22222222-aaaa-bbbb-cccc-222222222222'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -185,7 +183,6 @@ describe('MediaTool::get_media derivative enrichment', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $childId],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -207,7 +204,6 @@ describe('MediaTool::list_derivatives', function (): void {
             $result = $tool->execute(
                 ['action' => 'list_derivatives', 'asset_id' => '55555555-aaaa-bbbb-cccc-555555555555'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -243,7 +239,6 @@ describe('MediaTool::list_derivatives', function (): void {
             $result = $tool->execute(
                 ['action' => 'list_derivatives', 'asset_id' => '66666666-aaaa-bbbb-cccc-666666666666'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -284,7 +279,6 @@ describe('MediaTool::list_derivatives', function (): void {
             $result = $tool->execute(
                 ['action' => 'list_derivatives', 'asset_id' => '88888888-aaaa-bbbb-cccc-888888888888', 'format' => 'PDF'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -303,7 +297,6 @@ describe('MediaTool::list_derivatives', function (): void {
             $result = $tool->execute(
                 ['action' => 'list_derivatives', 'asset_id' => 'ffffffff-ffff-ffff-ffff-ffffffffffff'],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -342,7 +335,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -389,7 +381,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($created->success)->toBeTrue();
@@ -404,7 +395,6 @@ describe('MediaTool::create_derivative', function (): void {
             $read = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $created->data['derivative_id']],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($read->success)->toBeTrue();
@@ -427,7 +417,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
             $second = $tool->execute(
                 [
@@ -436,7 +425,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($first->success)->toBeTrue();
@@ -468,7 +456,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -490,7 +477,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'asset_id' => 'dddddddd-1111-2222-3333-dddddddddddd',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -511,7 +497,6 @@ describe('MediaTool::create_derivative', function (): void {
                     'format'   => 'pdf',
                 ],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -574,7 +559,6 @@ describe('MediaTool::search derivative filtering', function (): void {
             $result = $tool->execute(
                 ['action' => 'search', 'limit' => 100],
                 agentId: $parentAgentId,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();

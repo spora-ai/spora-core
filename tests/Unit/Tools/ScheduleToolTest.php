@@ -6,9 +6,11 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
+use Spora\Models\Principal;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\PromptTemplateService;
@@ -79,7 +81,27 @@ function makeScheduleToolOwner(): array
         'is_active'    => true,
     ]);
 
-    return [$userId, (int) $agent->id, $principalId];
+    return [$userId, (int) $agent->id, scheduleToolOwnerContext($principalId, $userId)];
+}
+
+/**
+ * The `PrincipalContext` the orchestrator hands to `ToolInterface::execute()`
+ * for a call made on behalf of `$userId`.
+ *
+ * `execute()` no longer takes a bare `$userId`: `ScheduleTool` reads
+ * `$context?->ownerUserId`, so a test that needs the tool to act *as* a
+ * user must pass the context rather than the id. Owner and runner are the
+ * same person in every scenario here — the registered user both owns the
+ * agent's principal and drives the tool — so both fields carry `$userId`.
+ */
+function scheduleToolOwnerContext(int $principalId, int $userId): PrincipalContext
+{
+    return new PrincipalContext(
+        principalId: $principalId,
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
 }
 
 function seedSchedule(int $agentId, int $userId, array $overrides = []): ScheduledRun
@@ -158,13 +180,13 @@ function restoreForeignKeysForTest(): void
 
 describe('ScheduleTool::list_schedules', function (): void {
     test('returns empty list when no schedules exist', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute(
             ['action' => 'list_schedules'],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue()
@@ -173,7 +195,7 @@ describe('ScheduleTool::list_schedules', function (): void {
     });
 
     test('returns slim schedules with summary, is_active, next_run_at', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $a = seedSchedule($agentId, $userId, ['raw_prompt' => 'Morning brief', 'cron_expression' => SCHEDULE_TOOL_CRON]);
         $b = seedSchedule($agentId, $userId, ['raw_prompt' => 'Run once', 'cron_expression' => null, 'run_at' => date('Y-m-d H:i:s', strtotime('+2 hours'))]);
 
@@ -181,7 +203,7 @@ describe('ScheduleTool::list_schedules', function (): void {
         $result = $tool->execute(
             ['action' => 'list_schedules'],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue();
@@ -195,7 +217,7 @@ describe('ScheduleTool::list_schedules', function (): void {
     });
 
     test('refuses to list for a hidden cross-user agent', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $strangerAgentId = (int) Agent::create([
             'principal_id' => createUserPrincipalPublic(99_999_999),
             'name'         => 'Stranger',
@@ -207,7 +229,7 @@ describe('ScheduleTool::list_schedules', function (): void {
         $result = $tool->execute(
             ['action' => 'list_schedules', 'agent_id' => $strangerAgentId],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeFalse()
@@ -217,13 +239,13 @@ describe('ScheduleTool::list_schedules', function (): void {
 
 describe('ScheduleTool::list_prompt_templates', function (): void {
     test('returns empty list when no templates exist', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute(
             ['action' => 'list_prompt_templates'],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue()
@@ -232,14 +254,14 @@ describe('ScheduleTool::list_prompt_templates', function (): void {
     });
 
     test('returns slim templates with id, name, description, max_steps, is_active', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId, ['description' => 'Greeting', 'max_steps' => 12]);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
             ['action' => 'list_prompt_templates'],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue();
@@ -257,14 +279,14 @@ describe('ScheduleTool::list_prompt_templates', function (): void {
 
 describe('ScheduleTool::read_schedule', function (): void {
     test('returns the full schedule resource', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
             ['action' => 'read_schedule', 'schedule_id' => $run->id],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue()
@@ -273,14 +295,14 @@ describe('ScheduleTool::read_schedule', function (): void {
     });
 
     test('rejects non-positive schedule_id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         foreach ([0, 'abc', -1] as $bad) {
             $result = $tool->execute(
                 ['action' => 'read_schedule', 'schedule_id' => $bad],
                 $agentId,
-                $userId,
+                context: $context,
             );
             expect($result->success)->toBeFalse()
                 ->and($result->content)->toContain('schedule_id')
@@ -289,23 +311,27 @@ describe('ScheduleTool::read_schedule', function (): void {
     });
 
     test('returns "not found" for a cross-user schedule_id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         seedSchedule($agentId, $userId, ['raw_prompt' => 'mine']);
 
         // Stranger tries to read a non-existent id on a stranger's agent —
-        // we hit the visibility gate first.
+        // we hit the visibility gate first. The stranger acts through their
+        // own user-principal, so their context carries their id, not the
+        // owner's: the call is rejected precisely because the tool can see
+        // whose user it is.
         $strangerAuth = bootAuthLayer();
         $strangerId = $strangerAuth->register(
             'snoop-' . bin2hex(random_bytes(4)) . '@example.com',
             'Password1!',
             'Snoop',
         );
+        $strangerPrincipalId = createUserPrincipalPublic($strangerId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
             ['action' => 'read_schedule', 'schedule_id' => 999_999_999],
             $agentId,
-            $strangerId,
+            context: scheduleToolOwnerContext($strangerPrincipalId, $strangerId),
         );
 
         expect($result->success)->toBeFalse()
@@ -315,14 +341,14 @@ describe('ScheduleTool::read_schedule', function (): void {
 
 describe('ScheduleTool::read_prompt_template', function (): void {
     test('returns the full template resource', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => $tpl->id],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue()
@@ -330,13 +356,13 @@ describe('ScheduleTool::read_prompt_template', function (): void {
     });
 
     test('returns "not found" for an unknown template_id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => 999_999_999],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeFalse()
@@ -346,7 +372,7 @@ describe('ScheduleTool::read_prompt_template', function (): void {
 
 describe('ScheduleTool::create_schedule', function (): void {
     test('happy path with cron_expression + raw_prompt persists the row', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -358,7 +384,7 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'max_steps_override' => 7,
                 'is_active'       => true,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->content)->toContain('Created schedule')
@@ -369,7 +395,7 @@ describe('ScheduleTool::create_schedule', function (): void {
     });
 
     test('happy path with template_id instead of raw_prompt', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId, ['name' => 'Brief']);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -380,14 +406,14 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'template_id'     => $tpl->id,
                 'timezone'        => 'UTC',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['template_id'])->toBe($tpl->id);
     });
 
     test('rejects when both cron_expression and run_at are provided', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -397,14 +423,14 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'run_at'          => '2026-12-31T23:59:00+00:00',
                 'raw_prompt'      => 'ambiguous',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('mutually exclusive');
     });
 
     test('rejects when neither cron_expression nor run_at is provided', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -412,7 +438,7 @@ describe('ScheduleTool::create_schedule', function (): void {
             'schedule_payload' => [
                 'raw_prompt' => 'what schedule?',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('cron_expression')
@@ -420,7 +446,7 @@ describe('ScheduleTool::create_schedule', function (): void {
     });
 
     test('rejects when neither template_id nor raw_prompt is provided', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -428,7 +454,7 @@ describe('ScheduleTool::create_schedule', function (): void {
             'schedule_payload' => [
                 'cron_expression' => SCHEDULE_TOOL_CRON,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('template_id')
@@ -440,7 +466,7 @@ describe('ScheduleTool::create_schedule', function (): void {
         // dropped raw_prompt in favour of template_id — a quiet data-loss
         // bug. The validator now rejects upfront so the LLM can correct the
         // payload before the schedule is created.
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId, ['name' => 'Conflict']);
         [$tool] = makeScheduleToolTestFixture();
 
@@ -451,7 +477,7 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'template_id'     => $tpl->id,
                 'raw_prompt'      => 'which wins?',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('template_id')
@@ -460,7 +486,7 @@ describe('ScheduleTool::create_schedule', function (): void {
     });
 
     test('rejects an invalid cron_expression', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -469,7 +495,7 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'cron_expression' => 'not-a-cron',
                 'raw_prompt'      => 'never',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('cron_expression')
@@ -477,7 +503,7 @@ describe('ScheduleTool::create_schedule', function (): void {
     });
 
     test('rejects an unknown IANA timezone', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -487,7 +513,7 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'raw_prompt'      => 'tz',
                 'timezone'        => 'Mars/Olympus',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('timezone')
@@ -495,7 +521,7 @@ describe('ScheduleTool::create_schedule', function (): void {
     });
 
     test('rejects out-of-range max_steps_override', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -505,14 +531,14 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'raw_prompt'         => 'me',
                 'max_steps_override' => 999,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('max_steps_override');
     });
 
     test('rejects unknown keys (strict allowlist)', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -522,7 +548,7 @@ describe('ScheduleTool::create_schedule', function (): void {
                 'raw_prompt'      => 'me',
                 'sql_injection'   => '; DROP TABLE agents;--',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not a known slim-payload key');
@@ -531,7 +557,7 @@ describe('ScheduleTool::create_schedule', function (): void {
 
 describe('ScheduleTool::create_prompt_template', function (): void {
     test('happy path persists the template', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -547,7 +573,7 @@ describe('ScheduleTool::create_prompt_template', function (): void {
                 'max_steps'       => 5,
                 'is_active'       => true,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['template']['name'])->toBe('Greet {{user_name}}')
@@ -556,7 +582,7 @@ describe('ScheduleTool::create_prompt_template', function (): void {
     });
 
     test('rejects empty name', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -565,14 +591,14 @@ describe('ScheduleTool::create_prompt_template', function (): void {
                 'name'            => '   ',
                 'prompt_template' => 'no name',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`name`');
     });
 
     test('rejects missing prompt_template', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -580,14 +606,14 @@ describe('ScheduleTool::create_prompt_template', function (): void {
             'template_payload' => [
                 'name' => 'Empty prompt',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('prompt_template');
     });
 
     test('rejects out-of-range max_steps', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -597,14 +623,14 @@ describe('ScheduleTool::create_prompt_template', function (): void {
                 'prompt_template' => 'go',
                 'max_steps'       => 200,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('max_steps');
     });
 
     test('rejects malformed variables', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
@@ -614,7 +640,7 @@ describe('ScheduleTool::create_prompt_template', function (): void {
                 'prompt_template' => '...',
                 'variables'       => [['default_value' => 'no key']],
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('variables');
@@ -623,7 +649,7 @@ describe('ScheduleTool::create_prompt_template', function (): void {
 
 describe('ScheduleTool::update_schedule', function (): void {
     test('happy path partial patch (is_active toggle)', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -631,14 +657,14 @@ describe('ScheduleTool::update_schedule', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $run->id,
             'schedule_patch' => ['is_active' => false],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['is_active'])->toBeFalse();
     });
 
     test('rejects unknown patch keys', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -646,14 +672,14 @@ describe('ScheduleTool::update_schedule', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $run->id,
             'schedule_patch' => ['sql_injection' => 'x'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('not a mutable key');
     });
 
     test('rejects simultaneous cron_expression and run_at', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -664,21 +690,21 @@ describe('ScheduleTool::update_schedule', function (): void {
                 'cron_expression' => SCHEDULE_TOOL_CRON,
                 'run_at'          => '2026-12-31T23:59:00+00:00',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('mutually exclusive');
     });
 
     test('returns "not found" for an unknown schedule', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
             'action'         => 'update_schedule',
             'schedule_id'    => 999_999_999,
             'schedule_patch' => ['is_active' => false],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('schedule not found');
@@ -687,7 +713,7 @@ describe('ScheduleTool::update_schedule', function (): void {
 
 describe('ScheduleTool::update_prompt_template', function (): void {
     test('happy path renames the template', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -695,14 +721,14 @@ describe('ScheduleTool::update_prompt_template', function (): void {
             'action'         => 'update_prompt_template',
             'template_id'    => $tpl->id,
             'template_patch' => ['name' => 'Renamed'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['template']['name'])->toBe('Renamed');
     });
 
     test('rejects empty-patch', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -710,7 +736,7 @@ describe('ScheduleTool::update_prompt_template', function (): void {
             'action'         => 'update_prompt_template',
             'template_id'    => $tpl->id,
             'template_patch' => [],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('patch object is required');
@@ -719,14 +745,14 @@ describe('ScheduleTool::update_prompt_template', function (): void {
 
 describe('ScheduleTool::delete_schedule + delete_prompt_template', function (): void {
     test('delete_schedule returns success and removes the row', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute([
             'action'      => 'delete_schedule',
             'schedule_id' => $run->id,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['deleted'])->toBeTrue()
@@ -734,27 +760,27 @@ describe('ScheduleTool::delete_schedule + delete_prompt_template', function (): 
     });
 
     test('delete_schedule returns "not found" for an unknown id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
             'action'      => 'delete_schedule',
             'schedule_id' => 999_999_999,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('schedule not found');
     });
 
     test('delete_prompt_template returns success and removes the row', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $tpl = seedTemplate($agentId);
 
         [$tool] = makeScheduleToolTestFixture();
         $result = $tool->execute([
             'action'      => 'delete_prompt_template',
             'template_id' => $tpl->id,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and(AgentPromptTemplate::find($tpl->id))->toBeNull();
@@ -763,7 +789,7 @@ describe('ScheduleTool::delete_schedule + delete_prompt_template', function (): 
 
 describe('ScheduleTool::trigger_schedule', function (): void {
     test('happy path returns a task_id and deactivates one-shot', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId, [
             'cron_expression' => null,
             'run_at'          => date('Y-m-d H:i:s', strtotime('+2 hours')),
@@ -773,7 +799,7 @@ describe('ScheduleTool::trigger_schedule', function (): void {
         $result = $tool->execute([
             'action'      => 'trigger_schedule',
             'schedule_id' => $run->id,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['task_id'])->toBeInt()
@@ -781,7 +807,7 @@ describe('ScheduleTool::trigger_schedule', function (): void {
     });
 
     test('surface PromptTemplateMissingException as a friendly error', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         // Insert via Eloquent (template_id = null passes FK), then patch the
         // row directly to point at a non-existent template id — that simulates
         // a deleted template without tripping the FK cascade. Pest wraps every
@@ -814,7 +840,7 @@ describe('ScheduleTool::trigger_schedule', function (): void {
         $result = $tool->execute([
             'action'      => 'trigger_schedule',
             'schedule_id' => $run->id,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('trigger_schedule')
@@ -909,7 +935,7 @@ describe('ScheduleTool — per-op defaults', function (): void {
 
 describe('ScheduleTool — cross-agent resolution', function (): void {
     test('read_schedule hits the visible-but-cross-owned route (not found on agent)', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         // Capture the seeded schedule's id rather than hardcoding 1 —
         // MariaDB/MySQL preserve the AUTO_INCREMENT counter across the
         // test transaction's rolled-back peers, so the first inserted
@@ -920,7 +946,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
         $result = $tool->execute(
             ['action' => 'read_schedule', 'schedule_id' => $schedule->id, 'agent_id' => 0],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         // `agent_id` of 0 falls back to the calling agent.
@@ -928,7 +954,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
     });
 
     test('write paths return agent-not-found for an explicit, non-existent agent_id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute(
@@ -937,7 +963,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
                 'raw_prompt'      => 'who am I?',
             ]],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeFalse()
@@ -945,7 +971,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
     });
 
     test('write paths return agent-not-found for an agent the user does NOT control', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $strangerAgentId = (int) Agent::create([
             'principal_id' => createUserPrincipalPublic(99_999_999),
             'name'         => 'Stranger',
@@ -960,7 +986,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
                 'raw_prompt'      => 'hostile takeover',
             ]],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeFalse()
@@ -968,7 +994,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
     });
 
     test('read_*_template with cross-agent_id hits the controller-side service', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         // Capture the seeded template's id rather than hardcoding 1 —
         // MariaDB and MySQL preserve the AUTO_INCREMENT counter across
         // failed inserts and across the test transaction's rolled-back
@@ -979,7 +1005,7 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
         $result = $tool->execute(
             ['action' => 'read_prompt_template', 'template_id' => $template->id],
             $agentId,
-            $userId,
+            context: $context,
         );
 
         expect($result->success)->toBeTrue()
@@ -989,21 +1015,21 @@ describe('ScheduleTool — cross-agent resolution', function (): void {
 
 describe('ScheduleTool — write-side failure surfaces', function (): void {
     test('update_prompt_template returns "not found" for an unknown template', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
             'action'         => 'update_prompt_template',
             'template_id'    => 999_999,
             'template_patch' => ['name' => 'X'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('prompt template not found');
     });
 
     test('update_schedule rejects bad timezone in patch', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -1011,14 +1037,14 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $run->id,
             'schedule_patch' => ['timezone' => 'Mars/Olympus'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('timezone');
     });
 
     test('update_schedule accepts null schedule fields to switch modes', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $run = seedSchedule($agentId, $userId);
 
         [$tool] = makeScheduleToolTestFixture();
@@ -1031,7 +1057,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
                 'cron_expression' => null,
                 'run_at'          => date('Y-m-d\TH:i:sP', strtotime('+1 hour')),
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1044,7 +1070,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
      * PENDING row's due_at matched the recomputed cron-derived one.
      */
     test('cron → one-shot transition replaces scheduled_runs_next row without UNIQUE collision', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool, $service] = makeScheduleToolTestFixture();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => SCHEDULE_TOOL_CRON,
@@ -1061,7 +1087,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
                 'cron_expression' => null,
                 'run_at'          => $newRunAt,
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1085,7 +1111,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
 
     /** Bug 2 regression variant: re-applying the same patch used to collide on UNIQUE because the prior PENDING row was only marked SKIPPED, not deleted. */
     test('updating run_at on a one-shot schedule is idempotent (no UNIQUE collision on re-update)', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool, $service] = makeScheduleToolTestFixture();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => null,
@@ -1100,12 +1126,12 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['run_at' => $secondRunAt],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
         $second = $tool->execute([
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['run_at' => $secondRunAt],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($first->success)->toBeTrue()
             ->and($second->success)->toBeTrue()
@@ -1128,7 +1154,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
      * clears cron_expression — the implicit mode-transition policy.
      */
     test('cron → one-shot transition via {run_at: <iso>} clears cron and reschedules cleanly', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool, $service] = makeScheduleToolTestFixture();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => SCHEDULE_TOOL_CRON,
@@ -1141,7 +1167,7 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['run_at' => date('Y-m-d\TH:i:sP', strtotime('+6 hours'))],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1161,13 +1187,13 @@ describe('ScheduleTool — write-side failure surfaces', function (): void {
     });
 
     test('delete_prompt_template rejects an unknown id', function (): void {
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         [$tool] = makeScheduleToolTestFixture();
 
         $result = $tool->execute([
             'action'      => 'delete_prompt_template',
             'template_id' => 999_999,
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('prompt template not found');
@@ -1207,7 +1233,7 @@ describe('ScheduleTool — summary presenter integration', function (): void {
 describe('Round 4 — implicit mode-transition clearing', function (): void {
     test('setting run_at on a cron schedule clears cron_expression and switches to one-shot', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
 
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
@@ -1220,7 +1246,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['run_at' => '2027-08-01T09:00:00+00:00'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1242,7 +1268,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 
     test('setting cron_expression on a one-shot schedule clears run_at and switches to recurring', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
 
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => null,
@@ -1256,7 +1282,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['cron_expression' => '0 9 * * *'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBe('0 9 * * *')
@@ -1269,7 +1295,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 
     test('changing just the run_at on a one-shot schedule does NOT clear cron (none was set)', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
 
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => null,
@@ -1283,7 +1309,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['run_at' => date('Y-m-d H:i:s', strtotime('+5 hours'))],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1292,7 +1318,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 
     test('changing just the cron on a recurring schedule does NOT clear run_at (none was set)', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
 
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
@@ -1305,7 +1331,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['cron_expression' => '0 17 * * *'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBe('0 17 * * *')
@@ -1314,7 +1340,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 
     test('explicit {cron_expression: null, run_at: <iso>} still works (no double-clearing)', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
 
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
@@ -1330,7 +1356,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
                 'cron_expression' => null,
                 'run_at'          => '2027-08-01T09:00:00+00:00',
             ],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull()
@@ -1349,7 +1375,7 @@ describe('Round 4 — implicit mode-transition clearing', function (): void {
 describe('Round 5 — wire-shape leniency for the literal string "null"', function (): void {
     test('update_schedule with {cron_expression: "null"} clears cron end-to-end', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
             'timezone'        => 'UTC',
@@ -1367,7 +1393,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['cron_expression' => 'null'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['cron_expression'])->toBeNull();
@@ -1375,7 +1401,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
 
     test('update_schedule with {max_steps_override: "null"} clears max_steps_override end-to-end', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression'   => '0 9 * * *',
             'max_steps_override' => 50,
@@ -1388,7 +1414,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['max_steps_override' => 'null'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['max_steps_override'])->toBeNull();
@@ -1396,7 +1422,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
 
     test('update_schedule with {template_id: "null"} unbinds the template end-to-end', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $template = seedTemplate($agentId, ['name' => 'To-unbind']);
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
@@ -1410,7 +1436,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['template_id' => 'null'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['scheduled_run']['template_id'])->toBeNull();
@@ -1418,14 +1444,14 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
 
     test('update_prompt_template with {max_steps: "null"} clears max_steps end-to-end', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $template = seedTemplate($agentId, ['max_steps' => 25]);
 
         $result = $tool->execute([
             'action'          => 'update_prompt_template',
             'template_id'     => $template->id,
             'template_patch'  => ['max_steps' => 'null'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeTrue()
             ->and($result->data['template']['max_steps'])->toBeNull();
@@ -1433,7 +1459,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
 
     test('genuinely-invalid cron (not "null", not "", not whitespace) is still rejected', function (): void {
         [$tool, $service] = makeScheduleToolTestFixture();
-        [$userId, $agentId] = makeScheduleToolOwner();
+        [$userId, $agentId, $context] = makeScheduleToolOwner();
         $created = $service->createRun($agentId, $userId, [
             'cron_expression' => '0 9 * * *',
             'timezone'        => 'UTC',
@@ -1445,7 +1471,7 @@ describe('Round 5 — wire-shape leniency for the literal string "null"', functi
             'action'         => 'update_schedule',
             'schedule_id'    => $runId,
             'schedule_patch' => ['cron_expression' => 'totally bogus cron'],
-        ], $agentId, $userId);
+        ], $agentId, context: $context);
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`cron_expression`');

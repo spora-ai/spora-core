@@ -51,7 +51,6 @@ it('fails on a disallowed mime hint before anything is ingested', function (): v
                 'content'   => '# harmless looking markdown',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeFalse();
@@ -84,7 +83,6 @@ it('fails on a disallowed mime hint even when the content is plain text', functi
                 'content'   => 'just words',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeFalse();
@@ -122,7 +120,6 @@ it('deletes and rejects a hint that passes but whose bytes sniff to a disallowed
                 'content'   => $png,
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeFalse();
@@ -160,7 +157,6 @@ it('leaves no orphan rows behind when several smuggled payloads are rejected', f
                     'content'   => $bytes,
                 ],
                 agentId: $agentId,
-                userId: 99,
             );
             expect($result->success)->toBeFalse();
         }
@@ -189,7 +185,6 @@ it('still admits audio bytes, because the audio allowlist is unconditional', fun
                 'content'   => 'ID3' . str_repeat("\x00", 24),
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -207,7 +202,6 @@ it('still admits audio bytes, because the audio allowlist is unconditional', fun
         $fetched = $tool->execute(
             ['action' => 'get_media', 'asset_id' => $result->data['asset_id']],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($fetched->success)->toBeTrue();
@@ -232,7 +226,6 @@ it('accepts a hint that matches what the bytes actually sniff to', function (): 
                 'content'   => "plain text notes\n",
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -263,7 +256,6 @@ it('reports the sniffed mime as authoritative when it differs from the hint', fu
                 'content'   => '{"quarter": 3}',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeTrue();
@@ -287,7 +279,6 @@ it('lists the allowed mimes on a rejection so the model can retry', function ():
                 'content'   => 'text',
             ],
             agentId: $agentId,
-            userId: 99,
         );
 
         expect($result->success)->toBeFalse();

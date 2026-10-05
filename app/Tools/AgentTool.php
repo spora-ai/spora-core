@@ -322,10 +322,10 @@ final class AgentTool extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
+        $userId = $context?->ownerUserId;
         $operation = $this->getOperationName($arguments);
 
         if ($operation === 'read_agent_configuration') {
@@ -651,9 +651,9 @@ final class AgentTool extends AbstractTool
      *
      * Same resolution as the `skill` tool's read gate: the execution's context,
      * else the calling agent's own principal, and an unresolvable one becomes
-     * `null` so every name fails closed. `$userId` is never used — it is the
-     * runner, not the owner, so a group agent triggered by one member would
-     * otherwise resolve against that member's personal skills.
+     * `null` so every name fails closed. No user id is consulted — a group agent
+     * triggered by one member must resolve against the group, not that
+     * member's personal principal.
      */
     private function executingPrincipalId(int $callingAgentId, ?PrincipalContext $context): ?int
     {

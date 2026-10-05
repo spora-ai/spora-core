@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
+use Spora\Models\Principal;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SubAgentTool;
 
@@ -81,11 +83,21 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
         'max_steps'   => 5,
     ]);
 
+    // The user id no longer travels as an argument to execute(); the tool
+    // reads it from `PrincipalContext::ownerUserId`, so the context is
+    // what tells it which user the task is running as.
+    $context = new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+
     $result = $tool->execute(
         arguments: ['op' => 'handover', 'target_agent_id' => $targetAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
+        context: $context,
     );
 
     expect($result->success)->toBeTrue("Tool rejected valid target: {$result->content}");
@@ -145,11 +157,21 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
         'max_steps'   => 5,
     ]);
 
+    // Same authenticated caller as the happy path, so the allowlist is
+    // the only thing that can reject this call — otherwise the auth guard
+    // would fire first and the test would pass for the wrong reason.
+    $context = new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+
     $result = $tool->execute(
         arguments: ['target_agent_id' => $otherAgent->id, 'prompt' => 'ctx'],
         agentId: $sourceAgent->id,
-        userId: $userId,
         taskId: $source->id,
+        context: $context,
     );
 
     expect($result->success)->toBeFalse();

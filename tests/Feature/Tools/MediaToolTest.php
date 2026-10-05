@@ -7,7 +7,33 @@ use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
+
+/**
+ * The `PrincipalContext` a `MediaTool::execute()` call site needs in order
+ * to say *which user* is calling.
+ *
+ * `ToolInterface::execute()` no longer takes a legacy `$userId` argument;
+ * the tool reads `$userId = $context?->ownerUserId`, so a caller that
+ * omitted the context arrives as `null`. `ownerUserId` is not decorative
+ * here — under `scope=user` / `scope=principal` it is what narrows the
+ * media query, and the `isAssetInPrincipalScope()` direct-upload path
+ * matches `media_assets.user_id` against it.
+ *
+ * `principalId` and `ownerUserId` both derive from `$userId` so the
+ * context is the one `PrincipalResolver` would hand the orchestrator for
+ * an agent owned by that user.
+ */
+function mediaToolUserContext(int $userId): PrincipalContext
+{
+    return new PrincipalContext(
+        principalId: createUserPrincipalPublic($userId),
+        type: Spora\Models\Principal::TYPE_USER,
+        ownerUserId: $userId,
+        runnerUserId: $userId,
+    );
+}
 
 describe('MediaTool::search', function (): void {
     it('returns paginated metadata with asset_url in the opaque local form', function (): void {
@@ -16,7 +42,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search', 'limit' => 10], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search', 'limit' => 10], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data)->not->toBeNull();
@@ -36,7 +62,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search', 'limit' => 999_999], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search', 'limit' => 999_999], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data['limit'])->toBe(ListMediaQuery::PER_PAGE_MAX);
@@ -50,7 +76,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(0);
@@ -67,7 +93,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search', 'plugin_slug' => 'minimax'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search', 'plugin_slug' => 'minimax'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(1);
@@ -88,7 +114,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search', 'mime_type' => 'image/png'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search', 'mime_type' => 'image/png'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data)->toHaveKey('total');
@@ -105,7 +131,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search'], agentId: $mine, userId: 99);
+            $result = $tool->execute(['action' => 'search'], agentId: $mine, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(1);
@@ -115,7 +141,11 @@ describe('MediaTool::search', function (): void {
         }
     });
 
-    it('uses user_id from userId when scope=user', function (): void {
+    it('uses the owner user id from the principal context when scope=user', function (): void {
+        // The user id the query filters on is no longer an argument to
+        // execute() -- it is `PrincipalContext::ownerUserId`, so this is
+        // the test that pins the context as the only supply route for a
+        // caller identity.
         $userConfig = Mockery::mock(ToolConfigService::class);
         $userConfig->allows('getEffectiveSettings')->andReturn(['scope' => 'user']);
 
@@ -128,7 +158,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $userConfig);
         try {
-            $result = $tool->execute(['action' => 'search'], agentId: $a1, userId: 77);
+            $result = $tool->execute(['action' => 'search'], agentId: $a1, context: mediaToolUserContext(77));
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(2);
@@ -146,7 +176,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search'], agentId: $agentA, userId: 99, taskId: 999);
+            $result = $tool->execute(['action' => 'search'], agentId: $agentA, taskId: 999);
 
             expect($result->success)->toBeTrue();
             expect($result->data['total'])->toBe(4);
@@ -167,7 +197,7 @@ describe('MediaTool::search', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'search', 'limit' => 2, 'offset' => 2], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'search', 'limit' => 2, 'offset' => 2], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeTrue();
             expect($result->data['limit'])->toBe(2);
@@ -188,7 +218,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -211,19 +240,13 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'user']);
 
-        $context = new Spora\Services\PrincipalContext(
-            principalId: createUserPrincipalPublic(42),
-            type: Spora\Models\Principal::TYPE_USER,
-            ownerUserId: 42,
-            runnerUserId: 42,
-        );
+        $context = mediaToolUserContext(42);
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
         try {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
-                userId: 42,
                 context: $context,
             );
 
@@ -244,7 +267,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -279,7 +301,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $principalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -295,7 +317,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentB->id,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -325,7 +346,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $callerPrincipalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -337,7 +358,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -360,7 +380,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: $principalId,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: $callerUserId,
@@ -372,7 +392,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: $callerUserId,
                 context: $context,
             );
 
@@ -392,7 +411,7 @@ describe('MediaTool::get_media', function (): void {
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
 
-        $context = new Spora\Services\PrincipalContext(
+        $context = new PrincipalContext(
             principalId: 0,
             type: Spora\Models\Principal::TYPE_USER,
             ownerUserId: null,
@@ -404,7 +423,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 9999,
-                userId: 99,
                 context: $context,
             );
 
@@ -424,16 +442,10 @@ describe('MediaTool::get_media', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
         try {
             // Different user-principal — must not see the asset.
-            $context = new Spora\Services\PrincipalContext(
-                principalId: createUserPrincipalPublic(88),
-                type: Spora\Models\Principal::TYPE_USER,
-                ownerUserId: 88,
-                runnerUserId: 88,
-            );
+            $context = mediaToolUserContext(88);
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 99,
-                userId: 88,
                 context: $context,
             );
 
@@ -449,7 +461,7 @@ describe('MediaTool::get_media', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'get_media'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'get_media'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('asset_id is required');
@@ -466,7 +478,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -485,7 +496,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: 1,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -511,7 +521,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -542,7 +551,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain(
@@ -574,7 +582,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain(
@@ -603,7 +610,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)->toContain('spora-file-card__glyph')
@@ -630,7 +636,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -654,7 +659,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -682,7 +686,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->content)
@@ -727,7 +730,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['width'])->toBe(1920);
@@ -761,7 +763,6 @@ describe('MediaTool::get_media', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_media', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['public_url'])->toBeNull();
@@ -785,7 +786,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -815,7 +815,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -838,7 +837,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -856,7 +854,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -871,7 +868,7 @@ describe('MediaTool::get_public_url', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'get_public_url'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'get_public_url'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('asset_id is required');
@@ -889,7 +886,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -912,7 +908,6 @@ describe('MediaTool::get_public_url', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_public_url', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->data['public_url'])->toContain('configured.example');
@@ -937,7 +932,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -971,7 +965,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1005,7 +998,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1036,7 +1028,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1068,7 +1059,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1099,7 +1089,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeTrue();
@@ -1120,7 +1109,7 @@ describe('MediaTool::get_embed_code', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'get_embed_code'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'get_embed_code'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('asset_id is required');
@@ -1137,7 +1126,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => '99999999-9999-9999-9999-999999999999'],
                 agentId: $agentA,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -1157,7 +1145,6 @@ describe('MediaTool::get_embed_code', function (): void {
             $result = $tool->execute(
                 ['action' => 'get_embed_code', 'asset_id' => $asset->id],
                 agentId: $otherAgent,
-                userId: 99,
             );
 
             expect($result->success)->toBeFalse();
@@ -1174,7 +1161,7 @@ describe('MediaTool routing', function (): void {
 
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth());
         try {
-            $result = $tool->execute(['action' => 'delete'], agentId: $agentA, userId: 99);
+            $result = $tool->execute(['action' => 'delete'], agentId: $agentA, context: mediaToolUserContext(99));
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('Invalid action');

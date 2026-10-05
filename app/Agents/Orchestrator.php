@@ -532,30 +532,16 @@ final class Orchestrator implements OrchestratorInterface
         $resolver = $this->principalResolver ?? new PrincipalResolver();
         $context  = $resolver->resolveForToolExecute($agentId);
 
-        // Source the calling user's id from the calling Agent's row
-        // — tools never see a session-derived `$userId`. When the
-        // orchestrator runs without AgentService (e.g. a minimal
-        // boot-auth test harness), the tool's $userId stays null and
-        // the tool's own getAgentByAgentId() fallback applies.
-        $userId = null;
-        if ($this->agentService !== null) {
-            $callingAgent = $this->agentService->getAgentByAgentId($agentId);
-            if ($callingAgent !== null) {
-                $userId = $callingAgent->user_id;
-            }
-        }
-
         // Arguments may contain PII — never log them.
         $this->logger?->debug('Tool dispatch', [
             'tool'      => $toolName,
             'agent_id'  => $agentId,
-            'user_id'   => $userId,
             'task_id'   => $taskId,
             'arguments' => $arguments,
         ]);
 
         try {
-            $result = $toolInstance->execute($arguments, $agentId, $userId, $taskId, $context);
+            $result = $toolInstance->execute($arguments, $agentId, $taskId, $context);
 
             if (!$result->success) {
                 $this->logger?->error('Tool returned failure', [

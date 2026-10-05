@@ -72,7 +72,6 @@ final class AskUserQuestionTool extends AbstractTool
     public function execute(
         array $arguments,
         int $agentId,
-        ?int $userId = null,
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {

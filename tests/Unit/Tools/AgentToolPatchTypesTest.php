@@ -9,6 +9,7 @@ use Spora\Services\AgentManifest;
 use Spora\Services\AgentService;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalContext;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\AgentTool;
 
@@ -47,6 +48,34 @@ function makeAgentToolForPatch(): array
     ];
 }
 
+if (!function_exists('agentToolContext')) {
+    /**
+     * The `PrincipalContext` a real orchestrator call for a user-owned agent
+     * would carry, for `execute(..., context: agentToolContext($userId))`.
+     *
+     * `update_agent` reads the acting user from `$context?->ownerUserId`,
+     * and the write path refuses outright when that is null ("agent not
+     * found or not owned by this user"), so the user these tests create an
+     * agent with has to travel as the context
+     * `PrincipalResolver::resolveForToolExecute()` builds from the agent's
+     * own row: the user's principal, that user as owner, and — because a
+     * task with no `trigger_user_id` falls back to the owner — the same id
+     * as the runner.
+     *
+     * Guarded so the parallel runner, which may load several of these files
+     * into one worker, does not redeclare it.
+     */
+    function agentToolContext(int $userId): PrincipalContext
+    {
+        return new PrincipalContext(
+            principalId: createUserPrincipalPublic($userId),
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $userId,
+            runnerUserId: $userId,
+        );
+    }
+}
+
 function storedColumn(int $agentId, string $column): mixed
 {
     return Capsule::table('agents')->where('id', $agentId)->value($column);
@@ -61,7 +90,7 @@ describe('update_agent — a stringified boolean is read, not cast', function ()
         $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['is_archived' => true, 'is_pinned' => true],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
         expect((int) storedColumn($agent->id, 'is_archived'))->toBe(1);
 
         // The regression: `(bool) "false"` is true, so this used to store the
@@ -70,7 +99,7 @@ describe('update_agent — a stringified boolean is read, not cast', function ()
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['is_archived' => 'false', 'is_pinned' => 'false'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and(storedColumn($agent->id, 'is_archived'))->toBe(0)
@@ -86,7 +115,7 @@ describe('update_agent — a stringified boolean is read, not cast', function ()
         $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['is_archived' => 'true', 'allow_followup' => 'false'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         // A string in a boolean column makes the row invisible to a
         // `WHERE is_archived = 1` filter while the manifest calls it archived.
@@ -101,14 +130,14 @@ describe('update_agent — a stringified boolean is read, not cast', function ()
         $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['is_archived' => 1, 'is_pinned' => '1'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
         expect((int) storedColumn($agent->id, 'is_archived'))->toBe(1)
             ->and((int) storedColumn($agent->id, 'is_pinned'))->toBe(1);
 
         $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['is_archived' => 0, 'is_pinned' => '0'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
         expect((int) storedColumn($agent->id, 'is_archived'))->toBe(0)
             ->and((int) storedColumn($agent->id, 'is_pinned'))->toBe(0);
     });
@@ -121,7 +150,7 @@ describe('update_agent — a stringified boolean is read, not cast', function ()
             $result = $tool->execute([
                 'action' => 'update_agent', 'agent_id' => $agent->id,
                 'agent'  => ['is_archived' => $value],
-            ], $agent->id, $userId);
+            ], $agent->id, context: agentToolContext($userId));
 
             expect($result->success)->toBeFalse()
                 ->and($result->content)->toContain('must be a boolean');
@@ -140,7 +169,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['max_steps' => '25', 'retry_after_minutes' => '3', 'max_retries' => '2'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and((int) storedColumn($agent->id, 'max_steps'))->toBe(25)
@@ -156,7 +185,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
         $high = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['max_steps' => '999'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($high->success)->toBeFalse()
             ->and($high->content)->toContain('`max_steps` must be an integer in 1..100')
@@ -165,7 +194,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
         $negative = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['retry_after_minutes' => '-5'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($negative->success)->toBeFalse()
             ->and($negative->content)->toContain('`retry_after_minutes` must be an integer in 0..')
@@ -180,7 +209,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
             $result = $tool->execute([
                 'action' => 'update_agent', 'agent_id' => $agent->id,
                 'agent'  => ['max_steps' => $value],
-            ], $agent->id, $userId);
+            ], $agent->id, context: agentToolContext($userId));
 
             expect($result->success)->toBeFalse();
         }
@@ -193,7 +222,7 @@ describe('update_agent — a stringified number is range-checked', function (): 
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['name' => 'Should Not Land', 'max_steps' => '999'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and(storedColumn($agent->id, 'name'))->toBe($agent->name);
@@ -209,7 +238,7 @@ describe('update_agent — the documented surface', function (): void {
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['description' => null],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and(storedColumn($agent->id, 'description'))->toBeNull();
@@ -226,7 +255,7 @@ describe('update_agent — the documented surface', function (): void {
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['not_a_field' => 'ignored downstream'],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         $attributes = Spora\Models\Agent::find($agent->id)?->getAttributes() ?? [];
 
@@ -246,7 +275,7 @@ describe('update_agent — the documented surface', function (): void {
             $result = $tool->execute([
                 'action' => 'update_agent', 'agent_id' => $agent->id,
                 'agent'  => [$key => 1],
-            ], $agent->id, $userId);
+            ], $agent->id, context: agentToolContext($userId));
 
             expect($result->success)->toBeFalse("{$key} must not be writable through the tool")
                 ->and($result->content)->toContain("'{$key}' is not writable through this tool")
@@ -265,7 +294,7 @@ describe('update_agent — the documented surface', function (): void {
         $result = $tool->execute([
             'action' => 'update_agent', 'agent_id' => $agent->id,
             'agent'  => ['name' => 'Should Not Land', 'llm_driver_config_id' => 1],
-        ], $agent->id, $userId);
+        ], $agent->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('the whole patch is refused')
@@ -280,7 +309,7 @@ describe('update_agent — the documented surface', function (): void {
             $result = $tool->execute([
                 'action' => 'update_agent', 'agent_id' => $agent->id,
                 'agent'  => ['name' => $value],
-            ], $agent->id, $userId);
+            ], $agent->id, context: agentToolContext($userId));
 
             expect($result->success)->toBeFalse();
         }
@@ -298,7 +327,7 @@ describe('create_agent — stringified scalars', function (): void {
         $result = $tool->execute([
             'action'  => 'create_agent',
             'payload' => ['name' => 'Quoted', 'max_steps' => '20', 'allow_followup' => 'false'],
-        ], $caller->id, $userId);
+        ], $caller->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeTrue()
             ->and($result->data['max_steps'])->toBe(20)
@@ -313,7 +342,7 @@ describe('create_agent — stringified scalars', function (): void {
         $result = $tool->execute([
             'action'  => 'create_agent',
             'payload' => ['name' => 'Too Many Steps', 'max_steps' => '999'],
-        ], $caller->id, $userId);
+        ], $caller->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`max_steps` must be a whole number in 1..100');
@@ -326,7 +355,7 @@ describe('create_agent — stringified scalars', function (): void {
         $result = $tool->execute([
             'action'  => 'create_agent',
             'payload' => ['name' => 'Vague', 'allow_followup' => 'yes'],
-        ], $caller->id, $userId);
+        ], $caller->id, context: agentToolContext($userId));
 
         expect($result->success)->toBeFalse()
             ->and($result->content)->toContain('`allow_followup` must be a boolean');

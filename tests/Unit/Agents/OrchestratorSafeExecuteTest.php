@@ -5,72 +5,71 @@ declare(strict_types=1);
 namespace Tests\Unit\Agents;
 
 use Mockery;
-use Mockery\MockInterface;
 use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Drivers\DriverFactory;
-use Spora\Models\Agent;
-use Spora\Services\AgentServiceInterface;
+use Spora\Models\Principal;
 
 afterEach(function (): void {
-    SpySafeExecuteTool::$lastTaskId = null;
-    SpySafeExecuteTool::$lastUserId = null;
+    SpySafeExecuteTool::$lastContext = null;
+    SpySafeExecuteTool::$lastTaskId  = null;
+    SpySafeExecuteTool::$lastUserId  = null;
 });
 
-test('safeExecute resolves $userId from the calling Agent row, never from session', function (): void {
-    // `userId` is no longer a parameter on `safeExecute()` — the
-    // Orchestrator fills it from the calling Agent's row, so a tool
-    // can never receive a session-derived value.
-    /** @var AgentServiceInterface&MockInterface $agentService */
-    $agentService = Mockery::mock(AgentServiceInterface::class);
-    $caller = new Agent();
-    $caller->id = 7;
-    $caller->principal_id = 1;
-    $agentService->allows('getAgentByAgentId')->andReturn($caller);
+test('safeExecute hands the tool a context resolving the calling agent owner', function (): void {
+    // A real user row: `principals.user_id` is a FK, so the owner cannot be
+    // materialised without one.
+    $ownerUserId = bootAuth(bootAuthLayer(), 'safe-execute@example.com', 'Password1!');
+    $agentId     = $this->makeAgentWithPrincipal([], $ownerUserId);
+    $principalId = $this->principalIdFor($ownerUserId);
 
     $orchestrator = new Orchestrator(
         Mockery::mock(DriverFactory::class),
         new OrchestratorConfig(
             toolInstances: [new SpySafeExecuteTool()],
             logger: new NullLogger(),
-            agentService: $agentService,
         ),
     );
 
     $result = $orchestrator->safeExecute(
         new SpySafeExecuteTool(),
         [],
-        agentId: 7,
+        agentId: $agentId,
         taskId: 1234,
     );
 
     expect($result->success)->toBeTrue();
-    expect(SpySafeExecuteTool::$lastTaskId)->toBe(1234);
-    // The legacy `$userId` shim is null for an in-memory Agent stub
-    // without a persisted principal row; the principal context (passed
-    // separately) is the source of truth. The tool still receives the
-    // legacy int for plugin back-compat.
-    expect(SpySafeExecuteTool::$lastUserId)->toBeNull();
+
+    // The context is the only ownership channel a tool gets — there is no
+    // separate user-id argument to fall back on.
+    expect(SpySafeExecuteTool::$lastContext)->not->toBeNull()
+        ->and(SpySafeExecuteTool::$lastContext->principalId)->toBe($principalId)
+        ->and(SpySafeExecuteTool::$lastContext->type)->toBe(Principal::TYPE_USER)
+        ->and(SpySafeExecuteTool::$lastContext->ownerUserId)->toBe($ownerUserId)
+        ->and(SpySafeExecuteTool::$lastUserId)->toBe($ownerUserId)
+        ->and(SpySafeExecuteTool::$lastTaskId)->toBe(1234);
 });
 
-test('safeExecute passes null $userId when the agentService is not configured', function (): void {
-    // Minimal boot (no AgentService) — the tool's own
-    // getAgentByAgentId() fallback applies for ownership checks.
+test('safeExecute yields a null owner when the calling agent does not exist', function (): void {
     $orchestrator = new Orchestrator(
         Mockery::mock(DriverFactory::class),
-        new OrchestratorConfig(
-            logger: new NullLogger(),
-        ),
+        new OrchestratorConfig(logger: new NullLogger()),
     );
 
-    $orchestrator->safeExecute(
+    $result = $orchestrator->safeExecute(
         new SpySafeExecuteTool(),
         [],
-        agentId: 1,
+        agentId: 999_999,
         taskId: 1,
     );
 
-    expect(SpySafeExecuteTool::$lastUserId)->toBeNull();
-    expect(SpySafeExecuteTool::$lastTaskId)->toBe(1);
+    expect($result->success)->toBeTrue();
+
+    // A missing agent resolves to the non-resolvable sentinel, so the owner
+    // is null and a tool reading it fails closed rather than guessing a user.
+    expect(SpySafeExecuteTool::$lastContext)->not->toBeNull()
+        ->and(SpySafeExecuteTool::$lastContext->isResolvable())->toBeFalse()
+        ->and(SpySafeExecuteTool::$lastUserId)->toBeNull()
+        ->and(SpySafeExecuteTool::$lastTaskId)->toBe(1);
 });
