@@ -8,9 +8,19 @@ use Psr\Log\LoggerInterface;
 use Throwable;
 
 /**
- * Aggregates {@see SearchProviderInterface} implementations over the same
- * precedence rules as {@see \Spora\Skills\SkillProviderRegistry}: core first, so
- * installing a plugin cannot change an existing result.
+ * Aggregates {@see SearchProviderInterface} implementations for the host ⌘K
+ * palette, the first provider to claim a `type::id` keeping it.
+ *
+ * Precedence is **plugin load order**, not core-first — and that is a
+ * deliberate difference from {@see \Spora\Skills\SkillProviderRegistry}, not an
+ * oversight. Core contributes no search provider at all, so the container's
+ * `search_provider_classes` list is empty and the merged order is the order the
+ * plugins load in. The skills registry *is* core-first, because a shipped skill
+ * has a name an agent's `allowed_skills` already pins, and repointing it would
+ * change what an existing agent may read. A `type::id` has no such anchor —
+ * nothing in core owns it — so a plugin author who picks a `type` another
+ * installed plugin already serves takes over that palette section, and wins or
+ * loses it by installation order.
  *
  * A provider that throws contributes nothing, and is logged rather than dropped
  * in silence — a provider that fails on every call is otherwise
@@ -28,7 +38,8 @@ final readonly class SearchProviderRegistry
     private readonly ?LoggerInterface $logger;
 
     /**
-     * @param list<SearchProviderInterface> $providers In precedence order.
+     * @param list<SearchProviderInterface> $providers In precedence order — see
+     *        the class docblock; today that is plugin load order alone.
      */
     public function __construct(array $providers = [], ?LoggerInterface $logger = null)
     {
@@ -74,14 +85,5 @@ final readonly class SearchProviderRegistry
         }
 
         return $out;
-    }
-
-    /** @return list<string> */
-    public function types(): array
-    {
-        return array_map(
-            static fn(SearchProviderInterface $p): string => $p->type(),
-            $this->providers,
-        );
     }
 }

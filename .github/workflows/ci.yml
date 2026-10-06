@@ -193,10 +193,11 @@ jobs:
     name: PHPStan
     runs-on: ubuntu-latest
     steps:
-      # Full history, matching the `test` job. The two diff-based steps below
-      # compare against the PR's base sha, and a depth-1 checkout does not
-      # contain that object — `git diff <base>...HEAD` fails with "Invalid
-      # symmetric difference expression" rather than reporting a clean tree.
+      # Full history, matching the `test` job. The diff-based steps below
+      # compare against a base sha the event supplies, and a depth-1 checkout
+      # does not contain that object — `git diff <base>...HEAD` fails with
+      # "Invalid symmetric difference expression" rather than reporting a clean
+      # tree. `before` on a push is one of those objects.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
@@ -215,14 +216,44 @@ jobs:
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=2G
 
+      # Everything below diffs this checkout against something the event
+      # supplies — the PR's base sha, or the sha the push moved the ref from.
+      # Resolved once, so the three checks cannot drift apart on which range
+      # they cover.
+      - name: Resolve the changeset base
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ -n "$PR_BASE_SHA" ]; then
+            base="$PR_BASE_SHA"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+            base="$PUSH_BEFORE_SHA"
+          else
+            # A tag push, and the push that created a ref, carry an all-zero
+            # `before`. One commit back still catches a marker introduced by
+            # the tagged commit itself.
+            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          echo "BASE_SHA=$base" >> "$GITHUB_ENV"
+          if [ -z "$base" ]; then
+            echo "No base commit in history; the range checks below will skip."
+          else
+            echo "Changeset base: $base"
+          fi
+
       # Generated OpenAPI drift + conflict-marker guard. Regenerating the
       # spec inside CI keeps the committed openapi.json honest — when a
-      # PR adds an endpoint via attributes, `composer openapi` should be
-      # rerun and the result committed; the check below fails if a PR
+      # change adds an endpoint via attributes, `composer openapi` should be
+      # rerun and the result committed; the check below fails if a commit
       # touches the file without regenerating it, and also blocks merge
       # conflict markers (`<<<<<<<`) sneaking into the JSON blob.
+      #
+      # No `if:` — this one reads no diff range, so there is nothing for it to
+      # skip, and a drifted spec that reached `main` is precisely what it is
+      # here to catch.
       - name: Check OpenAPI drift
-        if: github.event_name == 'pull_request'
         run: composer openapi:check
 
       # Unresolved conflict markers in the *committed* changeset.
@@ -238,30 +269,40 @@ jobs:
       #   2. The diff was taken from `HEAD~`, which does not exist in a
       #      depth-1 checkout (`static-analysis` has no `fetch-depth: 0`,
       #      unlike the `test` job), and points at the previous *commit*
-      #      rather than the PR's base. GitHub supplies the real base sha.
+      #      rather than the branch's base. GitHub supplies the real base sha.
       #
       # The merge-base form (`A...B`) scopes the check to this branch's
       # commits, so a marker that is already on main is not re-reported.
+      #
+      # `BASE_SHA` is resolved above for pull requests *and* pushes. It used to
+      # be read straight from `github.event.pull_request.base.sha` behind a
+      # PR-only `if:`, so on a push to `main` it was empty and the step skipped
+      # — a conflict marker merged straight to main was never inspected, in
+      # exactly the window where the merge has already happened.
       - name: Check for merge-conflict markers
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          if [ -z "$BASE_SHA" ]; then
+            echo "No changeset base; skipping the marker scan."
+            exit 0
+          fi
+
           if ! git diff --check "$BASE_SHA...HEAD"; then
             echo "Unresolved merge-conflict markers detected in the changeset."
             exit 1
           fi
 
       # Markdown link check, scoped to the relative paths inside the files a
-      # PR touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
+      # change touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
       # 0fcdaf71, but AGENTS.md kept pointing at the deleted files for months
       # and no gate noticed. Only in-repo links are resolvable here; the
       # absolute docs.spora-ai.com URLs need network access and are skipped.
       - name: Check markdown links
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          if [ -z "$BASE_SHA" ]; then
+            echo "No changeset base; skipping the link check."
+            exit 0
+          fi
+
           # NUL-delimited, never word-split, and no bash-4-only builtins: a
           # path may contain a space, and `for f in $changed` both errors on it
           # and silently skips the file, which is the same "nothing is broken"

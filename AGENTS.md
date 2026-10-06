@@ -72,7 +72,7 @@ in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
 - `APP_ENV` — Environment (`dev`, `prod`)
 
 ### CI
-GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Jobs: `test` (Pest, default PHP), `test-85` (Pest, PHP 8.5), `test-mysql` and `test-mariadb` (Pest against a real engine), `static-analysis` (PHPStan + OpenAPI drift + merge-marker + markdown-link checks), `sonar`. Formatting is not gated in CI — run `composer format` before committing.
+GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). **Gating** jobs: `test` (Pest + coverage, default PHP), `test-85` (Pest, PHP 8.5), `static-analysis` (PHPStan, plus OpenAPI drift, merge-marker and markdown-link checks), `sonar`. **Advisory, not gating:** `test-mysql` and `test-mariadb`, which run the same suite against a real engine but carry `continue-on-error: true` until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported — a red run there is reported and blocks nothing. The three range-based checks in `static-analysis` cover pulls *and* pushes: the base sha is the PR base or the push's `before`, so a conflict marker merged straight to `main` is still caught. Formatting is not gated in CI — run `composer format` before committing.
 
 ### SonarQube (MCP)
 - Project key `spora-ai_Spora` (see `sonar-project.properties`).
@@ -83,7 +83,7 @@ GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [
 
 ### Testing
 - Backend: **always run `composer test:parallel` for verification (~22s on a typical PR).** Never run `composer test` or `vendor/bin/pest` (serial) for the full suite — they take ~270s. Serial Pest is reserved for debugging one specific failing test. A parallel run may report 0–12 `risky` tests across reruns (well-known parallel-isolation flake); if `passed + risky == total` and there are no `failed`, the suite is clean — proceed.
-- **Per-engine testing.** Set `SPORA_TEST_DB_DRIVER=mysql|mariadb` to run the suite against a real engine (default `sqlite`). On MySQL/MariaDB, every Pest parallel worker creates its own `spora_test_w<PID>_<RAND>` database, installs the schema once, and drops it on exit. Override the server via `SPORA_TEST_DB_HOST`/`_PORT`/`_USER`/`_PASSWORD` (defaults: `127.0.0.1:3306 root:root`). CI runs against MySQL 9.7 and MariaDB 12.3 on every PR.
+- **Per-engine testing.** Set `SPORA_TEST_DB_DRIVER=mysql|mariadb` to run the suite against a real engine (default `sqlite`). On MySQL/MariaDB, every Pest parallel worker creates its own `spora_test_w<PID>_<RAND>` database, installs the schema once, and drops it on exit. Override the server via `SPORA_TEST_DB_HOST`/`_PORT`/`_USER`/`_PASSWORD` (defaults: `127.0.0.1:3306 root:root`). CI runs against MySQL 9.7 and MariaDB 12.3 on every push and PR, but those two jobs are advisory (`continue-on-error`) until the SQLite-specific migration tests are ported — see [CI](#ci).
 - Frontend unit: `composer frontend:test` (Vitest)
 - E2E: not wired up — no Playwright dep, no `frontend/tests/e2e/` (see [frontend architecture](https://docs.spora-ai.com/reference/concepts/frontend-architecture.html))
 

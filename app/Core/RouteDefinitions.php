@@ -101,6 +101,7 @@ final class RouteDefinitions
         SpeechRouteDefinitions::register($r);
         self::registerTemplateRoutes($r);
         self::registerSkillRoutes($r);
+        self::registerSearchRoutes($r);
         self::registerLlmConfigRoutes($r);
         self::registerPreferenceRoutes($r);
         self::registerUserProfileRoutes($r);
@@ -347,9 +348,14 @@ final class RouteDefinitions
         // `{path:.+}` so a nested sidecar (`references/REFERENCE.md`) matches;
         // the default `[^/]+` 404s at the router instead of answering.
         $r->addRoute('GET', self::ROUTE_SKILLS_SLUG . '/files/{path:.+}', [SkillController::class, 'file'], [AuthMiddleware::class, CsrfMiddleware::class]);
+    }
 
+    private static function registerSearchRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
+    {
         // The ⌘K palette had no endpoint and filtered Pinia stores directly,
-        // which left anything served by a plugin unsearchable.
+        // which left anything served by a plugin unsearchable. Authenticated but
+        // not CSRF-gated: a GET the palette fires on focus, exactly like the
+        // user-profile and SSE reads in `registerUserProfileRoutes()`.
         $r->addRoute('GET', '/api/v1/search', [SearchController::class, 'index'], [AuthMiddleware::class]);
     }
 
