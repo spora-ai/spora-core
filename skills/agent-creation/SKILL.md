@@ -133,15 +133,9 @@ Call them in order. The result_content of each ends with the canonical manifest 
 
 ## Sub-agent isolation
 
-AgentTool itself ships with **inconsistent defaults by design**. Verbatim from `app/Tools/AgentTool.php`:
+AgentTool ships with **inconsistent defaults by design**: three operations are on (`read_notes`, `write_notes`, `list_agents`), the other six are off, and four of those are approval-gated as well. The full per-operation table lives in the **agent-tool** skill and is not repeated here — two copies of that table is two chances to read a stale row.
 
-| Operation | `enabledByDefault` | `requiresApprovalByDefault` |
-| --- | --- | --- |
-| `read_notes`, `write_notes`, `list_agents` | `true` | `false` |
-| `read_agent`, `get_available_tools` | `false` | `false` |
-| `update_agent`, `create_agent`, `configure_tools`, `write_notes_overwrite` | `false` | `true` |
-
-In plain terms: a freshly-enabled sub-agent **can read its own notes, append notes, and list its sibling agents**, but it cannot create / edit / configure any agent (including itself) without an operator tap. That's the safe default for a research or worker agent.
+What that means for this flow: `create_agent`, `configure_tools`, `read_agent` and `update_agent` are all **off by default**. An operator who enabled the `agent` tool without enabling those four gave you a tool that refuses every call in the three-step flow with "operation not available". That is their setting, not a bug — name the operations you need rather than looking for another route in.
 
 If you need to fully lock the sub-agent out of `agent` — i.e. exclude the tool entirely from its manifest — disable the `agent` tool at the agent-level in the dashboard, not per-operation. Per-op `enabled: false` keeps the entries visible in the manifest so you can audit the intent (the operator can still see "this op is disabled on purpose"), while a fully-disabled tool entry is dropped from `tools[]` entirely.
 
@@ -303,11 +297,11 @@ If the same entry is sent without `tool_class`, the resolver can't bind the oper
 Each tool entry:
 
 - `tool_class` — FQCN string. **Get this from `get_available_tools`.** NOT `call_name` (v2 removed) and NOT `tool_name` (v2 removed).
-- `enabled` — bool, default true. `false` removes the tool from the agent entirely.
+- `enabled` — **tri-state, and the middle state is the one that bites.** `true` enables the tool on the target agent; `false` removes it; **omitting the key changes nothing.** It also accepts `"true"` / `"false"` / `0` / `1`, and a quoted value is read as the value it names rather than as truthy, so a revocation still revokes. So `{"tool_class": "X", "settings": {...}}` configures X *without* turning it on — which is what you want almost every time. The full statement, with the traps table, is in the **agent-tool** skill.
 - `settings` — object of `{setting_key: value}` for the tool's own settings. Omit to leave them alone. See *Writing settings* above for the replace semantics.
 - `operations` — array. Omit to inherit the tool's per-operation defaults. Each entry is `{ name, enabled?, auto_approve? }`:
   - `name` (required) — string from `get_available_tools.operations[].name`
-  - `enabled` — bool, default true
+  - `enabled` — tri-state like the tool's own: omitted leaves the operation as it is, `false` disables it
   - `auto_approve` — bool, default false. When true, the operation runs without per-call operator approval.
 
 ## Common mistakes
