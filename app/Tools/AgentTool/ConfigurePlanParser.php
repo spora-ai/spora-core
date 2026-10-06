@@ -180,10 +180,11 @@ final class ConfigurePlanParser
         if ($ops === null || $ops === []) {
             return [];
         }
-        if (!is_array($ops)) {
-            return $this->operationsFailure($i);
-        }
-        $ops = SlimPayloadValidator::unwrapSingleItemArray($ops);
+        // `unwrapSingleItemArray()` returns a non-array unchanged and only ever
+        // substitutes an array it checked with `is_array()`, so the two refusals
+        // below are one condition: whatever we were handed, and whatever it
+        // unwrapped to, either claims to be an operations list or it is an error.
+        $ops = is_array($ops) ? SlimPayloadValidator::unwrapSingleItemArray($ops) : $ops;
         if (!is_array($ops) || ($ops !== [] && !array_is_list($ops))) {
             return $this->operationsFailure($i);
         }
