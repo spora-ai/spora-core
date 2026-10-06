@@ -21,7 +21,6 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
 use Spora\AgentTemplates\AgentTemplateToolsApplier;
 use Spora\AgentTemplates\AgentTemplateValidator;
-use Spora\Apps\AppRegistry;
 use Spora\Auth\AuthService;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerReaper;
@@ -30,7 +29,6 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\WorkerController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
-use Spora\Search\Providers\SkillSearchProvider;
 use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
@@ -339,18 +337,10 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            // Core's own provider first, then plugin `searchProviders()`, so a
-            // plugin cannot displace what ⌘K already returns.
-            SkillSearchProvider::class => static function (ContainerInterface $c): SkillSearchProvider {
-                return new SkillSearchProvider(
-                    $c->get(SkillProviderRegistry::class),
-                    $c->get(AppRegistry::class),
-                );
-            },
-
-            'search_provider_classes' => [
-                SkillSearchProvider::class,
-            ],
+            // Core ships none: a hit needs a page to display it and only the
+            // plugin owning the content has one. The seam stays; the list starts
+            // empty, which is what the plugin path below depends on.
+            'search_provider_classes' => [],
 
             'search_provider_classes_merged' => static function (ContainerInterface $c): array {
                 return array_values(array_unique(array_merge(

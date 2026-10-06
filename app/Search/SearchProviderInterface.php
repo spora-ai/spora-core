@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace Spora\Search;
 
 /**
- * A source of palette search hits. Core ships {@see Providers\SkillSearchProvider};
- * a plugin ships one for content the host knows nothing about.
+ * A source of palette search hits. Core ships none — a hit needs somewhere to
+ * display it, and only the plugin that owns the content has that. A plugin ships
+ * one for content the host knows nothing about.
  *
  * Deliberately narrower than {@see \Spora\Skills\SkillProviderInterface}: search
  * returns provenance-filtered summaries, so there is no unknown-vs-invisible
