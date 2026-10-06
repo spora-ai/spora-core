@@ -11,10 +11,10 @@ use Intervention\Image\Interfaces\ImageInterface;
 use InvalidArgumentException;
 use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
+use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\Exceptions\ImageDerivativeProducerException;
 use Spora\Services\MediaArchive\ImageDerivativeFormat;
-use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Throwable;
 
@@ -33,17 +33,19 @@ use Throwable;
  * Source bytes are read straight from the {@see MediaAsset} row: the
  * data-url branch reads the column directly, the local branch reads
  * the on-disk file by deriving the path from `$asset->asset_token` and
- * the {@see Paths::storage()} root. The external branch (referenced
- * URL, no bytes on hand) isn't supported by design — "Convert to" only
- * operates on materialised assets.
+ * the {@see Paths::storage()} root, with the suffix resolved through
+ * {@see LocalAssetStore::storedExtension()} — the writer's own rule, so a
+ * source that is itself a derivative resolves too. The external branch
+ * (referenced URL, no bytes on hand) isn't supported by design — "Convert
+ * to" only operates on materialised assets.
  *
- * The producer has a no-arg constructor because
- * {@see \Spora\Services\MediaArchive\MediaDerivativeService} and
- * {@see \Spora\Http\MediaDerivativeController} instantiate producers
- * with `new $class()` — only tests get a chance to inject
- * collaborators. `Paths` is therefore rehydrated inside `produce()`
- * via the `BASE_PATH` constant the consumer defines at boot
- * (matches the convention used by `bin/spora` and `Kernel::boot()`).
+ * No constructor at all, deliberately: the DI container instantiates
+ * producers, but `produce()` receives only a {@see MediaAsset}, a format
+ * and an options array, so there is nothing to inject and nowhere to read
+ * an injected dependency from. `Paths` is therefore rehydrated inside
+ * `produce()` from the `BASE_PATH` constant the consumer defines at boot
+ * (matches the convention used by `bin/spora` and `Kernel::boot()`), with
+ * `SPORA_STORAGE_DIR` overriding the storage root.
  *
  * EXIF orientation is applied by the Intervention driver during decode
  * (`autoOrientation = true` is the default), so a portrait iPhone
@@ -204,14 +206,12 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
                 $asset->id,
             ));
         }
-        $ext = MediaArchiveService::extensionForMime($asset->mime_type);
-        if ($ext === null) {
-            throw new ImageDerivativeProducerException(sprintf(
-                'ImageDerivativeProducer: cannot derive local-file extension for MIME "%s"',
-                (string) $asset->mime_type,
-            ));
-        }
-        $path = $this->paths()->storage('assets') . '/' . $token . '.' . $ext;
+        // The writer's rule, not a MIME-only guess: a source that is itself
+        // a local-mode derivative is on disk under the suffix its own
+        // `filename` produced (`<base>.thumbnail-256`), which is not the
+        // suffix its `mime_type` maps to.
+        $path = $this->paths()->storage('assets')
+            . '/' . $token . '.' . LocalAssetStore::storedExtension($asset->mime_type, $asset->filename);
         // PHP 8.4+ no longer fully honours the `@` error-suppression
         // operator for `file_get_contents`; use the explicit handler
         // pattern (same as MetadataExtractor::readImageInfo) so a

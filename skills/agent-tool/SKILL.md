@@ -126,8 +126,9 @@ retrying. A single space *is* content and is accepted.
 ## Quoted scalars are read, not cast
 
 Every scalar this tool accepts — `enabled`, `auto_approve`, `allow_followup`,
-`is_pinned`, `is_archived`, `max_steps`, `retry_after_minutes`, `max_retries` — may
-arrive quoted, and sometimes does. Some providers flatten scalars into strings.
+`is_pinned`, `is_archived`, `max_steps`, `retry_after_minutes`, `max_retries`, and any
+`type: 'toggle'` tool setting — may arrive quoted, and sometimes does. Some providers
+flatten scalars into strings.
 
 A quoted value is read as **the value it names**, never as truthiness:
 
@@ -241,6 +242,7 @@ a *different* agent, note that you have no way to read that agent's current list
 | `allowed_skills` sent as a comma-joined string | Refused. It is a JSON array. |
 | `allowed_target_agents` sent as `["3","4"]` | Refused. That multi-select is stored as `int[]` — send `[3, 4]`. `allowed_skills` is the opposite: `string[]`. |
 | Any `type: 'password'` setting | Refused, always. A credential is the one thing a tool call may not write: the value would land in the call's own recorded arguments, so you could read back the key you just set. Credentials are operator-only. |
+| A `type: 'select'` value outside the options the tool declares | Refused, with the legal option keys listed. An unlisted value is not rendered by the settings form's dropdown at all, so the operator's next save overwrites it with the default — "landed, then reverted". Read the legal values off the refusal. |
 | Replacing another agent's `allowed_skills` | Allowed, and blind — you cannot read their current list. Ask the operator instead. |
 | `notes` inside an `update_agent` patch | Stripped silently. Use `write_notes`. |
 | `llm_driver_config_id` in an `update_agent` patch | Refused, and the whole patch with it. It decides which model and credentials the agent runs on — operator territory, and you cannot read the valid ids. |

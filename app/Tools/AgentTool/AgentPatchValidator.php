@@ -43,7 +43,7 @@ final class AgentPatchValidator
     private const PATCHABLE = [
         'name'                 => self::T_NAME,
         'description'          => self::T_TEXT,
-        'system_prompt'        => self::T_TEXT,
+        'system_prompt'        => self::T_PROMPT,
         'max_steps'            => self::T_STEPS,
         'allow_followup'       => self::T_BOOL,
         'retry_after_minutes'  => self::T_NON_NEGATIVE,
@@ -54,6 +54,7 @@ final class AgentPatchValidator
 
     private const T_NAME        = 'name';
     private const T_TEXT        = 'text';
+    private const T_PROMPT      = 'prompt';
     private const T_BOOL        = 'bool';
     private const T_STEPS       = 'steps';
     private const T_NON_NEGATIVE = 'non-negative';
@@ -146,6 +147,7 @@ final class AgentPatchValidator
         return match ($rule) {
             self::T_BOOL         => $this->boolean($key, $value),
             self::T_TEXT         => $this->nullableString($key, $value),
+            self::T_PROMPT       => $this->systemPrompt($key, $value),
             self::T_NAME         => $this->text($key, $value, self::NAME_MAX_LENGTH, 'a non-empty string'),
             self::T_STEPS        => $this->boundedInt($key, $value, self::MAX_STEPS_MIN, self::MAX_STEPS_MAX),
             self::T_NON_NEGATIVE => $this->boundedInt($key, $value, 0, PHP_INT_MAX),
@@ -179,6 +181,35 @@ final class AgentPatchValidator
                 $key,
                 self::DESC_MAX_LENGTH,
             ));
+        }
+        return $value;
+    }
+
+    /**
+     * The system prompt, verbatim, with no length cap.
+     *
+     * The only uncapped string on this patch, and deliberately so. Two things
+     * used to contradict this. `DESC_MAX_LENGTH` is a *description* bound —
+     * routing `system_prompt` through it capped a persona at 2000 chars,
+     * which is not a schema limit: migration 0066 widened `agents.system_prompt`
+     * to MEDIUMTEXT for exactly this reason ("long system_prompt … routinely
+     * pushes past 64 KB"). And `SlimPayloadValidator::buildValidatedCreateAgent()`
+     * applies no cap to `create_agent`'s `system_prompt` either, so the two
+     * halves of the same surface disagreed — an agent could be born with a
+     * 100 KB persona and then be unable to edit it, while `read_agent` hands
+     * that prompt back verbatim and so invites the model straight into the
+     * refusal.
+     *
+     * Matching `create_agent` keeps the one invariant that matters here: what
+     * you could create, you can update. The type check stays, because a
+     * non-string here would be truncated by the database rather than refused.
+     *
+     * @return string|ToolResult
+     */
+    private function systemPrompt(string $key, mixed $value)
+    {
+        if (!is_string($value)) {
+            return $this->badType($key, 'a string', $value, 'a text value');
         }
         return $value;
     }

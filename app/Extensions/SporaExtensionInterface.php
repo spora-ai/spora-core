@@ -113,8 +113,18 @@ interface SporaExtensionInterface
      * Search provider classes this extension contributes to the host ⌘K palette.
      *
      * Distinct from {@see skillProviders()}: that makes a resource *readable*,
-     * this makes it *findable*. Most plugins need neither hook for skills —
-     * core's provider already searches everything in the skill registry.
+     * this makes it *findable*. Core ships **no** search provider at all, so a
+     * skill is absent from ⌘K entirely until some plugin ships one for it —
+     * `skillProviders()` alone does not put it in the palette.
+     *
+     * The `href` on each hit is the plugin's own concern: only the plugin that
+     * owns a page can name the route that opens it.
+     *
+     * Precedence is plugin load order (core contributes none — see
+     * {@see \Spora\Search\SearchProviderRegistry}), so a `type` another
+     * installed plugin already serves is won or lost by installation order
+     * rather than by anything the host guarantees. Pick a `type` only this
+     * plugin's content can justify.
      *
      * @return list<class-string<\Spora\Search\SearchProviderInterface>>
      */

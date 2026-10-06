@@ -18,14 +18,14 @@ use Spora\Tools\Schema\ToolParameterSchemaBuilder;
  *      `action` enum, and in the `Invalid action` message the `default`
  *      arm emits (an op missing from that string tells the model the
  *      op does not exist, even though dispatch works).
- *   2. It has to be *gated correctly* — `enabledByDefault: true` and
- *      auto-approved, because the row it writes is bounded on every side
- *      that would make an unapproved write surprising: the payload is
- *      capped at 1 MiB, the MIME is re-sniffed from the bytes and
- *      allowlist-gated, and the asset is scoped to the calling agent.
- *      What an operator sees afterwards is an ordinary library row, not
- *      a new capability. `get_public_url` is the one op that asks for
- *      approval, because it is the one that reaches outside the session.
+ *   2. It has to be *gated correctly* — `enabledByDefault: true` but
+ *      `requiresApprovalByDefault: true`. The op is reachable and bounded
+ *      on payload size (1 MiB), MIME (re-sniffed and allowlist-gated) and
+ *      scope (the calling agent), none of which stop the durability
+ *      problem: there is no natural key, so a retry duplicates the row and
+ *      a loop has no ceiling. Approval per call is the bound, and it is
+ *      also the only bound that reaches the operator. Operators who trust
+ *      their agent with this can drop it via a per-agent override.
  *
  * The `required[]` narrowings matter for a second reason: `content` and
  * `filename` are meaningless to every other op, so leaving them
@@ -61,11 +61,15 @@ function createMediaParameter(string $name): ToolParameter
     throw new RuntimeException("MediaTool has no #[ToolParameter] named {$name}");
 }
 
-it('declares create_media as enabled by default and auto-approved', function (): void {
+it('declares create_media as enabled by default and requiring approval', function (): void {
+    // Approval is the guard on the one write with no natural key. Every
+    // other bound on this op (1 MiB payload cap, re-sniffed MIME,
+    // per-agent scope) shapes what a single call can do; none of them
+    // stops a retry inserting a second row or a loop growing the table.
     $op = createMediaOperation();
 
     expect($op->enabledByDefault)->toBeTrue()
-        ->and($op->requiresApprovalByDefault)->toBeFalse()
+        ->and($op->requiresApprovalByDefault)->toBeTrue()
         ->and($op->operatorDescription)->toBe('Create a text media asset');
 });
 

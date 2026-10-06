@@ -1,0 +1,12 @@
+{
+    "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
+    "slug": "fixture-search-plugin",
+    "description": "Test fixture plugin contributing two SearchProviders.",
+    "class": "Tests\\Fixtures\\Plugins\\SearchPlugin\\Plugin",
+    "icon": "puzzle",
+    "autoload": {
+        "psr-4": {
+            "Tests\\Fixtures\\Plugins\\SearchPlugin\\": "src/"
+        }
+    }
+}

@@ -14,39 +14,57 @@ use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
- * `GET /api/v1/search` — the endpoint the ⌘K palette calls. The behaviour worth
- * protecting here is the boring one: an empty query must not reach a provider at
- * all, since a palette rendering "everything" on an empty box looks hung.
+ * Counts the calls it receives, so a test can assert a provider was *not*
+ * reached — the empty-query guard is invisible from the response body alone,
+ * because a provider that ignores the query returns the same hits either way.
  */
-function searchControllerFixture(?int $userId, ?array $hits = []): SearchController
+final class CountingSearchProvider implements SearchProviderInterface
 {
-    $provider = new class ($hits) implements SearchProviderInterface {
-        public int $calls = 0;
+    public int $calls = 0;
 
-        /** @param list<SearchHit> $hits */
-        public function __construct(private readonly array $hits) {}
+    /** @param list<SearchHit> $hits */
+    public function __construct(private readonly array $hits) {}
 
-        public function type(): string
-        {
-            return 'skill';
-        }
+    public function type(): string
+    {
+        return 'skill';
+    }
 
-        public function search(string $query, SearchContext $context): array
-        {
-            $this->calls++;
+    /** @return list<SearchHit> */
+    public function search(string $query, SearchContext $context): array
+    {
+        $this->calls++;
 
-            return $this->hits;
-        }
-    };
+        return $this->hits;
+    }
+}
+
+/**
+ * `GET /api/v1/search` — the endpoint the ⌘K palette calls.
+ *
+ * The behaviour worth protecting here is the boring one: an empty query must
+ * not reach a provider at all, since a palette rendering "everything" on an
+ * empty box looks hung. So the fixture hands back the provider alongside the
+ * controller — a provider stub that ignored the query would satisfy every
+ * response assertion in this file while the guard was gone.
+ *
+ * @return array{controller: SearchController, provider: CountingSearchProvider}
+ */
+function searchControllerFixture(?int $userId, ?array $hits = []): array
+{
+    $provider = new CountingSearchProvider($hits ?? []);
 
     $auth = Mockery::mock(AuthService::class);
     $auth->shouldReceive('currentUserId')->andReturn($userId);
 
-    return new SearchController(
-        $auth,
-        new SearchProviderRegistry([$provider]),
-        new PrincipalService(new PrincipalResolver()),
-    );
+    return [
+        'controller' => new SearchController(
+            $auth,
+            new SearchProviderRegistry([$provider]),
+            new PrincipalService(new PrincipalResolver()),
+        ),
+        'provider'   => $provider,
+    ];
 }
 
 /**
@@ -68,7 +86,7 @@ function searchRequest(string $query): Request
 }
 
 it('refuses an unauthenticated caller', function () {
-    $response = searchControllerFixture(null)->index(searchRequest('inv'));
+    $response = searchControllerFixture(null)['controller']->index(searchRequest('inv'));
 
     expect($response->getStatusCode())->toBe(401)
         ->and(json_decode((string) $response->getContent(), true))
@@ -78,7 +96,7 @@ it('refuses an unauthenticated caller', function () {
 it('returns hits inside the standard data envelope', function () {
     $hit = new SearchHit(type: 'skill', id: 'invoice', label: 'invoice', subLabel: 'How to draft.');
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])->index(searchRequest('inv'))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])['controller']->index(searchRequest('inv'))->getContent(),
         true,
     );
 
@@ -89,24 +107,39 @@ it('returns hits inside the standard data envelope', function () {
 });
 
 it('returns an empty result for an absent query', function () {
+    // The provider is loaded with a hit it would return for *any* query, so
+    // deleting the controller's empty-query short-circuit shows up twice: in
+    // `data.hits` and in the call count.
+    $fixture = searchControllerFixture(
+        searchCallerWithoutPrincipal(),
+        [new SearchHit(type: 'skill', id: 'invoice', label: 'invoice')],
+    );
+
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(''))->getContent(),
+        (string) $fixture['controller']->index(searchRequest(''))->getContent(),
         true,
     );
 
-    expect($body['data']['hits'])->toBe([]);
+    expect($body['data']['hits'])->toBe([])
+        ->and($fixture['provider']->calls)->toBe(0);
 });
 
 it('answers an empty query with the same envelope as a real one', function () {
     // The palette sends a blank box on focus, so this is the common path, and a
     // client reading `data.query` got an undefined index on it.
+    $fixture = searchControllerFixture(
+        searchCallerWithoutPrincipal(),
+        [new SearchHit(type: 'skill', id: 'invoice', label: 'invoice')],
+    );
+
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(''))->getContent(),
+        (string) $fixture['controller']->index(searchRequest(''))->getContent(),
         true,
     );
 
     expect($body['data'])->toHaveKeys(['hits', 'query'])
-        ->and($body['data']['query'])->toBe('');
+        ->and($body['data']['query'])->toBe('')
+        ->and($fixture['provider']->calls)->toBe(0);
 });
 
 it('lets Symfony reject an array-valued q rather than searching for "Array"', function () {
@@ -117,7 +150,7 @@ it('lets Symfony reject an array-valued q rather than searching for "Array"', fu
     // decision rather than an accident.
     $request = Request::create('/api/v1/search', 'GET', ['q' => ['a', 'b']]);
 
-    expect(fn() => searchControllerFixture(searchCallerWithoutPrincipal())->index($request))
+    expect(fn() => searchControllerFixture(searchCallerWithoutPrincipal())['controller']->index($request))
         ->toThrow(BadRequestException::class);
 });
 
@@ -169,7 +202,7 @@ it('searches with a scope even when the caller has no principal row', function (
 
 it('truncates an over-long query instead of rejecting it', function () {
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal())->index(searchRequest(str_repeat('a', 5000)))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal())['controller']->index(searchRequest(str_repeat('a', 5000)))->getContent(),
         true,
     );
 
@@ -186,7 +219,7 @@ it('carries every hit field the palette reads', function () {
         href: '/apps/custom-skills/skill/invoice',
     );
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])->index(searchRequest('inv'))->getContent(),
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [$hit])['controller']->index(searchRequest('inv'))->getContent(),
         true,
     );
 
@@ -202,7 +235,7 @@ it('carries every hit field the palette reads', function () {
 
 it('serialises a hit with nowhere to go as an explicit null', function () {
     $body = json_decode(
-        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [new SearchHit(type: 'skill', id: 'typst', label: 'typst')])
+        (string) searchControllerFixture(searchCallerWithoutPrincipal(), [new SearchHit(type: 'skill', id: 'typst', label: 'typst')])['controller']
             ->index(searchRequest('typst'))->getContent(),
         true,
     );

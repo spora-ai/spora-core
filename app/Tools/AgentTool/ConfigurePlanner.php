@@ -41,8 +41,11 @@ final class ConfigurePlanner
      *
      * @param  mixed $entries
      * @param  int|null $principalId The principal whose visible skills an
-     *        `allowed_skills` write may name. Null resolves no principal, so a
-     *        provider that scopes by one sees nothing and every name is refused.
+     *        `allowed_skills` write may name. Null resolves no principal, which
+     *        refuses every name no provider returns; the null and
+     *        absent-registry arms are defensive for principal-scoped plugin
+     *        providers rather than a bound the bundled filesystem provider
+     *        imposes today.
      * @return list<array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}>|ToolResult
      */
     public function buildPlan(mixed $entries, ?int $principalId = null): array|ToolResult
@@ -124,9 +127,4 @@ final class ConfigurePlanner
         return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX
             . 'the target agent is not visible to this user, so no tool was changed.');
     }
-
-    /**
-     * @param  mixed $entry
-     * @return array{tool_class: string, enable: bool|null, operations: list<array{name: string, enabled: bool, auto_approve: bool}>, settings: array<string, mixed>}|ToolResult
-     */
 }

@@ -7,8 +7,10 @@ namespace Spora\Services\MediaArchive;
 use Spora\Services\MediaArchive\Concerns\DiscoversRegistrations;
 
 /**
- * Static registry of {@see MediaDerivativeProducerInterface} FQCNs, read by
- * {@see MediaDerivativeProducerDiscovery}'s consumer at construction.
+ * Static registry of {@see MediaDerivativeProducerInterface} FQCNs, re-read
+ * per call by {@see MediaDerivativeService} — `findProducer()`,
+ * `producerSourceMimeTypes()` and `availableOptionsFor()` each walk the list
+ * again, so a plugin that registers late is still picked up mid-request.
  *
  * Shares the registration pattern with
  * {@see MediaMimeRefinerDiscovery} — one body,

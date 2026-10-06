@@ -114,8 +114,11 @@ final class ToolSetting
          * - 'agent' — stored as `int[]`; LLM-facing values are resolved
          *   against the `Agent` Eloquent model to `"Name (#id)"` strings.
          * - 'skill' — stored as `string[]` of slugs; LLM-facing values
-         *   are resolved against the `SkillScanner` to `"name: short
-         *   description"` strings (description truncated to ~80 chars).
+         *   are projected by {@see \Spora\Services\SkillListProjector} from
+         *   the {@see \Spora\Skills\SkillProviderRegistry} into `"name: short
+         *   description"` strings (description truncated to ~80 chars). The
+         *   registry, not the shipped directories: a provider-supplied skill
+         *   projects like any other.
          * - 'raw'   — stored and surfaced as-is. Use when neither agent
          *   nor skill resolution fits the field's semantics.
          */

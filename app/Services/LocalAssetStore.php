@@ -14,6 +14,11 @@ use Spora\Services\MediaArchive\MediaArchiveService;
  * `<storage>/assets/<asset_token>.<ext>`; the row's `asset_token` (32 hex
  * chars of random bytes) is what {@see self::readFromAsset()} looks up.
  *
+ * The `<ext>` half is not a local decision: it is
+ * {@see self::storedExtension()} applied to the SAME two row columns
+ * (`mime_type`, `filename`) on both the writing and the reading side, so
+ * every reader reconstructs the exact name {@see self::store()} wrote.
+ *
  * The pre-refactor {@see self::resolve()} HMAC-token scheme is kept for
  * legacy rows whose URL was returned to the LLM before the migration
  * — those keep serving until they age out.
@@ -38,7 +43,7 @@ final class LocalAssetStore implements AssetStore
             ));
         }
 
-        $ext  = $this->pickExtension($mime, $filename);
+        $ext  = self::storedExtension($mime, $filename);
         $dir  = $this->paths->storage('assets');
         if (! is_dir($dir) && ! @mkdir($dir, 0755, recursive: true) && ! is_dir($dir)) {
             throw new AssetStorageException("Failed to create asset directory: {$dir}");
@@ -124,6 +129,14 @@ final class LocalAssetStore implements AssetStore
      * so that the `/api/v1/assets/<uuid>` opaque URL resolves without
      * exposing the underlying HMAC-token filename.
      *
+     * The extension comes from {@see self::storedExtension()} over the
+     * row's own `mime_type` + `filename` — the same two columns
+     * {@see self::store()} was handed on the way in, so this resolves the
+     * exact name the writer produced. Passing `null` here for the filename
+     * (the pre-fix behaviour) is what made every non-markdown local
+     * derivative 404: `store()` took `thumbnail-256` from the name and this
+     * looked for `webp` from the MIME.
+     *
      * @return array{path: string, mime: string, length: int}
      */
     public function readFromAsset(MediaAsset $asset): array
@@ -132,7 +145,7 @@ final class LocalAssetStore implements AssetStore
         if (!is_string($token) || $token === '') {
             throw new AssetStorageException("MediaAsset {$asset->id} has no asset_token");
         }
-        $ext = $this->pickExtension($asset->mime_type, null);
+        $ext = self::storedExtension($asset->mime_type, $asset->filename);
         $path = $this->paths->storage('assets') . '/' . $token . '.' . $ext;
         if (!is_file($path)) {
             throw new AssetStorageException("Local asset file missing: {$path}");
@@ -146,14 +159,33 @@ final class LocalAssetStore implements AssetStore
     }
 
     /**
-     * The extension this store writes and the extension
-     * {@see self::readFromAsset()} must find. Both sides resolve the MIME
-     * through {@see MediaArchiveService::extensionForMime()}, the single
-     * map — this class used to keep a private copy, which had already
-     * drifted: the OOXML MIME wrote `<token>.docx` (filename hint) and read
-     * back `<token>.bin`, so every local-mode `.docx` upload 404ed.
+     * The ONE rule for the `<token>.<ext>` suffix: the extension this store
+     * writes, and therefore the extension every reader must look for.
+     *
+     * A caller-supplied filename wins, because that is the name
+     * {@see self::store()} was handed and therefore the name on disk;
+     * otherwise the MIME resolves through the single map,
+     * {@see MediaArchiveService::extensionForMime()}, falling back to `bin`.
+     *
+     * Public and static precisely so the derivative-side readers reuse it
+     * rather than re-deriving: {@see \Spora\Services\MediaArchive\DerivativePayloadStore::pathFor()}
+     * and `ImageDerivativeProducer::readLocalBytes()` both need to rebuild
+     * this suffix from a {@see MediaAsset} row and nothing else, and a
+     * private MIME-only copy of this method is exactly the drift that made
+     * every non-markdown local derivative unreadable — the OOXML MIME once
+     * wrote `<token>.docx` (filename hint) and read back `<token>.bin`.
+     *
+     * The agreement holds under one stated condition: the row's `filename`
+     * must be the filename the bytes were stored under. Every writer in
+     * core (`MediaArchiveIngestPipeline`, `MediaDerivativeService`,
+     * {@see \Spora\Plugins\Concerns\StoresBinaryAssets}) stores first and
+     * persists that same name on the row, so a row written after this rule
+     * shipped always round-trips. A row whose `filename` is later rewritten
+     * would resolve to a path that no longer exists — there is no rename
+     * path in the archive today, and `AssetReference` carries no name the
+     * store could re-derive one from.
      */
-    private function pickExtension(?string $mime, ?string $filename): string
+    public static function storedExtension(?string $mime, ?string $filename): string
     {
         if (is_string($filename) && $filename !== '') {
             $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));

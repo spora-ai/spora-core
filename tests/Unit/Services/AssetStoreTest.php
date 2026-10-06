@@ -225,6 +225,86 @@ describe('LocalAssetStore extension agreement with the archive', function (): vo
             $restore();
         }
     });
+
+    /**
+     * The table above passes no filename, which is the only condition
+     * under which a MIME-only reader agreed with a filename-preferring
+     * writer. Real callers always pass one — ingest, `create_derivative`,
+     * the plugin helper — so the filename is the case that matters, and it
+     * used to be the broken one: `store()` took the suffix from the name
+     * while `readFromAsset()` looked for the MIME's, putting a
+     * `thumbnail-256` derivative on disk at `<token>.thumbnail-256` and
+     * looking for `<token>.webp`.
+     *
+     * Asserted on the bytes rather than a literal path: the store's reader
+     * must find and return exactly what the store's writer produced.
+     */
+    $filenameCases = [
+        'a webp thumbnail derivative'   => ['image/webp', 'holiday.thumbnail-256'],
+        'a png conversion derivative'   => ['image/png', 'holiday.format-png'],
+        'a jpeg conversion derivative'  => ['image/jpeg', 'holiday.format-jpeg'],
+        'the md control'                => ['text/markdown', 'notes.md'],
+        'a filename disagreeing with the mime' => ['image/webp', 'scan.tiff'],
+    ];
+
+    it('reads back what it wrote when a filename is supplied', function (string $mime, string $filename): void {
+        [$store, $dir, $restore] = buildLocalStore();
+        try {
+            $bytes = 'payload-for-' . $filename;
+            $ref = $store->store($bytes, mime: $mime, filename: $filename);
+
+            // The row as the derivative service writes it: token + both
+            // columns the writer saw.
+            $asset = new MediaAsset();
+            $asset->asset_token  = $ref->token;
+            $asset->mime_type    = $mime;
+            $asset->filename     = $filename;
+            $asset->storage_mode = 'local';
+
+            $resolved = $store->readFromAsset($asset);
+
+            expect($resolved['path'])->toBe($dir . '/assets/' . $ref->token . '.' . pathinfo($filename, PATHINFO_EXTENSION));
+            expect(file_get_contents($resolved['path']))->toBe($bytes);
+        } finally {
+            $restore();
+        }
+    })->with($filenameCases);
+
+    it('resolves the suffix from the filename, not the MIME, when they disagree', function (): void {
+        // Stated as its own case because it is the shape of the bug and the
+        // reason the rule is not "always use the MIME": `scan.tiff` with
+        // `image/webp` must land on and be read from `.tiff`, not `.webp`.
+        [$store, , $restore] = buildLocalStore();
+        try {
+            $ref = $store->store('bytes', mime: 'image/webp', filename: 'scan.tiff');
+
+            expect(LocalAssetStore::storedExtension('image/webp', 'scan.tiff'))->toBe('tiff');
+            expect($ref->url)->toEndWith('.tiff');
+
+            $asset = new MediaAsset();
+            $asset->asset_token  = $ref->token;
+            $asset->mime_type    = 'image/webp';
+            $asset->filename     = 'scan.tiff';
+            $asset->storage_mode = 'local';
+
+            expect(file_get_contents($store->readFromAsset($asset)['path']))->toBe('bytes');
+        } finally {
+            $restore();
+        }
+    });
+
+    it('falls back to the MIME suffix when the filename carries no extension', function (): void {
+        [$store, , $restore] = buildLocalStore();
+        try {
+            $ref = $store->store('bytes', mime: 'image/webp', filename: 'README');
+
+            expect($ref->url)->toEndWith('.webp');
+            expect(LocalAssetStore::storedExtension('image/webp', 'README'))->toBe('webp');
+            expect(LocalAssetStore::storedExtension('image/webp', null))->toBe('webp');
+        } finally {
+            $restore();
+        }
+    });
 });
 
 test('LocalAssetStore::resolve() returns null for an unknown filename', function (): void {

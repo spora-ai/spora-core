@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\MediaArchive;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\LocalAssetStore;
 
 /**
  * Byte-level access to a derivative's stored payload.
@@ -15,11 +16,17 @@ use Spora\Models\MediaAsset;
  * concern separate from choosing a producer or tracking attribution.
  *
  * Invariant: the `local` layout mirrors {@see \Spora\Services\LocalAssetStore},
- * which owns the same layout for the original asset. If the two drift, a
- * derivative written here cannot be read back by the original's reader. Both
- * resolve the extension from the same single map,
- * {@see MediaArchiveService::extensionForMime()}, so a new MIME only has to
- * be added once. The path shape is asserted in `DerivativePayloadStoreTest`.
+ * which owns the same layout for the original asset. It holds because
+ * {@see pathFor()} resolves the `<ext>` half through
+ * {@see LocalAssetStore::storedExtension()} over the SAME two row columns
+ * (`mime_type`, `filename`) the writer was handed — not by re-deriving it
+ * from the MIME alone, which is what put a `thumbnail-256` derivative at
+ * `<token>.thumbnail-256` while this class looked for `<token>.webp` and
+ * every local-mode image derivative 404'd. The condition is stated on
+ * `storedExtension()`: the row's `filename` must be the name the bytes were
+ * stored under, which every core writer satisfies. `DerivativePayloadStoreTest`
+ * asserts the agreement by round-tripping real written bytes rather than a
+ * literal path shape.
  */
 final readonly class DerivativePayloadStore
 {
@@ -88,9 +95,15 @@ final readonly class DerivativePayloadStore
             }
         });
     }
+
     /**
      * Absolute path of a `local`-mode asset's payload, or null when the
      * row carries no token to resolve one from.
+     *
+     * The extension comes from the writer's own rule
+     * ({@see LocalAssetStore::storedExtension()}) applied to the row's
+     * `mime_type` + `filename`, so this reconstructs the exact name
+     * `AssetStore::store()` produced rather than guessing it from the MIME.
      */
     public function pathFor(MediaAsset $asset): ?string
     {
@@ -101,10 +114,10 @@ final readonly class DerivativePayloadStore
         if (!is_string($token) || $token === '') {
             return null;
         }
-        $ext = MediaArchiveService::extensionForMime($asset->mime_type);
+        $ext = LocalAssetStore::storedExtension($asset->mime_type, $asset->filename);
 
         return (new \Spora\Core\Paths($this->basePath))->storage('assets')
-            . '/' . $token . ($ext !== null ? '.' . $ext : '');
+            . '/' . $token . '.' . $ext;
     }
 
     /**

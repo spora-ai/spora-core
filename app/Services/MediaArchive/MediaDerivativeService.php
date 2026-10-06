@@ -11,6 +11,7 @@ use Psr\Log\LoggerInterface;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Services\AssetStore;
+use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalService;
@@ -130,16 +131,32 @@ final class MediaDerivativeService
      * Remove every derivative of `$parent` — the derivative row, its
      * join row, and its on-disk payload — before the parent itself goes
      * away.
+     */
+    public function deleteWithDerivatives(MediaAsset $parent): void
+    {
+        self::deleteRowsWithPayloads($parent, $this->payloads);
+    }
+
+    /**
+     * The cascade behind {@see deleteWithDerivatives()}, split out because
+     * {@see MediaArchiveRetention::purgeTempRows()} deletes parent rows in
+     * bulk and must take the same two things with them.
      *
      * This has to be explicit. `media_derivatives` cascades on *both* foreign
      * keys, so deleting the parent drops the join rows and orphans each
-     * derivative's own `media_assets` row. {@see \Spora\Services\MediaArchive\MediaArchiveService::list()}
+     * derivative's own `media_assets` row. {@see MediaArchiveService::list()}
      * filters derivative rows out via `whereNotIn('id', <derivative ids>)` —
      * once the join row is gone the orphan stops matching that filter and
      * resurfaces as a stray top-level library asset with no route back to its
      * source, and in `local` mode its bytes stay on disk.
+     *
+     * `static` because the only collaborator the cascade needs is the
+     * byte-level {@see DerivativePayloadStore}, which is a path resolver
+     * over `BASE_PATH` and not a wired service. Retention is an
+     * opportunistic sweep that runs off raw row ids, with no
+     * `MediaDerivativeService` in scope and no reason to construct one.
      */
-    public function deleteWithDerivatives(MediaAsset $parent): void
+    public static function deleteRowsWithPayloads(MediaAsset $parent, DerivativePayloadStore $payloads): void
     {
         $derivativeIds = MediaDerivative::query()
             ->where('parent_id', $parent->id)
@@ -151,7 +168,7 @@ final class MediaDerivativeService
         }
 
         foreach (MediaAsset::query()->whereIn('id', $derivativeIds)->get() as $derivative) {
-            $this->payloads->remove($derivative);
+            $payloads->remove($derivative);
             $derivative->delete();
         }
 
@@ -558,6 +575,13 @@ final class MediaDerivativeService
      * divergence. The LLM read paths (chat attachment, `get_source`) resolve
      * this same row, so a producer that fixes a bad extraction must be able
      * to land it.
+     *
+     * A re-render must not leave the previous file behind. Two things keep
+     * it in place: the `asset_token` never changes, and the row's `filename`
+     * — which {@see LocalAssetStore::storedExtension()} prefers over the MIME
+     * — is left alone here precisely so a changed `mime_type` cannot resolve
+     * a different on-disk suffix mid-refresh. Asserted by the local-mode
+     * round-trip in `MediaDerivativeLocalStorageTest`.
      */
     private function refresh(MediaAsset $existing, DerivativeOutput $output): MediaAsset
     {
@@ -591,8 +615,17 @@ final class MediaDerivativeService
         $this->payloads->rewrite($existing, $bytes);
     }
 
-
-
+    /**
+     * The display filename for a derivative: the parent's basename plus the
+     * derivative format, e.g. `holiday.thumbnail-256`.
+     *
+     * The `.` + `$format` suffix is load-bearing beyond display. It becomes
+     * the derivative row's `filename`, which is the input
+     * {@see LocalAssetStore::storedExtension()} prefers over the MIME — so it
+     * is what decides the on-disk suffix the `local` reader then looks for.
+     * Dropping it (or renaming the format) silently changes where the bytes
+     * are written.
+     */
     private function filenameFor(MediaAsset $parent, string $format): string
     {
         $base = $parent->filename !== null && $parent->filename !== ''

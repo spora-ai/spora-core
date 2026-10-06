@@ -1455,7 +1455,6 @@ final class ContainerDefinitions
         ];
     }
 
-
     private static function toolDefinitions(): array
     {
         return [

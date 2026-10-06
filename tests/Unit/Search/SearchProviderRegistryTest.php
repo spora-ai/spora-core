@@ -90,15 +90,6 @@ it('logs a throwing provider, so a silent failure is distinguishable from no res
     expect($registry->search('inv', new SearchContext([1])))->toBe([]);
 });
 
-it('lists provider types in precedence order', function () {
-    $registry = new SearchProviderRegistry([
-        stubSearchProvider('skill', []),
-        stubSearchProvider('media-archive', []),
-    ]);
-
-    expect($registry->types())->toBe(['skill', 'media-archive']);
-});
-
 it('de-duplicates on type plus id, not id alone', function () {
     // An agent #7 and a group #7 are both legitimate and distinct.
     $registry = new SearchProviderRegistry([
