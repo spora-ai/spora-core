@@ -6,6 +6,7 @@ compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
   author: spora-ai
   version: "1.0"
+allowed-tools: media
 ---
 
 # Media library

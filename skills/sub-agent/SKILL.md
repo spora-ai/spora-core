@@ -6,6 +6,7 @@ compatibility: "Designed for Spora agents with the `sub_agent` tool enabled."
 metadata:
   author: spora-ai
   version: "1.0"
+allowed-tools: sub_agent media
 ---
 
 # Sub-agent

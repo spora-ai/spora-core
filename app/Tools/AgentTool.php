@@ -48,7 +48,22 @@ use Spora\Tools\ValueObjects\ToolResult;
     displayName: 'Agent',
     category: 'agent',
     icon: 'bot',
-    recommendsSkills: ['agent-tool'],
+    // Both skills, not one. The list is per-tool with no per-operation
+    // granularity, and `agent` is the only tool with two skills written about
+    // it, so this is the first declaration that could be two.
+    //
+    // `agent-creation` was missing here while six of this tool's nine operations
+    // told the LLM to read it — four through AGENT_CREATION_SKILL_HINT, plus
+    // `get_available_tools` and `configure_tools`, which spell the hint inline.
+    // The tool description and the class docblock point at it too.
+    //
+    // The cost of the omission was in the SPA, not for the model:
+    // `AgentToolsSection.vue` attributes a skill to a tool with
+    // `recommends_skills.includes(slug)`, so `agent-creation` matched no tool
+    // and was orphaned from every row. The precision this cannot express — that
+    // only `create_agent`/`configure_tools` want the creation protocol — is
+    // inherent to a per-tool list, not to listing both.
+    recommendsSkills: ['agent-tool', 'agent-creation'],
 )]
 #[ToolOperation(
     name: 'update_agent',
