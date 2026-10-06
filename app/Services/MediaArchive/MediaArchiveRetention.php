@@ -146,7 +146,8 @@ final class MediaArchiveRetention
      *
      * So this walks the ids and calls the same cascade
      * {@see MediaDerivativeService::deleteWithDerivatives()} uses, which
-     * unlinks each derivative's payload before dropping the row.
+     * unlinks each derivative's payload before dropping the row — plus the
+     * swept row's own payload, which that cascade never touches.
      *
      * @param  list<string> $ids
      * @return int parent rows actually deleted
@@ -165,6 +166,19 @@ final class MediaArchiveRetention
                 // derivative cascade took it in an earlier iteration.
                 continue;
             }
+            // The swept row's OWN bytes, before its cascade runs.
+            // `deleteRowsWithPayloads()` unlinks the payloads of an asset's
+            // *derivatives*; it never touches the asset itself, so without
+            // this a swept `local` row leaves its file on disk.
+            //
+            // It also makes the walk order-independent. `findExcessTempIds()`
+            // orders by `created_at`, which `$table->timestamps()` resolves at
+            // second precision — a parent and the derivative minted alongside
+            // it tie, and which one the engine hands back first is not
+            // specified. If the derivative is walked first, its row is gone
+            // before the parent's cascade runs, so the cascade finds no row
+            // to unlink and its bytes survive the sweep for good.
+            $payloads->remove($asset);
             MediaDerivativeService::deleteRowsWithPayloads($asset, $payloads);
             $deleted += (int) $asset->delete();
         }

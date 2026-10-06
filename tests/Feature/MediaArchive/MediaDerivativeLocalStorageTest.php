@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\MediaArchive;
 
+use Carbon\Carbon;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\MediaAsset;
@@ -318,6 +319,18 @@ describe('the temp sweep takes the derivative with it', function (): void {
         $derivative = $derivatives->createFromRequest($parent, 'thumbnail-256');
         $derivative = MediaAsset::query()->find((string) $derivative->id) ?? $derivative;
 
+        // The derivative is swept in its own right — it inherited
+        // `is_temporary` below — so `findExcessTempIds()` returns the parent
+        // AND the derivative, ordered by a `created_at` that
+        // `$table->timestamps()` only resolves to the second. The two tie,
+        // and which row an engine hands back first is unspecified; SQLite
+        // happens to return the parent, MySQL and MariaDB the derivative.
+        // Backdate the derivative so the hardest order is the one under
+        // test everywhere, rather than a test that only passes on whichever
+        // engine breaks the tie the convenient way.
+        $derivative->created_at = Carbon::now()->subMinute();
+        $derivative->save();
+
         // The inheritance the sweep filters on: user + agent + is_temporary
         // together, so a derivative missing any one of the three is immune.
         expect((bool) $derivative->is_temporary)->toBeTrue();
@@ -326,6 +339,10 @@ describe('the temp sweep takes the derivative with it', function (): void {
 
         $derivativePath = (string) $payloads->pathFor($derivative);
         expect(is_file($derivativePath))->toBeTrue();
+
+        // The parent's own bytes are on disk too, under the same store.
+        $parentPath = (string) $payloads->pathFor($parent);
+        expect(is_file($parentPath))->toBeTrue();
 
         // A newer non-derivative parent stands in for the upload the
         // controller just accepted; the sweep excludes it by id and
@@ -353,7 +370,14 @@ describe('the temp sweep takes the derivative with it', function (): void {
         // leak the sweep existed to prevent, not a cosmetic issue.
         expect(is_file($derivativePath))->toBeFalse();
 
-        // The newer sibling the sweep was told to keep really was kept.
+        // The swept parent's own bytes go with it: `purgeTempRows()`
+        // unlinks what it deletes, and the derivative cascade alone only
+        // ever reached the children.
+        expect(is_file($parentPath))->toBeFalse();
+
+        // The newer sibling the sweep was told to keep really was kept —
+        // and it kept its bytes too, so exactly one file is left standing.
         expect(MediaAsset::query()->find((string) $fresh->id))->not->toBeNull();
+        expect(derivLocalFiles())->toHaveCount(1);
     })->skip(!extension_loaded('gd') && !extension_loaded('imagick'), 'needs GD or Imagick');
 });
