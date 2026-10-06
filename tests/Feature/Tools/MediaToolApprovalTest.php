@@ -26,14 +26,17 @@ use Spora\Tools\MediaTool;
  *   - `get_source`        : enabled_by_default = true,  requires_approval_by_default = false
  *   - `list_derivatives`  : enabled_by_default = true,  requires_approval_by_default = false
  *   - `create_derivative` : enabled_by_default = true,  requires_approval_by_default = false
- *   - `create_media`      : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `create_media`      : enabled_by_default = true,  requires_approval_by_default = true
  *   - The discriminator `enum` in the generated JSON schema lists all eight
  *     operations (the orchestrator narrows the enum per-agent).
  *   - All eight are enabled by default, so an agent with no override row sees
- *     the full matrix. `get_public_url` is the sole operation that asks for
- *     approval: it is the one that mints a link that outlives the session, so
- *     every call is put in front of the operator. The remaining seven are
- *     reads or writes the agent could already make against assets it owns.
+ *     the full matrix. Exactly two ask for approval, and each for a reason
+ *     about durability rather than reads: `get_public_url` mints a link that
+ *     outlives the session, and `create_media` is the one write with no
+ *     natural key, so a retry duplicates the row and a loop spams the
+ *     archive — nothing in the database stops either. The other six are reads
+ *     or writes the agent could already make against assets it owns, and
+ *     `create_derivative`'s idempotency is a DB-enforced UNIQUE index.
  *     Matches `enabledByDefault` in
  *     {@see ToolDefinitionBuilder::buildToolDefinitions()}.
  *
@@ -152,18 +155,34 @@ describe('MediaTool attributes', function (): void {
             ->and($op->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('marks create_media as enabled by default and auto-approved', function (): void {
+    it('marks create_media as enabled by default and requiring approval', function (): void {
+        // The op is the tool's only write with no natural key: ingest dedupes
+        // on `(tool_call_id, source_url)` and an authored-text call carries
+        // neither, so a retry inserts a second row and a loop has no ceiling.
+        // Approval is the only bound, which is why the class docblock's old
+        // "auto-approved, bound it via requiresApprovalByDefault" was
+        // self-contradictory — it recommended the setting it declared false.
         $op = mediaToolOpByName('create_media');
         expect($op->enabledByDefault)->toBeTrue()
-            ->and($op->requiresApprovalByDefault)->toBeFalse();
+            ->and($op->requiresApprovalByDefault)->toBeTrue();
     });
 
-    it('gates on approval for get_public_url alone', function (): void {
+    it('marks create_derivative as auto-approved, which its natural key makes safe', function (): void {
+        // The other half of the same decision. `(parent_id, format,
+        // producer_plugin, producer_operation)` is a DB-enforced UNIQUE
+        // index, so a retry returns the existing row and a loop cannot grow
+        // the table — the durability risk that gates `create_media` is
+        // structurally absent here.
+        expect(mediaToolOpByName('create_derivative')->requiresApprovalByDefault)->toBeFalse();
+    });
+
+    it('gates on approval for get_public_url and create_media alone', function (): void {
         // The invariant behind the per-op assertions above, stated once so a
         // future operation cannot quietly join the approval set: enabling an op
         // is cheap to undo from the dashboard, but an approval prompt nobody
-        // expects is a stall on every turn. So exactly one operation may ask,
-        // and it has to be the one that reaches outside the session.
+        // expects is a stall on every turn. So the approval set stays exactly
+        // the operations that create state the agent cannot undo — a link that
+        // outlives the session, or a row with no idempotency key.
         $ops = mediaToolOperations();
 
         $approving = array_values(array_map(
@@ -171,7 +190,7 @@ describe('MediaTool attributes', function (): void {
             array_filter($ops, static fn(ToolOperation $op): bool => $op->requiresApprovalByDefault),
         ));
 
-        expect($approving)->toBe(['get_public_url']);
+        expect($approving)->toBe(['get_public_url', 'create_media']);
     });
 
     it('enables every operation by default', function (): void {

@@ -132,10 +132,14 @@ final class MediaEmbed
         string $filename,
         ?int $byteSize = null,
     ): string {
-        // Neutralised on the way past because the same stored filename reaches
-        // the `Content-Disposition` header. This closes nothing there: that
-        // header strips only quotes and backslashes, and doing it properly is
-        // a separate change to `AssetController::applyContentDisposition()`.
+        // The HTML-attribute context is why this is escaped at all: the sanitizer
+        // passes `href` through, so a quote in the value would break out of
+        // the attribute and let stored text inject markup into the chat
+        // bubble. Line breaks are stripped first because a raw CR/LF inside a
+        // `href` is dropped by some clients and silently truncates the link.
+        // The `Content-Disposition` header is not this comment's concern
+        // any more: `AssetController::applyContentDisposition()` strips
+        // control characters itself before the header is set.
         $safeUrl = htmlspecialchars(self::stripLineBreaks($url), ENT_QUOTES, 'UTF-8');
         $name = basename(self::stripLineBreaks($filename));
         $safeName = htmlspecialchars($name === '' ? 'download' : $name, ENT_QUOTES | ENT_HTML5, 'UTF-8');

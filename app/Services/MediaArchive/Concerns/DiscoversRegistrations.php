@@ -13,9 +13,9 @@ use InvalidArgumentException;
  * A trait, not an abstract base class, because a `private static`
  * property declared on a parent is *shared* by every subclass that does
  * not redeclare it — an abstract `ClassListDiscovery` base would silently
- * merge the converter, producer and refiner registries into one shared
- * list. Trait composition copies the property into each final class, so
- * every registry keeps its own storage and the three remain independent.
+ * merge the producer and refiner registries into one shared list. Trait
+ * composition copies the property into each final class, so every registry
+ * keeps its own storage and the two remain independent.
  *
  * PHP-DI v7 is the reason the list is static at all: it ships no runtime
  * queryable tag store, so core populates each list in

@@ -6,6 +6,7 @@ namespace Spora\Services\MediaArchive;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\Agent;
+use Spora\Models\MediaAsset;
 
 /**
  * Temp-row retention + GC for the Media Archive.
@@ -23,6 +24,9 @@ use Spora\Models\Agent;
  * below `voice_message_retention_count` before settling — acceptable
  * for this control loop; revisit if the upload rate ever exceeds
  * ~10/s per agent.
+ *
+ * Derivatives are swept too, and through the cascade rather than a raw
+ * row delete — see {@see self::purgeTempRows()}.
  */
 final class MediaArchiveRetention
 {
@@ -126,12 +130,45 @@ final class MediaArchiveRetention
     }
 
     /**
-     * @param list<string> $ids
+     * Delete the swept rows, each through the derivative cascade.
+     *
+     * `Capsule::table('media_assets')->delete()` is not enough since
+     * derivatives inherited `is_temporary`: the sweep reaches parent rows
+     * that own an `md` derivative, and a raw row delete drops the
+     * `media_derivatives` join via the FK cascade while leaving the
+     * derivative's own `media_assets` row behind. That orphan stops
+     * matching {@see MediaArchiveService::list()}'s `whereNotIn` filter
+     * (the join row that identified it is gone) and resurfaces as a stray
+     * top-level library asset, with its bytes still on disk in `local`
+     * mode. Since ingest mints the `md` derivative during the same upload
+     * `MediaUploadController` then purges, every temp PDF would leave one
+     * behind.
+     *
+     * So this walks the ids and calls the same cascade
+     * {@see MediaDerivativeService::deleteWithDerivatives()} uses, which
+     * unlinks each derivative's payload before dropping the row.
+     *
+     * @param  list<string> $ids
+     * @return int parent rows actually deleted
      */
     private function purgeTempRows(array $ids): int
     {
-        return (int) Capsule::table('media_assets')
-            ->whereIn('id', $ids)
-            ->delete();
+        $payloads = new DerivativePayloadStore(
+            defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
+        );
+
+        $deleted = 0;
+        foreach ($ids as $id) {
+            $asset = MediaAsset::query()->find($id);
+            if ($asset === null) {
+                // Already gone — a concurrent purge, or an id whose
+                // derivative cascade took it in an earlier iteration.
+                continue;
+            }
+            MediaDerivativeService::deleteRowsWithPayloads($asset, $payloads);
+            $deleted += (int) $asset->delete();
+        }
+
+        return $deleted;
     }
 }

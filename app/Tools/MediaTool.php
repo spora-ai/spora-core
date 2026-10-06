@@ -41,12 +41,12 @@ use Symfony\Component\HttpFoundation\Request;
  *                           reads, and `get_source` is how it reads it.
  *                           Auto-approved read.
  *   - `get_public_url`    — mint or fetch the public shareable URL of a single
- *                           asset. The only operation that requires approval
- *                           by default: it is the one that hands out a link
- *                           that keeps working outside the session, so the
- *                           operator sees and answers every call. Operators
- *                           can still drop the approval per-agent via an
- *                           override.
+ *                           asset. Requires approval by default: it is the one
+ *                           read that hands out a link that keeps working
+ *                           outside the session, so the operator sees and
+ *                           answers every call. Operators can still drop the
+ *                           approval per-agent via an override. `create_media`
+ *                           is the other approval-gated operation; see below.
  *   - `get_embed_code`    — return a markdown snippet (image / audio / video /
  *                           link) the assistant can drop into its reply,
  *                           pointing at the local archive URL. Auto-approved
@@ -80,11 +80,14 @@ use Symfony\Component\HttpFoundation\Request;
  *                           natural key `(parent_id, format, producer_plugin,
  *                           producer_operation)` — re-rendering returns
  *                           the same derivative id, which is what makes a
- *                           blind retry safe. Enabled and auto-approved: the
- *                           derivative is derived from a parent the agent
- *                           already owns, it costs a render rather than
- *                           granting access, and the row it writes is
- *                           operator-visible in the dashboard.
+ *                           blind retry safe. Enabled and auto-approved, which
+ *                           this release made explicit rather than
+ *                           incidental: the natural key is a DB-enforced
+ *                           UNIQUE index, so a retry cannot duplicate and a
+ *                           loop cannot grow the row count; the derivative is
+ *                           derived from a parent the agent already owns, it
+ *                           costs a render rather than granting access, and
+ *                           the row is operator-visible in the dashboard.
  *   - `create_media`       — store LLM-authored text (Markdown, plain text,
  *                           CSV, JSON, XML, YAML, HTML) as a new source
  *                           asset. The only write that needs no existing
@@ -95,9 +98,15 @@ use Symfony\Component\HttpFoundation\Request;
  *                           non-allowlisted MIME is deleted and rejected.
  *                           **Not idempotent** — a retry creates a second
  *                           asset, so reuse the returned `asset_id`.
- *                           Enabled and auto-approved, and the one write with
- *                           no natural key — so the row count is unbounded.
- *                           Bound it per agent via `requiresApprovalByDefault`.
+ *                           Enabled, and approval-gated by default: it is the
+ *                           one write with no natural key, so nothing in the
+ *                           database stops a retry from duplicating the row
+ *                           or a loop from spamming the archive. That is
+ *                           precisely what the per-call approval is for —
+ *                           the operator sees each call before durable state
+ *                           lands. Operators who have decided they trust
+ *                           their agent with this can drop it per-agent via
+ *                           a `requiresApprovalByDefault` override.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -179,7 +188,7 @@ use Symfony\Component\HttpFoundation\Request;
     description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML, HTML). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
     operatorDescription: 'Create a text media asset',
     enabledByDefault: true,
-    requiresApprovalByDefault: false,
+    requiresApprovalByDefault: true,
 )]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(
@@ -489,9 +498,17 @@ final class MediaTool extends AbstractTool
     /**
      * Read the asset's source back to the caller so the LLM can
      * iterate (e.g. re-typeset a previously uploaded `.typ` source,
-     * re-ingest an extracted document). Scope, ownership, and
-     * approval are inherited from {@see resolveAssetOrFail()} and
-     * the per-op `requiresApprovalByDefault: true`.
+     * re-ingest an extracted document). Scope and ownership are
+     * inherited from {@see resolveAssetOrFail()}.
+     *
+     * Auto-approved (`requiresApprovalByDefault: false`), which is worth
+     * stating because it inlines up to {@see self::GET_SOURCE_TEXT_MAX} of
+     * raw source and therefore looks like an exfiltration surface. It is
+     * not one: the op is a pure read of a row the calling agent already
+     * owns, gated by the same scope check every other per-asset op passes,
+     * and it never mints or mutates anything — see the auto-approval
+     * rationale on the class docblock's `get_source` entry and on
+     * {@see binarySourceFallback()}. The 5 MiB inline cap is the bound.
      *
      * Behavior by MIME shape:
      *  - Text-shaped (text/*, application/json, application/xml,
