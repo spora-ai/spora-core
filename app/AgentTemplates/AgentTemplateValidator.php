@@ -54,7 +54,7 @@ final class AgentTemplateValidator
      * Each `required_plugins` entry is a Composer `vendor/name`
      * identifier (e.g. `spora-ai/spora-plugin-minimax`) — the same
      * shape the exporter emits and the importer resolves back to the
-     * on-disk plugin slug via {@see PluginLoader::getSlugForPackageName()}.
+     * on-disk plugin slug via {@see \Spora\Plugins\PluginMetadata::getSlugForPackageName()}.
      *
      * Allows lowercase letters, digits, dot, underscore, and hyphen in
      * either segment (mirrors the relaxed Composer name regex while

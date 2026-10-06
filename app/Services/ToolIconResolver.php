@@ -48,7 +48,7 @@ class ToolIconResolver
         // Layer 2: per-plugin default via the owning plugin's plugin.json
         $slug = $this->pluginLoader->getSlugForToolClass($toolClass);
         if ($slug !== null) {
-            $manifest = $this->pluginLoader->getPluginManifest($slug);
+            $manifest = $this->pluginLoader->metadata()->getPluginManifest($slug);
             $pluginIcon = is_array($manifest) ? ($manifest['icon'] ?? null) : null;
             if (is_string($pluginIcon) && $pluginIcon !== '') {
                 return $pluginIcon;

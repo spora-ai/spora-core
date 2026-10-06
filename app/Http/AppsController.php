@@ -86,7 +86,7 @@ final class AppsController
 
         $slug = $this->pluginLoader?->getSlugForApp($app);
         if ($slug !== null) {
-            $manifest = $this->pluginLoader->getPluginManifest($slug);
+            $manifest = $this->pluginLoader->metadata()->getPluginManifest($slug);
             if (is_array($manifest)) {
                 $value = $manifest['frontendEntry'] ?? null;
                 return is_string($value) && $value !== '' ? $value : null;
@@ -105,7 +105,7 @@ final class AppsController
         }
 
         if ($slug !== null && $this->pluginLoader !== null) {
-            $manifest = $this->pluginLoader->getPluginManifest($slug);
+            $manifest = $this->pluginLoader->metadata()->getPluginManifest($slug);
             if (is_array($manifest)) {
                 $manifestValue = $manifest['accent'] ?? null;
                 if (is_string($manifestValue) && $this->isKnownAccent($manifestValue)) {
