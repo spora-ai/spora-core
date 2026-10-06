@@ -32,7 +32,9 @@ use Throwable;
  *
  * Boot-time work sits in {@see PluginDiscovery} and the on-disk metadata reads
  * in {@see PluginMetadata}; both bind the maps below by reference, so this
- * class stays their only owner and writer.
+ * class stays their only owner and writer. A snapshot would lose plugins:
+ * {@see PluginLoader::boot()} lets a manifest failure escape, and Kernel falls
+ * through to a partially populated loader.
  */
 final class PluginLoader
 {

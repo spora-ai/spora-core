@@ -13,9 +13,7 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
  * short-circuits to — so warm and cold boots apply the same validation,
  * autoload registration, and duplicate rules.
  *
- * The maps arrive by reference because a manifest that throws mid-scan must
- * leave the plugins loaded before it in place: `PluginLoader::boot()` lets that
- * exception escape, and Kernel falls through to a partial loader.
+ * The maps arrive by reference; {@see PluginLoader} explains why.
  */
 final class PluginDiscovery
 {

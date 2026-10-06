@@ -9,9 +9,7 @@ namespace Spora\Plugins;
  * from, its parsed `plugin.json`, and the `composer.json` fields the plugin
  * catalogue and the agent-template importer read.
  *
- * The slug-keyed maps arrive by reference: `boot()` fills them one plugin at a
- * time, so a snapshot taken here would go stale — and the maps have to stay
- * shared with {@see PluginLoader}, which owns them.
+ * The maps arrive by reference; {@see PluginLoader} explains why.
  */
 final class PluginMetadata
 {
@@ -26,8 +24,8 @@ final class PluginMetadata
     private array $pluginManifests;
 
     /**
-     * @param array<string, string>               $pluginDirs      Bound by reference to {@see PluginLoader}'s map.
-     * @param array<string, array<string, mixed>> $pluginManifests Bound by reference to {@see PluginLoader}'s map.
+     * @param array<string, string>               $pluginDirs
+     * @param array<string, array<string, mixed>> $pluginManifests
      */
     public function __construct(array &$pluginDirs, array &$pluginManifests)
     {
