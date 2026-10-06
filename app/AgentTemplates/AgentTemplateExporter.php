@@ -325,6 +325,6 @@ final class AgentTemplateExporter
         if ($slug === null) {
             return null;
         }
-        return $this->pluginLoader->getComposerNameForSlug($slug);
+        return $this->pluginLoader->metadata()->getComposerNameForSlug($slug);
     }
 }

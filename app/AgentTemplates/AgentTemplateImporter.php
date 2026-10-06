@@ -10,6 +10,7 @@ use Spora\AgentTemplates\Exceptions\AgentImportFailedException;
 use Spora\AgentTemplates\Exceptions\AgentTemplateNotFoundException;
 use Spora\Models\Agent;
 use Spora\Plugins\PluginLoader;
+use Spora\Plugins\PluginMetadata;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -27,7 +28,7 @@ use Spora\Services\ToolConfigService;
  * Plugins are NEVER auto-installed. Each entry of `required_plugins` is
  * a Composer `vendor/name` package string (e.g. `spora-ai/spora-plugin-minimax`);
  * the importer resolves it to the installed plugin's slug via
- * {@see PluginLoader::getSlugForPackageName()} and emits a `PLUGIN_MISSING`
+ * {@see PluginMetadata::getSlugForPackageName()} and emits a `PLUGIN_MISSING`
  * warning when no loaded plugin declares that package. The import is not aborted.
  */
 final class AgentTemplateImporter
@@ -179,7 +180,7 @@ final class AgentTemplateImporter
      * package name that does not resolve to a loaded plugin. Each entry is
      * a `vendor/name` string (e.g. `spora-ai/spora-plugin-minimax`); the
      * importer resolves it to the on-disk slug via
-     * {@see PluginLoader::getSlugForPackageName()} before comparing
+     * {@see PluginMetadata::getSlugForPackageName()} before comparing
      * against the installed set. Non-fatal — operators install plugins
      * manually.
      *
@@ -188,7 +189,7 @@ final class AgentTemplateImporter
     private function collectPluginWarnings(AgentTemplate $template, array &$warnings): void
     {
         foreach ($template->requiredPlugins() as $package) {
-            if ($this->plugins->getSlugForPackageName($package) !== null) {
+            if ($this->plugins->metadata()->getSlugForPackageName($package) !== null) {
                 continue;
             }
             $warnings[] = [

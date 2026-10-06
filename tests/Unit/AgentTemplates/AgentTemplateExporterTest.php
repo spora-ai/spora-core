@@ -213,7 +213,7 @@ test('export() lists every owning plugin\'s Composer package name in required_pl
 
     // Sanity check the new helper: it reads composer.json from the plugin
     // directory and returns the package name.
-    expect($loader->getComposerNameForSlug('tools-plugin'))
+    expect($loader->metadata()->getComposerNameForSlug('tools-plugin'))
         ->toBe('spora-ai/spora-fixture-tools-plugin');
 
     $agent = Agent::create([
@@ -286,18 +286,18 @@ test('export() omits plugins whose composer.json is missing or has no name', fun
     $prop = $ref->getProperty('pluginDirs');
     $prop->setValue($loader, ['no-name' => $tmp]);
 
-    expect($loader->getComposerNameForSlug('no-name'))->toBeNull();
+    expect($loader->metadata()->getComposerNameForSlug('no-name'))->toBeNull();
 
     @unlink($tmp . '/composer.json');
     @rmdir($tmp);
 });
 
-test('PluginLoader::getComposerNameForSlug() returns null for unknown slugs', function (): void {
+test('PluginMetadata::getComposerNameForSlug() returns null for unknown slugs', function (): void {
     $loader = new PluginLoader([]);
-    expect($loader->getComposerNameForSlug('does-not-exist'))->toBeNull();
+    expect($loader->metadata()->getComposerNameForSlug('does-not-exist'))->toBeNull();
 });
 
-test('PluginLoader::getComposerNameForSlug() returns null when composer.json is unreadable', function (): void {
+test('PluginMetadata::getComposerNameForSlug() returns null when composer.json is unreadable', function (): void {
     // No composer.json at the path → null (treated the same as missing).
     $tmp = sys_get_temp_dir() . '/spora-plugin-loader-no-json-' . uniqid();
     mkdir($tmp, 0o755, true);
@@ -307,7 +307,7 @@ test('PluginLoader::getComposerNameForSlug() returns null when composer.json is 
     $prop = $ref->getProperty('pluginDirs');
     $prop->setValue($loader, ['no-json' => $tmp]);
 
-    expect($loader->getComposerNameForSlug('no-json'))->toBeNull();
+    expect($loader->metadata()->getComposerNameForSlug('no-json'))->toBeNull();
 
     @rmdir($tmp);
 });
@@ -377,7 +377,7 @@ test('round-trip imports then exports the bundled core-assistant.json identicall
 test('export() then importPayload() round-trips on the same loader with zero PLUGIN_MISSING', function (): void {
     // Pin the vendor/name contract end-to-end: the exporter emits a
     // Composer package name, the importer resolves it back to a slug via
-    // PluginLoader::getSlugForPackageName(). If either half regressed,
+    // PluginMetadata::getSlugForPackageName(). If either half regressed,
     // a fresh export would re-import with PLUGIN_MISSING for an agent
     // the operator just created on the same instance.
     $loader = makeToolsPluginLoader();
