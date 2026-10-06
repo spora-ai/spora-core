@@ -50,6 +50,8 @@ final class ToolParameterSchemaBuilder
     /** @internal Filter-only side channel; see OperationSchemaFilter. */
     public const REQUIRED_WHEN_KEY = '__required_when';
 
+    private const ENUM_SOURCE_PREFIX = 'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] ';
+
     /**
      * Build the JSON Schema "parameters" object from a tool's attributes.
      *
@@ -77,26 +79,12 @@ final class ToolParameterSchemaBuilder
         array $enumSourceLabels = [],
     ): array {
         $ref              = new ReflectionClass($target);
-        $properties       = [];
-        $required         = [];
+        $operationAttrs   = self::collectInheritedAttributes($ref, ToolOperation::class);
+        $discriminator    = self::synthesizeDiscriminator($operationAttrs);
+        $discriminatorKey = $discriminator['key'];
+        $properties       = $discriminator['properties'];
+        $required         = $discriminator['required'];
         $requiredWhen     = [];
-        $discriminatorKey = null;
-
-        $operationAttrs = self::collectInheritedAttributes($ref, ToolOperation::class);
-        if (count($operationAttrs) >= 2) {
-            /** @var list<ToolOperation> $operations */
-            $operations = array_map(static fn($attr) => $attr->newInstance(), $operationAttrs);
-
-            $discriminatorKey = $operations[0]->discriminatorKey;
-            $opNames          = array_map(static fn(ToolOperation $op) => $op->name, $operations);
-
-            $properties[$discriminatorKey] = [
-                'type'        => 'string',
-                'description' => self::buildDiscriminatorDescription($operations),
-                'enum'        => $opNames,
-            ];
-            $required[] = $discriminatorKey;
-        }
 
         // Validate `enumSource` references before emitting any property so a
         // misconfigured tool fails fast on the first offender with a named
@@ -108,15 +96,7 @@ final class ToolParameterSchemaBuilder
             /** @var ToolParameter $param */
             $param = $attr->newInstance();
 
-            if ($discriminatorKey !== null && $param->name === $discriminatorKey) {
-                throw new ToolParameterSchemaException(sprintf(
-                    'Tool %s declares #[ToolParameter(name: %s)] which collides with the synthesized '
-                    . 'operation discriminator. Remove the parameter (the builder owns this property) '
-                    . 'or pick a different discriminatorKey on its #[ToolOperation] attributes.',
-                    $ref->getName(),
-                    var_export($param->name, true),
-                ));
-            }
+            self::assertNoDiscriminatorCollision($ref, $param, $discriminatorKey);
 
             $properties[$param->name] = self::propertyJson(
                 $param,
@@ -142,6 +122,55 @@ final class ToolParameterSchemaBuilder
             'required'         => array_values(array_unique($required)),
             self::REQUIRED_WHEN_KEY => $requiredWhen,
         ];
+    }
+
+    /**
+     * Synthesize the operation discriminator a tool owns once it declares
+     * more than one `#[ToolOperation]`, as the seed for the property and
+     * required lists. A single operation needs no LLM-facing choice, so the
+     * seed stays empty.
+     *
+     * @param  list<ReflectionAttribute<ToolOperation>> $operationAttrs
+     * @return array{key: string|null, properties: array<string, array<string, mixed>>, required: list<string>}
+     */
+    private static function synthesizeDiscriminator(array $operationAttrs): array
+    {
+        if (count($operationAttrs) < 2) {
+            return ['key' => null, 'properties' => [], 'required' => []];
+        }
+
+        /** @var list<ToolOperation> $operations */
+        $operations = array_map(static fn($attr) => $attr->newInstance(), $operationAttrs);
+
+        $discriminatorKey = $operations[0]->discriminatorKey;
+
+        return [
+            'key'        => $discriminatorKey,
+            'properties' => [$discriminatorKey => [
+                'type'        => 'string',
+                'description' => self::buildDiscriminatorDescription($operations),
+                'enum'        => array_map(static fn(ToolOperation $op) => $op->name, $operations),
+            ]],
+            'required'   => [$discriminatorKey],
+        ];
+    }
+
+    private static function assertNoDiscriminatorCollision(
+        ReflectionClass $ref,
+        ToolParameter $param,
+        ?string $discriminatorKey,
+    ): void {
+        if ($discriminatorKey === null || $param->name !== $discriminatorKey) {
+            return;
+        }
+
+        throw new ToolParameterSchemaException(sprintf(
+            'Tool %s declares #[ToolParameter(name: %s)] which collides with the synthesized '
+            . 'operation discriminator. Remove the parameter (the builder owns this property) '
+            . 'or pick a different discriminatorKey on its #[ToolOperation] attributes.',
+            $ref->getName(),
+            var_export($param->name, true),
+        ));
     }
 
     /**
@@ -193,7 +222,7 @@ final class ToolParameterSchemaBuilder
             $setting = $settingsByKey[$param->enumSource] ?? null;
             if ($setting === null) {
                 throw new ToolParameterSchemaException(sprintf(
-                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    self::ENUM_SOURCE_PREFIX
                     . 'but no #[ToolSetting(key: %s)] exists on the class. '
                     . 'Either add the setting or remove enumSource.',
                     $ref->getName(),
@@ -204,7 +233,7 @@ final class ToolParameterSchemaBuilder
             }
             if (!$setting->exposeToLlm) {
                 throw new ToolParameterSchemaException(sprintf(
-                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    self::ENUM_SOURCE_PREFIX
                     . 'but the named #[ToolSetting] is not exposeToLlm: true. '
                     . 'The LLM-facing schema has no source values to inject.',
                     $ref->getName(),
@@ -214,7 +243,7 @@ final class ToolParameterSchemaBuilder
             }
             if ($setting->type !== 'multi-select') {
                 throw new ToolParameterSchemaException(sprintf(
-                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    self::ENUM_SOURCE_PREFIX
                     . 'but the named #[ToolSetting] has type %s. enumSource only '
                     . 'supports multi-select settings.',
                     $ref->getName(),
@@ -225,7 +254,7 @@ final class ToolParameterSchemaBuilder
             }
             if ($setting->resolveAs !== 'agent') {
                 throw new ToolParameterSchemaException(sprintf(
-                    'Tool %s declares #[ToolParameter(name: %s, enumSource: %s)] '
+                    self::ENUM_SOURCE_PREFIX
                     . 'but the named #[ToolSetting] has resolveAs %s. enumSource '
                     . 'only supports resolveAs: agent.',
                     $ref->getName(),
