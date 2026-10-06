@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace Spora\Plugins;
 
 /**
- * On-disk metadata of the loaded plugins: the directory each one was booted
- * from, its parsed `plugin.json`, and the `composer.json` fields the plugin
- * catalogue and the agent-template importer read.
- *
- * The maps arrive by reference; {@see PluginLoader} explains why.
+ * On-disk metadata of the loaded plugins, read by the plugin catalogue and the
+ * agent-template importer. The maps arrive by reference; {@see PluginLoader}
+ * explains why.
  */
 final class PluginMetadata
 {

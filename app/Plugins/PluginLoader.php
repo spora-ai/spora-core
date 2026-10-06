@@ -98,11 +98,6 @@ final class PluginLoader
         );
     }
 
-    /**
-     * Callers hold the loader, not this collaborator, so the accessor hands out
-     * the live instance. Wrapping each of its methods here instead would double
-     * this class for no behaviour change.
-     */
     public function metadata(): PluginMetadata
     {
         return $this->metadata;

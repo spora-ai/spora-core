@@ -8,12 +8,10 @@ use Spora\Plugins\Exceptions\PluginLoadFailedException;
 
 /**
  * Turns a discovered `plugin.json` into an instantiated {@see PluginInterface}
- * and records it on the loader's slug-keyed maps. Owns both halves of the boot
- * path — cold discovery and the sidecar restore {@see PluginLoaderCache}
- * short-circuits to — so warm and cold boots apply the same validation,
- * autoload registration, and duplicate rules.
- *
- * The maps arrive by reference; {@see PluginLoader} explains why.
+ * and records it on the loader's slug-keyed maps. Owns both the cold scan and
+ * the sidecar restore {@see PluginLoaderCache} short-circuits to, so warm and
+ * cold boots apply the same validation. The maps arrive by reference;
+ * {@see PluginLoader} explains why.
  */
 final class PluginDiscovery
 {
