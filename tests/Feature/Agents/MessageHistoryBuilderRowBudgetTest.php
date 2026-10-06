@@ -74,6 +74,16 @@ function makeRowBudgetTask(int $agentId): \Spora\Models\Task
  */
 function makeRowBudgetAsset(string $uuid, string $filename, int $kilobytes): array
 {
+    // Real hex, and every caller must keep it that way: MariaDB maps
+    // `$table->uuid()` to its native `UUID` type (`MariaDbGrammar::typeUuid`,
+    // for 10.7+), which rejects anything outside [0-9a-f] — where MySQL maps
+    // the same column to `char(36)` and never checks. So an id with a
+    // non-hex letter in it passes on MySQL and SQLite and dies on MariaDB
+    // with a bare QueryException that names neither the column nor the value.
+    // The `char(36)` column also rejects anything that is not 8-4-4-4-12, so
+    // assert the whole shape rather than the alphabet alone.
+    expect($uuid)->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/');
+
     $body = str_repeat('A', $kilobytes * 1024);
 
     $asset = MediaAsset::create([
@@ -152,7 +162,9 @@ test('four in-budget attachments do not inline four budgets worth of text', func
 
 test('the first attachment is still inlined; the rest fall back to get_source pointers', function (): void {
     $ids = [];
-    foreach (['e', 'f', 'g'] as $n) {
+    // `e`/`f` would read fine but are not hex; `a`/`b`/`c` are, and the
+    // suffixes still differ, so the three ids stay distinct.
+    foreach (['a', 'b', 'c'] as $n) {
         [$id] = makeRowBudgetAsset(
             "5555555{$n}-5555-4555-8555-55555555555{$n}",
             "chunk-{$n}.log",
@@ -166,9 +178,9 @@ test('the first attachment is still inlined; the rest fall back to get_source po
     // The budget is spent by the first, so exactly one body is inlined and
     // every later attachment is named instead — which is the point: the LLM
     // still learns the content exists and can read it on demand.
-    expect($body)->toContain('# chunk-e.log (raw text')
-        ->and($body)->toContain('# chunk-f.log (no inline text)')
-        ->and($body)->toContain('# chunk-g.log (no inline text)')
+    expect($body)->toContain('# chunk-a.log (raw text')
+        ->and($body)->toContain('# chunk-b.log (no inline text)')
+        ->and($body)->toContain('# chunk-c.log (no inline text)')
         ->and($body)->toContain('get_source');
 
     // And the payload of the dropped ones is genuinely absent, not merely
@@ -191,7 +203,7 @@ test('attachments that fit together are all inlined, not cut at the first one', 
     // The budget is a total, not a one-shot: three small files summing well
     // under 512 KB must all arrive.
     $ids = [];
-    foreach (['h', 'i', 'j'] as $n) {
+    foreach (['d', 'e', 'f'] as $n) {
         [$id] = makeRowBudgetAsset(
             "7777777{$n}-7777-4777-8777-77777777777{$n}",
             "small-{$n}.log",
@@ -202,8 +214,8 @@ test('attachments that fit together are all inlined, not cut at the first one', 
 
     $body = buildRowBudgetMessage($ids);
 
-    expect($body)->toContain('# small-h.log (raw text')
-        ->and($body)->toContain('# small-i.log (raw text')
-        ->and($body)->toContain('# small-j.log (raw text')
+    expect($body)->toContain('# small-d.log (raw text')
+        ->and($body)->toContain('# small-e.log (raw text')
+        ->and($body)->toContain('# small-f.log (raw text')
         ->and($body)->not->toContain('get_source');
 });
