@@ -338,8 +338,14 @@ final class OrchestratorContainerBindings
             },
 
             // Core ships none: a hit needs a page to display it and only the
-            // plugin owning the content has one. The seam stays; the list starts
-            // empty, which is what the plugin path below depends on.
+            // plugin owning the content has one. The seam stays so a plugin has
+            // somewhere to register.
+            //
+            // The empty left-hand list is why the merge below is *pure plugin
+            // load order*: nothing core-side can take precedence, so a plugin
+            // claiming a `type::id` another installed plugin already serves wins
+            // or loses by load order. That is deliberately not the rule the
+            // skills list above follows, where core's provider is first.
             'search_provider_classes' => [],
 
             'search_provider_classes_merged' => static function (ContainerInterface $c): array {
@@ -383,7 +389,11 @@ final class OrchestratorContainerBindings
             AgentTemplateSettingsApplier::class => static function (ContainerInterface $c): AgentTemplateSettingsApplier {
                 return new AgentTemplateSettingsApplier(
                     $c->get(ToolConfigService::class),
-                    $c->get(SkillScanner::class),
+                    // The registry, not the scanner: `allowed_skills` entries in
+                    // a template must survive the import when a *provider* serves
+                    // them (spora-plugin-custom-skills), not only when they ship
+                    // as directories.
+                    $c->get(SkillProviderRegistry::class),
                 );
             },
 

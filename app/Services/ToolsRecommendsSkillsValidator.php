@@ -10,7 +10,7 @@ use Spora\Tools\Attributes\Tool;
 
 /**
  * Finds tools whose `#[Tool(recommendsSkills: ...)]` declarations name skill
- * slugs that are NOT present on disk.
+ * slugs that no {@see SkillProviderRegistry} provider serves.
  *
  * Strict mode: the HTTP list endpoint ({@see \Spora\Http\ToolController::index()})
  * treats any non-empty result as a 500 with code `TOOLS_RECOMMENDS_SKILLS_MISSING`.
@@ -19,6 +19,10 @@ use Spora\Tools\Attributes\Tool;
  * empty allowlist. Plugin authors are expected to ship their own
  * build-time test that mirrors {@see \Tests\Unit\Tools\ToolRecommendsSkillsValidationCoreTest}
  * for their scanner roots.
+ *
+ * The registry is the source of truth, and "not on disk" is only one way to
+ * fail it: the shipped directories are one provider among several, and a
+ * provider-supplied skill is never on disk at all.
  *
  * Comparison is case-insensitive (the scanner slug is canonical), and the
  * validator lists the skills once per call rather than per tool class — the

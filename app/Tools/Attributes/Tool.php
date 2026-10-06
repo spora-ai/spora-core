@@ -22,7 +22,8 @@ use InvalidArgumentException;
  *                                        //   (e.g. 'calendar', 'mail', 'search')
  *       recommendsSkills: ['git'],       // optional; slugs the tool bundles —
  *                                        //   enables strict-mode validation
- *                                        //   against SkillScanner on /api/v1/tools
+ *                                        //   against the SkillProviderRegistry
+ *                                        //   on /api/v1/tools
  *   )]
  *   final class MyTool implements ToolInterface { ... }
  *
@@ -90,7 +91,9 @@ final class Tool
          *     (see {@see SLUG_REGEX}); mismatches throw InvalidArgumentException.
          *   - Non-string entries throw InvalidArgumentException.
          * See {@see \Spora\Services\ToolsRecommendsSkillsValidator} for the
-         * strict-mode runtime check that every declared slug exists on disk.
+         * strict-mode runtime check that every declared slug resolves through
+         * the {@see \Spora\Skills\SkillProviderRegistry} — any provider, not
+         * only the shipped directories.
          *
          * @param array<int|string, mixed>|null $recommendsSkills
          */

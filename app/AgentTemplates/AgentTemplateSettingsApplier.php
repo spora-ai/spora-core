@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\AgentTemplates;
 
-use Spora\Skills\SkillScanner;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ToolSettingSchema;
 
@@ -23,14 +23,22 @@ use Spora\Tools\ToolSettingSchema;
  * - Coerce `multi-select` arrays to JSON strings (the form layer's shape)
  *   so {@see \Spora\Services\ToolConfigService::putAgentOverride()} can
  *   round-trip them. For `resolveAs: 'skill'` settings, intersect the
- *   import list with the local {@see SkillScanner} and emit `SKILL_MISSING`
- *   warnings for dropped slugs.
+ *   import list against the {@see SkillProviderRegistry} and emit
+ *   `SKILL_MISSING` warnings for dropped slugs.
+ *
+ * **The registry, not the scanner.** Availability is a property of every skill
+ * *provider*, not of the shipped directories: `spora-plugin-custom-skills`
+ * serves database-backed skills that never touch `SkillScanner`. Asking the
+ * scanner meant a template granting one of those lost it on import with a
+ * `SKILL_MISSING` warning naming a skill that was in fact installed — and the
+ * export → import round-trip silently shed `allowed_skills` for anyone
+ * shipping such a template.
  */
 final class AgentTemplateSettingsApplier
 {
     public function __construct(
         private readonly \Spora\Services\ToolConfigService $toolConfig,
-        private readonly ?SkillScanner $skillScanner = null,
+        private readonly ?SkillProviderRegistry $skills = null,
     ) {}
 
     /**
@@ -73,13 +81,29 @@ final class AgentTemplateSettingsApplier
         array &$warnings,
     ): string {
         $items = is_array($value) ? array_values($value) : [];
-        if ($setting->resolveAs === 'skill' && $this->skillScanner !== null) {
+        if ($setting->resolveAs === 'skill' && $this->skills !== null) {
             $items = $this->filterMissingSkills($items, $setting->key, $toolIndex, $warnings);
         }
         return json_encode($items, JSON_THROW_ON_ERROR);
     }
 
     /**
+     * Drop every slug no provider serves, reporting each.
+     *
+     * Both halves of the identity count, because `allowed_skills` entries are
+     * read back as names everywhere else ({@see \Spora\Services\SkillListProjector})
+     * while a shipped skill's slug is its directory basename. A provider with
+     * no directory behind it carries only a name.
+     *
+     * `null` for the principal, so a provider-scoped skill cannot be granted by
+     * a template: the import runs as no one in particular, and a grant that
+     * depended on who imported it would not survive the round-trip — the same
+     * rule {@see \Spora\Services\ToolsRecommendsSkillsValidator} holds to. A
+     * null registry performs no check at all rather than dropping everything:
+     * the property is optional for test and build-time construction, and
+     * emptying every imported agent's allowlist because a wiring is absent is
+     * the more damaging failure.
+     *
      * @param list<mixed> $items
      * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
      * @return list<mixed>
@@ -87,13 +111,16 @@ final class AgentTemplateSettingsApplier
     private function filterMissingSkills(array $items, string $key, int $toolIndex, array &$warnings): array
     {
         $available = [];
-        foreach ($this->skillScanner?->scan() ?? [] as $skill) {
-            $available[$skill->name()] = true;
+        foreach ($this->skills?->getSkills(null) ?? [] as $skill) {
+            $available[strtolower($skill->name)] = true;
+            if ($skill->slug !== null && $skill->slug !== '') {
+                $available[strtolower($skill->slug)] = true;
+            }
         }
 
         $filtered = [];
         foreach ($items as $slug) {
-            if (is_string($slug) && isset($available[$slug])) {
+            if (is_string($slug) && isset($available[strtolower(trim($slug))])) {
                 $filtered[] = $slug;
                 continue;
             }

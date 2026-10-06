@@ -195,10 +195,9 @@ test('opt-in export settings round-trip through the importer without secrets', f
 });
 
 test('missing skill slugs warn and are dropped from imported settings', function (): void {
-    $scanner = new Spora\Skills\SkillScanner([]);
     $security = new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $toolConfig = new Spora\Services\ToolConfigService($security, new Monolog\Logger('test'), [Spora\Tools\SkillTool::class]);
-    $settingsApplier = new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, $scanner);
+    $settingsApplier = new Spora\AgentTemplates\AgentTemplateSettingsApplier($toolConfig, new Spora\Skills\SkillProviderRegistry([]));
     $importer = new Spora\AgentTemplates\AgentTemplateImporter(
         $toolConfig,
         new Spora\Plugins\PluginLoader([]),

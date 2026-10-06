@@ -21,6 +21,17 @@ namespace Spora\Skills;
  * No lookup cache: providers differ in lookup cost and freshness and each knows
  * which applies to it, and caching here would hide a database-backed skill
  * written mid-worker-run.
+ *
+ * **A provider that throws is not caught, unlike {@see \Spora\Search\SearchProviderRegistry}.**
+ * That asymmetry is deliberate and the two registries agree on it: ⌘K is one
+ * global affordance, so degrading to a narrower palette is better than taking
+ * it down. Skills have no such fallback. A provider that fails here reaches the
+ * agent's tool definition on every tick — `allowed_skills` is projected into the
+ * definition the model reads, so swallowing the failure would ship a tool
+ * definition quietly missing the skills it claims, with no log to say why.
+ * Failing loud turns a broken plugin into a stack trace naming it, at the cost
+ * of a loud outage in an operator's install, which is a far better trade than a
+ * silent one.
  */
 final readonly class SkillProviderRegistry
 {

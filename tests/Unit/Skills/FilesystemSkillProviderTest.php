@@ -2,9 +2,93 @@
 
 declare(strict_types=1);
 
+use Psr\Log\NullLogger;
+use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Skills\Providers\FilesystemSkillProvider;
 use Spora\Skills\SkillProviderInterface;
+use Spora\Skills\SkillProviderRegistry;
 use Spora\Skills\SkillScanner;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\ToolInterface;
+use Spora\Tools\ValueObjects\ToolResult;
+
+/**
+ * Declares `git` so the strict-mode `recommendsSkills` check can be exercised
+ * against a provider whose `git` slug is served by a *malformed* skill — the
+ * shape a bundling accident actually takes.
+ */
+#[Tool(name: 'fs_index_git_tool', description: 'Declares the git skill.', recommendsSkills: ['git'])]
+final class FsProviderIndexGitTool implements ToolInterface
+{
+    public function execute(
+        array $arguments,
+        int $agentId,
+        ?int $taskId = null,
+        ?Spora\Services\PrincipalContext $context = null,
+    ): ToolResult {
+        return new ToolResult(true, 'ok');
+    }
+
+    public function describeAction(array $arguments): string
+    {
+        return '';
+    }
+
+    public function getParametersSchema(): array
+    {
+        return ['type' => 'object', 'properties' => [], 'required' => []];
+    }
+}
+
+/**
+ * A provider over throwaway scan roots, given as `source label => [slug =>
+ * SKILL.md contents]` in precedence order. Returns [provider, cleanup].
+ *
+ * @param array<string, array<string, string>> $roots
+ * @return array{0: FilesystemSkillProvider, 1: callable(): void}
+ */
+function fsProviderOver(array $roots): array
+{
+    $base = sys_get_temp_dir() . '/spora_fs_over_' . uniqid('', true);
+    $scannerRoots = [];
+    $created = [];
+
+    foreach ($roots as $source => $skills) {
+        $root = $base . '/' . $source;
+        mkdir($root, 0o755, true);
+        $scannerRoots[] = ['path' => $root, 'source' => $source];
+
+        foreach ($skills as $slug => $contents) {
+            $dir = $root . '/' . $slug;
+            mkdir($dir, 0o755, true);
+            file_put_contents($dir . '/SKILL.md', $contents);
+            $created[] = $dir;
+        }
+    }
+
+    $cleanup = static function () use ($base): void {
+        if (!is_dir($base)) {
+            return;
+        }
+        $iter = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iter as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($base);
+    };
+
+    return [new FilesystemSkillProvider(new SkillScanner($scannerRoots)), $cleanup];
+}
+
+/** A SKILL.md body that parses but fails validation. */
+function fsBrokenSkillMd(): string
+{
+    return "no frontmatter here\n";
+}
 
 /**
  * The filesystem provider owns the read path that used to live in `SkillTool`:
@@ -13,7 +97,8 @@ use Spora\Skills\SkillScanner;
  * — a database-backed provider has no equivalent and must bring its own.
  *
  * The tests that matter most are the ones a caller cannot replicate: the
- * symlink case, the cap, and the memo.
+ * symlink case, the cap, the memo, and the index identity below — the dedup
+ * key that decides whether a broken skill is reported or swallowed.
  */
 function fsProviderFixture(): array
 {
@@ -239,5 +324,125 @@ it('carries scanner warnings onto the summary', function (): void {
         }
         @rmdir($root . '/broken');
         @rmdir($root);
+    }
+});
+
+it('gives every broken skill its own row instead of collapsing them into one', function (): void {
+    // A skill that fails to parse has no frontmatter `name` at all, so the index
+    // used to put all three under one key and report a single row. The operator
+    // then saw one failure for three broken bundles — SkillScanner promises each
+    // one is reported, and this is where that promise was being kept.
+    [$provider, $cleanup] = fsProviderOver([
+        'core' => [
+            'aaa-broken' => fsBrokenSkillMd(),
+            'mmm-broken' => fsBrokenSkillMd(),
+            'zzz-broken' => fsBrokenSkillMd(),
+        ],
+    ]);
+
+    try {
+        $summaries = $provider->getSkills(null);
+
+        expect($summaries)->toHaveCount(3)
+            ->and(array_map(static fn($s): ?string => $s->slug, $summaries))
+                ->toBe(['aaa-broken', 'mmm-broken', 'zzz-broken']);
+
+        foreach ($summaries as $summary) {
+            expect($summary->hasWarnings)->toBeTrue();
+        }
+    } finally {
+        $cleanup();
+    }
+});
+
+it('keeps each broken skill distinguishable by the directory it came from', function (): void {
+    // The collision the nameless-key fold causes: the surviving row's slug was
+    // whichever root sorted first, so which broken bundle got reported depended
+    // on a directory name.
+    [$provider, $cleanup] = fsProviderOver([
+        'core' => ['aaa-broken' => fsBrokenSkillMd()],
+        'spora-plugin-late' => ['zzz-broken' => fsBrokenSkillMd()],
+    ]);
+
+    try {
+        expect(array_map(
+            static fn($s): array => [$s->slug, $s->source],
+            $provider->getSkills(null),
+        ))->toBe([
+            ['aaa-broken', 'core'],
+            ['zzz-broken', 'spora-plugin-late'],
+        ]);
+    } finally {
+        $cleanup();
+    }
+});
+
+it('keys a name-dir-mismatched skill on its directory, so it is listed but not readable by the bad name', function (): void {
+    // A `name` that disagrees with its directory is not a handle anything else
+    // agrees on: the strict-mode check resolves `slug`, the picker sends `name`,
+    // the route is `:slug`. The directory is the one stable handle left, so the
+    // skill keeps its row — the operator still sees the NAME_DIR_MISMATCH error —
+    // and stops answering to the name that is wrong.
+    [$provider, $cleanup] = fsProviderOver([
+        'core' => ['git' => "---\nname: gitting\ndescription: Mismatched\n---\n\nBody\n"],
+    ]);
+
+    try {
+        $summaries = $provider->getSkills(null);
+
+        expect($summaries)->toHaveCount(1)
+            ->and($summaries[0]->name)->toBe('gitting')
+            ->and($summaries[0]->slug)->toBe('git')
+            ->and($summaries[0]->hasWarnings)->toBeTrue()
+            ->and($provider->getSkillDetails('gitting', null))->toBeNull()
+            ->and($provider->getSkillDetails('git', null))->toBeNull();
+    } finally {
+        $cleanup();
+    }
+});
+
+it('lets the earlier root win a same-slug collision across roots', function (): void {
+    // Root precedence is the load-bearing part of the dedup key: a plugin that
+    // ships its own `git` must not repoint an existing agent's allowed_skills
+    // at different content.
+    [$provider, $cleanup] = fsProviderOver([
+        'core' => ['git' => "---\nname: git\ndescription: Core copy\n---\n\ncore body\n"],
+        'spora-plugin-shadower' => ['git' => "---\nname: git\ndescription: Plugin copy\n---\n\nplugin body\n"],
+    ]);
+
+    try {
+        $summaries = $provider->getSkills(null);
+
+        expect($summaries)->toHaveCount(1)
+            ->and($summaries[0]->source)->toBe('core')
+            ->and($provider->getSkillDetails('git', null)?->body)->toContain('core body');
+    } finally {
+        $cleanup();
+    }
+});
+
+it('keeps a same-slug collision resolvable for recommendsSkills when both copies are broken', function (): void {
+    // Strict mode 500s `GET /api/v1/tools` for the whole instance when a
+    // declared slug resolves to nothing. Two nameless skills used to collapse
+    // into one row keyed by the empty name, so a *legitimate* `git` bundle that
+    // happened to be malformed lost its slug and took the tool list down with
+    // it.
+    [$provider, $cleanup] = fsProviderOver([
+        'core' => [
+            'aaa-broken' => fsBrokenSkillMd(),
+            'git' => fsBrokenSkillMd(),
+        ],
+    ]);
+
+    try {
+        $registry = new SkillProviderRegistry([$provider]);
+        $validator = new ToolsRecommendsSkillsValidator(
+            new ToolConfigNameResolver(new NullLogger(), [FsProviderIndexGitTool::class]),
+            $registry,
+        );
+
+        expect($validator->validate())->toBe([]);
+    } finally {
+        $cleanup();
     }
 });

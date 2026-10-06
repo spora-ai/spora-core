@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Skills\Exceptions\SkillNotFoundException;
 use Spora\Skills\Skill;
 
 test('Skill accessors fall back safely on missing or malformed fields', function (): void {
@@ -110,32 +109,13 @@ test('Skill::addWarning + hasWarnings round-trip', function (): void {
     expect($skill->warnings())->toHaveCount(1);
 });
 
-test('Skill::resolveFilePath strips a leading slash and falls back to the entry file', function (): void {
-    $skill = new Skill(
-        frontmatter: ['name' => 'x'],
-        body: '',
-        dir: '/tmp/x',
-        files: [
-            ['path' => 'SKILL.md',     'bytes' => 100],
-            ['path' => 'examples.md',  'bytes' => 200],
-        ],
-    );
+test('Skill::slug is the directory basename, so it survives an unparsed frontmatter', function (): void {
+    // `slug` is what a `#[Tool(recommendsSkills:)]` declaration and the strict-
+    // mode check resolve against, and it must stay answerable for a skill whose
+    // frontmatter never parsed — otherwise a broken bundle silently takes the
+    // tool list down with it.
+    $broken = new Skill(frontmatter: [], body: '', dir: '/tmp/roots/git', files: []);
 
-    expect($skill->resolveFilePath('examples.md'))->toBe('/tmp/x/examples.md')
-        ->and($skill->resolveFilePath('/SKILL.md'))->toBe('/tmp/x/SKILL.md')
-        ->and($skill->resolveFilePath(''))->toBe('/tmp/x/SKILL.md');
-});
-
-test('Skill::resolveFilePath raises SkillNotFoundException for files outside the listing', function (): void {
-    $skill = new Skill(
-        frontmatter: ['name' => 'x'],
-        body: '',
-        dir: '/tmp/x',
-        files: [
-            ['path' => 'SKILL.md', 'bytes' => 100],
-        ],
-    );
-
-    expect(fn() => $skill->resolveFilePath('references/REF.md'))
-        ->toThrow(SkillNotFoundException::class);
+    expect($broken->name())->toBe('')
+        ->and($broken->slug())->toBe('git');
 });

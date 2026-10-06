@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Spora\Skills;
 
-use Spora\Skills\Exceptions\SkillNotFoundException;
-
 /**
  * A parsed, validated Skill.
  *
@@ -17,8 +15,14 @@ use Spora\Skills\Exceptions\SkillNotFoundException;
  *
  * `source` distinguishes bundled skills (`core`), project-shipped
  * (`project`), and plugin-shipped (`<plugin-slug>`). `dir` is the
- * absolute path to the skill's directory on disk — the Skill tool uses it
- * to resolve `skill_read` and `skill_files` calls.
+ * absolute path to the skill's directory on disk.
+ *
+ * **Core-internal.** A plugin never holds one: the provider seam speaks
+ * {@see SkillSummary} and {@see SkillDescriptor}, and a plugin that ships
+ * directories has them scanned by {@see SkillScanner} rather than receiving the
+ * objects. {@see dir()} is the one thing core still needs, and the only reader
+ * of it is {@see Providers\FilesystemSkillProvider::resolveContained()} — which
+ * proves the path is inside the directory rather than trusting a caller to do so.
  */
 final class Skill
 {
@@ -186,30 +190,5 @@ final class Skill
     public function frontmatter(): array
     {
         return $this->frontmatter;
-    }
-
-    /**
-     * Resolve a relative file path inside the skill's directory. Returns the
-     * absolute filesystem path on success; raises {@see SkillNotFoundException}
-     * when the path is not present in the scanned file listing.
-     *
-     * The caller is responsible for path-traversal hardening (see SkillTool).
-     * This method only normalises `path/to/file.md` to the absolute form
-     * `${dir}/path/to/file.md` against the cached listing.
-     */
-    public function resolveFilePath(string $relativePath): string
-    {
-        $relativePath = ltrim($relativePath, '/');
-        if ($relativePath === '') {
-            $relativePath = $this->filename;
-        }
-        foreach ($this->files as $entry) {
-            if ($entry['path'] === $relativePath) {
-                return rtrim($this->dir, '/') . '/' . $relativePath;
-            }
-        }
-        throw new SkillNotFoundException(
-            "File '{$relativePath}' is not part of skill '{$this->name()}'.",
-        );
     }
 }

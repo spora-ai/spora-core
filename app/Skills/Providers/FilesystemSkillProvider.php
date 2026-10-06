@@ -158,17 +158,50 @@ final class FilesystemSkillProvider implements SkillProviderInterface
     }
 
     /**
-     * @return array<string, Skill>
+     * The scanned skills, deduplicated, in the scanner's root order.
+     *
+     * @return array<string, Skill> keyed by {@see self::identity()}
      */
     private function index(): array
     {
-        $byName = [];
+        $index = [];
         foreach ($this->scanner->scan() as $skill) {
             // First entry wins, mirroring the scanner's root precedence: a
             // project skill must not be replaced by a same-named plugin one.
-            $byName[$skill->name()] ??= $skill;
+            $index[self::identity($skill)] ??= $skill;
         }
 
-        return $byName;
+        return $index;
+    }
+
+    /**
+     * What a skill dedupes and is looked up under.
+     *
+     * The frontmatter `name` for a skill that named itself consistently with
+     * its directory — which is every skill {@see \Spora\Skills\SkillValidator}
+     * accepts, and the only case where two roots' copies of one skill are
+     * meant to collapse. Anything else keys on the directory instead: a skill
+     * that failed to parse has **no** name, so keying on that folded every
+     * broken skill in the install into a single row and hid all but one of the
+     * failures {@see \Spora\Skills\SkillScanner} promises to report. The
+     * directory is unique per scanned skill, so each broken skill keeps its own
+     * row — and its own slug, which is what a `#[Tool(recommendsSkills:)]`
+     * declaration still has to resolve.
+     *
+     * A directory path can never collide with a name: names are slug-shaped
+     * and a path always contains a separator.
+     *
+     * One consequence worth naming: a `name`-dir-mismatched skill keeps its row
+     * but stops answering to the declared `name`, since the directory is the
+     * only handle the rest of the system agrees on — the strict-mode check
+     * resolves `slug`, the picker sends `name`, the route is `:slug`. It is a
+     * skill the validator has already declared unusable; losing the ability to
+     * read it under the wrong name is the point of the row staying visible.
+     */
+    private static function identity(Skill $skill): string
+    {
+        $name = $skill->name();
+
+        return $name !== '' && $name === $skill->slug() ? $name : $skill->dir();
     }
 }
