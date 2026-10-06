@@ -6,6 +6,7 @@ compatibility: Designed for Spora agents with the `time` tool (now + format oper
 metadata:
   author: spora-ai
   version: "2.1"
+allowed-tools: time calculator
 ---
 
 # Time arithmetic

@@ -5,6 +5,7 @@ license: MIT
 metadata:
   author: spora-ai
   version: "2.1"
+allowed-tools: agent
 ---
 
 # Agent creation

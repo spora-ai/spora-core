@@ -6,6 +6,7 @@ compatibility: "Designed for Spora agents with the `schedule` tool enabled."
 metadata:
   author: spora-ai
   version: "1.0"
+allowed-tools: schedule
 ---
 
 # Schedule
