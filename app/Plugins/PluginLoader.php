@@ -11,7 +11,6 @@ use Spora\Core\MiddlewareRouteCollector;
 use Spora\Events\BootingEvent;
 use Spora\Events\ContainerBuildingEvent;
 use Spora\Events\RoutesRegisteringEvent;
-use Spora\Plugins\Exceptions\PluginLoadFailedException;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Throwable;
@@ -30,13 +29,13 @@ use Throwable;
  *
  * Directories are scanned in the order given; if the same slug appears in more
  * than one, the first one wins.
+ *
+ * Boot-time work sits in {@see PluginDiscovery} and the on-disk metadata reads
+ * in {@see PluginMetadata}; both bind the maps below by reference, so this
+ * class stays their only owner and writer. A snapshot would lose plugins:
+ * {@see PluginLoader::boot()} lets a manifest failure escape, and Kernel falls
+ * through to a partially populated loader.
  */
-// NOSONAR — PluginLoader is a service-locator facade for plugin capabilities.
-// S1448 (too many methods) inflates because each plugin-side capability registers
-// as a sibling method (paths, hooks, ext entries, skill paths, …). Splitting the
-// facade would scatter the contract across multiple classes and defeat the
-// method-name lookup the plugin registry depends on. Acked in plugin-architecture
-// review; a deeper restructure is tracked separately.
 final class PluginLoader
 {
     /**
@@ -67,6 +66,10 @@ final class PluginLoader
 
     private readonly EventDispatcher $dispatcher;
 
+    private readonly PluginMetadata $metadata;
+
+    private readonly PluginDiscovery $discovery;
+
     /**
      * @param list<string>  $pluginDirectories Absolute paths to scan for `<plugin>/plugin.json`.
      *                                        Non-existent directories are silently skipped.
@@ -86,6 +89,18 @@ final class PluginLoader
     ) {
         $this->cache = new PluginLoaderCache($pluginDirectories, $stampPath);
         $this->dispatcher = $dispatcher ?? new EventDispatcher();
+        $this->metadata = new PluginMetadata($this->pluginDirs, $this->pluginManifests);
+        $this->discovery = new PluginDiscovery(
+            $this->cache,
+            $this->plugins,
+            $this->pluginDirs,
+            $this->pluginManifests,
+        );
+    }
+
+    public function metadata(): PluginMetadata
+    {
+        return $this->metadata;
     }
 
     /**
@@ -103,21 +118,13 @@ final class PluginLoader
         $discovered = $this->cache->collectManifests();
 
         if ($this->cache->isCurrent($discovered)) {
-            $this->restoreFromSidecar();
+            $this->discovery->restoreFromSidecar();
             return;
         }
 
-        $classLoader = $this->findClassLoader();
+        $this->discovery->loadDiscovered($discovered);
 
-        foreach ($discovered as $entry) {
-            $this->loadPluginFromManifest(
-                $entry['path'],
-                $entry['contents'],
-                $classLoader,
-            );
-        }
-
-        $this->cache->write($discovered, $this->buildSidecarEntries());
+        $this->cache->write($discovered, $this->discovery->buildSidecarEntries());
     }
 
     /**
@@ -341,180 +348,6 @@ final class PluginLoader
     }
 
     /**
-     * Resolve a plugin slug to its Composer package name (e.g.
-     * `spora-ai/spora-plugin-media-archive`). Reads the plugin's
-     * `composer.json#name` from the on-disk plugin directory.
-     *
-     * The slug alone is a filesystem identifier — it isn't a Packagist
-     * identifier, so a template exporter that emits slugs leaves the
-     * importer unable to resolve the requirement. The package name is
-     * what `composer require <name>` and Packagist's search API both
-     * understand.
-     *
-     * Returns null when the slug isn't loaded, the plugin directory has
-     * no readable `composer.json`, or the `name` field is missing —
-     * callers should treat null as "skip; the operator will see the
-     * missing plugin at import time".
-     */
-    public function getComposerNameForSlug(string $slug): ?string
-    {
-        $dir = $this->pluginDirs[$slug] ?? null;
-        if ($dir === null) {
-            return null;
-        }
-        $decoded = $this->readComposerJson($dir);
-        if (!is_array($decoded)) {
-            return null;
-        }
-        $name = $decoded['name'] ?? null;
-        return is_string($name) && $name !== '' ? $name : null;
-    }
-
-    /**
-     * Inverse of {@see getComposerNameForSlug()}: resolve a Composer
-     * `vendor/name` package string back to the on-disk slug of the
-     * loaded plugin that ships it.
-     *
-     * Walks every loaded plugin's directory and reads its
-     * `composer.json#name`. Used by the agent-template importer to
-     * decide whether an `required_plugins` entry from an exported
-     * template (vendor/name) is satisfied by the current instance —
-     * there is no slug-keyed map to consult directly.
-     *
-     * Returns null when no loaded plugin declares that package name,
-     * a `composer.json` is unreadable, or the `name` field is missing.
-     * Callers should treat null as "PLUGIN_MISSING".
-     */
-    public function getSlugForPackageName(string $package): ?string
-    {
-        if ($package === '') {
-            return null;
-        }
-        foreach ($this->pluginDirs as $slug => $dir) {
-            $decoded = $this->readComposerJson($dir);
-            if (!is_array($decoded)) {
-                continue;
-            }
-            $name = $decoded['name'] ?? null;
-            if (is_string($name) && $name === $package) {
-                return $slug;
-            }
-        }
-        return null;
-    }
-
-    /** @return array<string, mixed>|null */
-    private function readComposerJson(string $dir): ?array
-    {
-        $path = $dir . '/composer.json';
-        if (!is_file($path)) {
-            return null;
-        }
-        $raw = @file_get_contents($path);
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
-        $decoded = json_decode($raw, true);
-        return is_array($decoded) ? $decoded : null;
-    }
-
-    /**
-     * Map of plugin slug => absolute plugin directory, for plugins that were loaded.
-     *
-     * @return array<string, string>
-     */
-    public function getPluginDirectories(): array
-    {
-        return $this->pluginDirs;
-    }
-
-    /**
-     * Returns each loaded plugin's `composer.json` `suggest` field, keyed
-     * by the plugin's slug. Composer's `suggest` is reused as the
-     * "companion plugins" surface — no new field is invented in
-     * `plugin.json`.
-     *
-     * Result shape: `{ slug => { 'package-name' => 'description', ... } }`.
-     * Plugins without a `composer.json` or without a `suggest` field
-     * contribute nothing — the SPA hides the section for them.
-     *
-     * Cached per load — the `composer.json` is read once when the slug
-     * is first asked for.
-     *
-     * @return array<string, array<string, string>>
-     */
-    public function suggestedPackages(): array
-    {
-        if ($this->pluginManifests === []) {
-            return [];
-        }
-
-        $result = [];
-        foreach ($this->pluginDirs as $slug => $dir) {
-            $suggest = $this->readComposerSuggest($dir);
-            if ($suggest !== []) {
-                $result[$slug] = $suggest;
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Reads `composer.json` from the plugin directory and returns its
-     * `suggest` field. Errors (missing file, malformed JSON, non-object
-     * `suggest`) yield an empty array — failures are never surfaced
-     * because the suggestion list is purely informational.
-     *
-     * @return array<string, string>
-     */
-    private function readComposerSuggest(string $pluginDir): array
-    {
-        $path = rtrim($pluginDir, '/') . '/composer.json';
-        if (!is_readable($path)) {
-            return [];
-        }
-        $raw = file_get_contents($path);
-        if ($raw === false || $raw === '') {
-            return [];
-        }
-
-        $decoded = json_decode($raw, true);
-        $suggest = is_array($decoded) ? ($decoded['suggest'] ?? null) : null;
-
-        return is_array($suggest) ? $this->filterSuggestEntries($suggest) : [];
-    }
-
-    /**
-     * @param array<mixed, mixed> $suggest
-     * @return array<string, string>
-     */
-    private function filterSuggestEntries(array $suggest): array
-    {
-        $clean = [];
-        foreach ($suggest as $package => $description) {
-            if (!is_string($package) || $package === '' || !is_string($description)) {
-                continue;
-            }
-            $clean[$package] = $description;
-        }
-
-        return $clean;
-    }
-
-    /**
-     * The raw parsed manifest for a given slug, or null if the slug is not loaded.
-     * Useful for surfacing manifest-only metadata (e.g. `description`) that is not
-     * part of PluginInterface.
-     *
-     * @return array<string, mixed>|null
-     */
-    public function getPluginManifest(string $slug): ?array
-    {
-        return $this->pluginManifests[$slug] ?? null;
-    }
-
-    /**
      * All plugin migration paths and their declared schema versions, for use by DatabaseSchemaInstaller.
      * Keyed by plugin slug — the slug is the component name written to schema_versions
      * and the required prefix for migration filenames.
@@ -644,231 +477,4 @@ final class PluginLoader
         }
     }
 
-    /**
-     * Re-instantiate every plugin recorded in the sidecar JSON. Falls back to
-     * a full discovery if the sidecar is missing or corrupt.
-     */
-    private function restoreFromSidecar(): void
-    {
-        $entries = $this->cache->read();
-
-        if ($entries === null) {
-            $this->fallbackToFullDiscovery();
-            return;
-        }
-
-        $classLoader = $this->findClassLoader();
-
-        foreach ($entries as $entry) {
-            $this->restorePluginFromSidecarEntry($entry, $classLoader);
-        }
-    }
-
-    /**
-     * @param mixed $entry
-     */
-    private function restorePluginFromSidecarEntry(mixed $entry, ?\Composer\Autoload\ClassLoader $classLoader): void
-    {
-        if (!is_array($entry)) {
-            return;
-        }
-
-        $slug     = $entry['slug']      ?? null;
-        $dir      = $entry['directory'] ?? null;
-        $manifest = $entry['manifest']  ?? null;
-
-        if (!is_string($slug) || !is_string($dir) || !is_array($manifest)) {
-            return;
-        }
-
-        $class = $manifest['class'] ?? null;
-        if (!is_string($class) || $class === '') {
-            // Sidecar entry is partially corrupt — surface to the caller so the
-            // boot path falls back to a full cold discovery rather than failing
-            // inside instantiatePlugin with a cryptic message.
-            throw new PluginLoadFailedException(
-                "Sidecar entry for plugin '{$slug}' is missing the 'class' field.",
-            );
-        }
-
-        $this->registerManifestAutoload($manifest, $classLoader, $dir);
-
-        $this->instantiatePlugin($slug, $class, $dir, $manifest, $dir . '/plugin.json');
-    }
-
-    /**
-     * Sidecar is unusable (missing, undecodable, schema-mismatch) — perform a
-     * full cold discovery and persist a fresh cache so the next boot can
-     * short-circuit again.
-     */
-    private function fallbackToFullDiscovery(): void
-    {
-        $discovered = $this->cache->collectManifests();
-
-        $classLoader = $this->findClassLoader();
-        foreach ($discovered as $entry) {
-            $this->loadPluginFromManifest($entry['path'], $entry['contents'], $classLoader);
-        }
-
-        $this->cache->write($discovered, $this->buildSidecarEntries());
-    }
-
-    /**
-     * @return list<array{slug: string, class: ?string, directory: ?string, manifest: array<string, mixed>}>
-     */
-    private function buildSidecarEntries(): array
-    {
-        $entries = [];
-        foreach ($this->pluginManifests as $slug => $manifest) {
-            $entries[] = [
-                'slug'      => $slug,
-                'class'     => $manifest['class'] ?? null,
-                'directory' => $this->pluginDirs[$slug] ?? null,
-                'manifest'  => $manifest,
-            ];
-        }
-        return $entries;
-    }
-
-    /**
-     * @throws PluginLoadFailedException
-     */
-    private function loadPluginFromManifest(
-        string $manifestFile,
-        string $contents,
-        ?\Composer\Autoload\ClassLoader $classLoader,
-    ): void {
-        $manifest = $this->parseAndValidateManifest($contents, $manifestFile);
-        $slug     = $manifest['slug'];
-        $fqcn     = $manifest['class'];
-        $pluginDir = dirname($manifestFile);
-
-        // PSR-4 mappings must register before instantiatePlugin() resolves the class.
-        $this->registerManifestAutoload($manifest, $classLoader, $pluginDir);
-
-        $this->instantiatePlugin($slug, $fqcn, $pluginDir, $manifest, $manifestFile);
-    }
-
-    /**
-     * Decodes and structurally validates the manifest. Returns the full manifest array
-     * (preserving autoload and other optional fields) so callers can read them after
-     * the required slug/class fields have been verified.
-     *
-     * @return array<string, mixed>
-     *
-     * @throws PluginLoadFailedException
-     */
-    private function parseAndValidateManifest(string $raw, string $manifestFile): array
-    {
-        $manifest = json_decode($raw, true);
-
-        if (!is_array($manifest)) {
-            throw new PluginLoadFailedException(
-                "Plugin manifest '{$manifestFile}' contains invalid JSON.",
-            );
-        }
-
-        if (!isset($manifest['slug']) || !is_string($manifest['slug'])) {
-            throw new PluginLoadFailedException(
-                "Plugin manifest '{$manifestFile}' is missing the required 'slug' field. " .
-                "See plugin.schema.json for the full manifest contract.",
-            );
-        }
-
-        $slug = $manifest['slug'];
-
-        if (!preg_match('/^[a-z0-9][a-z0-9_-]*$/', $slug)) {
-            throw new PluginLoadFailedException(
-                "Plugin manifest '{$manifestFile}' has an invalid slug '{$slug}'. " .
-                "Slugs must be lowercase alphanumeric and may contain hyphens or underscores " .
-                "(e.g. 'my-plugin').",
-            );
-        }
-
-        if (!isset($manifest['class']) || !is_string($manifest['class'])) {
-            throw new PluginLoadFailedException(
-                "Plugin manifest '{$manifestFile}' (slug: '{$slug}') is missing the required 'class' field. " .
-                "See plugin.schema.json for the full manifest contract.",
-            );
-        }
-
-        return $manifest;
-    }
-
-    /**
-     * @param array<string, mixed> $manifest
-     */
-    private function registerManifestAutoload(array $manifest, ?\Composer\Autoload\ClassLoader $classLoader, string $pluginDir): void
-    {
-        if ($classLoader !== null && isset($manifest['autoload']['psr-4']) && is_array($manifest['autoload']['psr-4'])) {
-            foreach ($manifest['autoload']['psr-4'] as $namespace => $relativePath) {
-                $classLoader->addPsr4((string) $namespace, $pluginDir . '/' . ltrim((string) $relativePath, '/'));
-            }
-        }
-
-        // For plugins with their own Composer dependency tree.
-        if (isset($manifest['autoload']['files']) && is_array($manifest['autoload']['files'])) {
-            foreach ($manifest['autoload']['files'] as $relFile) {
-                $abs = $pluginDir . '/' . ltrim((string) $relFile, '/');
-                if (is_file($abs)) {
-                    require_once $abs;
-                }
-            }
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $manifest
-     *
-     * @throws PluginLoadFailedException When the class fails `is_a(..., true)` against
-     *                                   {@see PluginInterface} — either unresolvable via PSR-4
-     *                                   or not implementing the interface.
-     */
-    private function instantiatePlugin(
-        string $slug,
-        string $fqcn,
-        string $pluginDir,
-        array $manifest,
-        string $manifestFile = '',
-    ): void {
-        if (!is_a($fqcn, PluginInterface::class, true)) {
-            throw new PluginLoadFailedException(sprintf(
-                "Plugin manifest '%s' declares class '%s' but the class is not autoloadable "
-                . "or does not implement %s. Check that the manifest's autoload.psr-4 entry "
-                . "points to the right directory, and that the package's composer.json declares "
-                . "a matching PSR-4 mapping.",
-                $manifestFile !== '' ? $manifestFile : $pluginDir . '/plugin.json',
-                $fqcn,
-                PluginInterface::class,
-            ));
-        }
-
-        if (isset($this->plugins[$slug])) {
-            return;
-        }
-
-        foreach ($this->plugins as $existing) {
-            if (get_class($existing) === $fqcn) {
-                return;
-            }
-        }
-
-        /** @var PluginInterface $plugin */
-        $plugin = new $fqcn();
-
-        $this->plugins[$slug] = $plugin;
-        $this->pluginDirs[$slug] = $pluginDir;
-        $this->pluginManifests[$slug] = $manifest;
-    }
-
-    private function findClassLoader(): ?\Composer\Autoload\ClassLoader
-    {
-        foreach (spl_autoload_functions() as $fn) {
-            if (is_array($fn) && $fn[0] instanceof \Composer\Autoload\ClassLoader) {
-                return $fn[0];
-            }
-        }
-
-        return null;
-    }
 }

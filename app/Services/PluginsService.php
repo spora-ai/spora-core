@@ -33,8 +33,8 @@ final class PluginsService
     public function listPlugins(): array
     {
         $plugins         = $this->pluginLoader->getPlugins();
-        $directories     = $this->pluginLoader->getPluginDirectories();
-        $suggests        = $this->pluginLoader->suggestedPackages();
+        $directories     = $this->pluginLoader->metadata()->getPluginDirectories();
+        $suggests        = $this->pluginLoader->metadata()->suggestedPackages();
         $result          = [];
 
         foreach ($plugins as $slug => $plugin) {
@@ -54,7 +54,7 @@ final class PluginsService
      */
     private function buildPluginResource(string $slug, PluginInterface $plugin, ?string $directory, array $suggests): array
     {
-        $manifest          = $this->pluginLoader->getPluginManifest($slug) ?? [];
+        $manifest          = $this->pluginLoader->metadata()->getPluginManifest($slug) ?? [];
         $toolClasses       = $plugin->tools();
         $schemaVersion     = $plugin->schemaVersion();
         $migrationsPath    = $plugin->migrationsPath();
@@ -84,7 +84,7 @@ final class PluginsService
         return is_file($path) ? $this->parseComposerName($path) : null;
     }
 
-    /** Extracts `name` from a composer.json file path. Returns null on any read / parse / shape failure — like `PluginLoader::readComposerSuggest`, errors are not surfaced. */
+    /** Extracts `name` from a composer.json file path. Returns null on any read / parse / shape failure — like `PluginMetadata::readComposerSuggest`, errors are not surfaced. */
     private function parseComposerName(string $path): ?string
     {
         $raw = @file_get_contents($path);

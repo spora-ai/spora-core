@@ -153,7 +153,7 @@ test('boot() with current stamp short-circuits and re-instantiates from the side
         $loader1 = new PluginLoader([$dir], $stamp);
         $loader1->boot();
         expect($loader1->getPlugins())->toHaveKey('demo');
-        expect($loader1->getPluginDirectories())->toHaveKey('demo');
+        expect($loader1->metadata()->getPluginDirectories())->toHaveKey('demo');
         expect(file_exists($stamp))->toBeTrue();
         expect(file_exists($sidecar))->toBeTrue();
 
@@ -162,7 +162,7 @@ test('boot() with current stamp short-circuits and re-instantiates from the side
         $loader2 = new PluginLoader([$dir], $stamp);
         $loader2->boot();
         expect($loader2->getPlugins())->toHaveKey('demo');
-        expect($loader2->getPluginDirectories()['demo'])->toBe(realpath($dir . '/demo'));
+        expect($loader2->metadata()->getPluginDirectories()['demo'])->toBe(realpath($dir . '/demo'));
     } finally {
         @unlink($sidecar);
         @unlink($stamp);
@@ -268,7 +268,7 @@ test('multi-path discovery merges plugins from multiple directories and dedupes 
         expect($loader->getPlugins())->toHaveKey('a-only');
         expect($loader->getPlugins())->toHaveKey('b-only');
         // First-wins: a-only came from $dirA, so its directory is the one from $dirA
-        expect($loader->getPluginDirectories()['a-only'])->toBe(realpath($dirA . '/a-only'));
+        expect($loader->metadata()->getPluginDirectories()['a-only'])->toBe(realpath($dirA . '/a-only'));
     } finally {
         @unlink($dirB . '/a-only/plugin.json');
         @rmdir($dirB . '/a-only');
@@ -392,7 +392,7 @@ test('suggestedPackages() returns [] when no plugins are loaded', function (): v
     $loader = new PluginLoader(['/tmp/spora_no_plugins_' . uniqid()]);
     $loader->boot();
 
-    expect($loader->suggestedPackages())->toBe([]);
+    expect($loader->metadata()->suggestedPackages())->toBe([]);
 });
 
 test('suggestedPackages() skips plugins with no composer.json (hand-rolled plugins)', function (): void {
@@ -401,7 +401,7 @@ test('suggestedPackages() skips plugins with no composer.json (hand-rolled plugi
     $loader = new PluginLoader([FIXTURE_MANIFEST_PLUGINS]);
     $loader->boot();
 
-    expect($loader->suggestedPackages())->toBe([]);
+    expect($loader->metadata()->suggestedPackages())->toBe([]);
 });
 
 test('suggestedPackages() returns the `suggest` map from a plugin\'s composer.json', function (): void {
@@ -424,7 +424,7 @@ test('suggestedPackages() returns the `suggest` map from a plugin\'s composer.js
     try {
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
-        $suggests = $loader->suggestedPackages();
+        $suggests = $loader->metadata()->suggestedPackages();
 
         expect($suggests)->toHaveKey($slug);
         expect($suggests[$slug])->toBe([
@@ -456,7 +456,7 @@ test('suggestedPackages() ignores a composer.json with no `suggest` field', func
     try {
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
-        expect($loader->suggestedPackages())->toBe([]);
+        expect($loader->metadata()->suggestedPackages())->toBe([]);
     } finally {
         @unlink($dir . '/' . $slug . '/composer.json');
         @unlink($dir . '/' . $slug . '/plugin.json');
@@ -481,7 +481,7 @@ test('suggestedPackages() ignores a malformed composer.json', function (): void 
         $loader->boot();
         // Malformed JSON must be silently swallowed — the suggest list is
         // informational, never an error surface.
-        expect($loader->suggestedPackages())->toBe([]);
+        expect($loader->metadata()->suggestedPackages())->toBe([]);
     } finally {
         @unlink($dir . '/' . $slug . '/composer.json');
         @unlink($dir . '/' . $slug . '/plugin.json');
@@ -514,7 +514,7 @@ test('suggestedPackages() filters out non-string keys and non-string values from
     try {
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
-        $suggests = $loader->suggestedPackages();
+        $suggests = $loader->metadata()->suggestedPackages();
 
         // Only the well-formed entries survive.
         expect($suggests[$slug])->toHaveKey('spora/ok');
@@ -546,7 +546,7 @@ test('suggestedPackages() treats a non-object `suggest` field as empty', functio
     try {
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
-        expect($loader->suggestedPackages())->toBe([]);
+        expect($loader->metadata()->suggestedPackages())->toBe([]);
     } finally {
         @unlink($dir . '/' . $slug . '/composer.json');
         @unlink($dir . '/' . $slug . '/plugin.json');
@@ -569,7 +569,7 @@ test('suggestedPackages() ignores an empty composer.json file', function (): voi
     try {
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
-        expect($loader->suggestedPackages())->toBe([]);
+        expect($loader->metadata()->suggestedPackages())->toBe([]);
     } finally {
         @unlink($dir . '/' . $slug . '/composer.json');
         @unlink($dir . '/' . $slug . '/plugin.json');
@@ -595,18 +595,18 @@ test('getSlugForPackageName() returns the slug whose composer.json#name matches'
     // 'spora-ai/spora-fixture-tools-plugin' (added in the same change as
     // the fixture). The inverse helper must resolve it back to the slug.
     $loader = makeToolsPluginLoader();
-    expect($loader->getSlugForPackageName('spora-ai/spora-fixture-tools-plugin'))
+    expect($loader->metadata()->getSlugForPackageName('spora-ai/spora-fixture-tools-plugin'))
         ->toBe('tools-plugin');
 });
 
 test('getSlugForPackageName() returns null for an unknown package', function (): void {
     $loader = new PluginLoader([]);
-    expect($loader->getSlugForPackageName('spora-ai/spora-does-not-exist'))->toBeNull();
+    expect($loader->metadata()->getSlugForPackageName('spora-ai/spora-does-not-exist'))->toBeNull();
 });
 
 test('getSlugForPackageName() returns null for an empty string', function (): void {
     $loader = new PluginLoader([]);
-    expect($loader->getSlugForPackageName(''))->toBeNull();
+    expect($loader->metadata()->getSlugForPackageName(''))->toBeNull();
 });
 
 test('getSlugForPackageName() skips plugins whose composer.json is unreadable', function (): void {
@@ -632,9 +632,9 @@ test('getSlugForPackageName() skips plugins whose composer.json is unreadable', 
         $loader = new PluginLoader([$dir], null);
         $loader->boot();
 
-        expect($loader->getSlugForPackageName('spora-ai/spora-with-composer'))
+        expect($loader->metadata()->getSlugForPackageName('spora-ai/spora-with-composer'))
             ->toBe('with-composer');
-        expect($loader->getSlugForPackageName('spora-ai/no-composer'))
+        expect($loader->metadata()->getSlugForPackageName('spora-ai/no-composer'))
             ->toBeNull();
     } finally {
         @unlink($dir . '/with-composer/composer.json');
