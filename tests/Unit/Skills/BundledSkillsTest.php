@@ -69,10 +69,17 @@ test('every bundled skill scans with no validation findings', function (): void 
  * invisible by construction. That is exactly how all six shipped skills sat
  * with no `allowed-tools` while the banner existed and worked.
  *
- * Resolution is already covered: a name that parses but matches no installed
- * tool is an `ALLOWED_TOOLS_UNKNOWN_TOOL` warning, and the first test asserts
- * there are no findings. So this only has to establish that the declaration is
- * present and non-empty.
+ * A *malformed* value is already covered: the first test asserts no findings,
+ * and a comma or an FQCN trips `ALLOWED_TOOLS_INVALID`.
+ *
+ * An unresolvable one is **not** covered, and cannot be by either test as
+ * written: `SkillScanner` is built here with no `ToolConfigNameResolver`, and
+ * `SkillValidator::validateDeclaredToolsResolve()` returns immediately when
+ * `toolNames` is null (`SkillValidator.php:363-365`). `SkillScannerTest.php:352`
+ * pins that behaviour deliberately. So a typo in a bundled slug — `agnet` —
+ * would pass both tests in this file. Closing that needs a scanner constructed
+ * with the real core tool registry, which is a separate concern from this
+ * assertion and is left as a follow-up rather than half-built here.
  */
 test('every bundled skill declares at least one tool', function (): void {
     $frameworkSkills = BASE_PATH . '/skills';
