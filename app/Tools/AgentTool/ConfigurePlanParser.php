@@ -32,6 +32,14 @@ use Spora\Tools\ValueObjects\ToolResult;
  *    one thing a tool call must not be able to write: the value would land in the
  *    call's own recorded arguments, so the agent could read back the key it just
  *    set. Credentials stay operator-only, through the settings panel.
+ *  - **A `type: 'toggle'` value** is coerced to a real boolean before anything
+ *    else, exactly like `enabled`: a provider that quotes its scalars would
+ *    otherwise store the string `"false"` in a boolean column, which reads back
+ *    as true.
+ *  - **A `type: 'select'` value** must be one of the option keys the
+ *    declaration itself lists. The settings form renders it as a dropdown over
+ *    precisely those keys, so an unlisted value is invisible there and the
+ *    operator's next save silently resets it.
  *  - **A skill name the executing principal cannot see** refuses the whole call.
  *    That check is a property of the write, so it lives here rather than on the
  *    tool hosting the setting: a write that cannot make the claim should not be
@@ -50,6 +58,20 @@ final class ConfigurePlanParser
     /** The two `#[ToolSetting]` types that are not a plain value. */
     private const TYPE_PASSWORD     = 'password';
     private const TYPE_MULTI_SELECT = 'multi-select';
+
+    /**
+     * The two bounded scalar types: a flag and an enum.
+     *
+     * Both are plain values to the settings service — it stores whatever it
+     * is handed — so nothing between here and the column would ever have
+     * complained. `type: 'toggle'` therefore wrote the literal string
+     * `"false"` into a boolean column (reads back as true, the exact defect
+     * `AgentPatchValidator` exists to prevent), and `type: 'select'` accepted
+     * a value outside the declared options, leaving a row the settings form
+     * cannot render and its next save silently resets.
+     */
+    private const TYPE_TOGGLE       = 'toggle';
+    private const TYPE_SELECT       = 'select';
 
     public function __construct(
         private readonly ?SkillProviderRegistry $skills = null,
@@ -142,19 +164,28 @@ final class ConfigurePlanParser
      * Empty / missing operations is legal — the operation default then
      * applies.
      *
+     * A non-array is *refused*, not dropped, which is what this class does
+     * everywhere else and what makes the sibling `settings` check consistent:
+     * `{"operations": "now"}` silently returning "no operations" lets the
+     * whole call report success having applied nothing, and the model reads
+     * that as an enablement that landed. Absent, `null` and `[]` all still
+     * mean "inherit the operation defaults"; only a value that claims to be
+     * an operations list and is not one is an error.
+     *
      * @param  mixed $ops
      * @return list<array{name: string, enabled: bool, auto_approve: bool}>|ToolResult
      */
     private function parseOperations(mixed $ops, string $toolClass, int $i): array|ToolResult
     {
-        if (!is_array($ops) || $ops === []) {
+        if ($ops === null || $ops === []) {
             return [];
+        }
+        if (!is_array($ops)) {
+            return $this->operationsFailure($i);
         }
         $ops = SlimPayloadValidator::unwrapSingleItemArray($ops);
         if (!is_array($ops) || ($ops !== [] && !array_is_list($ops))) {
-            return ToolResult::fail(
-                self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}] must be an array of `{name, enabled?, auto_approve?}`.",
-            );
+            return $this->operationsFailure($i);
         }
         return $this->parseOperationRows($ops, $toolClass, $i);
     }
@@ -399,8 +430,75 @@ final class ConfigurePlanParser
                 $key,
             )),
             self::TYPE_MULTI_SELECT => $this->coerceMultiSelect($key, $value, $setting, $i, $principalId),
+            self::TYPE_TOGGLE       => $this->coerceToggle($key, $value, $i),
+            self::TYPE_SELECT       => $this->coerceSelect($key, $value, $setting, $i),
             default                 => $value,
         };
+    }
+
+    /**
+     * A toggle's stored form: a real bool, never the string it arrived as.
+     *
+     * Delegates to {@see LlmScalarCoercion::coerceBool()} for the same reason
+     * {@see enablementFlag()} does — a provider that flattens scalars into
+     * strings would otherwise make `"false"` the truthy value and write a
+     * revocation as an enablement. The blank-string case is the shared
+     * helper's `"empty means false"`, which is the right reading here: a
+     * toggle has no tri-state, so there is no "unspecified" to protect.
+     *
+     * @return bool|ToolResult
+     */
+    private function coerceToggle(string $key, mixed $value, int $i): bool|ToolResult
+    {
+        $coerced = $this->coerceBool($value);
+        if ($coerced === null) {
+            return $this->settingsFailure($i, sprintf(
+                "'%s' must be true or false, got %s. Send true / false, the string \"true\" / "
+                . '"false", or 0 / 1 — a quoted value is read as the boolean it names, not as truthy.',
+                $key,
+                $this->describeValue($value),
+            ));
+        }
+        return $coerced;
+    }
+
+    /**
+     * A select's stored form: one of the keys the declaration itself lists.
+     *
+     * `options` is a key => label map, so the keys are the legal values and
+     * the labels are presentation — only the key is ever stored or read
+     * back. Anything outside it is refused rather than written, because the
+     * settings form renders a select as a dropdown over exactly those keys:
+     * an unlisted value is invisible there, and the operator's next save
+     * overwrites it with the declared default. That reads to the model as
+     * "landed, then reverted", which is the same silent-loss shape as a dead
+     * override row.
+     *
+     * A `select` declared with no options at all can validate nothing, so
+     * every value is refused — fail closed rather than write an unbounded
+     * value into a column whose legal set is unknown.
+     *
+     * @return string|ToolResult
+     */
+    private function coerceSelect(string $key, mixed $value, ToolSetting $setting, int $i): string|ToolResult
+    {
+        $options = array_keys($setting->options);
+        if ($options === []) {
+            return $this->settingsFailure($i, sprintf(
+                "'%s' is a select that declares no options, so no value can be checked against it.",
+                $key,
+            ));
+        }
+        if (is_string($value) && array_key_exists($value, $setting->options)) {
+            return $value;
+        }
+
+        return $this->settingsFailure($i, sprintf(
+            "'%s' must be one of: %s. Got %s.",
+            $key,
+            implode(', ', $options),
+            $this->describeValue($value),
+        ));
     }
 
     /**
@@ -444,10 +542,20 @@ final class ConfigurePlanParser
      * the operator could have granted by hand, so bounding it here is what keeps
      * the write from being a cross-tenant grant.
      *
-     * Fails closed in both directions. A null `$principalId` resolves no
-     * principal, so a provider that scopes by one sees nothing and every name is
-     * refused. An absent registry refuses too: it cannot make the claim at all,
-     * and a check that vanishes when the wiring is incomplete is not a check.
+     * What this actually guarantees is narrower than "only the principal's own
+     * names". It refuses any name **no** provider returns, and
+     * `FilesystemSkillProvider` — the only provider core ships — ignores
+     * `$principalId` and returns every bundled skill. So a null principal still
+     * sees them all and a bundled name is still accepted here. That is sound
+     * rather than broken: a check that only ever refuses what no provider
+     * offers cannot grant more than the operator could have granted by hand.
+     *
+     * The null-principal and absent-registry arms are therefore defensive
+     * today rather than load-bearing — they become the tight principal-scoped
+     * boundary the moment a plugin registers such a provider, and they must
+     * already be closed by then. An absent registry refuses because it cannot
+     * make the claim at all: a check that vanishes when the wiring is
+     * incomplete is not a check.
      *
      * @param list<string> $names
      */
@@ -512,5 +620,16 @@ final class ConfigurePlanParser
     private function settingsFailure(int $i, string $message): ToolResult
     {
         return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . "settings[{$i}] {$message}");
+    }
+
+    /**
+     * Mirrors {@see settingsFailure()}'s shape, so a refusal on either half
+     * of an entry reads the same way to the model.
+     */
+    private function operationsFailure(int $i): ToolResult
+    {
+        return ToolResult::fail(
+            self::CONFIGURE_TOOLS_ERR_PREFIX . "operations[{$i}] must be an array of `{name, enabled?, auto_approve?}`.",
+        );
     }
 }

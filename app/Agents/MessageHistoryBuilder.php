@@ -385,6 +385,15 @@ final class AttachmentRowRenderer
      * sources therefore get *looser* than the old 256 KB cap, which
      * spares the common `get_source` round-trip.
      *
+     * **What this bounds is one attachment; what bounds the row is
+     * {@see MAX_INLINE_ROW_TEXT_BYTES}.** The two are the same number
+     * today, and the arithmetic above is a statement about a *row*, so it
+     * only held while one attachment could consume the whole of it. It did
+     * not: this cap was applied per asset inside a loop over every
+     * attachment with no count limit and no running total, so four 400 KB
+     * sources inlined 1.6 MB and the context-window claim stopped being
+     * true at the second attachment.
+     *
      * The derivative branch had no cap at all before this change, which
      * meant a 200-page PDF's full markdown was inlined uncapped — the
      * latent context bug this constant now bounds. Past the cap the
@@ -393,6 +402,23 @@ final class AttachmentRowRenderer
      * read it. See {@see self::buildTextBlock()}.
      */
     private const MAX_INLINE_TEXT_BYTES = 512 * 1024;
+
+    /**
+     * The same 512 KB, spent across every attachment in a single row rather
+     * than re-spent per attachment.
+     *
+     * Deliberately equal to {@see MAX_INLINE_TEXT_BYTES} so the pair cannot
+     * drift into a second, larger reading: one attachment may fill the whole
+     * row budget, and the next one finds nothing left. Kept as its own
+     * constant rather than a reuse of the other because they are different
+     * claims — "no single asset is this big" versus "no row inlines more
+     * than this" — and only the second is the one the context-window
+     * arithmetic above describes.
+     *
+     * Image blocks are not counted: they are separately capped per asset
+     * ({@see MAX_INLINE_IMAGE_BYTES}) and cost far fewer tokens per byte.
+     */
+    private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
 
     /**
      * Leading bytes we sample to confirm the asset really is text
@@ -477,6 +503,15 @@ final class AttachmentRowRenderer
      * The `md` derivatives are resolved in one batch before the loop
      * ({@see resolveTextDerivatives()}) rather than per attachment.
      *
+     * `$remaining` is the row's shared inline-text budget, spent in
+     * attachment order: each text block is charged what it actually inlined
+     * and the next attachment inherits the remainder. Without it the
+     * per-asset cap in {@see buildTextBlock()} would be re-spent once per
+     * attachment and a row's inlined total would be cap × attachment count
+     * — the multiplication the docblock on
+     * {@see AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES} was read as
+     * forbidding.
+     *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
@@ -490,6 +525,7 @@ final class AttachmentRowRenderer
         $imageBlocks    = [];
         $metadataBlocks = [];
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
+        $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
 
         foreach ($row->attachments as $ref) {
             $asset = $this->resolveAttachmentAsset($ref);
@@ -505,7 +541,9 @@ final class AttachmentRowRenderer
                 }
                 continue;
             }
-            $textBlocks[] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null);
+            [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
+            $textBlocks[] = $block;
+            $remaining    = max(0, $remaining - $inlined);
         }
 
         return ['text' => $textBlocks, 'image' => $imageBlocks, 'metadata' => $metadataBlocks];
@@ -602,49 +640,57 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * Produces the user-facing text block for a non-image attachment.
+     * Produces the user-facing text block for a non-image attachment, plus
+     * the inline bytes it consumed against the row's remaining `$budget`.
      *
-     * The invariant: a text-ish source within the inline budget is its
-     * own text; anything else gets an `md` derivative; and if neither
-     * fits, the LLM is told where to read it.
+     * The invariant: a text-ish source within both the per-asset cap and the
+     * row's remaining budget is its own text; anything else gets an `md`
+     * derivative; and if neither fits, the LLM is told where to read it.
      *
      * Resolution order:
      *   1. The asset has an `md` derivative (PDF, docx, …) and the
-     *      recorded `byte_size` is within {@see MAX_INLINE_TEXT_BYTES} —
-     *      inline the derivative's bytes. The size gate reads the column
-     *      first, so a 200-page PDF is never read off disk only to be
-     *      discarded — the derivative path costs a `media_derivatives`
-     *      lookup, a second `MediaAsset::find()` and a real
-     *      `file_get_contents()` per attachment per turn. The loaded bytes
-     *      are then re-measured, so a stale `byte_size` cannot smuggle an
-     *      oversized body into the context window.
-     *   2. The asset's mime type looks text-safe AND the raw bytes fit
-     *      within the same budget AND the leading bytes contain no NUL —
-     *      inline the raw bytes. This is what keeps `create_media` and
-     *      `note.txt` from spawning a pointless `foo.md` derivative of
-     *      `foo.md`.
-     *   3. Out of bounds, NUL-containing, or binary with no derivative —
-     *      the LLM gets the metadata prefix block (a sibling) for the
-     *      asset_id plus a body naming `get_source`. The pointer is a
-     *      tail fallback, not the common path: `[no extractable text]`
-     *      would be actively wrong here, because an in-bounds-mime asset
-     *      whose bytes merely exceed the budget absolutely does have
-     *      text — the LLM would report "no text" and stop instead of
-     *      reading it. It also keeps the LLM from trying
-     *      `read_url file:///api/v1/assets/...`.
+     *      recorded `byte_size` is within both {@see MAX_INLINE_TEXT_BYTES}
+     *      and `$budget` — inline the derivative's bytes. The size gate
+     *      reads the column first, so a 200-page PDF is never read off disk
+     *      only to be discarded — the derivative path costs a
+     *      `media_derivatives` lookup, a second `MediaAsset::find()` and a
+     *      real `file_get_contents()` per attachment per turn. The loaded
+     *      bytes are then re-measured, so a stale `byte_size` cannot smuggle
+     *      an oversized body into the context window.
+     *   2. The asset's mime type looks text-safe AND the raw bytes fit the
+     *      same two bounds AND the leading bytes contain no NUL — inline the
+     *      raw bytes. This is what keeps `create_media` and `note.txt` from
+     *      spawning a pointless `foo.md` derivative of `foo.md`.
+     *   3. Out of bounds, budget spent by an earlier attachment, NUL-
+     *      containing, or binary with no derivative — the LLM gets the
+     *      metadata prefix block (a sibling) for the asset_id plus a body
+     *      naming `get_source`. The pointer is a tail fallback, not the
+     *      common path: `[no extractable text]` would be actively wrong
+     *      here, because an in-bounds-mime asset whose bytes merely exceed
+     *      the budget absolutely does have text — the LLM would report
+     *      "no text" and stop instead of reading it. It also keeps the LLM
+     *      from trying `read_url file:///api/v1/assets/...`.
      *
-     * @return array<string, mixed>
+     * A zero `$budget` therefore reaches branch 3 for an otherwise-inlinable
+     * asset, which is the intended outcome: the budget is spent, and the
+     * pointer tells the LLM the content exists and how to reach it.
+     *
+     * @return array{0: array<string, mixed>, 1: int} The block, and the bytes it inlined (0 on the pointer branch).
      */
-    private function buildTextBlock(MediaAsset $asset, ?MediaAsset $derivative): array
+    private function buildTextBlock(MediaAsset $asset, ?MediaAsset $derivative, int $budget): array
     {
         $displayName = $asset->filename ?? $asset->id;
+        $cap         = min(self::MAX_INLINE_TEXT_BYTES, $budget);
 
         // 1. The `md` derivative of a binary document.
-        $extracted = $this->loadInlinableDerivativeText($derivative);
+        $extracted = $this->loadInlinableDerivativeText($derivative, $cap);
         if ($extracted !== null) {
             return [
-                'type' => 'text',
-                'text' => "# {$displayName} (extracted text)\n\n" . $extracted,
+                [
+                    'type' => 'text',
+                    'text' => "# {$displayName} (extracted text)\n\n" . $extracted,
+                ],
+                strlen($extracted),
             ];
         }
 
@@ -652,33 +698,39 @@ final class AttachmentRowRenderer
         if ($this->isLikelyTextMime($asset)) {
             $bytes = $this->loadAssetBytes($asset);
             if ($bytes !== null
-                && strlen($bytes) <= self::MAX_INLINE_TEXT_BYTES
+                && strlen($bytes) <= $cap
                 && $this->bytesLookLikeText($bytes)
             ) {
                 return [
-                    'type' => 'text',
-                    'text' => "# {$displayName} (raw text — no converter registered)\n\n" . $bytes,
+                    [
+                        'type' => 'text',
+                        'text' => "# {$displayName} (raw text — no converter registered)\n\n" . $bytes,
+                    ],
+                    strlen($bytes),
                 ];
             }
         }
 
         // 3. Nothing inlineable — point at the tool that can read it.
         return [
-            'type' => 'text',
-            'text' => "# {$displayName} (no inline text)\n\n"
-                . '[too large to inline — call `get_source` with the asset_id above to read the file]',
+            [
+                'type' => 'text',
+                'text' => "# {$displayName} (no inline text)\n\n"
+                    . '[too large to inline — call `get_source` with the asset_id above to read the file]',
+            ],
+            0,
         ];
     }
 
     /**
-     * The derivative's bytes when it exists AND is within the inline
-     * budget, otherwise null. The `byte_size` column is the gate: it is
-     * populated at creation time, so an oversized derivative is rejected
-     * without touching the disk at all.
+     * The derivative's bytes when it exists AND is within both the per-asset
+     * cap and the row's remaining budget, otherwise null. The `byte_size`
+     * column is the gate: it is populated at creation time, so an oversized
+     * derivative is rejected without touching the disk at all.
      */
-    private function loadInlinableDerivativeText(?MediaAsset $derivative): ?string
+    private function loadInlinableDerivativeText(?MediaAsset $derivative, int $cap): ?string
     {
-        if ($derivative === null || ! $this->fitsInlineBudget((int) ($derivative->byte_size ?? 0))) {
+        if ($derivative === null || ! $this->fitsInlineBudget((int) ($derivative->byte_size ?? 0), $cap)) {
             return null;
         }
 
@@ -687,14 +739,14 @@ final class AttachmentRowRenderer
         // set it. Re-check the real length for anything that predates it, so
         // a stale `byte_size` cannot smuggle an oversized body into the
         // context window.
-        return ($bytes === null || $bytes === '' || ! $this->fitsInlineBudget(strlen($bytes)))
+        return ($bytes === null || $bytes === '' || ! $this->fitsInlineBudget(strlen($bytes), $cap))
             ? null
             : $bytes;
     }
 
-    private function fitsInlineBudget(int $length): bool
+    private function fitsInlineBudget(int $length, int $cap = self::MAX_INLINE_TEXT_BYTES): bool
     {
-        return $length <= self::MAX_INLINE_TEXT_BYTES;
+        return $length <= $cap;
     }
 
     /**
