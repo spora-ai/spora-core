@@ -1401,8 +1401,8 @@ final class ContainerDefinitions
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),
                     $c->get(MediaCreateHandler::class),
-                    $c->get(ToolConfigService::class),
                     $c->get(Config::class),
+                    $c->get(ToolConfigService::class),
                 );
             },
 
