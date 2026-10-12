@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Config;
 use Spora\Http\NotificationSubscriptionController;
 use Spora\Services\NotificationSubscriptionService;
 use Symfony\Component\HttpFoundation\Request;
@@ -12,14 +13,10 @@ beforeEach(function (): void {
 
 afterEach(fn() => Spora\Core\Database::resetBootState());
 
-function makeSubscriptionControllerUnit(array $configOverrides = []): array
+function makeSubscriptionControllerUnit(Config $config = new Config()): array
 {
     $authService = bootAuthLayer();
     $subscriptions = new NotificationSubscriptionService();
-    $config = array_replace_recursive(
-        ['notifications' => ['email_enabled' => true]],
-        $configOverrides,
-    );
     $controller = new NotificationSubscriptionController($authService, $subscriptions, $config);
 
     return [$controller, $authService, $subscriptions];
@@ -95,8 +92,8 @@ test('index() returns null user_principal_id when the user has no user-principal
     expect($body['data']['user_principal_id'])->toBeNull();
 });
 
-test('index() reports email_enabled=true by default so the SPA renders no banner', function (): void {
-    [$controller, $authService] = makeSubscriptionControllerUnit();
+test('index() reports email_enabled=true when SPORA_NOTIFICATIONS_EMAIL_ENABLED is on, so the SPA renders no banner', function (): void {
+    [$controller, $authService] = makeSubscriptionControllerUnit(new Config(['SPORA_NOTIFICATIONS_EMAIL_ENABLED' => true]));
     seedSubscriptionUserUnit($authService);
 
     $response = $controller->index();
@@ -104,10 +101,21 @@ test('index() reports email_enabled=true by default so the SPA renders no banner
     expect($body['data']['email_enabled'])->toBeTrue();
 });
 
+test('index() reports email_enabled=false when the Config does not carry the setting', function (): void {
+    // `Config::getBool()` answers false for a key it does not hold, so a
+    // caller that builds a Config without the setting shows the banner even
+    // though `SettingsRegistry` declares the default to be on. The shipped
+    // value arrives from `ConfigFactory`, not from this call site.
+    [$controller, $authService] = makeSubscriptionControllerUnit();
+    seedSubscriptionUserUnit($authService);
+
+    $response = $controller->index();
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['email_enabled'])->toBeFalse();
+});
+
 test('index() reports email_enabled=false when the operator opted out via config', function (): void {
-    [$controller, $authService] = makeSubscriptionControllerUnit([
-        'notifications' => ['email_enabled' => false],
-    ]);
+    [$controller, $authService] = makeSubscriptionControllerUnit(new Config(['SPORA_NOTIFICATIONS_EMAIL_ENABLED' => false]));
     seedSubscriptionUserUnit($authService);
 
     $response = $controller->index();

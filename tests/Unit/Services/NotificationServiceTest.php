@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Illuminate\Support\Carbon;
 use Monolog\Handler\TestHandler;
 use Monolog\Logger;
+use Spora\Core\Config;
+use Spora\Core\Paths;
 use Spora\Models\Agent;
 use Spora\Models\MailTemplate;
 use Spora\Models\Notification;
@@ -14,6 +16,8 @@ use Spora\Models\User;
 use Spora\Services\NotificationService;
 use Spora\Services\NotificationSubscriptionService;
 use Spora\Services\SystemMailer;
+use Spora\Settings\SettingDefinition;
+use Spora\Settings\SettingsRegistry;
 use Tests\Support\TestCapturingMercure;
 
 defined('NOTIF_TEST_PASSWORD') || define('NOTIF_TEST_PASSWORD', 'Password1!');
@@ -21,7 +25,13 @@ defined('NOTIF_TEST_PASSWORD') || define('NOTIF_TEST_PASSWORD', 'Password1!');
 function makeNotificationServiceWithUser(): array
 {
     $mercure = new TestCapturingMercure();
-    $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver(), null, [], new NotificationSubscriptionService());
+    $service = new NotificationService(
+        $mercure,
+        new Spora\Services\PrincipalResolver(),
+        new Config(),
+        null,
+        new NotificationSubscriptionService(),
+    );
 
     $auth = bootAuthLayer();
     static $seq = 0;
@@ -324,18 +334,21 @@ describe('NotificationService::notifyTaskRetrying', function (): void {
 
 describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
-    it('returns silently when notifications.email_enabled is false in config', function (): void {
+    it('returns silently when SPORA_NOTIFICATIONS_EMAIL_ENABLED is false in config', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
         $task = makeTaskForUser($userId);
 
         $testHandler = new TestHandler();
         $logger = new Logger('test', [$testHandler]);
-        $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
+        $systemMailer = new SystemMailer(new Config([
+            'SPORA_MAIL_DRIVER'     => 'log',
+            'SPORA_MAIL_FROM_NAME' => 'Spora',
+        ]), $logger);
 
-        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), $systemMailer, [
-            'notifications' => ['email_enabled' => false],
-            'app_name'      => 'Spora',
-        ]);
+        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), new Config([
+            'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => false,
+            'SPORA_APP_NAME'                    => 'Spora',
+        ]), $systemMailer);
 
         $service->sendEmailForScheduledRun($task);
 
@@ -346,10 +359,10 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         [$service, , $userId] = makeNotificationServiceWithUser();
         $task = makeTaskForUser($userId);
 
-        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), null, [
-            'notifications' => ['email_enabled' => true],
-            'app_name'      => 'Spora',
-        ]);
+        $service = new NotificationService(new TestCapturingMercure(), new Spora\Services\PrincipalResolver(), new Config([
+            'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => true,
+            'SPORA_APP_NAME'                    => 'Spora',
+        ]), null);
 
         $service->sendEmailForScheduledRun($task);
 
@@ -377,16 +390,19 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
         $testHandler = new TestHandler();
         $logger = new Logger('test', [$testHandler]);
-        $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
+        $systemMailer = new SystemMailer(new Config([
+            'SPORA_MAIL_DRIVER'     => 'log',
+            'SPORA_MAIL_FROM_NAME' => 'Spora',
+        ]), $logger);
 
         $service = new NotificationService(
             new TestCapturingMercure(),
             new Spora\Services\PrincipalResolver(),
+            new Config([
+                'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => true,
+                'SPORA_APP_NAME'                    => 'Spora',
+            ]),
             $systemMailer,
-            [
-                'notifications' => ['email_enabled' => true],
-                'app_name'      => 'Spora',
-            ],
             new NotificationSubscriptionService(),
         );
 
@@ -402,13 +418,24 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         expect($context['subject'])->toBe('Run completed: NotifTestAgent');
     });
 
-    it('sends the email by default when the email_enabled key is absent (default-on)', function (): void {
-        // Regression: default-on must hold even when the email_enabled
-        // key is absent — exercises the `?? true` fallback.
+    it('sends the email when SPORA_NOTIFICATIONS_EMAIL_ENABLED sits at its shipped default', function (): void {
+        // `NotificationService` no longer carries a `?? true`: an absent key
+        // answers false, so only the registry's declared default keeps email
+        // on. Building the Config the way `ConfigFactory` does when `.env` and
+        // `config.php` are both silent is what puts that default under test
+        // instead of a literal here.
+        $config = new Config(array_map(
+            static fn(SettingDefinition $d): mixed => $d->default,
+            (new SettingsRegistry(new Paths(BASE_PATH)))->all(),
+        ));
+
+        expect($config->has('SPORA_NOTIFICATIONS_EMAIL_ENABLED'))
+            ->and($config->getBool('SPORA_NOTIFICATIONS_EMAIL_ENABLED'))->toBeTrue();
+
         MailTemplate::create([
             'name'      => 'scheduled_run_completed',
             'subject'   => 'Run completed: {{agent_name}}',
-            'body'      => 'Agent {{agent_name}} finished task {{task_id}}.',
+            'body' => 'Agent {{agent_name}} finished task {{task_id}}.',
             'body_html' => null,
         ]);
 
@@ -423,15 +450,16 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
         $testHandler = new TestHandler();
         $logger = new Logger('test', [$testHandler]);
-        $systemMailer = new SystemMailer(['mail_driver' => 'log'], $logger);
+        $systemMailer = new SystemMailer(new Config([
+            'SPORA_MAIL_DRIVER'     => 'log',
+            'SPORA_MAIL_FROM_NAME' => 'Spora',
+        ]), $logger);
 
-        // No 'notifications' key — exercises the `?? true` fallback in
-        // NotificationService when the config key is fully absent.
         $service = new NotificationService(
             new TestCapturingMercure(),
             new Spora\Services\PrincipalResolver(),
+            $config,
             $systemMailer,
-            ['app_name' => 'Spora'],
             new NotificationSubscriptionService(),
         );
 
