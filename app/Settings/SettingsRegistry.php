@@ -38,9 +38,7 @@ final class SettingsRegistry
     /** @var array<string, SettingDefinition>|null */
     private ?array $definitions = null;
 
-    public function __construct(private readonly Paths $paths)
-    {
-    }
+    public function __construct(private readonly Paths $paths) {}
 
     /**
      * @return array<string, SettingDefinition> keyed by setting key

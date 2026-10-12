@@ -28,7 +28,7 @@ it('declares every setting key exactly once', function (): void {
 
     $repeated = array_keys(array_filter(
         array_count_values($declared),
-        static fn (int $occurrences): bool => $occurrences > 1,
+        static fn(int $occurrences): bool => $occurrences > 1,
     ));
 
     expect($repeated)->toBe([])
@@ -56,10 +56,10 @@ it('marks :key boot only, because it is read before the overlay runs', function 
 
 it('marks every database-section setting boot only', function (): void {
     $notBootOnly = array_map(
-        static fn (SettingDefinition $d): string => $d->key,
+        static fn(SettingDefinition $d): string => $d->key,
         array_filter(
             settingsRegistryFixture()->forSection('database'),
-            static fn (SettingDefinition $d): bool => $d->bootOnly === false,
+            static fn(SettingDefinition $d): bool => $d->bootOnly === false,
         ),
     );
 
@@ -186,7 +186,7 @@ it('round-trips every non-null declared default', function (string $key): void {
         ->toEqual($definition->default);
 })->with(array_keys(array_filter(
     settingsRegistryFixture()->all(),
-    static fn (SettingDefinition $d): bool => $d->default !== null,
+    static fn(SettingDefinition $d): bool => $d->default !== null,
 )));
 
 it('finds a definition by key and reports an unknown one as absent', function (): void {
@@ -204,6 +204,6 @@ it('lists every secret-marked setting as a secret', function (): void {
     expect($registry->secretKeys())
         ->toEqualCanonicalizing(array_keys(array_filter(
             $registry->all(),
-            static fn (SettingDefinition $d): bool => $d->secret,
+            static fn(SettingDefinition $d): bool => $d->secret,
         )));
 });

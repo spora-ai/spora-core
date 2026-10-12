@@ -21,6 +21,5 @@ final readonly class SettingsRow
         public bool $encrypted,
         public ?int $updatedBy,
         public bool $undecryptable = false,
-    ) {
-    }
+    ) {}
 }

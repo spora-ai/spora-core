@@ -91,7 +91,7 @@ it('falls back to the declared default rather than to an empty credential', func
 it('throws from every reader of an undecryptable key', function (string $method): void {
     [$config] = undecryptableConfigOverlay();
 
-    expect(fn () => $config->{$method}('SPORA_MAIL_PASSWORD'))->toThrow(SettingsDecryptionException::class);
+    expect(fn() => $config->{$method}('SPORA_MAIL_PASSWORD'))->toThrow(SettingsDecryptionException::class);
 })->with([
     'get'       => 'get',
     'getString' => 'getString',

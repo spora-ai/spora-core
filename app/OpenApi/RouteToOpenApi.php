@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\OpenApi;
 
 use OpenApi\Annotations as OA;
-use Spora\Core\Config;
 use OpenApi\Annotations\Components;
 use OpenApi\Annotations\Info;
 use OpenApi\Annotations\OpenApi;
@@ -15,6 +14,7 @@ use OpenApi\Annotations\Response;
 use OpenApi\Annotations\SecurityScheme;
 use OpenApi\Annotations\Server;
 use ReflectionMethod;
+use Spora\Core\Config;
 use Spora\Core\RouteDefinitions;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;

@@ -17,8 +17,7 @@ final class ConfigFactory
     public function __construct(
         private readonly SettingsRegistry $registry,
         private readonly Paths $paths,
-    ) {
-    }
+    ) {}
 
     public function create(): Config
     {

@@ -27,8 +27,7 @@ final class SettingsRepository
     public function __construct(
         private readonly SecurityManagerInterface $security,
         private readonly SettingsRegistry $registry,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, SettingsRow> keyed by setting key

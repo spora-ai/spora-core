@@ -57,6 +57,5 @@ final readonly class SettingDefinition
         public array $options = [],
         public string $validation = '',
         public string $transform = '',
-    ) {
-    }
+    ) {}
 }

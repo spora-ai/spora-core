@@ -35,8 +35,7 @@ final class Config
     public function __construct(
         private array $values = [],
         private array $sources = [],
-    ) {
-    }
+    ) {}
 
     /**
      * Layer the stored settings over the three boot layers.

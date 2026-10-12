@@ -13,6 +13,4 @@ use RuntimeException;
  * overlay, so the consumer that needed the credential fails loudly. See
  * `SettingsRepository::decodeRow()` for the boot-time half of this.
  */
-final class SettingsDecryptionException extends RuntimeException
-{
-}
+final class SettingsDecryptionException extends RuntimeException {}

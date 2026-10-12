@@ -237,7 +237,7 @@ it('maps only to keys the registry declares', function (): void {
 it('maps no two legacy config.php paths to the same key, except the mail aliases', function (): void {
     $collisions = array_keys(array_filter(
         array_count_values(array_values(ConfigFactory::legacyKeyMap())),
-        static fn (int $occurrences): bool => $occurrences > 1,
+        static fn(int $occurrences): bool => $occurrences > 1,
     ));
 
     // The mail keys are the one deliberate exception: `SystemMailer` read the
