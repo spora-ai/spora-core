@@ -3,10 +3,12 @@
 declare(strict_types=1);
 
 use DI\ContainerBuilder;
+use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Paths;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Settings\SettingsRegistry;
 
 /**
  * Regression test for the v0.13.x MEDIUMBLOB widening. Review Finding #1
@@ -19,34 +21,19 @@ use Spora\Services\MediaArchive\MediaArchiveService;
  */
 
 /**
- * Cheap throwaway container resolving only `Paths::class` — matches
- * the shape `configDefinition()` reads from `$c->get(...)`. Mirrors
- * `makeFakeContainer()` in ContainerDefinitionsTest.php.
+ * Container carrying only the `Config` the shipped factory reads its ceiling
+ * from. The factory no longer consults a `'config'` array entry — it asks for
+ * `Config::class` and reads `SPORA_ASSET_STORE_MAX_BYTES` off it.
  */
-function mediumblobFakeContainer(): Psr\Container\ContainerInterface
-{
-    return new class (new Paths(BASE_PATH)) implements Psr\Container\ContainerInterface {
-        public function __construct(private readonly Paths $paths) {}
-        public function get(string $id): mixed
-        {
-            if ($id === Paths::class) {
-                return $this->paths;
-            }
-            throw new RuntimeException("Unexpected container lookup: $id");
-        }
-        public function has(string $id): bool
-        {
-            return $id === Paths::class;
-        }
-    };
-}
-
-function buildContainerWithAssetStoreConfig(array $assetStoreOverride): Psr\Container\ContainerInterface
+function buildContainerWithAssetStoreConfig(string $mode, int $maxBytes): Psr\Container\ContainerInterface
 {
     $builder = new ContainerBuilder();
     $builder->useAutowiring(false);
     $builder->addDefinitions([
-        'config' => ['asset_store' => $assetStoreOverride],
+        Config::class => new Config([
+            'SPORA_ASSET_STORE_MODE' => $mode,
+            'SPORA_ASSET_STORE_MAX_BYTES' => $maxBytes,
+        ]),
     ]);
     return $builder->build();
 }
@@ -58,32 +45,25 @@ function shipDatabaseAssetStoreFactory(): Closure
 }
 
 test('shipped DatabaseAssetStore factory returns an instance when max_bytes equals the MEDIUMBLOB ceiling', function (): void {
-    $c = buildContainerWithAssetStoreConfig([
-        'mode'      => 'data_url',
-        'max_bytes' => DatabaseAssetStore::MAX_BYTES,
-    ]);
+    $c = buildContainerWithAssetStoreConfig('data_url', DatabaseAssetStore::MAX_BYTES);
 
     expect(shipDatabaseAssetStoreFactory()($c))->toBeInstanceOf(DatabaseAssetStore::class);
 });
 
 test('shipped DatabaseAssetStore factory throws InvalidArgumentException when max_bytes exceeds the MEDIUMBLOB ceiling', function (): void {
-    $c = buildContainerWithAssetStoreConfig([
-        'mode'      => 'data_url',
-        'max_bytes' => DatabaseAssetStore::MAX_BYTES + 1,
-    ]);
+    $c = buildContainerWithAssetStoreConfig('data_url', DatabaseAssetStore::MAX_BYTES + 1);
 
     expect(fn() => shipDatabaseAssetStoreFactory()($c))
         ->toThrow(InvalidArgumentException::class, 'MEDIUMBLOB ceiling');
 });
 
 test('shipped asset_store config default is the MEDIUMBLOB ceiling', function (): void {
-    // Pin the literal default from `configDefinition()` so a future drift
+    // Pin the literal default from `SettingsRegistry` so a future drift
     // back to the old 50 MiB value is caught at CI, not on first boot.
-    $ref = new ReflectionMethod(ContainerDefinitions::class, 'configDefinition');
-    $config = ($ref->invoke(null)['config'])(mediumblobFakeContainer());
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
 
-    expect($config['asset_store']['max_bytes'])->toBe(DatabaseAssetStore::MAX_BYTES);
-    expect($config['asset_store']['mode'])->toBe('auto');
+    expect($registry->get('SPORA_ASSET_STORE_MAX_BYTES')?->default)->toBe(DatabaseAssetStore::MAX_BYTES);
+    expect($registry->get('SPORA_ASSET_STORE_MODE')?->default)->toBe('auto');
 });
 
 test('DATA_URL_MAX_BYTES matches DatabaseAssetStore::MAX_BYTES', function (): void {

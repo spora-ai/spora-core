@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use OpenApi\Annotations\OpenApi;
+use Spora\Core\Config;
 use Spora\OpenApi\RouteSpecCollector;
 use Spora\OpenApi\RouteToOpenApi;
 
@@ -11,10 +12,13 @@ use Spora\OpenApi\RouteToOpenApi;
  * config snapshot. Mirrors `OpenApiGenerateTest::openApiTestCollectRoutes`
  * but threads the `$config` parameter through.
  *
- * @param array<string, mixed> $config
+ * `null` is the "nothing threaded through" case the registrar is written
+ * for — `RouteToOpenApi::build()` reaches it from `bin/spora-build`, which
+ * boots no container and therefore has no `Config`.
+ *
  * @return list<array<string, mixed>>
  */
-function routeRegCollectRoutes(array $config): array
+function routeRegCollectRoutes(?Config $config): array
 {
     $collector = new RouteSpecCollector();
     Spora\Core\RouteDefinitions::register($collector, $config);
@@ -24,10 +28,8 @@ function routeRegCollectRoutes(array $config): array
 
 /**
  * Build the OpenAPI spec with an explicit config snapshot.
- *
- * @param array<string, mixed> $config
  */
-function routeRegSpec(array $config): OpenApi
+function routeRegSpec(?Config $config): OpenApi
 {
     return (new RouteToOpenApi())->build($config);
 }
@@ -50,7 +52,7 @@ function routeRegMiddleware(array $routes, string $method, string $path): ?array
 
 describe('POST /api/v1/groups — allow_group_creation config flag', function (): void {
     it('registers AuthMiddleware only (no AdminMiddleware) when allow_group_creation=true', function (): void {
-        $routes = routeRegCollectRoutes(['allow_group_creation' => true]);
+        $routes = routeRegCollectRoutes(new Config(['SPORA_ALLOW_GROUP_CREATION' => true]));
 
         $middleware = routeRegMiddleware($routes, 'POST', '/api/v1/groups');
         expect($middleware)->not->toBeNull();
@@ -60,15 +62,15 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
     });
 
     it('registers AdminMiddleware when allow_group_creation=false', function (): void {
-        $routes = routeRegCollectRoutes(['allow_group_creation' => false]);
+        $routes = routeRegCollectRoutes(new Config(['SPORA_ALLOW_GROUP_CREATION' => false]));
 
         $middleware = routeRegMiddleware($routes, 'POST', '/api/v1/groups');
         expect($middleware)->not->toBeNull();
         expect($middleware)->toContain(Spora\Http\Middleware\AdminMiddleware::class);
     });
 
-    it('defaults to the open variant (allow_group_creation=true) when config is empty', function (): void {
-        $routes = routeRegCollectRoutes([]);
+    it('defaults to the open variant (allow_group_creation=true) when no config is supplied', function (): void {
+        $routes = routeRegCollectRoutes(null);
 
         $middleware = routeRegMiddleware($routes, 'POST', '/api/v1/groups');
         expect($middleware)->not->toBeNull();
@@ -77,7 +79,7 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
 
     it('keeps PATCH on AdminMiddleware regardless of the flag', function (): void {
         foreach ([true, false] as $value) {
-            $routes = routeRegCollectRoutes(['allow_group_creation' => $value]);
+            $routes = routeRegCollectRoutes(new Config(['SPORA_ALLOW_GROUP_CREATION' => $value]));
 
             $patch = routeRegMiddleware($routes, 'PATCH', '/api/v1/groups/{id}');
             expect($patch)->toContain(Spora\Http\Middleware\AdminMiddleware::class);
@@ -86,7 +88,7 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
 
     it('registers DELETE without AdminMiddleware (gate moves to the controller so the group owner can delete)', function (): void {
         foreach ([true, false] as $value) {
-            $routes = routeRegCollectRoutes(['allow_group_creation' => $value]);
+            $routes = routeRegCollectRoutes(new Config(['SPORA_ALLOW_GROUP_CREATION' => $value]));
 
             $delete = routeRegMiddleware($routes, 'DELETE', '/api/v1/groups/{id}');
             expect($delete)->toContain(Spora\Http\Middleware\AuthMiddleware::class);
@@ -99,8 +101,8 @@ describe('POST /api/v1/groups — allow_group_creation config flag', function ()
     });
 
     it('emits the same security shape in the OpenAPI doc regardless of the flag (auth+csrf are always there)', function (): void {
-        $openSpec = routeRegSpec(['allow_group_creation' => true]);
-        $strictSpec = routeRegSpec(['allow_group_creation' => false]);
+        $openSpec = routeRegSpec(new Config(['SPORA_ALLOW_GROUP_CREATION' => true]));
+        $strictSpec = routeRegSpec(new Config(['SPORA_ALLOW_GROUP_CREATION' => false]));
 
         foreach ([true, false] as $value) {
             $spec = $value ? $openSpec : $strictSpec;
@@ -118,7 +120,7 @@ describe('GET /api/v1/llm-configs/global — read-side middleware (regression fo
         // LLM configs to choose a default at agent-creation time. The
         // write paths (POST /llm-configs, /llm-configs/{id}/set-default)
         // still admin-gate other behaviour downstream.
-        $routes = routeRegCollectRoutes([]);
+        $routes = routeRegCollectRoutes(null);
 
         $middleware = routeRegMiddleware($routes, 'GET', '/api/v1/llm-configs/global');
         expect($middleware)->not->toBeNull();

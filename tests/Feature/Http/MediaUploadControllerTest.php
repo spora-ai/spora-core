@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
+use Spora\Core\Config;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\MediaUploadController;
@@ -273,6 +274,7 @@ function buildUploadControllerFixtures(?\Spora\Auth\AuthService $auth = null, in
         $auth,
         new \Spora\Services\PrincipalResolver(),
         $sniffer,
+        new Config(),
     );
     return [$assetStore, $service, $auth, $allowed, $sniffer, $controller];
 }
