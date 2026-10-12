@@ -567,6 +567,14 @@ final class SettingsRegistry
             secret: true,
             description: 'Shared secret used to sign Mercure update tokens.',
         ));
+        $add(new SettingDefinition(
+            key: 'SPORA_MERCURE_LEGACY_USER_TOPIC',
+            label: 'Publish to the legacy user topic',
+            type: SettingDefinition::TYPE_TOGGLE,
+            default: false,
+            section: 'security',
+            description: 'Also publish updates to the pre-principals per-user topic. Only useful if something is still subscribed to it.',
+        ));
 
         // Database and keys — every one of these is read before the database
         // can be opened, which is why they are `bootOnly`.

@@ -158,6 +158,7 @@ final class ConfigFactory
             'mercure_url'                    => 'SPORA_MERCURE_URL',
             'mercure_publish_url'            => 'SPORA_MERCURE_PUBLISH_URL',
             'mercure_jwt_key'                => 'SPORA_MERCURE_JWT_KEY',
+            'mercure_legacy_user_topic'      => 'SPORA_MERCURE_LEGACY_USER_TOPIC',
             'app_url'                        => 'SPORA_APP_URL',
             'app_prefix'                     => 'SPORA_APP_PREFIX',
             'plugin_install_enabled'         => 'SPORA_PLUGIN_INSTALL_ENABLED',
@@ -181,6 +182,20 @@ final class ConfigFactory
             'mail.from_address'              => 'SPORA_MAIL_FROM',
             'mail.from_name'                 => 'SPORA_MAIL_FROM_NAME',
             'mail.encryption'                => 'SPORA_MAIL_ENCRYPTION',
+
+            // The flat keys come second so they win. `SystemMailer` read the
+            // flat shape; the `mail` block that `install.php` writes into a
+            // fresh `config.php` was never actually read by anything. Both
+            // are accepted so neither shape is silently dropped, and the one
+            // that demonstrably worked takes precedence.
+            'mail_driver'                    => 'SPORA_MAIL_DRIVER',
+            'mail_host'                      => 'SPORA_MAIL_HOST',
+            'mail_port'                      => 'SPORA_MAIL_PORT',
+            'mail_username'                  => 'SPORA_MAIL_USERNAME',
+            'mail_password'                  => 'SPORA_MAIL_PASSWORD',
+            'mail_from'                      => 'SPORA_MAIL_FROM',
+            'mail_from_name'                 => 'SPORA_MAIL_FROM_NAME',
+            'mail_encryption'                => 'SPORA_MAIL_ENCRYPTION',
         ];
     }
 }
