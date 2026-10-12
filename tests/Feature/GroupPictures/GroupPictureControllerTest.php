@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\GroupPictures;
 
+use Spora\Core\Config;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\GroupPictureController;
@@ -93,6 +94,7 @@ function buildGroupPictureController(GroupPictureService $service): GroupPicture
         $service,
         $mediaArchive,
         new MimeSniffer(),
+        new Config(),
     );
 }
 

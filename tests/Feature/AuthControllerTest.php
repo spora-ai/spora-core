@@ -13,6 +13,7 @@ const LOGIN_ENDPOINT = '/api/v1/auth/login';
 const RESET_PASSWORD_ENDPOINT = '/api/v1/auth/reset-password';
 const PASSWORD_ENDPOINT = '/api/v1/auth/password';
 
+use Spora\Core\Config;
 use Spora\Http\AuthController;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserServiceInterface;
@@ -35,7 +36,7 @@ function makeAuthControllerWithMocks(): array
     $csrfService = new Spora\Security\CsrfTokenService();
     $validator = new Spora\Services\AuthValidator();
     $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, ['allow_registration' => true]);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, new Config(['SPORA_ALLOW_REGISTRATION' => true]));
 
     return [$controller, $authService];
 }
@@ -52,7 +53,7 @@ function makeAuthControllerWithUserService(): array
     $csrfService = new Spora\Security\CsrfTokenService();
     $validator = new Spora\Services\AuthValidator();
     $workflow = new Spora\Services\AuthWorkflow($authService, $userService, $csrfService, $validator);
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, ['allow_registration' => true]);
+    $controller = new AuthController($authService, $csrfService, $validator, $workflow, new Config(['SPORA_ALLOW_REGISTRATION' => true]));
 
     return [$controller, $authService, $userService];
 }
@@ -278,7 +279,7 @@ test('resetPassword resets password with valid selector and token', function ():
         private ArrayObject $captured;
         public function __construct(ArrayObject $captured)
         {
-            $this->inner = new Spora\Services\SystemMailer(['mail_driver' => 'log']);
+            $this->inner = new Spora\Services\SystemMailer(new Config(['SPORA_MAIL_DRIVER' => 'log']));
             $this->captured = $captured;
         }
         public function sendPasswordResetEmail(string $email, string $resetUrl): bool

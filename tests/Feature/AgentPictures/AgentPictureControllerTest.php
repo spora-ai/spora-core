@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\AgentPictures;
 
 use RuntimeException;
+use Spora\Core\Config;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\AgentPictureController;
@@ -174,6 +175,7 @@ function buildController(AgentPictureService $service): AgentPictureController
         $service,
         $mediaArchive,
         new MimeSniffer(),
+        new Config(),
     );
 }
 
