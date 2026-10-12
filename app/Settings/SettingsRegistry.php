@@ -107,16 +107,17 @@ final class SettingsRegistry
         if ($raw === null) {
             return $d->default;
         }
+        if (in_array($d->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true)) {
+            return $this->normalizeList($d, $raw);
+        }
 
         return match ($d->transform) {
-            'image_types' => self::coerceImageTypes((string) $raw),
             // Normalised, not validated: the router strips the prefix from
             // incoming paths, so `/spora` and `spora` must resolve the same.
             'app_prefix' => RequestOrigin::normalizePrefix((string) $raw),
             default => match ($d->type) {
                 SettingDefinition::TYPE_TOGGLE => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
                 SettingDefinition::TYPE_NUMBER => (int) $raw,
-                SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST => (array) $raw,
                 default => (string) $raw,
             },
         };
@@ -141,12 +142,63 @@ final class SettingsRegistry
 
     public function decode(SettingDefinition $d, string $raw): mixed
     {
+        if (in_array($d->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true)) {
+            return $this->normalizeList($d, $this->maybeJsonDecode($raw));
+        }
+
         return match ($d->type) {
             SettingDefinition::TYPE_TOGGLE => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
             SettingDefinition::TYPE_NUMBER => (int) $raw,
-            SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST => $this->decodeList($raw),
             default => $raw,
         };
+    }
+
+    /**
+     * Split a delimited string, or flatten an array, into a list — applying
+     * the setting's transform either way.
+     *
+     * Every input form has to go through here. A list arrives as comma- or
+     * whitespace-separated text from `.env`, as a textarea's raw text from
+     * the admin page, as JSON from the database, and as a real array from a
+     * JSON request body. Filtering only the text form would let the others
+     * past a rejection rule.
+     *
+     * @return list<string>
+     */
+    private function normalizeList(SettingDefinition $d, mixed $raw): array
+    {
+        if (is_array($raw)) {
+            $raw = implode(',', array_map(static fn(mixed $v): string => (string) $v, $raw));
+        }
+
+        return $d->transform === 'image_types'
+            ? self::coerceImageTypes((string) $raw)
+            : self::tokenize((string) $raw);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function tokenize(string $raw): array
+    {
+        $parts = preg_split('/[\s,]+/', trim($raw)) ?: [];
+
+        return array_values(array_unique(array_filter(
+            $parts,
+            static fn(string $p): bool => $p !== '',
+        )));
+    }
+
+    /**
+     * Lists are stored as JSON, but a value can also arrive as delimited text
+     * from `.env` or the admin page. Only a genuine JSON array is unwrapped —
+     * a bare token like `png` is not valid JSON and must stay a string.
+     */
+    private function maybeJsonDecode(string $raw): mixed
+    {
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : $raw;
     }
 
     /**
@@ -178,21 +230,6 @@ final class SettingsRegistry
         }
 
         return array_values(array_unique($normalized));
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function decodeList(string $raw): array
-    {
-        $decoded = json_decode($raw, true);
-        if (is_array($decoded)) {
-            return array_values($decoded);
-        }
-
-        // A value written before the list became JSON-encoded — and anything
-        // an operator typed into `.env` — arrives comma-separated.
-        return self::coerceImageTypes($raw);
     }
 
     /**
