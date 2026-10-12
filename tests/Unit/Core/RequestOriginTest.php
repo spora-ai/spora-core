@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Core;
 
 use ReflectionMethod;
+use Spora\Core\Config;
 use Spora\Core\RequestOrigin;
 
 beforeEach(function (): void {
@@ -15,7 +16,7 @@ afterEach(function (): void {
     unset($_SERVER['HTTP_HOST'], $_SERVER['SERVER_PORT'], $_SERVER['REQUEST_SCHEME'], $_SERVER['HTTPS']);
 });
 
-// detect(array $config)
+// detect(?Config $config)
 
 test('detect returns http://localhost from CLI when config is empty', function (): void {
     expect(RequestOrigin::detect())->toBe('http://localhost');
@@ -24,17 +25,17 @@ test('detect returns http://localhost from CLI when config is empty', function (
 test('detect honors config app_url over server globals', function (): void {
     $_SERVER['HTTP_HOST'] = '127.0.0.1:8080';
 
-    expect(RequestOrigin::detect(['app_url' => 'https://spora.fabiangrassl.de']))->toBe('https://spora.fabiangrassl.de');
+    expect(RequestOrigin::detect(new Config(['SPORA_APP_URL' => 'https://spora.fabiangrassl.de'])))->toBe('https://spora.fabiangrassl.de');
 });
 
 test('detect strips trailing slash from config app_url', function (): void {
-    expect(RequestOrigin::detect(['app_url' => 'https://spora.fabiangrassl.de/']))->toBe('https://spora.fabiangrassl.de');
+    expect(RequestOrigin::detect(new Config(['SPORA_APP_URL' => 'https://spora.fabiangrassl.de/'])))->toBe('https://spora.fabiangrassl.de');
 });
 
 test('detect does NOT read SPOra_APP_URL from $_ENV (config system owns it)', function (): void {
     // Security regression test: RequestOrigin MUST NOT bypass the framework
-    // config system by reading $_ENV directly. config.php and SPOra_APP_URL
-    // (via $apply()) flow through the container's `config` array, not here.
+    // config system by reading $_ENV directly. config.php and SPORA_APP_URL
+    // flow through the `Config` object, not here.
     $_ENV['SPORA_APP_URL'] = 'https://evil.example.com';
     putenv('SPORA_APP_URL=https://evil.example.com');
 
@@ -144,7 +145,7 @@ test('detectFrom does NOT read X-Forwarded-* (security: spoofable)', function ()
     ]))->toBe('http://spora.example.com');
 });
 
-// detectWithPrefix(array $config)
+// detectWithPrefix(?Config $config)
 
 test('detectWithPrefix returns [baseUrl, "/spora"] by default when config is empty', function (): void {
     // The Spora admin UI ships under /spora/ (public/spora/) and plugins ship
@@ -153,40 +154,39 @@ test('detectWithPrefix returns [baseUrl, "/spora"] by default when config is emp
 });
 
 test('detectWithPrefix treats app_prefix="" as an explicit empty (host-root mount)', function (): void {
-    expect(RequestOrigin::detectWithPrefix(['app_prefix' => '']))->toBe(['http://localhost', '']);
+    expect(RequestOrigin::detectWithPrefix(new Config(['SPORA_APP_PREFIX' => ''])))->toBe(['http://localhost', '']);
 });
 
 test('detectWithPrefix normalizes app_prefix=/spora', function (): void {
-    [$base, $prefix] = RequestOrigin::detectWithPrefix(['app_prefix' => '/spora']);
+    [$base, $prefix] = RequestOrigin::detectWithPrefix(new Config(['SPORA_APP_PREFIX' => '/spora']));
 
     expect($prefix)->toBe('/spora');
     expect($base)->toBe('http://localhost');
 });
 
 test('detectWithPrefix normalizes bare "spora" to "/spora"', function (): void {
-    expect(RequestOrigin::detectWithPrefix(['app_prefix' => 'spora'])[1])->toBe('/spora');
+    expect(RequestOrigin::detectWithPrefix(new Config(['SPORA_APP_PREFIX' => 'spora']))[1])->toBe('/spora');
 });
 
 test('detectWithPrefix strips trailing slash from app_prefix', function (): void {
-    expect(RequestOrigin::detectWithPrefix(['app_prefix' => '/spora/'])[1])->toBe('/spora');
+    expect(RequestOrigin::detectWithPrefix(new Config(['SPORA_APP_PREFIX' => '/spora/']))[1])->toBe('/spora');
 });
 
 test('detectWithPrefix treats app_prefix="/" as empty', function (): void {
-    expect(RequestOrigin::detectWithPrefix(['app_prefix' => '/'])[1])->toBe('');
+    expect(RequestOrigin::detectWithPrefix(new Config(['SPORA_APP_PREFIX' => '/']))[1])->toBe('');
 });
 
 test('detectWithPrefix composes baseUrl + prefix from config', function (): void {
-    expect(RequestOrigin::detectWithPrefix([
-        'app_url'    => 'https://spora.fabiangrassl.de',
-        'app_prefix' => '/spora',
-    ]))->toBe(['https://spora.fabiangrassl.de', '/spora']);
+    expect(RequestOrigin::detectWithPrefix(new Config([
+        'SPORA_APP_URL'    => 'https://spora.fabiangrassl.de',
+        'SPORA_APP_PREFIX' => '/spora',
+    ])))->toBe(['https://spora.fabiangrassl.de', '/spora']);
 });
 
 test('detectWithPrefix does NOT read SPOra_APP_URL or SPOra_APP_PREFIX from $_ENV (config system owns them)', function (): void {
     // Security regression test: same as detect() — RequestOrigin MUST NOT
-    // bypass the framework config system. config.php and SPOra_APP_URL /
-    // SPOra_APP_PREFIX (via $apply()) flow through the container's `config`
-    // array, not here.
+    // bypass the framework config system. config.php and SPORA_APP_URL /
+    // SPORA_APP_PREFIX flow through the `Config` object, not here.
     $_ENV['SPORA_APP_URL']    = 'https://evil.example.com';
     $_ENV['SPORA_APP_PREFIX'] = '/evil';
     putenv('SPORA_APP_URL=https://evil.example.com');

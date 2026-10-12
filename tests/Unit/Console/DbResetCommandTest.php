@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Console\Commands\DbResetCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -38,17 +39,17 @@ function makeTempSqliteFile(string $contents = ''): string
     return $path;
 }
 
-function makeConfigFor(string $dbPath, string $driver = 'sqlite'): array
+function makeConfigFor(string $dbPath, string $driver = 'sqlite'): Config
 {
-    return [
-        'db_driver'   => $driver,
-        'db_path'     => $dbPath,
-        'db_host'     => null,
-        'db_port'     => null,
-        'db_name'     => null,
-        'db_user'     => null,
-        'db_password' => null,
-    ];
+    return new Config([
+        'SPORA_DB_DRIVER'   => $driver,
+        'SPORA_DB_PATH'     => $dbPath,
+        'SPORA_DB_HOST'     => null,
+        'SPORA_DB_PORT'     => null,
+        'SPORA_DB_NAME'     => null,
+        'SPORA_DB_USER'     => null,
+        'SPORA_DB_PASSWORD' => null,
+    ]);
 }
 
 function makeDbFor(string $dbPath, string $driver = 'sqlite'): Database
@@ -184,14 +185,14 @@ test('help text documents both SQLite and MySQL paths', function (): void {
 
 test('MySQL branch with missing config fails with a clear error', function (): void {
     withSchemaStamp(function (): void {
-        // db_name is given a valid identifier (otherwise the identifier check
-        // fires first, before the missing-config scan). db_host, db_user, and
-        // db_password are all null — they should appear in the missing-config
-        // error.
-        $db = new Database([
-            'db_driver' => 'mysql',
-            'db_name'   => 'spora',
-        ]);
+        // SPORA_DB_NAME is given a valid identifier (otherwise the identifier
+        // check fires first, before the missing-config scan). SPORA_DB_HOST,
+        // SPORA_DB_USER and SPORA_DB_PASSWORD are all unset — they should
+        // appear in the missing-config error.
+        $db = new Database(new Config([
+            'SPORA_DB_DRIVER' => 'mysql',
+            'SPORA_DB_NAME'   => 'spora',
+        ]));
         $tester = makeTester($db);
 
         $tester->execute(['--force' => true], ['interactive' => false]);
@@ -206,14 +207,14 @@ test('MySQL branch with missing config fails with a clear error', function (): v
 
 test('MySQL branch with full config DROPs and CREATEs the database via PDO', function (): void {
     withSchemaStamp(function (): void {
-        $config = [
-            'db_driver'   => 'mysql',
-            'db_host'     => 'db.example.com',
-            'db_port'     => 3306,
-            'db_name'     => 'spora_test',
-            'db_user'     => 'root',
-            'db_password' => 'secret',
-        ];
+        $config = new Config([
+            'SPORA_DB_DRIVER'   => 'mysql',
+            'SPORA_DB_HOST'     => 'db.example.com',
+            'SPORA_DB_PORT'     => 3306,
+            'SPORA_DB_NAME'     => 'spora_test',
+            'SPORA_DB_USER'     => 'root',
+            'SPORA_DB_PASSWORD' => 'secret',
+        ]);
         $db = new Database($config);
 
         $executedSql = [];
@@ -240,16 +241,16 @@ test('MySQL branch with full config DROPs and CREATEs the database via PDO', fun
     });
 });
 
-test('MySQL branch defaults db_port to 3306 when not configured', function (): void {
+test('MySQL branch defaults SPORA_DB_PORT to 3306 when not configured', function (): void {
     withSchemaStamp(function (): void {
-        $config = [
-            'db_driver'   => 'mysql',
-            'db_host'     => 'db.example.com',
-            // db_port intentionally omitted.
-            'db_name'     => 'spora_test',
-            'db_user'     => 'root',
-            'db_password' => 'secret',
-        ];
+        $config = new Config([
+            'SPORA_DB_DRIVER'   => 'mysql',
+            'SPORA_DB_HOST'     => 'db.example.com',
+            // SPORA_DB_PORT intentionally omitted.
+            'SPORA_DB_NAME'     => 'spora_test',
+            'SPORA_DB_USER'     => 'root',
+            'SPORA_DB_PASSWORD' => 'secret',
+        ]);
         $db = new Database($config);
 
         $capturedDsn = null;
@@ -274,13 +275,13 @@ test('MySQL branch defaults db_port to 3306 when not configured', function (): v
 
 test('MySQL branch surfaces PDO exceptions as a clear error', function (): void {
     withSchemaStamp(function (): void {
-        $config = [
-            'db_driver'   => 'mysql',
-            'db_host'     => 'db.example.com',
-            'db_name'     => 'spora_test',
-            'db_user'     => 'root',
-            'db_password' => 'secret',
-        ];
+        $config = new Config([
+            'SPORA_DB_DRIVER'   => 'mysql',
+            'SPORA_DB_HOST'     => 'db.example.com',
+            'SPORA_DB_NAME'     => 'spora_test',
+            'SPORA_DB_USER'     => 'root',
+            'SPORA_DB_PASSWORD' => 'secret',
+        ]);
         $db = new Database($config);
 
         $pdo = Mockery::mock(PDO::class);
@@ -304,12 +305,12 @@ test('MySQL branch surfaces PDO exceptions as a clear error', function (): void 
 
 test('MySQL branch with partial config lists every missing env var', function (): void {
     withSchemaStamp(function (): void {
-        $config = [
-            'db_driver'   => 'mysql',
-            'db_host'     => 'db.example.com',
-            'db_name'     => 'spora', // valid identifier — keeps the test on the missing-config path
-            // db_user, db_password missing.
-        ];
+        $config = new Config([
+            'SPORA_DB_DRIVER' => 'mysql',
+            'SPORA_DB_HOST'   => 'db.example.com',
+            'SPORA_DB_NAME'   => 'spora', // valid identifier — keeps the test on the missing-config path
+            // SPORA_DB_USER, SPORA_DB_PASSWORD missing.
+        ]);
         $db = new Database($config);
         $tester = makeTester($db);
 
@@ -326,17 +327,17 @@ test('MySQL branch with partial config lists every missing env var', function ()
     });
 });
 
-test('SQLite branch respects a custom db_path from config', function (): void {
+test('SQLite branch respects a custom SPORA_DB_PATH from config', function (): void {
     withSchemaStamp(function (): void {
-        // db_path points at a non-default location.
+        // SPORA_DB_PATH points at a non-default location.
         $custom = sys_get_temp_dir() . '/spora-custom-' . bin2hex(random_bytes(6)) . '/data/spora.sqlite';
         @mkdir(dirname($custom), 0o755, true);
         file_put_contents($custom, 'existing data');
 
-        $db = new Database([
-            'db_driver' => 'sqlite',
-            'db_path'   => $custom,
-        ]);
+        $db = new Database(new Config([
+            'SPORA_DB_DRIVER' => 'sqlite',
+            'SPORA_DB_PATH'   => $custom,
+        ]));
         $tester = makeTester($db);
 
         $tester->execute(['--force' => true], ['interactive' => false]);
@@ -356,10 +357,10 @@ test('SQLite branch creates the parent directory if it does not exist', function
         expect(is_dir($dir))->toBeFalse();
         expect(file_exists($dbPath))->toBeFalse();
 
-        $db = new Database([
-            'db_driver' => 'sqlite',
-            'db_path'   => $dbPath,
-        ]);
+        $db = new Database(new Config([
+            'SPORA_DB_DRIVER' => 'sqlite',
+            'SPORA_DB_PATH'   => $dbPath,
+        ]));
         $tester = makeTester($db);
 
         $tester->execute(['--force' => true], ['interactive' => false]);
@@ -391,10 +392,10 @@ test('non-SQLite, non-MySQL driver falls through to the SQLite branch', function
     withSchemaStamp(function (): void {
         // A typo / future driver should not blow up — it should be treated as SQLite.
         $dbPath = makeTempSqliteFile('non-empty');
-        $db = new Database([
-            'db_driver' => 'postgres', // unrecognised
-            'db_path'   => $dbPath,
-        ]);
+        $db = new Database(new Config([
+            'SPORA_DB_DRIVER' => 'postgres', // unrecognised
+            'SPORA_DB_PATH'   => $dbPath,
+        ]));
         $tester = makeTester($db);
 
         // No --force and the file is non-empty — would prompt. With interactive=false
@@ -408,14 +409,14 @@ test('non-SQLite, non-MySQL driver falls through to the SQLite branch', function
 
 test('case-insensitive driver match for mysql', function (): void {
     withSchemaStamp(function (): void {
-        $config = [
-            'db_driver'   => 'MySQL', // mixed case
-            'db_host'     => 'db.example.com',
-            'db_port'     => 3307,
-            'db_name'     => 'spora_test',
-            'db_user'     => 'root',
-            'db_password' => 'secret',
-        ];
+        $config = new Config([
+            'SPORA_DB_DRIVER'   => 'MySQL', // mixed case
+            'SPORA_DB_HOST'     => 'db.example.com',
+            'SPORA_DB_PORT'     => 3307,
+            'SPORA_DB_NAME'     => 'spora_test',
+            'SPORA_DB_USER'     => 'root',
+            'SPORA_DB_PASSWORD' => 'secret',
+        ]);
         $db = new Database($config);
 
         $pdo = Mockery::mock(PDO::class);
@@ -461,7 +462,7 @@ test('schema stamp is left alone if it does not exist (no error)', function (): 
 });
 
 // ---------------------------------------------------------------------------
-// MySQL db_name identifier validation
+// MySQL SPORA_DB_NAME identifier validation
 //
 // DROP/CREATE DATABASE cannot be parameterised via PDO::prepare(), so the
 // command validates the identifier against MySQL's identifier rules BEFORE
@@ -471,7 +472,7 @@ test('schema stamp is left alone if it does not exist (no error)', function (): 
 // ---------------------------------------------------------------------------
 
 /**
- * @param array<string, string> $extraConfig  Extra db_* keys to merge on top of the base mysql config.
+ * @param array<string, string> $extraConfig  Extra `SPORA_DB_*` keys to merge on top of the base mysql config.
  *
  * @return array{0: list<string>, 1: int, 2: string}  [executedSql, statusCode, display]
  */
@@ -484,14 +485,14 @@ function runMysqlResetWithName(string $dbName, array $extraConfig = []): array
     ];
 
     withSchemaStamp(function () use ($dbName, $extraConfig, &$captured): void {
-        $config = array_merge([
-            'db_driver'   => 'mysql',
-            'db_host'     => 'db.example.com',
-            'db_port'     => 3306,
-            'db_name'     => $dbName,
-            'db_user'     => 'root',
-            'db_password' => 'secret',
-        ], $extraConfig);
+        $config = new Config(array_merge([
+            'SPORA_DB_DRIVER'   => 'mysql',
+            'SPORA_DB_HOST'     => 'db.example.com',
+            'SPORA_DB_PORT'     => 3306,
+            'SPORA_DB_NAME'     => $dbName,
+            'SPORA_DB_USER'     => 'root',
+            'SPORA_DB_PASSWORD' => 'secret',
+        ], $extraConfig));
         $db = new Database($config);
 
         $pdo = Mockery::mock(PDO::class);
@@ -528,7 +529,7 @@ dataset('invalid_mysql_db_names', [
     'too long (65 chars)'         => [str_repeat('a', 65)],
 ]);
 
-test('rejects invalid db_name without invoking PDO::exec()', function (string $badName): void {
+test('rejects an invalid SPORA_DB_NAME without invoking PDO::exec()', function (string $badName): void {
     [$executedSql, $status, $display] = runMysqlResetWithName($badName);
 
     expect($status)->toBe(Command::FAILURE);
@@ -547,7 +548,7 @@ dataset('valid_mysql_db_names', [
     'max length (64)'  => [str_repeat('a', 64)],
 ]);
 
-test('accepts valid db_name and interpolates it as a backtick-quoted identifier', function (string $goodName): void {
+test('accepts a valid SPORA_DB_NAME and interpolates it as a backtick-quoted identifier', function (string $goodName): void {
     [$executedSql, $status] = runMysqlResetWithName($goodName);
 
     expect($status)->toBe(Command::SUCCESS);
@@ -557,13 +558,13 @@ test('accepts valid db_name and interpolates it as a backtick-quoted identifier'
 })->with('valid_mysql_db_names');
 
 test('rejection short-circuits before missing-config check (no host)', function (): void {
-    // Even without a db_host, a bad db_name is caught first and never tries
+    // Even without a host, a bad SPORA_DB_NAME is caught first and never tries
     // to read the rest of the config.
     withSchemaStamp(function (): void {
-        $db = new Database([
-            'db_driver' => 'mysql',
-            'db_name'   => 'spora; DROP DATABASE other',
-        ]);
+        $db = new Database(new Config([
+            'SPORA_DB_DRIVER' => 'mysql',
+            'SPORA_DB_NAME'   => 'spora; DROP DATABASE other',
+        ]));
         $tester = makeTester($db);
         $tester->execute(['--force' => true], ['interactive' => false]);
 

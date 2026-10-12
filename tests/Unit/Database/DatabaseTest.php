@@ -3,24 +3,25 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
 use Spora\Core\Database;
 
 // Helpers
 
-function makeTempSqliteConfig(): array
+function makeTempSqliteConfig(): Config
 {
-    return [
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ];
+    return new Config([
+        'SPORA_DB_DRIVER' => 'sqlite',
+        'SPORA_DB_PATH'   => ':memory:',
+    ]);
 }
 
-function bootFreshDatabase(array $config = []): Database
+function bootFreshDatabase(?Config $config = null): Database
 {
     Database::resetBootState();
     Database::setSchemaInstallSkipped(false);
 
-    $db = new Database($config ?: makeTempSqliteConfig());
+    $db = new Database($config ?? makeTempSqliteConfig());
     $db->boot();
 
     return $db;

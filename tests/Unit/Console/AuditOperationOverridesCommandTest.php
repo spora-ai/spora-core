@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Console\Commands\AuditOperationOverridesCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Models\Agent;
 use Spora\Tools\CalculatorTool;
@@ -40,7 +41,7 @@ function auditAgent(): int
 
 function auditTester(): CommandTester
 {
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     return new CommandTester(new AuditOperationOverridesCommand($db));

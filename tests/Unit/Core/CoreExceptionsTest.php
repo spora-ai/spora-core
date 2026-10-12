@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use DI\ContainerBuilder;
+use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
@@ -85,7 +86,7 @@ function withKeyEnvRestored(callable $fn): void
 function bootBadPrefixInstaller(): DatabaseSchemaInstaller
 {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_bad_migrations']);
