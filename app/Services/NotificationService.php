@@ -290,10 +290,13 @@ class NotificationService implements NotificationServiceInterface
     private function buildRunUrl(int|string $taskId): string
     {
         $baseUrl = rtrim((string) $this->config->getString('SPORA_APP_URL', ''), '/');
-        $prefix  = RequestOrigin::normalizePrefix((string) $this->config->getString('SPORA_APP_PREFIX', ''));
-        $sep     = $prefix === '' ? '' : '/';
+        // `normalizePrefix()` already returns either '' or '/something' — a
+        // leading slash and no trailing one — so adding a separator of its own
+        // put a second slash in the middle of every subdirectory install's
+        // link.
+        $prefix = RequestOrigin::normalizePrefix((string) $this->config->getString('SPORA_APP_PREFIX', ''));
 
-        return $baseUrl . $prefix . $sep . 'tasks/' . $taskId;
+        return $baseUrl . $prefix . '/tasks/' . $taskId;
     }
 
     private function toResource(Notification $notification): array

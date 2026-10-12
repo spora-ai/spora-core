@@ -45,7 +45,7 @@ final class SystemMailer implements MailerInterface
      */
     public function buildMailer(): Mailer
     {
-        $driver = $this->config->getString('SPORA_MAIL_DRIVER', 'php_mail');
+        $driver = $this->config->getString('SPORA_MAIL_DRIVER', 'sendmail');
 
         $dsn = match ($driver) {
             'smtp' => $this->buildSmtpDsn(),

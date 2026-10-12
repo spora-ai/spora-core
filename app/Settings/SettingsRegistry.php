@@ -115,6 +115,15 @@ final class SettingsRegistry
             // Normalised, not validated: the router strips the prefix from
             // incoming paths, so `/spora` and `spora` must resolve the same.
             'app_prefix' => RequestOrigin::normalizePrefix((string) $raw),
+            // `php_mail` was the long-standing fallback and resolves to
+            // `sendmail://default` — the same DSN as `sendmail`. Canonicalising
+            // it here means an operator's stored value and the registry
+            // default are one name, which is what lets the admin page offer a
+            // closed set of drivers instead of accepting whatever was typed.
+            'mail_driver' => match (strtolower(trim((string) $raw))) {
+                'php_mail' => 'sendmail',
+                default => strtolower(trim((string) $raw)),
+            },
             default => match ($d->type) {
                 SettingDefinition::TYPE_TOGGLE => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
                 SettingDefinition::TYPE_NUMBER => (int) $raw,
@@ -516,14 +525,16 @@ final class SettingsRegistry
             key: 'SPORA_MAIL_DRIVER',
             label: 'Mail driver',
             type: SettingDefinition::TYPE_SELECT,
-            default: 'smtp',
+            default: 'sendmail',
             group: 'mail',
             section: 'mail',
+            transform: 'mail_driver',
             options: [
-                ['value' => 'smtp', 'label' => 'SMTP'],
-                ['value' => 'sendmail', 'label' => 'Sendmail'],
+                ['value' => 'sendmail', 'label' => 'Sendmail — hand off to the local mail binary'],
+                ['value' => 'smtp', 'label' => 'SMTP — deliver through a mail server'],
+                ['value' => 'log', 'label' => 'Log — write messages to the log, send nothing'],
             ],
-            description: 'How outbound mail is delivered.',
+            description: 'How outbound mail is delivered. Sendmail is the default because it is what an unconfigured install has always done.',
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MAIL_HOST',
