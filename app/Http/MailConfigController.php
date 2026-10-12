@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Core\DotenvWriter;
 use Spora\Services\SystemMailer;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -32,21 +33,12 @@ final class MailConfigController
     public function __construct(
         private readonly AuthService $authService,
         private readonly SystemMailer $systemMailer,
-        private readonly array $config = [],
+        private readonly Config $config,
     ) {}
 
     public function index(): JsonResponse
     {
-        $mailConfig = [
-            'driver'       => $this->config['mail_driver']     ?? 'php_mail',
-            'host'         => $this->config['mail_host']       ?? null,
-            'port'         => $this->config['mail_port']       ?? 465,
-            'username'     => $this->config['mail_username']   ?? null,
-            'password'     => $this->config['mail_password']   ?? null,
-            'from_address' => $this->config['mail_from']       ?? null,
-            'from_name'    => $this->config['mail_from_name']  ?? 'Spora',
-            'encryption'   => $this->config['mail_encryption'] ?? 'tls',
-        ];
+        $mailConfig = $this->currentMailConfig();
 
         // Mask password
         if ($mailConfig['password'] !== null && $mailConfig['password'] !== '') {
@@ -88,15 +80,16 @@ final class MailConfigController
         }
 
         // Return updated config with password masked
+        $current = $this->currentMailConfig();
         $updatedConfig = [
-            'driver'       => $body['driver']       ?? $this->config['mail_driver']     ?? 'php_mail',
-            'host'         => $body['host']         ?? $this->config['mail_host']       ?? null,
-            'port'         => isset($body['port']) ? (int) $body['port'] : ($this->config['mail_port']       ?? 465),
-            'username'     => $body['username']     ?? $this->config['mail_username']   ?? null,
+            'driver'       => $body['driver']       ?? $current['driver'],
+            'host'         => $body['host']         ?? $current['host'],
+            'port'         => isset($body['port']) ? (int) $body['port'] : $current['port'],
+            'username'     => $body['username']     ?? $current['username'],
             'password'     => '***',
-            'from_address' => $body['from_address'] ?? $this->config['mail_from']       ?? null,
-            'from_name'    => $body['from_name']    ?? $this->config['mail_from_name']  ?? 'Spora',
-            'encryption'   => $body['encryption']   ?? $this->config['mail_encryption'] ?? 'tls',
+            'from_address' => $body['from_address'] ?? $current['from_address'],
+            'from_name'    => $body['from_name']    ?? $current['from_name'],
+            'encryption'   => $body['encryption']   ?? $current['encryption'],
         ];
 
         return new JsonResponse([
@@ -125,6 +118,26 @@ final class MailConfigController
                 Response::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
+    }
+
+    /**
+     * The stored mail settings behind both `index()` and the echo of
+     * `update()`, so the two cannot disagree about what "unchanged" means.
+     *
+     * @return array<string, string|int|null>
+     */
+    private function currentMailConfig(): array
+    {
+        return [
+            'driver'       => $this->config->getString('SPORA_MAIL_DRIVER'),
+            'host'         => $this->config->getString('SPORA_MAIL_HOST'),
+            'port'         => $this->config->getInt('SPORA_MAIL_PORT'),
+            'username'     => $this->config->getString('SPORA_MAIL_USERNAME'),
+            'password'     => $this->config->getString('SPORA_MAIL_PASSWORD'),
+            'from_address' => $this->config->getString('SPORA_MAIL_FROM'),
+            'from_name'    => $this->config->getString('SPORA_MAIL_FROM_NAME'),
+            'encryption'   => $this->config->getString('SPORA_MAIL_ENCRYPTION'),
+        ];
     }
 
     private function decodeJson(Request $request): array

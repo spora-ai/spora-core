@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use InvalidArgumentException;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Models\NotificationSubscription;
 use Spora\Models\Principal;
 use Spora\Services\NotificationSubscriptionService;
@@ -29,7 +30,7 @@ final class NotificationSubscriptionController
     public function __construct(
         private readonly AuthService $authService,
         private readonly NotificationSubscriptionService $subscriptions,
-        private readonly array $config = [],
+        private readonly Config $config,
     ) {}
 
     /**
@@ -81,9 +82,7 @@ final class NotificationSubscriptionController
      */
     private function resolveEmailEnabled(): bool
     {
-        $config = $this->config;
-
-        return (bool) ($config['notifications']['email_enabled'] ?? true);
+        return $this->config->getBool('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
     }
 
     /**

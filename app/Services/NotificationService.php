@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Illuminate\Support\Carbon;
+use Spora\Core\Config;
+use Spora\Core\RequestOrigin;
 use Spora\Models\Notification;
 use Spora\Models\Task;
 use Spora\Models\User;
@@ -17,8 +19,8 @@ class NotificationService implements NotificationServiceInterface
     public function __construct(
         private readonly MercurePublisherInterface $mercure,
         private readonly PrincipalResolver $principalResolver,
+        private readonly Config $config,
         private readonly ?SystemMailer $systemMailer = null,
-        private readonly array $config = [],
         private readonly ?NotificationSubscriptionService $subscriptions = null,
     ) {}
 
@@ -242,7 +244,7 @@ class NotificationService implements NotificationServiceInterface
         // SPORA_NOTIFICATIONS_EMAIL_ENABLED=false in .env.
         if ($this->systemMailer === null
             || $this->subscriptions === null
-            || ! ($this->config['notifications']['email_enabled'] ?? true)
+            || ! $this->config->getBool('SPORA_NOTIFICATIONS_EMAIL_ENABLED')
         ) {
             return;
         }
@@ -269,7 +271,7 @@ class NotificationService implements NotificationServiceInterface
             'task_id'     => $task->id,
             'agent_name'  => $agent->name,
             'user_prompt' => $task->user_prompt,
-            'site_name'   => $this->config['app_name'] ?? 'Spora',
+            'site_name'   => $this->config->getString('SPORA_APP_NAME'),
             'run_url'     => $this->buildRunUrl($task->id),
         ];
 
@@ -287,8 +289,8 @@ class NotificationService implements NotificationServiceInterface
 
     private function buildRunUrl(int|string $taskId): string
     {
-        $baseUrl = rtrim((string) ($this->config['app_url'] ?? ''), '/');
-        $prefix  = \Spora\Core\RequestOrigin::normalizePrefix((string) ($this->config['app_prefix'] ?? ''));
+        $baseUrl = rtrim((string) $this->config->getString('SPORA_APP_URL', ''), '/');
+        $prefix  = RequestOrigin::normalizePrefix((string) $this->config->getString('SPORA_APP_PREFIX', ''));
         $sep     = $prefix === '' ? '' : '/';
 
         return $baseUrl . $prefix . $sep . 'tasks/' . $taskId;

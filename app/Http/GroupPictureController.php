@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Models\Group;
 use Spora\Models\GroupMembership;
 use Spora\Services\GroupDetailResource;
@@ -47,8 +48,8 @@ final class GroupPictureController
         private readonly GroupPictureService $pictureService,
         private readonly MediaArchiveService $mediaArchive,
         private readonly MimeSniffer $sniffer,
+        private readonly Config $config,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
-        private readonly array $config = [],
     ) {}
 
     /**
@@ -123,7 +124,7 @@ final class GroupPictureController
 
         return new JsonResponse([
             'data' => [
-                'asset'  => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? '')),
+                'asset'  => $this->serializer->serialize($asset, $this->config->getString('SPORA_APP_URL')),
                 'group'  => GroupDetailResource::toArray($group, $userId, $this->principalService, $this->pictureService),
             ],
         ], Response::HTTP_CREATED);
