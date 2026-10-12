@@ -2,10 +2,29 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Config;
+use Spora\Core\Paths;
 use Spora\Http\ConfigController;
+use Spora\Settings\SettingDefinition;
+use Spora\Settings\SettingsRegistry;
 
-test('index() returns allow_registration true when config is empty', function (): void {
-    $controller = new ConfigController([]);
+/**
+ * The Config `ConfigFactory` produces when `.env` and `config.php` are both
+ * silent: every declared setting at its registry default. The flags this
+ * endpoint reports have no defaults of their own any more — the registry owns
+ * them — so a test that omitted a key would be asserting `false` for a toggle
+ * the application ships as `true`.
+ */
+function runtimeFlagsAsShipped(): Config
+{
+    return new Config(array_map(
+        static fn(SettingDefinition $d): mixed => $d->default,
+        (new SettingsRegistry(new Paths(BASE_PATH)))->all(),
+    ));
+}
+
+test('index() returns allow_registration true when nothing overrides the registry default', function (): void {
+    $controller = new ConfigController(runtimeFlagsAsShipped());
 
     $response = $controller->index();
 
@@ -15,7 +34,7 @@ test('index() returns allow_registration true when config is empty', function ()
 });
 
 test('index() returns allow_registration false when config sets it to false', function (): void {
-    $controller = new ConfigController(['allow_registration' => false]);
+    $controller = new ConfigController(new Config(['SPORA_ALLOW_REGISTRATION' => false]));
 
     $response = $controller->index();
 
@@ -25,7 +44,7 @@ test('index() returns allow_registration false when config sets it to false', fu
 });
 
 test('index() returns allow_registration true when config sets it to true', function (): void {
-    $controller = new ConfigController(['allow_registration' => true]);
+    $controller = new ConfigController(new Config(['SPORA_ALLOW_REGISTRATION' => true]));
 
     $response = $controller->index();
 
@@ -34,7 +53,7 @@ test('index() returns allow_registration true when config sets it to true', func
 });
 
 test('index() coerces truthy non-bool config values', function (): void {
-    $controller = new ConfigController(['allow_registration' => 1]);
+    $controller = new ConfigController(new Config(['SPORA_ALLOW_REGISTRATION' => 1]));
 
     $response = $controller->index();
 
@@ -43,7 +62,7 @@ test('index() coerces truthy non-bool config values', function (): void {
 });
 
 test('index() coerces falsy non-bool config values', function (): void {
-    $controller = new ConfigController(['allow_registration' => 0]);
+    $controller = new ConfigController(new Config(['SPORA_ALLOW_REGISTRATION' => 0]));
 
     $response = $controller->index();
 
@@ -51,8 +70,8 @@ test('index() coerces falsy non-bool config values', function (): void {
     expect($body['allow_registration'])->toBeFalse();
 });
 
-test('index() defaults plugin_install_enabled to false when config omits it', function (): void {
-    $controller = new ConfigController([]);
+test('index() defaults plugin_install_enabled to false when nothing overrides the registry default', function (): void {
+    $controller = new ConfigController(runtimeFlagsAsShipped());
 
     $response = $controller->index();
 
@@ -61,7 +80,7 @@ test('index() defaults plugin_install_enabled to false when config omits it', fu
 });
 
 test('index() returns plugin_install_enabled true when config sets it true', function (): void {
-    $controller = new ConfigController(['plugin_install_enabled' => true]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_INSTALL_ENABLED' => true]));
 
     $response = $controller->index();
 
@@ -70,7 +89,7 @@ test('index() returns plugin_install_enabled true when config sets it true', fun
 });
 
 test('index() coerces plugin_install_enabled truthy non-bool values', function (): void {
-    $controller = new ConfigController(['plugin_install_enabled' => 1]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_INSTALL_ENABLED' => 1]));
 
     $response = $controller->index();
 
@@ -79,7 +98,7 @@ test('index() coerces plugin_install_enabled truthy non-bool values', function (
 });
 
 test('index() coerces plugin_install_enabled falsy non-bool values', function (): void {
-    $controller = new ConfigController(['plugin_install_enabled' => 0]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_INSTALL_ENABLED' => 0]));
 
     $response = $controller->index();
 
@@ -87,8 +106,8 @@ test('index() coerces plugin_install_enabled falsy non-bool values', function ()
     expect($body['plugin_install_enabled'])->toBeFalse();
 });
 
-test('index() defaults plugin_catalog_enabled to true when config omits it', function (): void {
-    $controller = new ConfigController([]);
+test('index() defaults plugin_catalog_enabled to true when nothing overrides the registry default', function (): void {
+    $controller = new ConfigController(runtimeFlagsAsShipped());
 
     $response = $controller->index();
 
@@ -97,7 +116,7 @@ test('index() defaults plugin_catalog_enabled to true when config omits it', fun
 });
 
 test('index() returns plugin_catalog_enabled false when config sets it false', function (): void {
-    $controller = new ConfigController(['plugin_catalog_enabled' => false]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_CATALOG_ENABLED' => false]));
 
     $response = $controller->index();
 
@@ -106,7 +125,7 @@ test('index() returns plugin_catalog_enabled false when config sets it false', f
 });
 
 test('index() coerces plugin_catalog_enabled truthy non-bool values', function (): void {
-    $controller = new ConfigController(['plugin_catalog_enabled' => 1]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_CATALOG_ENABLED' => 1]));
 
     $response = $controller->index();
 
@@ -115,7 +134,7 @@ test('index() coerces plugin_catalog_enabled truthy non-bool values', function (
 });
 
 test('index() coerces plugin_catalog_enabled falsy non-bool values', function (): void {
-    $controller = new ConfigController(['plugin_catalog_enabled' => 0]);
+    $controller = new ConfigController(new Config(['SPORA_PLUGIN_CATALOG_ENABLED' => 0]));
 
     $response = $controller->index();
 
@@ -126,13 +145,13 @@ test('index() coerces plugin_catalog_enabled falsy non-bool values', function ()
 test('index() treats the string "false" as falsy (matches env-overlay semantics)', function (): void {
     // Regression: a naive `(bool)` cast turns `(bool) "false"` into `true`.
     // The runtime flag must agree with the FILTER_VALIDATE_BOOLEAN semantics
-    // used in ContainerDefinitions so the SPA never sees a value that
+    // used when every layer is coerced, so the SPA never sees a value that
     // disagrees with the server's own gates.
-    $controller = new ConfigController([
-        'allow_registration'     => 'false',
-        'plugin_install_enabled' => 'false',
-        'plugin_catalog_enabled' => 'false',
-    ]);
+    $controller = new ConfigController(new Config([
+        'SPORA_ALLOW_REGISTRATION'      => 'false',
+        'SPORA_PLUGIN_INSTALL_ENABLED'  => 'false',
+        'SPORA_PLUGIN_CATALOG_ENABLED'  => 'false',
+    ]));
 
     $response = $controller->index();
 
@@ -143,11 +162,11 @@ test('index() treats the string "false" as falsy (matches env-overlay semantics)
 });
 
 test('index() accepts FILTER_VALIDATE_BOOLEAN truthy strings', function (): void {
-    $controller = new ConfigController([
-        'allow_registration'     => 'true',
-        'plugin_install_enabled' => '1',
-        'plugin_catalog_enabled' => 'yes',
-    ]);
+    $controller = new ConfigController(new Config([
+        'SPORA_ALLOW_REGISTRATION'      => 'true',
+        'SPORA_PLUGIN_INSTALL_ENABLED'  => '1',
+        'SPORA_PLUGIN_CATALOG_ENABLED'  => 'yes',
+    ]));
 
     $response = $controller->index();
 
@@ -157,27 +176,27 @@ test('index() accepts FILTER_VALIDATE_BOOLEAN truthy strings', function (): void
     expect($body['plugin_catalog_enabled'])->toBeTrue();
 });
 
-test('index() falls back to the default when the flag is an explicit null', function (): void {
-    $controller = new ConfigController([
-        'allow_registration'     => null,
-        'plugin_install_enabled' => null,
-        'plugin_catalog_enabled' => null,
-    ]);
+test('index() falls back to false when a flag is an explicit null', function (): void {
+    $controller = new ConfigController(new Config([
+        'SPORA_ALLOW_REGISTRATION'      => null,
+        'SPORA_PLUGIN_INSTALL_ENABLED'  => null,
+        'SPORA_PLUGIN_CATALOG_ENABLED'  => null,
+    ]));
 
     $response = $controller->index();
 
     $body = json_decode($response->getContent(), true);
-    expect($body['allow_registration'])->toBeTrue();
+    expect($body['allow_registration'])->toBeFalse();
     expect($body['plugin_install_enabled'])->toBeFalse();
-    expect($body['plugin_catalog_enabled'])->toBeTrue();
+    expect($body['plugin_catalog_enabled'])->toBeFalse();
 });
 
 test('index() returns all three runtime feature flag keys together', function (): void {
-    $controller = new ConfigController([
-        'allow_registration'     => true,
-        'plugin_install_enabled' => false,
-        'plugin_catalog_enabled' => true,
-    ]);
+    $controller = new ConfigController(new Config([
+        'SPORA_ALLOW_REGISTRATION'      => true,
+        'SPORA_PLUGIN_INSTALL_ENABLED'  => false,
+        'SPORA_PLUGIN_CATALOG_ENABLED'  => true,
+    ]));
 
     $response = $controller->index();
 

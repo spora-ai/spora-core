@@ -11,6 +11,7 @@ const EVE_EMAIL = 'eve@example.com';
 const GRACE_EMAIL = 'grace@example.com';
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
 use Spora\Http\AuthController;
 use Spora\Services\RateLimiter;
 use Spora\Services\UserServiceInterface;
@@ -25,12 +26,18 @@ afterEach(function (): void {
 
 /**
  * Build an AuthController backed by a fresh database.
- * Pass custom config overrides (e.g. ['allow_registration' => false]).
+ *
+ * `$configOverrides` is merged over the registry's shipped
+ * `SPORA_ALLOW_REGISTRATION`, so the tests that are not about the registration
+ * gate still run against an open one.
  */
 function makeAuthController(array $configOverrides = [], ?callable $userServiceSetup = null): array
 {
     $service    = bootAuthLayer();
-    $config     = array_merge(['allow_registration' => true, 'app_env' => 'testing'], $configOverrides);
+    $config     = new Config(array_replace(
+        ['SPORA_ALLOW_REGISTRATION' => true, 'SPORA_APP_ENV' => 'testing'],
+        $configOverrides,
+    ));
     $userService = Mockery::mock(UserServiceInterface::class);
     $userService->allows('getUser')->andReturn(null)->byDefault();
     if ($userServiceSetup !== null) {
@@ -39,7 +46,7 @@ function makeAuthController(array $configOverrides = [], ?callable $userServiceS
     $csrfService = new Spora\Security\CsrfTokenService();
     $validator = new Spora\Services\AuthValidator();
     $workflow = new Spora\Services\AuthWorkflow($service, $userService, $csrfService, $validator);
-    $controller = new AuthController($service, $csrfService, $validator, $workflow, null, $config);
+    $controller = new AuthController($service, $csrfService, $validator, $workflow, $config);
 
     return [$controller, $service, $userService, $csrfService];
 }
@@ -92,7 +99,7 @@ test('register duplicate email returns 409 EMAIL_TAKEN', function (): void {
 
 test('register with allow_registration=false returns 403 REGISTRATION_DISABLED', function (): void {
     clearSession();
-    [$controller] = makeAuthController(['allow_registration' => false]);
+    [$controller] = makeAuthController(['SPORA_ALLOW_REGISTRATION' => false]);
 
     $response = $controller->register(jsonRequest('POST', REGISTER_URL, [
         'email'    => 'carol@example.com',

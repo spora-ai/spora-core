@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Config;
 use Spora\Http\NotificationController;
 use Spora\Models\Notification;
 use Spora\Services\MercurePublisherInterface;
@@ -33,7 +34,7 @@ function makeNotificationControllerUnit(): array
         }
     };
 
-    $notificationService = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+    $notificationService = new NotificationService($mercure, new Spora\Services\PrincipalResolver(), new Config());
     $controller = new NotificationController($authService, $notificationService);
 
     return [$controller, $authService, $notificationService];

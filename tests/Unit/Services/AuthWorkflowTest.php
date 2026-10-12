@@ -197,7 +197,10 @@ test('performEmailChangeRequest succeeds when SMTP is healthy', function (): voi
 
     // Use the real SystemMailer pointed at the log driver — no real network,
     // and delight-im's confirmation row stays in place.
-    $systemMailer = new \Spora\Services\SystemMailer(['mail_driver' => 'log']);
+    $systemMailer = new \Spora\Services\SystemMailer(new \Spora\Core\Config([
+        'SPORA_MAIL_DRIVER'     => 'log',
+        'SPORA_MAIL_FROM_NAME' => 'Spora',
+    ]));
     $authService->setSystemMailer($systemMailer);
 
     $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [

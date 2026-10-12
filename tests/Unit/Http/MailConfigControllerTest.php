@@ -2,30 +2,24 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Config;
+use Spora\Core\Paths;
 use Spora\Http\MailConfigController;
 use Spora\Services\SystemMailer;
+use Spora\Settings\SettingDefinition;
+use Spora\Settings\SettingsRegistry;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function (): void {
     TestDatabaseFactory::boot();
-
-    // SystemMailer::getMailConfig() lets SPORA_MAIL_* env vars override the
-    // passed config; the .env's SPORA_MAIL_DRIVER=log leaks into $_ENV the
-    // moment any other test boots the Kernel. Clear here so the per-test
-    // config we pass is what's actually used.
-    foreach (array_keys($_ENV) as $key) {
-        if (is_string($key) && str_starts_with($key, 'SPORA_MAIL_')) {
-            unset($_ENV[$key]);
-        }
-    }
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());
 
 const MAIL_CONFIG_URI = '/api/v1/mail-config';
 
-function makeMailConfigController(array $config = []): array
+function makeMailConfigController(Config $config = new Config()): array
 {
     $authService = bootAuthLayer();
     $systemMailer = new SystemMailer($config);
@@ -36,14 +30,14 @@ function makeMailConfigController(array $config = []): array
 // index
 
 test('index() returns masked password when password is set', function (): void {
-    [$controller] = makeMailConfigController([
-        'mail_driver'   => 'smtp',
-        'mail_host'     => 'smtp.example.com',
-        'mail_port'     => 587,
-        'mail_username' => 'user',
-        'mail_password' => 'secret',
-        'mail_from'     => 'from@example.com',
-    ]);
+    [$controller] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER'   => 'smtp',
+        'SPORA_MAIL_HOST'     => 'smtp.example.com',
+        'SPORA_MAIL_PORT'     => 587,
+        'SPORA_MAIL_USERNAME' => 'user',
+        'SPORA_MAIL_PASSWORD' => 'secret',
+        'SPORA_MAIL_FROM'     => 'from@example.com',
+    ]));
 
     $response = $controller->index();
 
@@ -55,9 +49,9 @@ test('index() returns masked password when password is set', function (): void {
 });
 
 test('index() leaves password null when no password is set', function (): void {
-    [$controller] = makeMailConfigController([
-        'mail_driver' => 'php_mail',
-    ]);
+    [$controller] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER' => 'php_mail',
+    ]));
 
     $response = $controller->index();
 
@@ -65,16 +59,39 @@ test('index() leaves password null when no password is set', function (): void {
     expect($body['data']['mail_config']['password'])->toBeNull();
 });
 
-test('index() uses sane defaults when config keys are missing', function (): void {
-    [$controller] = makeMailConfigController([]);
+test('index() reports the registry defaults when nothing is configured', function (): void {
+    // The endpoint used to answer with its own literals (`php_mail`, port 465)
+    // rather than the site's mail configuration, because it asked for `mail_*`
+    // keys no layer produced. It now reports what the Config holds, and a fresh
+    // install holds the registry defaults.
+    $asShipped = new Config(array_map(
+        static fn(SettingDefinition $d): mixed => $d->default,
+        (new SettingsRegistry(new Paths(BASE_PATH)))->all(),
+    ));
+
+    [$controller] = makeMailConfigController($asShipped);
 
     $response = $controller->index();
 
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['mail_config']['driver'])->toBe('php_mail');
-    expect($body['data']['mail_config']['port'])->toBe(465);
+    expect($body['data']['mail_config']['driver'])->toBe('smtp');
+    expect($body['data']['mail_config']['host'])->toBe('localhost');
+    expect($body['data']['mail_config']['port'])->toBe(587);
     expect($body['data']['mail_config']['encryption'])->toBe('tls');
     expect($body['data']['mail_config']['from_name'])->toBe('Spora');
+});
+
+test('index() reports nulls for every field a Config that names none leaves out', function (): void {
+    [$controller] = makeMailConfigController();
+
+    $response = $controller->index();
+
+    $body = json_decode($response->getContent(), true);
+    expect($body['data']['mail_config']['driver'])->toBeNull();
+    expect($body['data']['mail_config']['host'])->toBeNull();
+    expect($body['data']['mail_config']['port'])->toBeNull();
+    expect($body['data']['mail_config']['encryption'])->toBeNull();
+    expect($body['data']['mail_config']['from_name'])->toBeNull();
 });
 
 // update — uses real DotenvWriter writes; we point at a tmp env path via reflection by overriding constants is impossible.
@@ -100,11 +117,11 @@ test('update() returns 400 on invalid JSON', function (): void {
 });
 
 test('update() returns 200 with masked password when called with empty body', function (): void {
-    [$controller] = makeMailConfigController([
-        'mail_driver' => 'smtp',
-        'mail_host'   => 'host',
-        'mail_from'   => 'noreply@example.com',
-    ]);
+    [$controller] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER' => 'smtp',
+        'SPORA_MAIL_HOST'   => 'host',
+        'SPORA_MAIL_FROM'   => 'noreply@example.com',
+    ]));
 
     $request = jsonRequest('PUT', MAIL_CONFIG_URI, []);
     $response = $controller->update($request);
@@ -118,11 +135,11 @@ test('update() returns 200 with masked password when called with empty body', fu
 test('update() with body containing only masked password skips writing it but still returns 200', function (): void {
     // Point DEFAULT_PATH override: not possible. But with body=['password'=>'***'], the code path
     // hits `continue;` so envValues stays empty — DotenvWriter::sets is never invoked.
-    [$controller] = makeMailConfigController([
-        'mail_driver' => 'smtp',
-        'mail_host'   => 'host',
-        'mail_from'   => 'noreply@example.com',
-    ]);
+    [$controller] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER' => 'smtp',
+        'SPORA_MAIL_HOST'   => 'host',
+        'SPORA_MAIL_FROM'   => 'noreply@example.com',
+    ]));
 
     $request = jsonRequest('PUT', MAIL_CONFIG_URI, ['password' => '***']);
     $response = $controller->update($request);
@@ -135,10 +152,10 @@ test('update() with body containing only masked password skips writing it but st
 // test
 
 test('test() returns 401 when no user is authenticated', function (): void {
-    [$controller] = makeMailConfigController([
-        'mail_driver' => 'log',
-        'mail_from'   => 'from@example.com',
-    ]);
+    [$controller] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER' => 'log',
+        'SPORA_MAIL_FROM'   => 'from@example.com',
+    ]));
     clearSession();
 
     $response = $controller->test();
@@ -149,10 +166,11 @@ test('test() returns 401 when no user is authenticated', function (): void {
 });
 
 test('test() returns 200 when log driver sends successfully', function (): void {
-    [$controller, $authService] = makeMailConfigController([
-        'mail_driver' => 'log',
-        'mail_from'   => 'from@example.com',
-    ]);
+    [$controller, $authService] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER'     => 'log',
+        'SPORA_MAIL_FROM'       => 'from@example.com',
+        'SPORA_MAIL_FROM_NAME' => 'Spora',
+    ]));
     bootAuth($authService, 'mailtest@example.com');
 
     $response = $controller->test();
@@ -163,10 +181,10 @@ test('test() returns 200 when log driver sends successfully', function (): void 
 });
 
 test('test() returns 500 when mail driver is invalid', function (): void {
-    [$controller, $authService] = makeMailConfigController([
-        'mail_driver' => 'invalid_driver',
-        'mail_from'   => 'from@example.com',
-    ]);
+    [$controller, $authService] = makeMailConfigController(new Config([
+        'SPORA_MAIL_DRIVER' => 'invalid_driver',
+        'SPORA_MAIL_FROM'   => 'from@example.com',
+    ]));
     bootAuth($authService, 'badmail@example.com');
 
     $response = $controller->test();
