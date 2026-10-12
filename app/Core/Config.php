@@ -67,14 +67,25 @@ final class Config
             $byGroup[$definition->group][] = $definition;
         }
 
+        // Iterating the declarations rather than the stored rows is what
+        // enforces `bootOnly`: the repository returns every row in a group,
+        // including the boot-only keys, and a stored `SPORA_DB_HOST` would
+        // otherwise overwrite the value the database was opened with.
+        //
+
         foreach ($byGroup as $group => $definitions) {
-            foreach ($repository->allForGroup((string) $group) as $key => $row) {
-                if ($row->undecryptable) {
-                    $this->undecryptable[] = $key;
+            $rows = $repository->allForGroup((string) $group);
+            foreach ($definitions as $definition) {
+                $row = $rows[$definition->key] ?? null;
+                if ($row === null) {
                     continue;
                 }
-                $this->values[$key] = $row->value;
-                $this->sources[$key] = self::SOURCE_DATABASE;
+                if ($row->undecryptable) {
+                    $this->undecryptable[] = $definition->key;
+                    continue;
+                }
+                $this->values[$definition->key] = $row->value;
+                $this->sources[$definition->key] = self::SOURCE_DATABASE;
             }
         }
     }

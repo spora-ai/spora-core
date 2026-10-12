@@ -234,38 +234,43 @@ it('maps only to keys the registry declares', function (): void {
     expect($undeclared)->toBe([]);
 });
 
-it('maps no two legacy config.php paths to the same key', function (): void {
+it('maps no two legacy config.php paths to the same key, except the mail aliases', function (): void {
     $collisions = array_keys(array_filter(
         array_count_values(array_values(ConfigFactory::legacyKeyMap())),
         static fn (int $occurrences): bool => $occurrences > 1,
     ));
 
-    expect($collisions)->toBe([]);
+    // The mail keys are the one deliberate exception: `SystemMailer` read the
+    // flat `mail_driver`, `install.php` writes the nested `mail` block, and
+    // accepting only one of them silently drops whichever a deployment has.
+    expect(array_values(array_diff($collisions, ConfigFactory::MAIL_ALIAS_TARGETS)))->toBe([])
+        ->and($collisions)->toEqualCanonicalizing(ConfigFactory::MAIL_ALIAS_TARGETS);
 });
 
 /**
- * The contract `ConfigFactory::envValues()` states for itself: an env var set
- * to the empty string reads as unset, so a blanked-out
- * `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=` falls back to the default instead
- * of disabling image uploads.
+ * An env var set to the empty string is a *value*, not an absence.
  *
- * Known failure. `$raw = $_ENV[$key] ?? (getenv($key) ?: null)` short-circuits
- * on `$_ENV` before the `?: null` it relies on is reached, and
- * `Kernel::loadDotEnv()` uses `Dotenv::createImmutable()`, whose default
- * `EnvConstAdapter` writes `.env` into `$_ENV`. So the variable this contract
- * is written about is exactly the one that never reaches the `?:`. Today
- * `$_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = ''` resolves to `[]` —
- * no image type allowed — from the `config.php` file's comment on
- * {@see \Spora\Core\ConfigFactory}.
+ * `$_ENV[$key] ?? (getenv($key) ?: null)` short-circuits on `$_ENV` before the
+ * truthiness check is reached, and `Kernel::loadDotEnv()` uses
+ * `Dotenv::createImmutable()`, whose default `EnvConstAdapter` writes `.env`
+ * into `$_ENV`. So a blanked-out
+ * `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=` reaches the registry as `''` and
+ * becomes `[]`.
+ *
+ * That is the documented meaning of an empty value — "no image type allowed" —
+ * and it is what `ConfigMerger::parseImageTypesCsv()` did before this
+ * migration. It is worth pinning because the obvious "fix" is to add a
+ * truthiness check, which would make an operator's deliberate empty value
+ * silently re-enable image uploads.
  */
-it('treats an env var set to the empty string as unset', function (): void {
+it('reads an env var set to the empty string as an explicit empty list', function (): void {
     configResolutionUseConfigFile([]);
     configResolutionSetEnv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES', '');
 
     $config = configResolutionBuildConfig(configResolutionRegistry());
 
-    expect($config->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(['png', 'jpeg', 'webp'])
-        ->and($config->sourceOf('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(Config::SOURCE_DEFAULT);
+    expect($config->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe([])
+        ->and($config->sourceOf('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(Config::SOURCE_ENV);
 });
 
 /**
