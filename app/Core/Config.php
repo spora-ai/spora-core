@@ -71,8 +71,6 @@ final class Config
         // enforces `bootOnly`: the repository returns every row in a group,
         // including the boot-only keys, and a stored `SPORA_DB_HOST` would
         // otherwise overwrite the value the database was opened with.
-        //
-
         foreach ($byGroup as $group => $definitions) {
             $rows = $repository->allForGroup((string) $group);
             foreach ($definitions as $definition) {
