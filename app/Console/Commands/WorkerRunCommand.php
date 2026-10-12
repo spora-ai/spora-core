@@ -12,6 +12,7 @@ use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Console\WorkerLoopOptions;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
@@ -131,7 +132,7 @@ final class WorkerRunCommand extends Command
         $staleMinutesRaw = $input->getOption('stale-minutes');
         $staleMinutes = (int) ($staleMinutesRaw !== null
             ? $staleMinutesRaw
-            : ($this->container->get('config')['worker_stale_minutes'] ?? 60));
+            : (int) $this->container->get(Config::class)->getInt('SPORA_WORKER_STALE_MINUTES', 60));
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
@@ -140,7 +141,7 @@ final class WorkerRunCommand extends Command
         $workersCli = $input->getOption('workers');
         $maxWorkers = match (true) {
             $workersCli !== null && $workersCli !== '0' => (int) $workersCli,
-            default => (int) ($this->container->get('config')['max_workers'] ?? 0),
+            default => (int) $this->container->get(Config::class)->getInt('SPORA_MAX_WORKERS', 0),
         };
 
         $earlyExit = $this->prepareForRun(

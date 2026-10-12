@@ -67,9 +67,35 @@ in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
 - `spora.log` — Application logs (PSR-3, Monolog)
 - `php.log` — PHP error/fatal logs
 
-### Environment Variables
-- `SPORA_SYNC_MODE` — Worker execution mode: `true` = inline/dev (synchronous), `false` = queued/worker (async)
-- `APP_ENV` — Environment (`dev`, `prod`)
+### Configuration
+Spora's settings are **declared once** in `app/Settings/SettingsRegistry.php`.
+That file is the authority on every setting key, its type, its default and
+whether it is `bootOnly` — nothing else needs a matching edit, and a key that
+is not declared there is not a setting.
+
+Read them through the `Config` value object (`app/Core/Config.php`):
+
+```php
+$config->getBool('SPORA_ALLOW_REGISTRATION')
+$config->getInt('SPORA_TOOL_HTTP_TIMEOUT')
+$config->getString('SPORA_DB_DRIVER')
+```
+
+The container binding is `Config::class`. There is no `array $config` and no
+`'config'` key.
+
+Precedence, last wins:
+
+```
+registry defaults  <  config.php  <  .env / OS environment  <  database
+```
+
+Keys marked `bootOnly` in the registry (the `SPORA_DB_*` family,
+`SPORA_KEY_PATH`, `SPORA_LOG_PATH`, `SPORA_APP_ENV`, `SPORA_APP_URL`,
+`SPORA_APP_PREFIX`) are read before the database can be opened, so they come
+from files only and are never stored in it. The database layer is applied
+once per request by `Kernel::handle()`, not by the `Config` factory — see
+`Config::applySettingsOverlay()` for why.
 
 ### CI
 GitHub Actions runs on push to `main`, on `v*` tags, and on pull requests (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). **Gating** jobs: `test` (Pest + coverage, default PHP), `test-85` (Pest, PHP 8.5), `static-analysis` (PHPStan, plus OpenAPI drift, merge-marker and markdown-link checks), `sonar`. **Advisory, not gating:** `test-mysql` and `test-mariadb`, which run the same suite against a real engine but carry `continue-on-error: true` until the SQLite-specific migration tests (`PRAGMA`/`sqlite_master`) are ported — a red run there is reported and blocks nothing. The three range-based checks in `static-analysis` cover pulls *and* pushes: the base sha is the PR base or the push's `before`, so a conflict marker merged straight to `main` is still caught. Formatting is not gated in CI — run `composer format` before committing.
