@@ -946,11 +946,10 @@ final class ContainerDefinitions
             GroupPictureController::class => static function (ContainerInterface $c): GroupPictureController {
                 return new GroupPictureController(
                     $c->get(AuthService::class),
-                    $c->get(GroupPictureService::class),
                     $c->get(PrincipalService::class),
+                    $c->get(GroupPictureService::class),
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),
-                    new MediaAssetSerializer(),
                     $c->get(Config::class),
                 );
             },
@@ -1045,8 +1044,8 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(MimeSniffer::class),
-                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                     $c->get(Config::class),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
                 );
             },
 
@@ -1098,7 +1097,6 @@ final class ContainerDefinitions
                     $c->get(AgentPictureService::class),
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),
-                    new MediaAssetSerializer(),
                     $c->get(Config::class),
                 );
             },

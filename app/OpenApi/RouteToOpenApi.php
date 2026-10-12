@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\OpenApi;
 
 use OpenApi\Annotations as OA;
+use Spora\Core\Config;
 use OpenApi\Annotations\Components;
 use OpenApi\Annotations\Info;
 use OpenApi\Annotations\OpenApi;
@@ -36,13 +37,13 @@ final class RouteToOpenApi
         private readonly HandlerOperationExtractor $operationExtractor = new HandlerOperationExtractor(),
     ) {}
 
-    public function build(array $config = []): OpenApi
+    public function build(?Config $config = null): OpenApi
     {
         $collector = new RouteSpecCollector();
         // Pass the resolved config so {@see RouteDefinitions::register()}
         // picks the open variant for routes whose middleware depends on
         // a runtime flag (e.g. POST /api/v1/groups honours
-        // `allow_group_creation`).
+        // `SPORA_ALLOW_GROUP_CREATION`).
         RouteDefinitions::register($collector, $config);
 
         $openapi = new OpenApi([]);

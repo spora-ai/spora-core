@@ -64,9 +64,9 @@ final class SettingsRepository
     }
 
     /**
-     * @param string|null $raw Null deletes the row, which is how "not set" is
-     *                         stored. An empty string is a value — it is how a
-     *                         secret gets cleared.
+     * @param mixed $value Null deletes the row, which is how "not set" is
+     *                     stored. An empty string is a value — it is how a
+     *                     secret gets cleared.
      */
     public function put(SettingDefinition $definition, mixed $value, ?int $userId): void
     {
