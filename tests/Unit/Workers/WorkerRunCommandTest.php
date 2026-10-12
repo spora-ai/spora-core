@@ -10,6 +10,7 @@ use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Models\Agent;
@@ -36,7 +37,7 @@ const DAILY_9AM_CRON = '0 9 * * *';
 function makeWorkerRunCommand(): array
 {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
     $db->boot();
 
     $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -62,7 +63,7 @@ function makeWorkerRunCommand(): array
 
     /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
     $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-    $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+    $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
     // WorkerRunCommand now resolves WorkerReaper from the container (DI wiring
     // shipped in Plan 2). The real container's factory wires the optional
     // SubAgentServiceInterface as `null`; the test mock returns a fresh
@@ -427,7 +428,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         // return that older row — dispatching its agent instead of the agent
         // bound to the row that was just claimed.
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $authService = bootAuthLayer();
@@ -517,7 +518,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
         );
@@ -699,7 +700,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         // B2 regression — the catch branch must not skip finalisation: it must queue
         // the next PENDING for recurring schedules, atomically with marking SKIPPED.
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $throwingOrchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -768,7 +769,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         // B2 regression — one-shot failures must deactivate the run, not leave it
         // active with no PENDING entry and no SKIPPED bookkeeping.
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $throwingOrchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -833,7 +834,7 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
     it('marks task FAILED when orchestrator->tick() throws an exception', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -907,7 +908,7 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
 describe('WorkerRunCommand --reap-only', function (): void {
     it('exits immediately without processing the queue when --reap-only is set', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -924,7 +925,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
         );
@@ -979,7 +980,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
     it('calls reapStaleTasks and marks orphaned tasks FAILED in --reap-only mode', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -994,7 +995,7 @@ describe('WorkerRunCommand --reap-only', function (): void {
 
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 1]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 1]));
         $container->allows('get')->with('tool_instances')->andReturn([]);
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
@@ -1054,7 +1055,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
     it('rejects --daemon combined with --once', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $paths = new Paths(BASE_PATH);
@@ -1065,7 +1066,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $notification = Mockery::mock(NotificationService::class);
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );
@@ -1083,7 +1084,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
     it('rejects --daemon combined with --reap-only', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $paths = new Paths(BASE_PATH);
@@ -1094,7 +1095,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $notification = Mockery::mock(NotificationService::class);
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );
@@ -1112,7 +1113,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
     it('rejects --once combined with --reap-only', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $paths = new Paths(BASE_PATH);
@@ -1123,7 +1124,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         $notification = Mockery::mock(NotificationService::class);
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
-        $container->allows('get')->with('config')->andReturn(['worker_stale_minutes' => 60]);
+        $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );
@@ -1146,7 +1147,7 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         // misconfigured install still produces a clear failure (no DB
         // connection attempts).
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $paths = new Paths(BASE_PATH);
@@ -1182,7 +1183,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
     {
         // Make sure DB is booted (it's already booted by the test's beforeEach).
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -1224,7 +1225,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
 
     it('substitutes {{agent_name}} when an agent is provided', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
         [, $agentId] = registerAgentInWorkerDb();
         $agent = Agent::find($agentId);
@@ -1248,7 +1249,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
 
     it('substitutes {{user_name}} with the agent owner\'s username', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
         [$userId, $agentId] = registerAgentInWorkerDb();
         // The user record must have its `username` column set for the substitution
@@ -1275,7 +1276,7 @@ describe('ScheduledRunProcessor substituteVariables', function (): void {
 
     it('falls back to the placeholder when the owner has no username', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
         [, $agentId] = registerAgentInWorkerDb();
         $agent = Agent::find($agentId);
@@ -1353,7 +1354,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
 
     it('does nothing when no retry tasks are due', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
@@ -1364,7 +1365,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
 
     it('skips retries that have not elapsed', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $auth = bootAuthLayer();
@@ -1402,7 +1403,7 @@ describe('WorkerQueueProcessor processRetryQueue', function (): void {
 
     it('processes a due retry by calling orchestrator->retry()', function (): void {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();
 
         $auth = bootAuthLayer();

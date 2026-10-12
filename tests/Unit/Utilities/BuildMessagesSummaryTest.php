@@ -24,10 +24,10 @@ final class BuildMessagesSummaryTest extends TestCase
     {
         require 'vendor/autoload.php';
 
-        $db = new \Spora\Core\Database([
-            'db_driver' => 'sqlite',
-            'db_path'   => ':memory:',
-        ], null);
+        $db = new \Spora\Core\Database(new \Spora\Core\Config([
+            'SPORA_DB_DRIVER' => 'sqlite',
+            'SPORA_DB_PATH'   => ':memory:',
+        ]), null);
         $db->boot();
 
         // Create a user and agent for FK constraints

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Console\Commands\InstallCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Paths;
@@ -21,15 +22,15 @@ function makeInstallTester(Database $db): CommandTester
 function makeInstallDb(): Database
 {
     Database::resetBootState();
-    return new Database([
-        'db_driver'   => 'sqlite',
-        'db_path'     => ':memory:',
-        'db_host'     => null,
-        'db_port'     => null,
-        'db_name'     => null,
-        'db_user'     => null,
-        'db_password' => null,
-    ]);
+    return new Database(new Config([
+        'SPORA_DB_DRIVER'   => 'sqlite',
+        'SPORA_DB_PATH'     => ':memory:',
+        'SPORA_DB_HOST'     => null,
+        'SPORA_DB_PORT'     => null,
+        'SPORA_DB_NAME'     => null,
+        'SPORA_DB_USER'     => null,
+        'SPORA_DB_PASSWORD' => null,
+    ]));
 }
 
 it('boots the DB, runs migrations, and reports success', function (): void {

@@ -16,6 +16,31 @@ defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 defined('TEST_TIMESTAMP_FORMAT') || define('TEST_TIMESTAMP_FORMAT', 'Y-m-d H:i:s');
 const NOTIFICATIONS_API_PATH = '/api/v1/notifications/';
 
+/**
+ * The three settings `NotificationService` reads, at their declared defaults.
+ *
+ * Taken from the registry rather than retyped so a default that changes there
+ * cannot leave this fixture asserting a value production no longer resolves.
+ * An empty `Config` would be wrong: it reads every toggle as `false`, and the
+ * email gate is default-on.
+ *
+ * @return array<string, mixed>
+ */
+function notificationServiceConfigValues(): array
+{
+    $registry = new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH));
+
+    $values = [];
+    foreach (['SPORA_NOTIFICATIONS_EMAIL_ENABLED', 'SPORA_APP_NAME', 'SPORA_APP_URL'] as $key) {
+        $definition = $registry->get($key);
+        if ($definition !== null) {
+            $values[$key] = $definition->default;
+        }
+    }
+
+    return $values;
+}
+
 function makeNotificationService(?MercurePublisherInterface $mercureOverride = null): NotificationService
 {
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
@@ -24,7 +49,11 @@ function makeNotificationService(?MercurePublisherInterface $mercureOverride = n
     $mercure->allows('publishForPrincipal')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
 
-    return new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+    return new NotificationService(
+        $mercure,
+        new Spora\Services\PrincipalResolver(),
+        new Spora\Core\Config(notificationServiceConfigValues()),
+    );
 }
 
 function makeNotificationController(): array
@@ -70,7 +99,11 @@ describe('NotificationService', function (): void {
             ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
             ->andReturn(true);
 
-        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+        $service = new NotificationService(
+            $mercure,
+            new Spora\Services\PrincipalResolver(),
+            new Spora\Core\Config(notificationServiceConfigValues()),
+        );
 
         $task = Task::create([
             'agent_id'    => $agent->id,
@@ -101,7 +134,11 @@ describe('NotificationService', function (): void {
         $mercure->allows('publishToUser')->andReturn(true);
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+        $service = new NotificationService(
+            $mercure,
+            new Spora\Services\PrincipalResolver(),
+            new Spora\Core\Config(notificationServiceConfigValues()),
+        );
 
         $task = Task::create([
             'agent_id'       => $agent->id,
@@ -135,7 +172,11 @@ describe('NotificationService', function (): void {
             ->with(Mockery::type('int'), Mockery::type('int'), Mockery::type('array'))
             ->andReturn(true);
 
-        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+        $service = new NotificationService(
+            $mercure,
+            new Spora\Services\PrincipalResolver(),
+            new Spora\Core\Config(notificationServiceConfigValues()),
+        );
 
         $task = Task::create([
             'agent_id'    => $agent->id,
@@ -161,7 +202,11 @@ describe('NotificationService', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publishToUser')->andReturn(true);
 
-        $service = new NotificationService($mercure, new Spora\Services\PrincipalResolver());
+        $service = new NotificationService(
+            $mercure,
+            new Spora\Services\PrincipalResolver(),
+            new Spora\Core\Config(notificationServiceConfigValues()),
+        );
 
         $task = Task::create([
             'agent_id'    => $agent->id,

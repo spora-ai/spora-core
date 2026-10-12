@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Delight\Auth\Role;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Console\Commands\SetupCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Paths;
@@ -22,7 +23,7 @@ function makeSetupTester(): CommandTester
     // The connection is already booted by tests/Pest.php beforeEach. Don't
     // resetBootState() — that would create a fresh in-memory SQLite that the
     // Auth (which is on the original connection) can't see.
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $authService    = bootAuthLayer();

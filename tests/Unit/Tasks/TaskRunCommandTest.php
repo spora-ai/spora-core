@@ -9,6 +9,7 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Commands\TaskRunCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
@@ -75,12 +76,11 @@ describe('TaskRunCommand — task claiming', function (): void {
         simulateLoggedInSession($this->userId, 'taskrun@example.com');
 
         $this->container = Mockery::mock(ContainerInterface::class);
-        $this->container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-            'worker_mode' => true,
-            'llm_timeout' => 300,
-        ]);
+        $this->container->allows('get')->with(Config::class)->andReturn(new Config([
+            'SPORA_DB_DRIVER'   => 'sqlite',
+            'SPORA_DB_PATH'     => SQLITE_MEMORY,
+            'SPORA_LLM_TIMEOUT' => 300,
+        ]));
         /** @var Mockery\MockInterface&MercurePublisherInterface $mockMercure */
         $mockMercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mockMercure->allows('publish')->andReturn(true);
@@ -124,16 +124,15 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
 
         $container = Mockery::mock(ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-        ]);
+        $container->allows('get')->with(Config::class)->andReturn(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+        );
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
@@ -201,7 +200,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
@@ -211,10 +210,9 @@ describe('TaskRunCommand — task claiming', function (): void {
         $factory->allows('makeFromAgent')->andReturn($textDriver);
 
         $container = Mockery::mock(ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-        ]);
+        $container->allows('get')->with(Config::class)->andReturn(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+        );
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
@@ -278,7 +276,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
@@ -288,10 +286,9 @@ describe('TaskRunCommand — task claiming', function (): void {
         $factory->allows('makeFromAgent')->andReturn($textDriver);
 
         $container = Mockery::mock(ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-        ]);
+        $container->allows('get')->with(Config::class)->andReturn(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+        );
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
@@ -352,7 +349,7 @@ describe('TaskRunCommand — task claiming', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
@@ -372,10 +369,9 @@ describe('TaskRunCommand — task claiming', function (): void {
         $nullFactory->allows('makeFromAgent')->andReturn($nullDriver);
 
         $container = Mockery::mock(ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-        ]);
+        $container->allows('get')->with(Config::class)->andReturn(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+        );
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
@@ -449,7 +445,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
@@ -469,10 +465,9 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $factory->allows('makeFromAgent')->andReturn($textDriver);
 
         $container = Mockery::mock(ContainerInterface::class);
-        $container->allows('get')->with('config')->andReturn([
-            'db_driver' => 'sqlite',
-            'db_path' => SQLITE_MEMORY,
-        ]);
+        $container->allows('get')->with(Config::class)->andReturn(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+        );
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
@@ -525,7 +520,7 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         ]);
 
         $db = new Database(
-            ['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY],
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
             new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
         );
         $db->bootDatabaseConnectionOnly();
@@ -747,7 +742,7 @@ describe('TaskRunCommand — client-mode guard', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
 
         $command = new TaskRunCommand(
-            new Database(['db_driver' => 'sqlite', 'db_path' => SQLITE_MEMORY]),
+            new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY])),
             $container,
             $mercure,
             WorkerRuntimeMode::Client,

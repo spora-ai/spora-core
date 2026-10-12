@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Schema\Blueprint;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Database\MigrationHelpers;
 
@@ -12,10 +13,10 @@ uses(MigrationHelpers::class);
 
 beforeEach(function (): void {
     Database::resetBootState();
-    $db = new Database([
-        'db_driver' => 'sqlite',
-        'db_path'   => ':memory:',
-    ]);
+    $db = new Database(new Config([
+        'SPORA_DB_DRIVER' => 'sqlite',
+        'SPORA_DB_PATH'   => ':memory:',
+    ]));
     $db->boot();
 });
 
