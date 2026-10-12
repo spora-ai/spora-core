@@ -106,10 +106,7 @@ final class SystemMailer implements MailerInterface
             throw new InvalidArgumentException("Mail template '{$templateName}' rendered to an empty body.");
         }
 
-        $from = new Address(
-            $this->config->getString('SPORA_MAIL_FROM', 'noreply@spora.local'),
-            $this->config->getString('SPORA_MAIL_FROM_NAME'),
-        );
+        $from = $this->buildSender();
 
         $email = (new Email())
             ->from($from)
@@ -215,12 +212,25 @@ final class SystemMailer implements MailerInterface
      * @param string $to Recipient email address
      * @return bool True on success
      */
+    /**
+     * The From address for every outbound message.
+     *
+     * `Address` takes a non-nullable name, and `SPORA_MAIL_FROM_NAME` came
+     * from the deleted `getMailConfig()` that always supplied one — so it was
+     * non-nullable by accident. `ConfigFactory` populates every declared key
+     * in production; the defaults cover a hand-built Config.
+     */
+    private function buildSender(): Address
+    {
+        return new Address(
+            $this->config->getString('SPORA_MAIL_FROM', 'noreply@spora.local'),
+            $this->config->getString('SPORA_MAIL_FROM_NAME', 'Spora'),
+        );
+    }
+
     public function sendTestEmail(string $to): bool
     {
-        $from = new Address(
-            $this->config->getString('SPORA_MAIL_FROM', 'noreply@spora.local'),
-            $this->config->getString('SPORA_MAIL_FROM_NAME'),
-        );
+        $from = $this->buildSender();
 
         $email = (new Email())
             ->from($from)
@@ -243,10 +253,10 @@ final class SystemMailer implements MailerInterface
     private function buildSmtpDsn(): string
     {
         $host       = $this->config->getString('SPORA_MAIL_HOST');
-        $port       = $this->config->getInt('SPORA_MAIL_PORT');
+        $port       = (int) $this->config->getInt('SPORA_MAIL_PORT', 587);
         $user       = $this->config->getString('SPORA_MAIL_USERNAME');
         $pass       = $this->config->getString('SPORA_MAIL_PASSWORD');
-        $encryption = strtolower((string) $this->config->getString('SPORA_MAIL_ENCRYPTION'));
+        $encryption = strtolower((string) $this->config->getString('SPORA_MAIL_ENCRYPTION', 'tls'));
 
         // Unreachable for a Config built by ConfigFactory, which defaults
         // SPORA_MAIL_HOST to 'localhost'. Kept because rawurlencode(null) is
