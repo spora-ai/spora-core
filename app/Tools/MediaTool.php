@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -18,7 +19,6 @@ use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Built-in tool for reading and producing media library content.
@@ -264,8 +264,6 @@ final class MediaTool extends AbstractTool
      */
     private const GET_SOURCE_DERIVATIVE_PREVIEW_BYTES = 64 * 1024;
 
-    private readonly array $config;
-
     public function __construct(
         private readonly MediaArchiveService $archive,
         private readonly AuthService $auth,
@@ -274,11 +272,9 @@ final class MediaTool extends AbstractTool
         private readonly MediaSourceReader $sourceReader,
         private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly MediaCreateHandler $createHandler,
+        private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
-        Request|array $request = [],
-    ) {
-        $this->config = is_array($request) ? $request : [];
-    }
+    ) {}
 
     public function execute(
         array $arguments,
@@ -809,14 +805,14 @@ final class MediaTool extends AbstractTool
      * side-effect on the asset (token mint + save) — both `get_public_url`
      * and `get_media` need the URL, so the side-effect lives here.
      *
-     * Reading the host from `config.app_url` (not the per-request host)
+     * Reading the host from `SPORA_APP_URL` (not the per-request host)
      * keeps share URLs stable across requests and immune to Host-header
      * spoofing. Mirrors {@see MediaAssetSerializer::buildPublicUrl()} so
      * the tool payload matches what the REST endpoint returns.
      */
     private function ensurePublicUrl(MediaAsset $asset): ?string
     {
-        $host = (string) ($this->config['app_url'] ?? '');
+        $host = (string) $this->config->getString('SPORA_APP_URL', '');
         if ($host === '') {
             return null;
         }

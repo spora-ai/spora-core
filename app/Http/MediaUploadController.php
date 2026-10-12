@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -43,8 +44,8 @@ final class MediaUploadController
         private readonly AuthService $auth,
         private readonly PrincipalResolver $principalResolver,
         private readonly MimeSniffer $sniffer,
+        private readonly Config $config,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
-        private readonly array $config = [],
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -101,7 +102,7 @@ final class MediaUploadController
         }
 
         return new JsonResponse(
-            ['data' => $this->serializer->serialize($asset, (string) ($this->config['app_url'] ?? ''))],
+            ['data' => $this->serializer->serialize($asset, $this->config->getString('SPORA_APP_URL'))],
             Response::HTTP_CREATED,
         );
     }
