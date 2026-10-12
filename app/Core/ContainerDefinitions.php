@@ -146,6 +146,8 @@ use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
 use Spora\Services\PrincipalResolver;
+use Spora\Settings\SettingsRegistry;
+use Spora\Settings\SettingsRepository;
 use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
 use Spora\Services\PromptTemplateServiceInterface;
@@ -223,215 +225,20 @@ final class ContainerDefinitions
     private static function configDefinition(): array
     {
         return [
-            'config' => static function (ContainerInterface $c): array {
-                $paths = $c->get(Paths::class);
-                $defaults = [
-                    'db_driver'           => 'sqlite',
-                    'db_path'             => $paths->storage('database.sqlite'),
-                    'db_host'             => null,
-                    'db_port'             => null,
-                    'db_name'             => null,
-                    'db_user'             => null,
-                    'db_password'         => null,
-                    'key_path'            => null,
-                    'allow_registration'  => true,
-                    // Whether non-admin users can hit `POST /api/v1/groups`.
-                    // When `true` (default), every authenticated caller can
-                    // create groups — PATCH/DELETE stay admin-only and the
-                    // per-group owner/admin role check still governs them.
-                    // Set `SPORA_ALLOW_GROUP_CREATION=false` to restore the
-                    // admin-only create model.
-                    'allow_group_creation' => true,
-                    'app_env'             => 'production',
-                    'log_level'           => 'WARNING',
-                    'log_path'            => $paths->storage('spora.log'),
-                    // Worker runtime mode. Default 'server' — `bin/spora worker:run`
-                    // drains the QUEUED backlog. Set `SPORA_WORKER_RUNTIME_MODE=client`
-                    // for browser SharedWorker + `/worker/housekeeping` operators
-                    // (no daemon required). Unknown values fall back to 'server'.
-                    'worker_runtime_mode' => 'server',
-                    // Seconds the reaper should wait past the last heartbeat
-                    // before flipping a RUNNING row to FAILED. Configurable via
-                    // `SPORA_TICK_LEASE_SECONDS`.
-                    'tick_lease_seconds'  => 600,
-                    'worker_stale_minutes' => 60,
-                    'max_workers'         => 0,
-                    'llm_timeout'         => 300,
-                    'tool_http_timeout'   => 30,
-                    'mercure_url'         => null,
-                    'mercure_jwt_key'     => null,
-                    'app_url'             => RequestOrigin::detect(),
-                    'app_prefix'          => RequestOrigin::detectWithPrefix()[1],
+            SettingsRegistry::class => static fn(ContainerInterface $c): SettingsRegistry
+                => new SettingsRegistry($c->get(Paths::class)),
 
-                    'plugin_install_enabled' => false,
+            SettingsRepository::class => static fn(ContainerInterface $c): SettingsRepository
+                => new SettingsRepository(
+                    $c->get(SecurityManagerInterface::class),
+                    $c->get(SettingsRegistry::class),
+                ),
 
-                    // Path/name of the composer executable PluginManager shells out to.
-                    // 'composer' relies on the host's $PATH (typical for dev/CI). Shared-host
-                    // operators can ship `bin/composer.phar` and override this with an absolute
-                    // path; when the value ends in `.phar` PluginManager prepends PHP_BINARY.
-                    'composer_binary'     => 'composer',
-
-                    // Binary asset storage. Plugins produce images/audio/video via
-                    // AssetStore::store() — the mode setting decides whether the
-                    // payload ships inline (data: URL) or written to disk and
-                    // served via GET /api/v1/assets/{token}. 'auto' picks per-call
-                    // based on auto_threshold_bytes.
-                    //   - mode:                 'auto' | 'data_url' | 'local'
-                    //   - auto_threshold_bytes: payloads ≤ this become data URLs
-                    //   - max_bytes:            hard ceiling per asset. Defaults
-                    //                          to `DatabaseAssetStore::MAX_BYTES`
-                    //                          so `data_url` payloads never exceed
-                    //                          the MEDIUMBLOB ceiling on
-                    //                          `media_assets.payload` (migration
-                    //                          0064). Raise via
-                    //                          `SPORA_ASSET_STORE_MAX_BYTES` on
-                    //                          `local`-mode deployments.
-                    'asset_store' => [
-                        'mode'                 => 'auto',
-                        'auto_threshold_bytes' => 1 * 1024 * 1024,
-                        'max_bytes'            => DatabaseAssetStore::MAX_BYTES,
-                    ],
-
-                    // Plugin catalog (Packagist browse) — enabled by default. The
-                    // endpoint is registered even when off so the navbar item
-                    // can decide to hide itself on a 404 instead of polling
-                    // a separate config endpoint. Set to false to take the
-                    // operator offline from external HTTP traffic.
-                    'plugin_catalog_enabled' => true,
-
-                    // Cache TTL (seconds) for the on-disk plugin-catalog cache.
-                    // One file, one entry per query (keyed by a SHA-256 fingerprint
-                    // of the query string); multiple queries share the storage path.
-                    // 1 hour by default — Packagist search is not real-time.
-                    'plugin_catalog_ttl' => PluginCatalogService::DEFAULT_TTL_SECONDS,
-
-                    // Media Archive: optional ingest surface for plugins that
-                    // produce binary media. When `promote_external = true`
-                    // (default), URL inputs are fetched and stored locally via
-                    // AssetStore so the operator's UI shows durable copies.
-                    //   - promote_external:    when false, URL inputs are stored
-                    //                          as `storage_mode = external` without
-                    //                          fetching the body
-                    //   - fetch_timeout_seconds: ceiling for the HEAD + GET path
-                    //   - max_promote_bytes:    CDN responses larger than this are
-                    //                           recorded as `external` (avoid filling
-                    //                           disk with multi-GB videos)
-                    //   - ffprobe_enabled:      when true (and ffprobe is on PATH),
-                    //                           audio/video duration is extracted
-                    'media_archive' => [
-                        'promote_external'      => true,
-                        'fetch_timeout_seconds' => 30,
-                        'max_promote_bytes'     => 100 * 1024 * 1024,
-                        'ffprobe_enabled'       => false,
-
-                        // Image MIME types the upload UI offers as image-only
-                        // attachments (PNG/JPEG/WebP). Operators can extend this
-                        // via config.php (`'media_archive' => ['allowed_image_types' => [...]]`)
-                        // or via `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env var
-                        // (comma-separated). An empty list explicitly disables
-                        // image uploads; missing key falls back to this default.
-                        // GIF is opt-in (GPT-4o accepts non-animated GIF); SVG is
-                        // excluded pending a sanitization pass.
-                        'allowed_image_types'   => ['png', 'jpeg', 'webp'],
-                    ],
-                ];
-
-                $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $paths->config());
-                $fileConfig = UserConfig::load($configPath);
-
-                $envOverrides = self::collectEnvOverrides();
-                // Deep merge for associative maps so env-overridden nested keys
-                // (e.g. `media_archive.fetch_timeout_seconds`) reach consumers
-                // that read `$config['media_archive']['fetch_timeout_seconds']`.
-                // List arrays are replaced atomically — overriding
-                // `['png','jpeg','webp']` with `['gif']` yields `['gif']`, not
-                // a merged list.
-                return ConfigMerger::merge($defaults, $fileConfig, $envOverrides);
-            },
+            Config::class => static fn(ContainerInterface $c): Config => (new ConfigFactory(
+                $c->get(SettingsRegistry::class),
+                $c->get(Paths::class),
+            ))->create(),
         ];
-    }
-
-    private static function collectEnvOverrides(): array
-    {
-        $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
-
-        $overrides = [];
-        // `set` writes the value at the dot-path inside `$overrides`. A
-        // key like `media_archive.allowed_image_types` lands at
-        // `['media_archive' => ['allowed_image_types' => …]]` so the deep
-        // merge in `mergeConfig()` keeps it next to its siblings. Each
-        // call returns true if the value was actually set.
-        $set = static function (string $dotPath, mixed $value) use (&$overrides): bool {
-            if ($value === null) {
-                return false;
-            }
-            $segments = explode('.', $dotPath);
-            $cursor = & $overrides;
-            foreach (array_slice($segments, 0, -1) as $segment) {
-                if (!isset($cursor[$segment]) || !is_array($cursor[$segment])) {
-                    $cursor[$segment] = [];
-                }
-                $cursor = & $cursor[$segment];
-            }
-            $cursor[end($segments)] = $value;
-            return true;
-        };
-        $apply = static function (string $envVar, string $key, callable $cast) use ($env, $set): void {
-            $value = $env($envVar);
-            $set($key, $value === null ? null : $cast($value));
-        };
-
-        $apply('SPORA_DB_DRIVER', 'db_driver', static fn($v) => $v);
-        $apply('SPORA_DB_HOST', 'db_host', static fn($v) => $v);
-        $apply('SPORA_DB_PORT', 'db_port', static fn($v) => (int) $v);
-        $apply('SPORA_DB_NAME', 'db_name', static fn($v) => $v);
-        $apply('SPORA_DB_USER', 'db_user', static fn($v) => $v);
-        $apply('SPORA_DB_PASSWORD', 'db_password', static fn($v) => $v);
-        $apply('SPORA_SQLITE_BUSY_TIMEOUT', 'sqlite_busy_timeout', static fn($v) => (int) $v);
-        $apply('SPORA_APP_ENV', 'app_env', static fn($v) => $v);
-        $apply('SPORA_ALLOW_REGISTRATION', 'allow_registration', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_ALLOW_GROUP_CREATION', 'allow_group_creation', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_LOG_LEVEL', 'log_level', static fn($v) => $v);
-        $apply('SPORA_LOG_PATH', 'log_path', static fn($v) => $v);
-        $apply('SPORA_WORKER_RUNTIME_MODE', 'worker_runtime_mode', static fn($v) => $v);
-        $apply('SPORA_TICK_LEASE_SECONDS', 'tick_lease_seconds', static fn($v) => (int) $v);
-        $apply('SPORA_TOOLS_GROUP_CASCADE_ENABLED', 'tools_group_cascade_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_WORKER_STALE_MINUTES', 'worker_stale_minutes', static fn($v) => (int) $v);
-        $apply('SPORA_MAX_WORKERS', 'max_workers', static fn($v) => (int) $v);
-        $apply('SPORA_LLM_TIMEOUT', 'llm_timeout', static fn($v) => (int) $v);
-        $apply('SPORA_TOOL_HTTP_TIMEOUT', 'tool_http_timeout', static fn($v) => (int) $v);
-        $apply('SPORA_MERCURE_URL', 'mercure_url', static fn($v) => $v);
-        $apply('SPORA_MERCURE_JWT_KEY', 'mercure_jwt_key', static fn($v) => $v);
-        $apply('SPORA_MERCURE_PUBLISH_URL', 'mercure_publish_url', static fn($v) => $v);
-        $apply('SPORA_APP_URL', 'app_url', static fn($v) => (string) $v);
-        $apply('SPORA_APP_PREFIX', 'app_prefix', static fn($v) => RequestOrigin::normalizePrefix((string) $v));
-        $apply('SPORA_APP_NAME', 'app_name', static fn($v) => (string) $v);
-        $apply('SPORA_COMPOSER_BINARY', 'composer_binary', static fn($v) => $v);
-        $apply('SPORA_PLUGIN_INSTALL_ENABLED', 'plugin_install_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_ASSET_STORE_MODE', 'asset_store.mode', static fn($v) => $v);
-        $apply('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES', 'asset_store.auto_threshold_bytes', static fn($v) => (int) $v);
-        $apply('SPORA_ASSET_STORE_MAX_BYTES', 'asset_store.max_bytes', static fn($v) => (int) $v);
-        $apply('SPORA_PLUGIN_CATALOG_ENABLED', 'plugin_catalog_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_PLUGIN_CATALOG_TTL', 'plugin_catalog_ttl', static fn($v) => (int) $v);
-        $apply('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL', 'media_archive.promote_external', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $apply('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT', 'media_archive.fetch_timeout_seconds', static fn($v) => (int) $v);
-        $apply('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES', 'media_archive.max_promote_bytes', static fn($v) => (int) $v);
-        $apply('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED', 'media_archive.ffprobe_enabled', static fn($v) => filter_var($v, FILTER_VALIDATE_BOOLEAN));
-        $set(
-            'media_archive.allowed_image_types',
-            ConfigMerger::parseImageTypesCsv($env('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES')),
-        );
-
-        $notifEmail = $env('SPORA_NOTIFICATIONS_EMAIL_ENABLED');
-        if ($notifEmail !== null) {
-            $set('notifications.email_enabled', filter_var($notifEmail, FILTER_VALIDATE_BOOLEAN));
-        } else {
-            // Default-on: set explicitly so the API can introspect the
-            // resolved value rather than relying on `?? true` in consumers.
-            $set('notifications.email_enabled', true);
-        }
-
-        return $overrides;
     }
 
     /**
