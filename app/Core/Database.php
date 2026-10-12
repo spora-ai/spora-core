@@ -24,7 +24,7 @@ final class Database
     private static bool $schemaInstallSkipped = false;
 
     public function __construct(
-        private readonly array $config,
+        private readonly Config $config,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?Paths $paths = null,
         private readonly ?AppLoader $appLoader = null,
@@ -38,25 +38,29 @@ final class Database
 
         $capsule = new Capsule();
 
-        $driver = $this->config['db_driver'] ?? 'sqlite';
+        // SPORA_DB_HOST, SPORA_DB_PORT, SPORA_DB_NAME, SPORA_DB_USER,
+        // SPORA_DB_PASSWORD and SPORA_SQLITE_BUSY_TIMEOUT carry no registry
+        // default, so the fallbacks below stay — the registry is the single
+        // declaration of these only once it declares them.
+        $driver = $this->config->getString('SPORA_DB_DRIVER');
 
         // Pass `mariadb` through as the driver's literal name so Illuminate's MariaDB grammar is used and `Connection::getDriverName()` matches the `=== 'mariadb'` gates in migrations.
         if ($driver === 'mysql' || $driver === 'mariadb') {
             $capsule->addConnection([
                 'driver'    => $driver,
-                'host'      => $this->config['db_host'] ?? '127.0.0.1',
-                'port'      => $this->config['db_port'] ?? 3306,
-                'database'  => $this->config['db_name'] ?? '',
-                'username'  => $this->config['db_user'] ?? '',
-                'password'  => $this->config['db_password'] ?? '',
+                'host'      => $this->config->getString('SPORA_DB_HOST') ?? '127.0.0.1',
+                'port'      => $this->config->getInt('SPORA_DB_PORT') ?? 3306,
+                'database'  => $this->config->getString('SPORA_DB_NAME') ?? '',
+                'username'  => $this->config->getString('SPORA_DB_USER') ?? '',
+                'password'  => $this->config->getString('SPORA_DB_PASSWORD') ?? '',
                 'charset'   => 'utf8mb4',
                 'collation' => 'utf8mb4_unicode_ci',
                 'prefix'    => '',
             ]);
         } else {
-            $dbPath = $this->config['db_path'] ?? (__DIR__ . '/../../storage/database.sqlite');
+            $dbPath = $this->sqlitePath();
 
-            $dir = dirname((string) $dbPath);
+            $dir = dirname($dbPath);
             if (!is_dir($dir)) {
                 mkdir($dir, 0755, true);
             }
@@ -69,7 +73,7 @@ final class Database
                 'database' => $dbPath,
                 'prefix'   => '',
                 'foreign_key_constraints' => true,
-                'busy_timeout' => (int) ($this->config['sqlite_busy_timeout'] ?? 5000),
+                'busy_timeout' => $this->config->getInt('SPORA_SQLITE_BUSY_TIMEOUT', 5000),
                 'journal_mode' => 'wal',
                 'synchronous'  => 'NORMAL',
                 'pragmas' => [
@@ -96,8 +100,7 @@ final class Database
         }
 
         // Stamp file is skipped for `:memory:` SQLite (no persistent fs); otherwise it's the O(1) hot-path cache.
-        $dbPath    = $this->config['db_path'] ?? null;
-        $stampPath = ($dbPath === ':memory:')
+        $stampPath = $this->usesInMemorySqlite()
             ? null
             : ($this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp');
 
@@ -120,13 +123,10 @@ final class Database
     }
 
     /**
-     * Read-only access to the resolved config array (defaults merged with
-     * config.php and SPORA_* env vars). Useful for callers that need driver /
-     * host / db_name / etc. without going through Eloquent.
-     *
-     * @return array<string, mixed>
+     * Read-only access to the resolved configuration, for callers that need
+     * driver / host / db name / etc. without going through Eloquent.
      */
-    public function getConfig(): array
+    public function getConfig(): Config
     {
         return $this->config;
     }
@@ -137,11 +137,27 @@ final class Database
      */
     public function getStampPath(): ?string
     {
-        $dbPath = $this->config['db_path'] ?? null;
-        if ($dbPath === ':memory:') {
+        if ($this->usesInMemorySqlite()) {
             return null;
         }
         return $this->paths?->storage('.schema_stamp') ?? BASE_PATH . '/storage/.schema_stamp';
+    }
+
+    /**
+     * The registry defaults `SPORA_DB_PATH` to `Paths::storage()`, but a
+     * hand-built `Config` — the tests construct one directly — need not carry
+     * it, and the connection cannot be opened without a real path.
+     */
+    private function sqlitePath(): string
+    {
+        return $this->config->getString('SPORA_DB_PATH')
+            ?? $this->paths?->storage('database.sqlite')
+            ?? __DIR__ . '/../../storage/database.sqlite';
+    }
+
+    private function usesInMemorySqlite(): bool
+    {
+        return $this->config->getString('SPORA_DB_PATH') === ':memory:';
     }
 
     /** Reset the static boot flag (for testing only). */
@@ -149,7 +165,7 @@ final class Database
     {
         self::$booted  = false;
         self::$capsule = null;
-        // A test that bypasses the factory and inlines `new Database([sqlite :memory:])->boot()` would otherwise inherit the worker's "already installed" skip and fail every insert with "no such table".
+        // A test that bypasses the factory and inlines a `:memory:` Database would otherwise inherit the worker's "already installed" skip and fail every insert with "no such table".
         self::$schemaInstallSkipped = false;
     }
 }

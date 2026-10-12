@@ -281,7 +281,7 @@ final class ContainerDefinitions
 
             Database::class => static function (ContainerInterface $c): Database {
                 $db = new Database(
-                    $c->get('config'),
+                    $c->get(Config::class),
                     $c->get(PluginLoader::class),
                     $c->get(Paths::class),
                     $c->has(AppLoader::class) ? $c->get(AppLoader::class) : null,
@@ -291,13 +291,13 @@ final class ContainerDefinitions
             },
 
             LoggerInterface::class => static function (ContainerInterface $c): LoggerInterface {
-                $config = $c->get('config');
-                $levelStr = ucfirst(strtolower($config['log_level'] ?? 'warning'));
+                $config = $c->get(Config::class);
+                $levelStr = ucfirst(strtolower((string) $config->getString('SPORA_LOG_LEVEL')));
                 $level = constant(Level::class . '::' . $levelStr);
 
                 $logger = new MonologLogger('spora');
 
-                $logPath = $config['log_path'] ?? $c->get(Paths::class)->storage('spora.log');
+                $logPath = $config->getString('SPORA_LOG_PATH') ?? $c->get(Paths::class)->storage('spora.log');
                 $stream = ($logPath === 'stdout') ? 'php://stdout' : $logPath;
                 $handler = new StreamHandler($stream, $level);
 
@@ -309,18 +309,18 @@ final class ContainerDefinitions
             DelightAuth::class => static function (ContainerInterface $c): DelightAuth {
                 $pdo = Capsule::connection()->getPdo();
 
-                $config      = $c->get('config');
-                $throttling  = ($config['app_env'] ?? 'production') !== 'testing';
+                $config      = $c->get(Config::class);
+                $throttling  = $config->getString('SPORA_APP_ENV') !== 'testing';
 
                 return new DelightAuth($pdo, null, null, $throttling);
             },
 
             AuthService::class => static function (ContainerInterface $c): AuthService {
-                $config = $c->get('config');
+                $config = $c->get(Config::class);
                 $authService = new AuthService(
                     $c->get(DelightAuth::class),
-                    (string) ($config['app_url'] ?? ''),
-                    (string) ($config['app_prefix'] ?? ''),
+                    $config->getString('SPORA_APP_URL') ?? '',
+                    $config->getString('SPORA_APP_PREFIX') ?? '/spora',
                 );
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 return $authService;
@@ -370,13 +370,13 @@ final class ContainerDefinitions
                 return new DriverFactory(
                     $c->get(LoggerInterface::class),
                     $c->get(LLMConfigServiceInterface::class),
-                    (int) ($c->get('config')['llm_timeout'] ?? 300),
+                    $c->get(Config::class)->getInt('SPORA_LLM_TIMEOUT') ?? 300,
                     $c->get(LLMConfigPreferences::class),
                 );
             },
 
             ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
-                $config = $c->get('config');
+                $config = $c->get(Config::class);
                 return new ToolConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
@@ -386,7 +386,7 @@ final class ContainerDefinitions
                     // empty skills map, matching a bare `new` call site.
                     $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
                     $c->get(PrincipalService::class),
-                    (bool) ($config['tools_group_cascade_enabled'] ?? false),
+                    $config->getBool('SPORA_TOOLS_GROUP_CASCADE_ENABLED'),
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -430,37 +430,36 @@ final class ContainerDefinitions
     {
         return [
             // MediaArchive service stack — see app/Services/MediaArchive.
-            // Config block lives under the `media_archive` key above.
+            // Keys are the `SPORA_MEDIA_ARCHIVE_*` registry entries.
             MimeSniffer::class => static fn(ContainerInterface $c): MimeSniffer => new MimeSniffer(
                 $c->get(LoggerInterface::class),
             ),
 
             RemoteMediaFetcher::class => static function (ContainerInterface $c): RemoteMediaFetcher {
-                $cfg = $c->get('config')['media_archive'] ?? [];
+                $config = $c->get(Config::class);
                 return new RemoteMediaFetcher(
                     $c->get(HttpClientInterface::class),
                     $c->get(LoggerInterface::class),
-                    (int) ($cfg['fetch_timeout_seconds'] ?? 30),
-                    (int) ($cfg['max_promote_bytes'] ?? (100 * 1024 * 1024)),
+                    $config->getInt('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT') ?? 30,
+                    $config->getInt('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES') ?? (100 * 1024 * 1024),
                 );
             },
 
             MetadataExtractor::class => static function (ContainerInterface $c): MetadataExtractor {
-                $cfg = $c->get('config')['media_archive'] ?? [];
                 return new MetadataExtractor(
                     $c->get(LoggerInterface::class),
-                    (bool) ($cfg['ffprobe_enabled'] ?? false),
+                    $c->get(Config::class)->getBool('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED'),
                 );
             },
 
             MediaArchiveUrlResolver::class => static function (ContainerInterface $c): MediaArchiveUrlResolver {
-                $cfg = $c->get('config')['media_archive'] ?? [];
+                $config = $c->get(Config::class);
                 return new MediaArchiveUrlResolver(
                     $c->get(RemoteMediaFetcher::class),
                     $c->get(MimeSniffer::class),
                     $c->get(LoggerInterface::class),
-                    (bool) ($cfg['promote_external'] ?? true),
-                    (int) ($cfg['max_promote_bytes'] ?? (100 * 1024 * 1024)),
+                    $config->getBool('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'),
+                    $config->getInt('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES') ?? (100 * 1024 * 1024),
                 );
             },
 
@@ -517,12 +516,19 @@ final class ContainerDefinitions
                 => new PdfMarkdownExtractor(
                     $c->get(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class),
                 ),
-            MediaAllowedTypesService::class => static fn(ContainerInterface $c): MediaAllowedTypesService
-                => new MediaAllowedTypesService(
+            MediaAllowedTypesService::class => static function (ContainerInterface $c): MediaAllowedTypesService {
+                // A TYPE_LIST setting: the registry coerces every layer to
+                // `array<string>`, which `Config::get()` — `mixed` by
+                // necessity — cannot express.
+                /** @var list<string>|null $allowedImageTypes */
+                $allowedImageTypes = $c->get(Config::class)->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+                return new MediaAllowedTypesService(
                     $c->get(MediaDerivativeService::class),
                     $c->get(DriverFactory::class),
-                    $c->get('config')['media_archive']['allowed_image_types'] ?? null,
-                ),
+                    $allowedImageTypes,
+                );
+            },
         ];
     }
 
@@ -535,29 +541,29 @@ final class ContainerDefinitions
     {
         return [
             DataUrlAssetStore::class => static function (ContainerInterface $c): DataUrlAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
-                return new DataUrlAssetStore($max);
+                return new DataUrlAssetStore(
+                    $c->get(Config::class)->getInt('SPORA_ASSET_STORE_MAX_BYTES') ?? DatabaseAssetStore::MAX_BYTES,
+                );
             },
 
             LocalAssetStore::class => static function (ContainerInterface $c): LocalAssetStore {
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? 50 * 1024 * 1024);
                 return new LocalAssetStore(
                     $c->get(Paths::class),
                     $c->get(SecurityManagerInterface::class),
-                    $max,
+                    $c->get(Config::class)->getInt('SPORA_ASSET_STORE_MAX_BYTES') ?? DatabaseAssetStore::MAX_BYTES,
                 );
             },
 
             AssetStore::class => static function (ContainerInterface $c): AssetStore {
-                $cfg  = $c->get('config')['asset_store'] ?? [];
-                $mode = is_string($cfg['mode'] ?? null) ? $cfg['mode'] : 'auto';
+                $config = $c->get(Config::class);
+                $mode = $config->getString('SPORA_ASSET_STORE_MODE') ?? 'auto';
                 return match ($mode) {
                     'local'    => $c->get(LocalAssetStore::class),
                     'data_url' => $c->get(DatabaseAssetStore::class),
                     'auto'     => new AutoAssetStore(
                         $c->get(DatabaseAssetStore::class),
                         $c->get(LocalAssetStore::class),
-                        (int) ($cfg['auto_threshold_bytes'] ?? 1_048_576),
+                        $config->getInt('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES') ?? 1_048_576,
                     ),
                     default    => throw new InvalidArgumentException(
                         "Unknown asset_store.mode: {$mode}",
@@ -568,7 +574,7 @@ final class ContainerDefinitions
             DatabaseAssetStore::class => static function (ContainerInterface $c): DatabaseAssetStore {
                 // Default tracks the MEDIUMBLOB ceiling (migration 0064) so
                 // data_url-mode assets never exceed the column capacity.
-                $max = (int) ($c->get('config')['asset_store']['max_bytes'] ?? DatabaseAssetStore::MAX_BYTES);
+                $max = $c->get(Config::class)->getInt('SPORA_ASSET_STORE_MAX_BYTES') ?? DatabaseAssetStore::MAX_BYTES;
                 if ($max > DatabaseAssetStore::MAX_BYTES) {
                     throw new InvalidArgumentException(sprintf(
                         'asset_store.max_bytes=%d exceeds the %d-byte MEDIUMBLOB ceiling '
@@ -586,7 +592,7 @@ final class ContainerDefinitions
     // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
     {
-        return (bool) ($c->get('config')['plugin_install_enabled'] ?? false);
+        return $c->get(Config::class)->getBool('SPORA_PLUGIN_INSTALL_ENABLED');
     }
 
     private static function llmDefinitions(): array
@@ -769,7 +775,7 @@ final class ContainerDefinitions
                     $c->get(AuthValidator::class),
                     $c->get(AuthWorkflow::class),
                     $c->get(SystemMailer::class),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
@@ -816,10 +822,12 @@ final class ContainerDefinitions
             },
 
             ConfigController::class => static function (ContainerInterface $c): ConfigController {
+                $config = $c->get(Config::class);
+
                 return new ConfigController(
-                    $c->get('config'),
+                    $config,
                     $c->get(WorkerRuntimeMode::class),
-                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                    $config->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
                 );
             },
 
@@ -878,13 +886,12 @@ final class ContainerDefinitions
                 return new PluginCatalogService(
                     $c->get(HttpClientInterface::class),
                     $c->get(Paths::class),
-                    (int) ($c->get('config')['plugin_catalog_ttl'] ?? PluginCatalogService::DEFAULT_TTL_SECONDS),
+                    $c->get(Config::class)->getInt('SPORA_PLUGIN_CATALOG_TTL') ?? PluginCatalogService::DEFAULT_TTL_SECONDS,
                 );
             },
 
             PluginsController::class => static function (ContainerInterface $c): PluginsController {
-                $config = $c->get('config');
-                $enabled = (bool) ($config['plugin_catalog_enabled'] ?? true);
+                $enabled = $c->get(Config::class)->getBool('SPORA_PLUGIN_CATALOG_ENABLED');
 
                 return new PluginsController(
                     $c->get(PluginsService::class),
@@ -944,7 +951,7 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),
                     new MediaAssetSerializer(),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
         ];
@@ -1039,7 +1046,7 @@ final class ContainerDefinitions
                     $c->get(PrincipalResolver::class),
                     $c->get(MimeSniffer::class),
                     new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
@@ -1092,7 +1099,7 @@ final class ContainerDefinitions
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),
                     new MediaAssetSerializer(),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
@@ -1131,7 +1138,7 @@ final class ContainerDefinitions
                     $c->get(\Spora\Agents\RetryScheduler::class),
                     $c->get(NotificationService::class),
                     $c->get(LoggerInterface::class),
-                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                    $c->get(Config::class)->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -1201,23 +1208,23 @@ final class ContainerDefinitions
                 return new NotificationSubscriptionController(
                     $c->get(AuthService::class),
                     $c->get(\Spora\Services\NotificationSubscriptionService::class),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
             SseController::class => static function (ContainerInterface $c): SseController {
-                $config = $c->get('config');
+                $config = $c->get(Config::class);
                 // mercure_publish_url wins when set (split-URL deployments);
                 // fall through to mercure_url so single-URL setups report active.
-                $hubUrl = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
+                $hubUrl = $config->getString('SPORA_MERCURE_PUBLISH_URL') ?? $config->getString('SPORA_MERCURE_URL');
 
                 return new SseController(
                     $c->get(AuthService::class),
                     $c->get(PrincipalResolver::class),
                     $hubUrl,
-                    $config['mercure_jwt_key'] ?? null,
+                    $config->getString('SPORA_MERCURE_JWT_KEY'),
                     '/.well-known/mercure',
-                    $config['app_url'] ?? null,
+                    $config->getString('SPORA_APP_URL'),
                 );
             },
         ];
@@ -1243,7 +1250,7 @@ final class ContainerDefinitions
                 return new MailConfigController(
                     $c->get(AuthService::class),
                     $c->get(SystemMailer::class),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
@@ -1397,7 +1404,7 @@ final class ContainerDefinitions
                     $c->get(MediaDerivativeHandler::class),
                     $c->get(MediaCreateHandler::class),
                     $c->get(ToolConfigService::class),
-                    $c->get('config'),
+                    $c->get(Config::class),
                 );
             },
 
@@ -1439,16 +1446,13 @@ final class ContainerDefinitions
                     return $process;
                 };
 
-                $config = $c->get('config');
-                $composerBinary = is_string($config['composer_binary'] ?? null) && $config['composer_binary'] !== ''
-                    ? $config['composer_binary']
-                    : 'composer';
+                $composerBinary = $c->get(Config::class)->getString('SPORA_COMPOSER_BINARY');
 
                 return new PluginManager(
                     $c->get(LoggerInterface::class),
                     $processFactory,
                     $c->get(Paths::class),
-                    $composerBinary,
+                    ($composerBinary === null || $composerBinary === '') ? 'composer' : $composerBinary,
                 );
             },
 
@@ -1458,8 +1462,8 @@ final class ContainerDefinitions
             // values fall back to Server — operators can fix the env later
             // without bringing the app down.
             WorkerRuntimeMode::class => static function (ContainerInterface $c): WorkerRuntimeMode {
-                $raw = $c->get('config')['worker_runtime_mode'] ?? 'server';
-                return WorkerRuntimeMode::tryFrom((string) $raw) ?? WorkerRuntimeMode::Server;
+                $raw = $c->get(Config::class)->getString('SPORA_WORKER_RUNTIME_MODE') ?? 'server';
+                return WorkerRuntimeMode::tryFrom($raw) ?? WorkerRuntimeMode::Server;
             },
         ];
     }

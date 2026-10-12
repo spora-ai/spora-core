@@ -147,6 +147,8 @@ final class OrchestratorContainerBindings
             },
 
             WorkerController::class => static function (ContainerInterface $c): WorkerController {
+                $config = $c->get(Config::class);
+
                 return new WorkerController(
                     $c->get(AuthService::class),
                     $c->get(WorkerRuntimeMode::class),
@@ -154,8 +156,10 @@ final class OrchestratorContainerBindings
                     $c->get(HousekeepingLock::class),
                     $c->get(WorkerReaper::class),
                     $c->get(ScheduledRunProcessor::class),
-                    (int) ($c->get('config')['worker_stale_minutes'] ?? 60),
-                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                    // The registry declares both defaults; the coalesce only
+                    // fires for a hand-built `Config` that omits them.
+                    $config->getInt('SPORA_WORKER_STALE_MINUTES') ?? 60,
+                    $config->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
                 );
             },
         ];
@@ -165,17 +169,16 @@ final class OrchestratorContainerBindings
     {
         return [
             MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
-                $config   = $c->get('config');
-                $hubUrl   = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
-                $jwtKey   = $config['mercure_jwt_key'] ?? null;
-                $client   = $c->get(HttpClientInterface::class);
+                $config = $c->get(Config::class);
+                $hubUrl = $config->getString('SPORA_MERCURE_PUBLISH_URL') ?? $config->getString('SPORA_MERCURE_URL');
+                $jwtKey = $config->getString('SPORA_MERCURE_JWT_KEY');
 
                 return new MercurePublisher(
-                    $client,
+                    $c->get(HttpClientInterface::class),
                     $hubUrl,
                     $jwtKey,
                     $c->get(LoggerInterface::class),
-                    (bool) ($config['mercure_legacy_user_topic'] ?? false),
+                    self::mercureLegacyUserTopicEnabled(),
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -185,7 +188,7 @@ final class OrchestratorContainerBindings
                     $c->get(MercurePublisherInterface::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(SystemMailer::class),
-                    $c->get('config'),
+                    $c->get(Config::class),
                     $c->get(NotificationSubscriptionService::class),
                 );
             },
@@ -200,7 +203,7 @@ final class OrchestratorContainerBindings
 
             SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
                 return new SystemMailer(
-                    $c->get('config'),
+                    $c->get(Config::class),
                     $c->get(LoggerInterface::class),
                     $c->get(MailTemplateRenderer::class),
                 );
@@ -224,6 +227,25 @@ final class OrchestratorContainerBindings
                 return new MailTemplateRenderer($c->get(MarkdownConverter::class));
             },
         ];
+    }
+
+    /**
+     * `SPORA_MERCURE_LEGACY_USER_TOPIC` is read straight from the
+     * environment because it is not a declared setting: it appears in no
+     * {@see \Spora\Settings\SettingsRegistry} entry and in no
+     * {@see ConfigFactory::legacyKeyMap()} path, so `Config` cannot carry it.
+     * Reading it through `Config` would compile to a constant `false` and
+     * silently strand the one release the dual-publish exists for.
+     *
+     * Delete this together with {@see MercurePublisher}'s legacy topic once
+     * the rollout is finished — or, sooner, declare the setting and drop this
+     * method.
+     */
+    private static function mercureLegacyUserTopicEnabled(): bool
+    {
+        $raw = $_ENV['SPORA_MERCURE_LEGACY_USER_TOPIC'] ?? (getenv('SPORA_MERCURE_LEGACY_USER_TOPIC') ?: null);
+
+        return $raw !== null && filter_var($raw, FILTER_VALIDATE_BOOLEAN);
     }
 
     private static function templates(): array

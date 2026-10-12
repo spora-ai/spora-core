@@ -51,9 +51,9 @@ final class SecurityKeyDefinitions
             return $envKeyPath;
         }
 
-        $configKeyPath = ($c->get('config'))['key_path'] ?? null;
+        $configKeyPath = $c->get(Config::class)->getString('SPORA_KEY_PATH');
         if ($configKeyPath !== null) {
-            return (string) $configKeyPath;
+            return $configKeyPath;
         }
 
         // Conventional fallback; SecretKeyInstaller writes here on `spora:install`.
