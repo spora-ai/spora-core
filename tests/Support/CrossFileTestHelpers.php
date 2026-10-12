@@ -317,8 +317,8 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
      */
     function makeMediaToolWithRealArchive(
         ?Spora\Auth\AuthService $auth = null,
-        ?Spora\Services\ToolConfigService $config = null,
-        array $globalConfig = [],
+        ?Spora\Services\ToolConfigService $toolConfigService = null,
+        ?Spora\Core\Config $config = null,
     ): array {
         // Reuse the same builder that MediaArchiveServiceTest uses so we get a
         // fully-wired service (asset store, resolver, converters, decoder).
@@ -344,8 +344,8 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
-            $config,
-            $globalConfig,
+            $config ?? new Spora\Core\Config(),
+            $toolConfigService,
         );
 
         return [
@@ -396,6 +396,7 @@ if (!function_exists('buildMediaToolForSchema')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
+            new Spora\Core\Config(),
         );
     }
 }
