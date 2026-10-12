@@ -223,10 +223,19 @@ final class SettingsRegistry
         $normalized = [];
         foreach ($tokens as $token) {
             $t = ltrim(strtolower(trim($token)), '.');
-            if ($t === '' || $t === 'svg' || $t === 'svg+xml') {
+            if ($t === '') {
                 continue;
             }
-            $normalized[] = $t === 'jpg' ? 'jpeg' : $t;
+            // Matched by suffix rather than by equality. `svg`, `svgz`,
+            // `image/svg+xml` and a leading-dotted `.svg` are all the same
+            // format, and an allowlist that filtered only the exact string
+            // `svg` would filter the one spelling an operator is least likely
+            // to type.
+            $bare = str_contains($t, '/') ? substr($t, (int) strrpos($t, '/') + 1) : $t;
+            if (str_starts_with($bare, 'svg')) {
+                continue;
+            }
+            $normalized[] = $bare === 'jpg' ? 'jpeg' : $bare;
         }
 
         return array_values(array_unique($normalized));

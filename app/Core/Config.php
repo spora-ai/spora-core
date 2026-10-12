@@ -48,11 +48,14 @@ final class Config
      * calls `Database::boot()`, so anything that reads config before then
      * necessarily sees only the boot layers.
      *
-     * Called once per request, immediately after the database boots. A setting
+     * Applied once per request, immediately after the database boots. A setting
      * marked `bootOnly` is skipped: it was read before this ran, so a stored
      * value would arrive too late to have any effect and would only mislead.
      *
-     * @throws SettingsDecryptionException Never. See {@see self::get()}.
+     * Decryption failures are absorbed one layer down, in
+     * {@see SettingsRepository::allForGroup()} — that is where the catch is,
+     * and moving it here would make a lost key fatal on every request.
+     * {@see self::get()} is where it resurfaces.
      */
     public function applySettingsOverlay(SettingsRepository $repository, SettingsRegistry $registry): void
     {

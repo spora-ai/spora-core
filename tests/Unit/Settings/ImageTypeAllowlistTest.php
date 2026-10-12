@@ -39,7 +39,19 @@ it('rejects svg from every input form', function (mixed $input): void {
     'stored JSON, svg+xml'     => ['["svg+xml"]'],
     'JSON array body'          => [['png', 'svg', 'jpeg']],
     'JSON array body, upper'   => [['png', '.SVG']],
+    'gzipped svg'              => ['png,svgz'],
+    'full mime type'           => ['image/svg+xml,png'],
+    'json mime type'           => ['["image/png","image/svg+xml"]'],
 ]);
+
+it('rejects svg from the write path, not only the read path', function (): void {
+    // `encode()` only formats, so a caller that skipped the registry could
+    // persist anything. This is the shape the admin endpoint will arrive in.
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
+    $definition = $registry->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+    expect($registry->coerce($definition, ['png', 'svg', 'image/svg+xml']))->toBe(['png']);
+});
 
 it('survives the encode/decode round trip', function (): void {
     $registry = new SettingsRegistry(new Paths(BASE_PATH));

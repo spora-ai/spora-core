@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Settings;
 
+use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\QueryException;
 use Spora\Core\SecurityManagerInterface;
@@ -75,14 +76,18 @@ final class SettingsRepository
             return;
         }
 
-        $encoded = $this->registry->encode($definition, $value);
+        // Coerce before storing. `encode()` only formats, so without this a
+        // caller could persist a value the registry would have rejected — an
+        // `svg` in the image allowlist being the one that matters. A stored
+        // value has to be the same value a read would produce.
+        $encoded = $this->registry->encode($definition, $this->registry->coerce($definition, $value));
         $isSecret = $definition->secret;
 
         $payload = [
             'value'      => $isSecret ? $this->security->encrypt($encoded)->toStorageString() : $encoded,
             'encrypted'  => $isSecret,
             'updated_by' => $userId,
-            'updated_at' => now(),
+            'updated_at' => Carbon::now(),
         ];
 
         Capsule::table('settings')->updateOrInsert(

@@ -51,12 +51,12 @@ final class ConfigFactory
     {
         $out = [];
         foreach (array_keys($this->registry->all()) as $key) {
-            // `?: null` rather than `?? null` matches what the rest of the
-            // codebase does, and therefore matches existing behaviour: an env
-            // var set to the empty string reads as unset. That is what makes
-            // `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=` fall back to the
-            // default rather than disabling image uploads, which is the one
-            // part of that key's contract worth keeping.
+            // `?? null` rather than a truthiness check, because phpdotenv's default
+            // adapter writes into `$_ENV` and `??` finds it there. An env var
+            // set to the empty string therefore arrives as `''`, not as null
+            // — which is how `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=`
+            // disables image uploads outright. That is the documented meaning
+            // of an empty value, not an accident.
             $raw = $_ENV[$key] ?? (getenv($key) ?: null);
             if ($raw !== null) {
                 $out[$key] = $raw;
