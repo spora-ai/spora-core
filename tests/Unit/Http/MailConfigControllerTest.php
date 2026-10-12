@@ -74,7 +74,11 @@ test('index() reports the registry defaults when nothing is configured', functio
     $response = $controller->index();
 
     $body = json_decode($response->getContent(), true);
-    expect($body['data']['mail_config']['driver'])->toBe('smtp');
+    // `sendmail`, not `smtp`. The endpoint's old literals were `php_mail` and
+    // port 465; `php_mail` and `sendmail` are the same DSN, so the registry
+    // default is the one that keeps an unconfigured install behaving exactly
+    // as it did. See MailDriverTest.
+    expect($body['data']['mail_config']['driver'])->toBe('sendmail');
     expect($body['data']['mail_config']['host'])->toBe('localhost');
     expect($body['data']['mail_config']['port'])->toBe(587);
     expect($body['data']['mail_config']['encryption'])->toBe('tls');
