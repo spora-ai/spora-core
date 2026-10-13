@@ -319,7 +319,35 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function maskForApi(array $settings, string $toolClass): array
     {
-        return $this->schema->maskForApi($settings, $toolClass);
+        return $this->schema->maskForApi($settings, $toolClass, $this->maskablePasswordKeys($toolClass));
+    }
+
+    /**
+     * Every key whose value must be masked before it leaves the process, for
+     * `$toolClass` or for the shared group it consumes.
+     *
+     * Exposed rather than folded into {@see self::maskForApi()} because the
+     * agent-override path masks a `{value, source}` pair key by key, and
+     * duplicating the union there is how the two paths drifted apart once
+     * already.
+     *
+     * @return list<string>
+     */
+    public function maskablePasswordKeys(string $toolClass): array
+    {
+        $passwordKeys = $this->schema->getPasswordKeys($toolClass);
+
+        // A value the shared group supplied was encrypted under the *group's*
+        // `#[ToolSetting(type: 'password')]` list, so the tool's own list is
+        // not enough to mask it. A tool that declares the key as `text` —
+        // a mistyping the schema cannot detect — would otherwise publish the
+        // plugin-wide credential on routes that are not admin-gated.
+        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
+        if ($groupClass !== null) {
+            $passwordKeys = array_merge($passwordKeys, $this->schema->getPasswordKeys($groupClass));
+        }
+
+        return array_values(array_unique($passwordKeys));
     }
 
     /**

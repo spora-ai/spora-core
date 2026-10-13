@@ -60,7 +60,6 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             $toolConfig,
             $llmConfig,
             $preferences,
-            $this->instanceResolver,
             $this->principalResolver,
         );
         $this->operationsResolver = new AgentToolOperationsResolver($this->instanceResolver, $this->overrideResolver, $this->principalResolver);

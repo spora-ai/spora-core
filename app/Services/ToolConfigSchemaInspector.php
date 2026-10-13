@@ -120,12 +120,19 @@ final class ToolConfigSchemaInspector
      * Return a copy of settings with password fields replaced by "***".
      * Null/empty password fields are left as-is.
      *
+     * `$passwordKeys` defaults to the class's own declared passwords. A
+     * caller that also holds values encrypted under a *different* class's
+     * schema — a shared settings group, whose values are encrypted against
+     * the group's password list — passes the union, because masking has to
+     * key off the schema that encrypted them.
+     *
      * @param  array<string, mixed> $settings
+     * @param  list<string>|null    $passwordKeys
      * @return array<string, mixed>
      */
-    public function maskForApi(array $settings, string $toolClass): array
+    public function maskForApi(array $settings, string $toolClass, ?array $passwordKeys = null): array
     {
-        $passwordKeys = $this->getPasswordKeys($toolClass);
+        $passwordKeys ??= $this->getPasswordKeys($toolClass);
         $masked       = $settings;
 
         foreach ($passwordKeys as $key) {
