@@ -14,7 +14,7 @@ use Spora\Services\PluginCatalogService;
  *
  * This replaces the `$defaults` array and the 36 `collectEnvOverrides()`
  * `$apply()` calls in `ContainerDefinitions`. Nothing checked that those two
- * agreed with each other or with `.env.example`, which is how drift survived:
+ * agreed with each other, which is how drift survived:
  * a key added to `$defaults` with no `$apply()` line is silently
  * un-overridable by env, and a `$apply()` line with no `$defaults` entry
  * resolves only when the env var happens to be set.

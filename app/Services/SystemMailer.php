@@ -207,12 +207,6 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Send a simple test email to verify mail configuration.
-     *
-     * @param string $to Recipient email address
-     * @return bool True on success
-     */
-    /**
      * The From address for every outbound message.
      *
      * `Address` takes a non-nullable name, and `SPORA_MAIL_FROM_NAME` came
@@ -228,6 +222,12 @@ final class SystemMailer implements MailerInterface
         );
     }
 
+    /**
+     * Send a simple test email to verify mail configuration.
+     *
+     * @param string $to Recipient email address
+     * @return bool True on success
+     */
     public function sendTestEmail(string $to): bool
     {
         $from = $this->buildSender();

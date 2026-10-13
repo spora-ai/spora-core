@@ -9,11 +9,13 @@ use Spora\Core\Config;
 /**
  * The one rule for a tool's outbound HTTP timeout.
  *
- * `SPORA_TOOL_HTTP_TIMEOUT` is operator-editable in Global Settings, so the
- * copies this replaces — which read `$_ENV` and `getenv()` directly — bypassed
- * the value the operator actually set. They also leaned on `?:` to turn a tool
- * setting of `0` into the global one by accident rather than by decision;
- * `0` and negatives are unset here on purpose.
+ * `SPORA_TOOL_HTTP_TIMEOUT` is operator-editable in Global Settings, so
+ * `ReadUrlTool` reading `$_ENV` and `getenv()` directly bypassed the value the
+ * operator actually set — they saved it in the UI and nothing changed.
+ *
+ * A tool setting of `0` or less still falls through to the global, as it
+ * always did: the old code tested `> 0` explicitly. That is unchanged
+ * behaviour, not a new rule.
  */
 final class HttpTimeoutResolver
 {

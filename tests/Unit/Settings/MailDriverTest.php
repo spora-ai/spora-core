@@ -65,3 +65,12 @@ it('offers only the encryption values the mailer accepts', function (): void {
         ->and($offered)->not->toContain('')
         ->and($offered)->toContain($encryption->default);
 });
+
+it('offers only drivers SystemMailer can build a DSN for', function (): void {
+    // The same contract as the encryption set: an option the registry declares
+    // is one the admin dropdown offers and an operator can pick.
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
+    $offered  = array_column($registry->get('SPORA_MAIL_DRIVER')->options, 'value');
+
+    expect($offered)->toContain('smtp', 'sendmail');
+});

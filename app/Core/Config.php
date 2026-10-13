@@ -13,8 +13,10 @@ use Spora\Settings\SettingsRepository;
  * `config.php` and the admin API.
  *
  * Built from three layers at container time — defaults, `config.php`, `.env` —
- * and given a fourth, the database, exactly once, by
- * {@see self::applySettingsOverlay()}. There is no `all()` accessor that reads
+ * and given a fourth, the database, by {@see self::applySettingsOverlay()}.
+ * Re-applying it is idempotent and is how a write made inside a request
+ * becomes visible to the response answering it
+ * ({@see \Spora\Http\MailConfigController::mailConfigResponse()}). There is no `all()` accessor that reads
  * raw env: a value either went through a declared {@see \Spora\Settings\SettingDefinition}
  * or it is not configuration.
  */
@@ -47,9 +49,9 @@ final class Config
      * calls `Database::boot()`, so anything that reads config before then
      * necessarily sees only the boot layers.
      *
-     * Applied once per request, immediately after the database boots. A setting
-     * marked `bootOnly` is skipped: it was read before this ran, so a stored
-     * value would arrive too late to have any effect and would only mislead.
+     * Applied immediately after the database boots. A setting marked
+     * `bootOnly` is skipped: it was read before this ran, so a stored value
+     * would arrive too late to have any effect and would only mislead.
      *
      * Decryption failures are absorbed one layer down, in
      * {@see SettingsRepository::allForGroup()} — that is where the catch is,
@@ -164,9 +166,10 @@ final class Config
      * A stored value we cannot read is reported where it is actually used,
      * not swallowed at boot.
      *
-     * The overlay substitutes the declared default so the application starts —
-     * a site that will not boot cannot show the admin the error explaining
-     * why. But a consumer reaching for a credential it cannot read must fail
+     * The overlay skips an unreadable row, so the boot-layer value stands —
+     * the registry default when nothing else sets it — and the application
+     * starts. A site that will not boot cannot show the admin the error
+     * explaining why. But a consumer reaching for a credential it cannot read must fail
      * visibly: silently proceeding with an empty key turns "your secret key
      * was rotated" into an opaque 401 from a third-party API, hours later,
      * with nothing pointing back here.

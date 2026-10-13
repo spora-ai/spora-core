@@ -90,11 +90,12 @@ Precedence, last wins:
 registry defaults  <  config.php  <  .env / OS environment  <  database
 ```
 
-Keys marked `bootOnly` in the registry (the `SPORA_DB_*` family,
-`SPORA_KEY_PATH`, `SPORA_LOG_PATH`, `SPORA_APP_ENV`, `SPORA_APP_URL`,
-`SPORA_APP_PREFIX`) are read before the database can be opened, so they come
-from files only and are never stored in it. The database layer is applied
-once per request by `Kernel::handle()`, not by the `Config` factory — see
+Keys marked `bootOnly` in the registry are read before the database can be
+opened, so they come from files only and are never stored in it. Enumerating
+them here is a list that rots — `SettingsRegistry::bootOnlyKeys()` is the
+authority. The database layer is applied by `Kernel::handle()` for a web
+request and by each settings-reading command on the CLI, never by the `Config`
+factory — see
 `Config::applySettingsOverlay()` for why.
 
 ### CI

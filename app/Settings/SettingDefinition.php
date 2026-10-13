@@ -10,9 +10,10 @@ namespace Spora\Settings;
  * This is simultaneously the default, the UI field, the API schema and the
  * validation rule. That is the point: the old arrangement needed an option
  * registered in `ContainerDefinitions::collectEnvOverrides()`, a default in
- * `$defaults`, and a matching line in `.env.example`, and nothing checked that
- * the three agreed — which is how `type: 'number'` ended up used 20 times and
- * documented zero.
+ * `$defaults`, and a matching line in the operator's `.env.example`, and
+ * nothing checked that the three agreed — which is how a numeric setting's
+ * type lived only in an `(int)` cast inside `collectEnvOverrides()`, invisible
+ * to the UI and to the API.
  *
  * A key that is not declared here is not a setting: the admin API rejects it
  * and nothing resolves it from the store.

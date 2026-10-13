@@ -15,8 +15,8 @@ use Throwable;
  * The database layer of {@see \Spora\Core\Config}.
  *
  * No caching, deliberately. A row read per request is fresh in both tiers —
- * `public/index.php` builds a fresh kernel per request and the worker forks a
- * fresh process per task — and `ToolConfigService` already sets that precedent.
+ * each web request builds a fresh kernel, and the worker spawns a fresh
+ * process per task — and `ToolConfigService` already sets that precedent.
  * A memoizing decorator here would buy nothing and would make "settings apply
  * on the next request" untrue.
  */
@@ -150,7 +150,7 @@ final class SettingsRepository
             // value still exists on disk and becomes readable again if the
             // right key comes back. See Config::applySettingsOverlay().
             error_log(sprintf(
-                '[Spora] settings: cannot decrypt "%s.%s" with the current secret key; falling back to its default.',
+                '[Spora] settings: cannot decrypt "%s.%s" with the current secret key; keeping the value from config.php/.env, or the default when neither sets it.',
                 $group,
                 $key,
             ));
