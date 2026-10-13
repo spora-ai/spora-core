@@ -34,8 +34,7 @@ final class GlobalSettingsController
         private readonly SettingsRepository $repository,
         private readonly Config $config,
         private readonly AuthService $authService,
-    ) {
-    }
+    ) {}
 
     #[OA\Get(
         path: '/api/v1/admin/settings',

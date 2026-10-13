@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Auth\AuthService;
 use Delight\Auth\Role;
 use Spora\Core\Database;
 use Spora\Core\Kernel;

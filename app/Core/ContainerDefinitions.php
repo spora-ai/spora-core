@@ -55,13 +55,13 @@ use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
 use Spora\Http\ContinueTaskDispatcher;
 use Spora\Http\DecisionsRequestValidator;
+use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
 use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
 use Spora\Http\GroupToolsController;
-use Spora\Http\GlobalSettingsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -177,12 +177,14 @@ use Spora\Tools\AgentTool;
 use Spora\Tools\AgentTool\SkillCatalogPresenter;
 use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
+use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\MediaCreateHandler;
 use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ScheduleTool;
+use Spora\Tools\SharedSettingsResolver;
 use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
@@ -376,6 +378,9 @@ final class ContainerDefinitions
                 );
             },
 
+            SharedSettingsResolver::class => static fn(ContainerInterface $c): SharedSettingsResolver
+                => new SharedSettingsResolver($c->get(PluginLoader::class)->settingsClasses()),
+
             ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
                 $config = $c->get(Config::class);
                 return new ToolConfigService(
@@ -389,6 +394,7 @@ final class ContainerDefinitions
                     $c->get(PrincipalService::class),
                     $config->getBool('SPORA_TOOLS_GROUP_CASCADE_ENABLED'),
                     $c->get(PrincipalResolver::class),
+                    $c->get(SharedSettingsResolver::class),
                 );
             },
 
@@ -775,8 +781,8 @@ final class ContainerDefinitions
                     $c->get(CsrfTokenService::class),
                     $c->get(AuthValidator::class),
                     $c->get(AuthWorkflow::class),
-                    $c->get(SystemMailer::class),
                     $c->get(Config::class),
+                    $c->get(SystemMailer::class),
                 );
             },
 
@@ -1020,6 +1026,7 @@ final class ContainerDefinitions
                     InstalledToolClasses::for($c),
                     $c->get(ToolIconResolver::class),
                     $c->get(ToolsRecommendsSkillsValidator::class),
+                    $c->get(SharedSettingsResolver::class),
                 );
             },
         ];
@@ -1252,6 +1259,8 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(SystemMailer::class),
                     $c->get(Config::class),
+                    $c->get(SettingsRepository::class),
+                    $c->get(SettingsRegistry::class),
                 );
             },
 
@@ -1353,6 +1362,7 @@ final class ContainerDefinitions
                 return new ReadUrlTool(
                     $c->get(HttpClientInterface::class),
                     $c->get(ToolConfigService::class),
+                    $c->get(HttpTimeoutResolver::class),
                     $c->get(LoggerInterface::class),
                     $c->get(PdfMarkdownExtractor::class),
                 );

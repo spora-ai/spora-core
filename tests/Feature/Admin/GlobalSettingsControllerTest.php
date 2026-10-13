@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
-use Spora\Core\Kernel;
 use Spora\Core\Paths;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\Middleware\AdminMiddleware;
