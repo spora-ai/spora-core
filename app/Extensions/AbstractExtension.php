@@ -102,4 +102,15 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
+
+    /**
+     * See {@see SporaExtensionInterface::settingsClasses()}. Default to no
+     * shared credential group shipped.
+     *
+     * @return list<class-string>
+     */
+    public function settingsClasses(): array
+    {
+        return [];
+    }
 }

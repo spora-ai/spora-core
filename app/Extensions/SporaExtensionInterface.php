@@ -110,6 +110,26 @@ interface SporaExtensionInterface
     public function skillProviders(): array;
 
     /**
+     * Shared settings group classes this extension contributes.
+     *
+     * A *data* hook listing the classes that carry `#[SharedSettings]` and the
+     * `#[ToolSetting]` attributes every tool in this extension falls back to
+     * ({@see \Spora\Tools\ConsumesSharedSettings}). One group replaces the
+     * credential repeated on each of a plugin's tools — `spora-plugin-minimax`
+     * declares the same `api_key` on five.
+     *
+     * Not on `plugin.json`: the manifest schema is `additionalProperties:
+     * false`, and the classes live in the entry point like every other
+     * class-list hook rather than in the manifest. Read once at container
+     * build time into {@see \Spora\Tools\SharedSettingsResolver}; the loader
+     * asks the live plugin object on both cold and warm boot, so a plugin
+     * shipping a new group without touching its manifest still gets it.
+     *
+     * @return list<class-string>
+     */
+    public function settingsClasses(): array;
+
+    /**
      * Search provider classes this extension contributes to the host ⌘K palette.
      *
      * Distinct from {@see skillProviders()}: that makes a resource *readable*,

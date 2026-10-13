@@ -33,6 +33,15 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    /**
+     * `ToolStatus` is derived, not computed: it is whatever
+     * `getMissingRequiredSettings()` says about the effective settings, so
+     * anything merged into those settings changes it by construction. The
+     * shared-settings layer is deliberately not part of that derivation — see
+     * {@see self::statusResolution()} for the rule and its consequence.
+     */
+    private const STATUS_INCLUDES_SHARED_SETTINGS = false;
+
     private readonly AgentToolInstanceResolver $instanceResolver;
     private readonly AgentToolOverrideResolver $overrideResolver;
     private readonly AgentToolOperationsResolver $operationsResolver;
@@ -100,8 +109,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
         $tool = AgentTool::where('agent_id', $agentId)->where('tool_class', $toolClass)->first();
 
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
-        $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
+        $missing = $this->statusResolution($toolClass, $agentId, $userId)['missing'];
 
         $result = [
             'tool' => [
@@ -138,8 +146,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             ->where('tool_class', $toolClass)
             ->exists();
 
-        $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
-        $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
+        $missing = $this->statusResolution($toolClass, $agentId, $userId)['missing'];
 
         return [
             'tool_class'       => $toolClass,
@@ -166,8 +173,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
 
         foreach ($toolClasses as $toolClass) {
             $isEnabled = isset($enabledTools[$toolClass]);
-            $effective = $this->toolConfig->getEffectiveSettings($toolClass, $agentId, $userId, null);
-            $missing = $this->toolConfig->getMissingRequiredSettings($toolClass, $effective);
+            $missing = $this->statusResolution($toolClass, $agentId, $userId)['missing'];
 
             $statuses[] = [
                 'tool_class'       => $toolClass,
@@ -209,6 +215,41 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
     public function patchOperationOverride(int $agentId, int $userId, string $toolClass, string $operation, array $data): array
     {
         return $this->operationsResolver->patchOperationOverride($agentId, $userId, $toolClass, $operation, $data);
+    }
+
+    /**
+     * Resolve a tool's settings *for status purposes*, and report what is
+     * still missing. Every method on this service that produces a
+     * `missing_required` list goes through here, so the shared-group rule is
+     * enforced in one place rather than restated per call site.
+     *
+     * The shared group is excluded on purpose. It is a plugin-wide credential
+     * an operator fills in once; letting it into this resolution would make
+     * every tool consuming the group report `can_enable: true` with an empty
+     * `missing_required` as soon as the plugin is installed, and there would
+     * be no field anywhere telling the operator that the plugin's own
+     * credential is still blank. The tool *runs* on the shared value — that
+     * is the point of the feature — but the status keeps reporting the
+     * tool's own configuration, which is what the form is actually editing.
+     *
+     * Reversing this is a product decision, not a code one: the moment
+     * `missing_required` should honour the shared group, this constant flips
+     * and `tests/Unit/Tools/SharedSettingsStatusBoundaryTest.php` is the file
+     * whose assertions say so.
+     *
+     * @return array{missing: list<string>}
+     */
+    private function statusResolution(string $toolClass, int $agentId, int $userId): array
+    {
+        $effective = $this->toolConfig->getEffectiveSettings(
+            $toolClass,
+            $agentId,
+            $userId,
+            null,
+            includeSharedSettings: self::STATUS_INCLUDES_SHARED_SETTINGS,
+        );
+
+        return ['missing' => $this->toolConfig->getMissingRequiredSettings($toolClass, $effective)];
     }
 
     /**

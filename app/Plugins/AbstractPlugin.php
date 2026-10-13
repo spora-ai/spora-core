@@ -160,4 +160,15 @@ abstract class AbstractPlugin implements PluginInterface
     {
         return [];
     }
+
+    /**
+     * Shared settings groups this plugin declares. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::settingsClasses()}.
+     *
+     * @return list<class-string>
+     */
+    public function settingsClasses(): array
+    {
+        return [];
+    }
 }
