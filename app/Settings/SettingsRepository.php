@@ -82,6 +82,24 @@ final class SettingsRepository
         $encoded = $this->registry->encode($definition, $this->registry->coerce($definition, $value));
         $isSecret = $definition->secret;
 
+        // An empty secret is unencodable, so it must never reach a row.
+        // `encrypt('')` emits a bare nonce+MAC (40 bytes) and `decrypt()`
+        // rejects anything under nonce+MAC+1 (41) as too short — the row would
+        // read as undecryptable forever, and every read of that key would then
+        // throw. "No credential" and "clear the credential" mean the same
+        // thing to the operator, so both land on the same path as `null`.
+        //
+        // Checked on the encoded value rather than the input, because a
+        // transform can normalise a non-empty input down to `''`.
+        //
+        // Scoped to secrets on purpose: `''` is a legitimate value for a text
+        // or list setting, and storing it must keep working.
+        if ($isSecret && $encoded === '') {
+            $this->delete($definition->group, $definition->key);
+
+            return;
+        }
+
         $payload = [
             'value'      => $isSecret ? $this->security->encrypt($encoded)->toStorageString() : $encoded,
             'encrypted'  => $isSecret,

@@ -114,3 +114,37 @@ it('deletes the row when a setting is written as null', function (): void {
 
     expect($repository->allForGroup('framework'))->toBe([]);
 });
+
+it('stores an empty string for a non-secret setting', function (): void {
+    // The counterpart to the next test, and the reason that one is scoped to
+    // secrets: `''` is a legitimate value here and must survive a round trip.
+    [$registry, $repository] = settingsRepositoryFixture();
+
+    $repository->put($registry->get('SPORA_APP_NAME'), '', null);
+
+    expect($repository->allForGroup('framework'))->toHaveKey('SPORA_APP_NAME')
+        ->and($repository->allForGroup('framework')['SPORA_APP_NAME']->value)->toBe('');
+});
+
+it('refuses to store an empty secret, because the ciphertext would be unreadable', function (): void {
+    [$registry, $repository] = settingsRepositoryFixture();
+
+    $repository->put($registry->get('SPORA_MAIL_PASSWORD'), '', null);
+
+    // `encrypt('')` emits a bare nonce+MAC — 40 bytes — and `decrypt()`
+    // rejects anything under 41 as too short. Storing it would produce a row
+    // that reads as undecryptable forever, after which every read of this key
+    // throws. The row must not exist at all.
+    expect(Capsule::table('settings')->where('setting_key', 'SPORA_MAIL_PASSWORD')->exists())->toBeFalse();
+});
+
+it('reads back cleanly after a secret was cleared with an empty string', function (): void {
+    [$registry, $repository] = settingsRepositoryFixture();
+
+    $repository->put($registry->get('SPORA_MAIL_PASSWORD'), 'hunter2', null);
+    $repository->put($registry->get('SPORA_MAIL_PASSWORD'), '', null);
+
+    // The operator-visible symptom of the bug: a poisoned row makes every
+    // read of the key throw, so the whole settings page fails to load.
+    expect($repository->allForGroup('mail'))->toBe([]);
+});
