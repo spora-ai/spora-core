@@ -1,0 +1,4 @@
+{
+    "slug": "shared-settings-plugin",
+    "class": "Tests\\Fixtures\\Plugins\\SharedSettingsPlugin\\Plugin"
+}

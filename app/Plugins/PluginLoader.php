@@ -293,6 +293,33 @@ final class PluginLoader
     }
 
     /**
+     * All shared settings group classes contributed by loaded plugins, fanned
+     * out into {@see \Spora\Tools\SharedSettingsResolver} at container build
+     * time. Mirrors {@see searchProviderClasses()}.
+     *
+     * Nothing is recorded in the {@see PluginLoaderCache} sidecar for this
+     * hook, and nothing needs to be: `boot()` re-instantiates the plugin
+     * objects on a warm boot and this reads the live instance, so a plugin
+     * that adds a group class without touching `plugin.json` is picked up on
+     * the next request. Caching the list alongside the manifest would make the
+     * sidecar a second thing to invalidate.
+     *
+     * @return list<class-string>
+     */
+    public function settingsClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->settingsClasses() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All loaded plugins, indexed by their manifest slug.
      *
      * @return array<string, PluginInterface>
