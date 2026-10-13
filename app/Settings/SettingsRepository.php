@@ -79,7 +79,7 @@ final class SettingsRepository
         // caller could persist a value the registry would have rejected — an
         // `svg` in the image allowlist being the one that matters. A stored
         // value has to be the same value a read would produce.
-        $encoded = $this->registry->encode($definition, $this->registry->coerce($definition, $value));
+        $encoded = $this->registry->encode($this->registry->coerce($definition, $value));
         $isSecret = $definition->secret;
 
         // An empty secret is unencodable, so it must never reach a row.

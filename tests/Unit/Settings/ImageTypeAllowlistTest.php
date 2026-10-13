@@ -64,7 +64,7 @@ it('survives the encode/decode round trip', function (): void {
     $registry = new SettingsRegistry(new Paths(BASE_PATH));
     $definition = $registry->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
 
-    expect($registry->decode($definition, $registry->encode($definition, ['png', 'svg', 'jpeg'])))
+    expect($registry->decode($definition, $registry->encode(['png', 'svg', 'jpeg'])))
         ->toBe(['png', 'jpeg']);
 });
 

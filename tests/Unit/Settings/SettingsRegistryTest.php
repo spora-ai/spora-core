@@ -154,7 +154,7 @@ it('round-trips a :type setting through encode and decode', function (string $ke
     $registry = settingsRegistryFixture();
     $definition = $registry->get($key);
 
-    expect($registry->decode($definition, $registry->encode($definition, $value)))->toBe($expected);
+    expect($registry->decode($definition, $registry->encode($value)))->toBe($expected);
 })->with([
     'toggle true'  => ['SPORA_ALLOW_REGISTRATION', true, true],
     'toggle false' => ['SPORA_ALLOW_REGISTRATION', false, false],
@@ -167,7 +167,7 @@ it('round-trips a :type setting through encode and decode', function (string $ke
 it('stores a list as JSON, not the comma-separated form operators type', function (): void {
     $registry = settingsRegistryFixture();
 
-    expect($registry->encode($registry->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'), ['png', 'jpeg']))
+    expect($registry->encode(['png', 'jpeg']))
         ->toBe('["png","jpeg"]');
 });
 
@@ -182,7 +182,7 @@ it('round-trips every non-null declared default', function (string $key): void {
     $registry = settingsRegistryFixture();
     $definition = $registry->get($key);
 
-    expect($registry->decode($definition, $registry->encode($definition, $definition->default)))
+    expect($registry->decode($definition, $registry->encode($definition->default)))
         ->toEqual($definition->default);
 })->with(array_keys(array_filter(
     settingsRegistryFixture()->all(),

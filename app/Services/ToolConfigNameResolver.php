@@ -117,9 +117,7 @@ final class ToolConfigNameResolver
      */
     public function resolveGroupClass(string $groupId): ?string
     {
-        $class = $this->buildToolNameMap()[self::GROUP_PREFIX . $groupId] ?? null;
-
-        return $class;
+        return $this->buildToolNameMap()[self::GROUP_PREFIX . $groupId] ?? null;
     }
 
     /**

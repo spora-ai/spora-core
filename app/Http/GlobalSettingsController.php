@@ -92,33 +92,16 @@ final class GlobalSettingsController
         $accepted = [];
 
         foreach ($incoming as $entry) {
-            if (!is_array($entry) || !isset($entry['key'])) {
-                return $this->error('VALIDATION_ERROR', 'Each entry needs a `key`.', Response::HTTP_UNPROCESSABLE_ENTITY);
+            $admitted = $this->admit($entry);
+            if ($admitted instanceof JsonResponse) {
+                return $admitted;
             }
-
-            $key = (string) $entry['key'];
-            $definition = $this->registry->get($key);
-            if ($definition === null) {
-                return $this->error('VALIDATION_ERROR', sprintf('Unknown setting "%s".', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
-            if ($definition->bootOnly) {
-                // A DB-backed `db_host` would lock the operator out on the very
-                // request that wrote it. These are read before the database
-                // this row lives in is open.
-                return $this->error('VALIDATION_ERROR', sprintf('"%s" is set in .env or config.php and cannot be edited here.', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
-            }
-
-            $value = $entry['value'] ?? null;
 
             // A secret the operator did not touch comes back as the mask.
             // Writing that back would overwrite the real value with '***'.
-            if ($definition->secret && $value === self::MASK) {
+            [$definition, $value] = $admitted;
+            if ($definition === null) {
                 continue;
-            }
-
-            $invalid = $this->rejectInvalid($definition, $value);
-            if ($invalid !== null) {
-                return $invalid;
             }
 
             $accepted[] = [$definition, $value];
@@ -157,6 +140,43 @@ final class GlobalSettingsController
     }
 
     /**
+     * Decide whether one batch entry may be written.
+     *
+     * `null` for the definition means "skip": an untouched secret, whose mask
+     * came back as its value.
+     *
+     * @param mixed $entry
+     * @return array{0: ?SettingDefinition, 1: mixed}|JsonResponse
+     */
+    private function admit(mixed $entry): array|JsonResponse
+    {
+        if (!is_array($entry) || !isset($entry['key'])) {
+            return $this->error('VALIDATION_ERROR', 'Each entry needs a `key`.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $key = (string) $entry['key'];
+        $definition = $this->registry->get($key);
+        if ($definition === null) {
+            return $this->error('VALIDATION_ERROR', sprintf('Unknown setting "%s".', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        if ($definition->bootOnly) {
+            // A DB-backed `db_host` would lock the operator out on the very
+            // request that wrote it. These are read before the database this
+            // row lives in is open.
+            return $this->error('VALIDATION_ERROR', sprintf('"%s" is set in .env or config.php and cannot be edited here.', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $value = $entry['value'] ?? null;
+        if ($definition->secret && $value === self::MASK) {
+            return [null, null];
+        }
+
+        $invalid = $this->rejectInvalid($definition, $value);
+
+        return $invalid ?? [$definition, $value];
+    }
+
+    /**
      * @param list<string> $undecryptable
      * @return array<string, mixed>
      */
@@ -191,6 +211,19 @@ final class GlobalSettingsController
 
     private function rejectInvalid(SettingDefinition $definition, mixed $value): ?JsonResponse
     {
+        $reason = $this->rejectionReason($definition, $value);
+
+        return $reason === null ? null : $this->error('VALIDATION_ERROR', $reason, Response::HTTP_UNPROCESSABLE_ENTITY);
+    }
+
+    /**
+     * Why this value cannot be stored, or `null` when it can.
+     *
+     * Separate from {@see self::rejectInvalid()} so this reads as a list of
+     * reasons rather than a list of exits.
+     */
+    private function rejectionReason(SettingDefinition $definition, mixed $value): ?string
+    {
         if ($value === null) {
             return null;
         }
@@ -200,23 +233,14 @@ final class GlobalSettingsController
         // literal string "Array".
         $isList = in_array($definition->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true);
         if ($isList !== is_array($value)) {
-            return $this->error(
-                'VALIDATION_ERROR',
-                $isList
-                    ? sprintf('"%s" takes a list of values.', $definition->key)
-                    : sprintf('"%s" takes a single value.', $definition->key),
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-            );
+            return $isList
+                ? sprintf('"%s" takes a list of values.', $definition->key)
+                : sprintf('"%s" takes a single value.', $definition->key);
         }
 
-        if (!$isList && $definition->validation !== '' && is_scalar($value)) {
-            if (preg_match($definition->validation, (string) $value) !== 1) {
-                return $this->error(
-                    'VALIDATION_ERROR',
-                    sprintf('"%s" does not accept that value.', $definition->key),
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
+        if (!$isList && $definition->validation !== '' && is_scalar($value)
+            && preg_match($definition->validation, (string) $value) !== 1) {
+            return sprintf('"%s" does not accept that value.', $definition->key);
         }
 
         // The declared option set, checked against the *coerced* value so a
@@ -225,14 +249,9 @@ final class GlobalSettingsController
         // `nonsense` to SPORA_MAIL_DRIVER returned 200 and then made every
         // send throw.
         $allowed = array_column($definition->options, 'value');
-        if ($allowed !== [] && !$isList && is_scalar($value)) {
-            if (!in_array($this->registry->coerce($definition, $value), $allowed, true)) {
-                return $this->error(
-                    'VALIDATION_ERROR',
-                    sprintf('"%s" must be one of: %s.', $definition->key, implode(', ', $allowed)),
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                );
-            }
+        if ($allowed !== [] && !$isList && is_scalar($value)
+            && !in_array($this->registry->coerce($definition, $value), $allowed, true)) {
+            return sprintf('"%s" must be one of: %s.', $definition->key, implode(', ', $allowed));
         }
 
         return null;

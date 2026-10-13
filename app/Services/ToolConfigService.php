@@ -327,6 +327,21 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
+     * Which layer a base-level value came from, for the annotation.
+     *
+     * @param list<string>            $fromGroup      keys the shared group supplied
+     * @param array<string, mixed>    $schemaDefaults the tool's declared defaults
+     */
+    private function baseSource(string $key, array $fromGroup, array $schemaDefaults): string
+    {
+        if (in_array($key, $fromGroup, true)) {
+            return 'shared';
+        }
+
+        return array_key_exists($key, $schemaDefaults) ? 'default' : 'shared';
+    }
+
+    /**
      * Every key whose value must be masked before it leaves the process, for
      * `$toolClass` or for the shared group it consumes.
      *
@@ -557,12 +572,7 @@ class ToolConfigService implements ToolConfigServiceInterface
 
         $result = [];
         foreach ($shared as $key => $value) {
-            $result[$key] = [
-                'value'  => $value,
-                'source' => in_array($key, $fromGroup, true)
-                    ? 'shared'
-                    : (array_key_exists($key, $schemaDefaults) ? 'default' : 'shared'),
-            ];
+            $result[$key] = ['value' => $value, 'source' => $this->baseSource($key, $fromGroup, $schemaDefaults)];
         }
 
         $global = $this->getGlobalSettings($toolClass);

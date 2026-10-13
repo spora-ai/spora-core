@@ -227,7 +227,7 @@ HELP);
     private function validateMysqlConfig(SymfonyStyle $io, Config $config): ?int
     {
         $missing = [];
-        foreach (['db_host' => 'SPORA_DB_HOST', 'db_user' => 'SPORA_DB_USER', 'db_password' => 'SPORA_DB_PASSWORD'] as $key => $env) {
+        foreach (['SPORA_DB_HOST', 'SPORA_DB_USER', 'SPORA_DB_PASSWORD'] as $env) {
             $value = $config->getString($env);
             if (!is_string($value) || $value === '') {
                 $missing[] = $env;

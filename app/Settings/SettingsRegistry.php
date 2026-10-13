@@ -43,6 +43,13 @@ final class SettingsRegistry
      *
      * @var array<string, string>
      */
+    /**
+     * Non-negative integer, for every duration, count, size and timeout here.
+     * A named constant so the rule lives once instead of being restated
+     * thirteen times — and so a change to it cannot miss a key.
+     */
+    public const VALIDATION_UINT = '/^\d+$/';
+
     public const SECTION_LABELS = [
         'general'   => 'General',
         'access'    => 'Access',
@@ -163,11 +170,15 @@ final class SettingsRegistry
     }
 
     /**
-     * Render a typed value for storage. Lists go to JSON so they round-trip
-     * exactly; the comma-separated form is an input convenience for operators
-     * typing into `.env`, not a storage format.
+     * Render a value for storage. Lists go to JSON so they round-trip exactly;
+     * the comma-separated form is an input convenience for operators typing into
+     * `.env`, not a storage format.
+     *
+     * Takes no definition because nothing about it needs one — shape follows the
+     * value's PHP type, and the coercion to that type happened in
+     * {@see self::coerce()}.
      */
-    public function encode(SettingDefinition $d, mixed $value): string
+    public function encode(mixed $value): string
     {
         if (is_array($value)) {
             return (string) json_encode($value);
@@ -384,7 +395,7 @@ final class SettingsRegistry
             default: 300,
             section: 'timeouts',
             description: 'Seconds to wait for a model response before giving up.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_TOOL_HTTP_TIMEOUT',
@@ -393,7 +404,7 @@ final class SettingsRegistry
             default: 30,
             section: 'timeouts',
             description: 'Default seconds for outbound HTTP from tools. A tool that declares its own timeout overrides this.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
 
         // Worker.
@@ -416,7 +427,7 @@ final class SettingsRegistry
             default: 600,
             section: 'worker',
             description: 'Seconds the reaper waits past the last heartbeat before marking a run as failed.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_WORKER_STALE_MINUTES',
@@ -425,7 +436,7 @@ final class SettingsRegistry
             default: 60,
             section: 'worker',
             description: 'Minutes without a heartbeat before a worker is considered dead.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
             workerRestart: true,
         ));
         $add(new SettingDefinition(
@@ -435,7 +446,7 @@ final class SettingsRegistry
             default: 0,
             section: 'worker',
             description: 'Zero means no limit.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
             workerRestart: true,
         ));
         $add(new SettingDefinition(
@@ -472,7 +483,7 @@ final class SettingsRegistry
             default: PluginCatalogService::DEFAULT_TTL_SECONDS,
             section: 'plugins',
             description: 'Seconds a catalog search stays cached on disk.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_COMPOSER_BINARY',
@@ -504,7 +515,7 @@ final class SettingsRegistry
             default: 1024 * 1024,
             section: 'media',
             description: 'In auto mode, payloads at or below this are inlined.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_ASSET_STORE_MAX_BYTES',
@@ -513,7 +524,7 @@ final class SettingsRegistry
             default: DatabaseAssetStore::MAX_BYTES,
             section: 'media',
             description: 'Hard ceiling per asset. Inlined payloads must stay under the media_assets column limit.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
 
         // Media archive.
@@ -532,7 +543,7 @@ final class SettingsRegistry
             default: 30,
             section: 'media',
             description: 'Seconds allowed for the remote media fetch.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES',
@@ -541,7 +552,7 @@ final class SettingsRegistry
             default: 100 * 1024 * 1024,
             section: 'media',
             description: 'Larger responses are recorded as external rather than downloaded.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED',
@@ -592,7 +603,7 @@ final class SettingsRegistry
             default: 587,
             group: 'mail',
             section: 'mail',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MAIL_USERNAME',
@@ -708,7 +719,7 @@ final class SettingsRegistry
             section: 'database',
             bootOnly: true,
             description: 'Milliseconds to wait for a locked database before failing.',
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_DB_HOST',
@@ -723,7 +734,7 @@ final class SettingsRegistry
             type: SettingDefinition::TYPE_NUMBER,
             section: 'database',
             bootOnly: true,
-            validation: '/^\d+$/',
+            validation: self::VALIDATION_UINT,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_DB_NAME',
