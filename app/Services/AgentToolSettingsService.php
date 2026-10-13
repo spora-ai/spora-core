@@ -100,7 +100,17 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             ->exists();
 
         if ($globalSettings === [] && !$hasAgentOverride) {
-            $defaults = $this->toolConfig->getSchemaDefaults($toolClass);
+            // Only when the shared group has nothing to say. An agent override
+            // outranks the group, so seeding *either* value here is wrong:
+            // seeding the schema default shadows the operator's shared
+            // credential, and seeding the group value would drag it past the
+            // status boundary, which deliberately resolves without the shared
+            // layer so a tool enabled on a shared credential still reports it
+            // as missing.
+            $defaults = $this->toolConfig->sharedGroupHasValues($toolClass)
+                ? []
+                : $this->toolConfig->getSchemaDefaults($toolClass);
+
             if ($defaults !== []) {
                 $this->toolConfig->putAgentOverride($toolClass, $agentId, $defaults);
             }

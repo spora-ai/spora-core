@@ -85,7 +85,11 @@ final class GlobalSettingsController
         }
 
         $userId = $this->authService->currentUserId();
-        $written = [];
+        // Two phases, and the order is load-bearing: a batch refused half-way
+        // through leaves the operator unable to say what was saved. Validating
+        // and writing in one pass persisted everything before the failing
+        // entry and then answered 422 saying nothing about those rows.
+        $accepted = [];
 
         foreach ($incoming as $entry) {
             if (!is_array($entry) || !isset($entry['key'])) {
@@ -117,8 +121,13 @@ final class GlobalSettingsController
                 return $invalid;
             }
 
+            $accepted[] = [$definition, $value];
+        }
+
+        $written = [];
+        foreach ($accepted as [$definition, $value]) {
             $this->repository->put($definition, $value, $userId);
-            $written[] = $key;
+            $written[] = $definition->key;
         }
 
         return new JsonResponse(['data' => ['updated' => $written]], Response::HTTP_OK);
@@ -185,11 +194,42 @@ final class GlobalSettingsController
         if ($value === null) {
             return null;
         }
-        if ($definition->validation !== '' && is_scalar($value)) {
+
+        // An array where a single value belongs. `coerce()` would cast it with
+        // `(string)`, which emits "Array to string conversion" and stores the
+        // literal string "Array".
+        $isList = in_array($definition->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true);
+        if ($isList !== is_array($value)) {
+            return $this->error(
+                'VALIDATION_ERROR',
+                $isList
+                    ? sprintf('"%s" takes a list of values.', $definition->key)
+                    : sprintf('"%s" takes a single value.', $definition->key),
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        if (!$isList && $definition->validation !== '' && is_scalar($value)) {
             if (preg_match($definition->validation, (string) $value) !== 1) {
                 return $this->error(
                     'VALIDATION_ERROR',
                     sprintf('"%s" does not accept that value.', $definition->key),
+                    Response::HTTP_UNPROCESSABLE_ENTITY,
+                );
+            }
+        }
+
+        // The declared option set, checked against the *coerced* value so a
+        // legacy spelling (`php_mail` → `sendmail`) is accepted and stored
+        // canonically. Without this the API accepted anything: writing
+        // `nonsense` to SPORA_MAIL_DRIVER returned 200 and then made every
+        // send throw.
+        $allowed = array_column($definition->options, 'value');
+        if ($allowed !== [] && !$isList && is_scalar($value)) {
+            if (!in_array($this->registry->coerce($definition, $value), $allowed, true)) {
+                return $this->error(
+                    'VALIDATION_ERROR',
+                    sprintf('"%s" must be one of: %s.', $definition->key, implode(', ', $allowed)),
                     Response::HTTP_UNPROCESSABLE_ENTITY,
                 );
             }

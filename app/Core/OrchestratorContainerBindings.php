@@ -178,7 +178,7 @@ final class OrchestratorContainerBindings
                     $hubUrl,
                     $jwtKey,
                     $c->get(LoggerInterface::class),
-                    self::mercureLegacyUserTopicEnabled(),
+                    $c->get(Config::class)->getBool('SPORA_MERCURE_LEGACY_USER_TOPIC'),
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -227,25 +227,6 @@ final class OrchestratorContainerBindings
                 return new MailTemplateRenderer($c->get(MarkdownConverter::class));
             },
         ];
-    }
-
-    /**
-     * `SPORA_MERCURE_LEGACY_USER_TOPIC` is read straight from the
-     * environment because it is not a declared setting: it appears in no
-     * {@see \Spora\Settings\SettingsRegistry} entry and in no
-     * {@see ConfigFactory::legacyKeyMap()} path, so `Config` cannot carry it.
-     * Reading it through `Config` would compile to a constant `false` and
-     * silently strand the one release the dual-publish exists for.
-     *
-     * Delete this together with {@see MercurePublisher}'s legacy topic once
-     * the rollout is finished — or, sooner, declare the setting and drop this
-     * method.
-     */
-    private static function mercureLegacyUserTopicEnabled(): bool
-    {
-        $raw = $_ENV['SPORA_MERCURE_LEGACY_USER_TOPIC'] ?? (getenv('SPORA_MERCURE_LEGACY_USER_TOPIC') ?: null);
-
-        return $raw !== null && filter_var($raw, FILTER_VALIDATE_BOOLEAN);
     }
 
     private static function templates(): array

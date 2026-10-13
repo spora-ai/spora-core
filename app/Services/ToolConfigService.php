@@ -484,6 +484,24 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
+     * Whether the shared group has any stored value at all.
+     *
+     * Callers that persist a value at a level that outranks the group use this
+     * to decide whether that level should be seeded at all. Seeding the schema
+     * default would shadow the group; seeding the group's value would let it
+     * cross the status boundary that deliberately resolves without it.
+     */
+    public function sharedGroupHasValues(string $toolClass): bool
+    {
+        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
+        if ($groupClass === null) {
+            return false;
+        }
+
+        return array_filter($this->getGlobalSettings($groupClass), static fn(mixed $v): bool => $v !== null && $v !== '') !== [];
+    }
+
+    /**
      * Return keys of required settings that have no value (null or empty) in the given effective settings.
      *
      * @param  array<string, mixed> $effectiveSettings

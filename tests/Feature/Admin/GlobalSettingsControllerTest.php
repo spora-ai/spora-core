@@ -214,3 +214,58 @@ function collectSettings(JsonResponse $response): array
 
     return $out;
 }
+
+test('PATCH rejects a value outside the declared option set', function (): void {
+    // The dropdown in the UI is rendered from `options`, so the API has to
+    // agree with it. It did not: this returned 200, stored "nonsense", and
+    // every subsequent mail send then threw in SystemMailer.
+    $response = gsPatch(gsController(), [
+        'settings' => [['key' => 'SPORA_MAIL_DRIVER', 'value' => 'carrier-pigeon']],
+    ]);
+
+    expect($response->getStatusCode())->toBe(422)
+        ->and(gsBody($response)['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+test('PATCH accepts a legacy spelling and stores it canonically', function (): void {
+    $controller = gsController();
+    $response = gsPatch($controller, [
+        'settings' => [['key' => 'SPORA_MAIL_DRIVER', 'value' => 'php_mail']],
+    ]);
+
+    expect($response->getStatusCode())->toBe(200)
+        ->and(gsBody($response)['data']['updated'])->toBe(['SPORA_MAIL_DRIVER']);
+});
+
+test('PATCH refuses an array for a setting that takes one value', function (): void {
+    // `coerce()` would have cast it with `(string)`, emitting "Array to string
+    // conversion" and storing the literal string "Array".
+    $response = gsPatch(gsController(), [
+        'settings' => [['key' => 'SPORA_APP_NAME', 'value' => ['a', 'b']]],
+    ]);
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
+test('a refused batch writes nothing at all', function (): void {
+    $controller = gsController();
+
+    $response = gsPatch($controller, [
+        'settings' => [
+            ['key' => 'SPORA_APP_NAME', 'value' => 'Accepted'],
+            ['key' => 'SPORA_MAIL_DRIVER', 'value' => 'carrier-pigeon'],
+        ],
+    ]);
+
+    expect($response->getStatusCode())->toBe(422);
+
+    // The first entry validated cleanly and would have been written before the
+    // second was rejected, leaving the operator unable to say what was saved.
+    $registry = gsRegistry();
+    $stored = (new SettingsRepository(
+        new Spora\Core\SecurityManager(str_repeat('z', SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+        $registry,
+    ))->allForGroup('framework');
+
+    expect($stored)->not->toHaveKey('SPORA_APP_NAME');
+});

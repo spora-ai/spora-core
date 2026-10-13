@@ -197,3 +197,28 @@ test('a global admin still passes without holding any group role', function (): 
 
     expect($response->getStatusCode())->toBe(404);
 });
+
+it('does not let the enable pre-seed shadow the shared group', function (): void {
+    // `enableTool()` wrote `getSchemaDefaults()` into the agent override when
+    // the tool had no globals of its own — which is precisely the shared-group
+    // scenario. The agent level outranks the group, so the operator's value
+    // was replaced by the code default the moment the tool was enabled.
+    //
+    // The fix skips the seed rather than seeding the group value: seeding that
+    // would put the group's credential into the agent override, which the
+    // status path reads, collapsing the deliberate boundary that a shared
+    // credential enables a tool without counting as configured.
+    $service = groupWriteService();
+    $tool    = Tests\Unit\Tools\AcmeChatTool::class;
+
+    $service->putGlobalSettings(AcmeSharedSettings::class, ['retries' => '99']);
+
+    expect($service->getSchemaDefaults($tool)['retries'] ?? null)->toBe('3')
+        ->and($service->sharedGroupHasValues($tool))->toBeTrue();
+});
+
+it('reports no shared values for a tool in no group', function (): void {
+    $service = groupWriteService();
+
+    expect($service->sharedGroupHasValues(Tests\Unit\Tools\AcmeStandaloneTool::class))->toBeFalse();
+});
