@@ -101,6 +101,33 @@ test('GET returns every declared setting, grouped by section', function (): void
     }
 });
 
+test('GET exposes the storage group, which is not the section', function (): void {
+    // DELETE /admin/settings/{group}/{key} is addressed by this, and the page
+    // used to send the section key instead — which 422s for everything except
+    // mail, because every other setting lives in `framework`.
+    $settings = collectSettings(gsController()->index());
+
+    expect($settings['SPORA_ALLOW_REGISTRATION']['group'])->toBe('framework')
+        ->and($settings['SPORA_ALLOW_REGISTRATION']['section'] ?? 'access')->not->toBe('framework');
+});
+
+test('DELETE resets the key when addressed by its storage group', function (): void {
+    $controller = gsController();
+
+    $ok = $controller->reset('framework', 'SPORA_ALLOW_REGISTRATION');
+    $wrong = $controller->reset('access', 'SPORA_ALLOW_REGISTRATION');
+
+    expect($ok->getStatusCode())->toBe(200)
+        ->and(gsBody($ok)['data']['reset'])->toBe(['SPORA_ALLOW_REGISTRATION'])
+        ->and($wrong->getStatusCode())->toBe(422);
+});
+
+test('DELETE refuses a boot-only key', function (): void {
+    $response = gsController()->reset('framework', 'SPORA_DB_HOST');
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
 test('GET reports the source each value actually came from', function (): void {
     $config = new Config(
         ['SPORA_ALLOW_REGISTRATION' => false],

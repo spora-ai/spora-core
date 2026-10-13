@@ -162,6 +162,11 @@ final class GlobalSettingsController
 
         return [
             'key'           => $definition->key,
+            // The storage discriminator, NOT the section. They differ — every
+            // setting except mail's lives in `framework` while spanning
+            // several sections — and `DELETE /{group}/{key}` is addressed by
+            // this one.
+            'group'         => $definition->group,
             'label'         => $definition->label,
             'type'          => $definition->type,
             'description'   => $definition->description,
