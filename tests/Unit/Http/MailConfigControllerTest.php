@@ -16,6 +16,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function (): void {
     TestDatabaseFactory::boot();
+    // The MySQL/MariaDB CI databases are shared for the whole run and are only
+    // dropped when a test dirties the schema, so a row written by one test here
+    // is still present for the next one and the insert collides on the unique
+    // index. SQLite gets a fresh `:memory:` every time, which is why this only
+    // ever showed up on those engines.
+    Capsule::table('settings')->delete();
 });
 
 afterEach(fn() => Spora\Core\Database::resetBootState());
