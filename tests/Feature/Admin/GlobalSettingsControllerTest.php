@@ -269,3 +269,32 @@ test('a refused batch writes nothing at all', function (): void {
 
     expect($stored)->not->toHaveKey('SPORA_APP_NAME');
 });
+
+test('PATCH rejects a malformed body without writing anything', function (): void {
+    $controller = gsController();
+
+    $response = $controller->update(new Request([], [], [], [], [], [], '{not json'));
+    $body     = gsBody($response);
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and($body['error']['code'])->toBe('INVALID_JSON');
+});
+
+test('PATCH rejects an entry that is not an object or carries no key', function (): void {
+    $controller = gsController();
+
+    expect(gsPatch($controller, ['settings' => ['a string']])->getStatusCode())->toBe(422)
+        ->and(gsPatch($controller, ['settings' => [['value' => 1]]])->getStatusCode())->toBe(422);
+});
+
+test('PATCH refuses a scalar for a setting that takes a list', function (): void {
+    // The mirror of the array-for-scalar case: this one would have been
+    // `explode()`d into a single-entry list and stored as if the operator had
+    // typed it.
+    $response = gsPatch(gsController(), [
+        'settings' => [['key' => 'SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES', 'value' => 'png']],
+    ]);
+
+    expect($response->getStatusCode())->toBe(422)
+        ->and(gsBody($response)['error']['code'])->toBe('VALIDATION_ERROR');
+});

@@ -222,3 +222,43 @@ it('reports no shared values for a tool in no group', function (): void {
 
     expect($service->sharedGroupHasValues(Tests\Unit\Tools\AcmeStandaloneTool::class))->toBeFalse();
 });
+
+test('an unauthenticated caller cannot read tool settings', function (): void {
+    // The gate has three outcomes, not two: a global admin passes, a group
+    // admin passes, everyone else is 403 — and a caller with no session has
+    // to be 401 before the role lookup ever runs.
+    $kernel   = new Kernel(groupWritePaths());
+    $response = $kernel->handle(Request::create('/api/v1/tools/any-tool/settings', 'GET'));
+    $kernel->__destruct();
+
+    expect($response->getStatusCode())->toBe(401)
+        ->and(json_decode((string) $response->getContent(), true)['error']['code'])->toBe('UNAUTHENTICATED');
+});
+
+test('a plain member of a group still cannot read tool settings', function (): void {
+    // Being in a group is not enough — only owner and admin clear the bar.
+    $auth = bootAuthLayer();
+    $id   = bootAuth($auth, 'group-member@example.com', 'Password1!', 'Member');
+    simulateLoggedInSession($id, 'group-member@example.com');
+
+    $groupId = (int) Capsule::table('groups')->insertGetId([
+        'name'               => 'group-member-' . $id,
+        'description'        => null,
+        'created_by_user_id' => $id,
+        'created_at'         => date('Y-m-d H:i:s'),
+        'updated_at'         => date('Y-m-d H:i:s'),
+    ]);
+    Capsule::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $id,
+        'role'       => GroupMembership::ROLE_MEMBER,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    $kernel   = new Kernel(groupWritePaths());
+    $response = $kernel->handle(Request::create('/api/v1/tools/any-tool/settings', 'GET'));
+    $kernel->__destruct();
+
+    expect($response->getStatusCode())->toBe(403);
+});
