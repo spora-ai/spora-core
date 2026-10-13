@@ -6,6 +6,7 @@ namespace Tests\Unit\Tools;
 
 use Mockery;
 use ReflectionClass;
+use Spora\Core\Config;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
@@ -13,6 +14,7 @@ use Spora\Tools\AbstractTool;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
+use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
@@ -49,7 +51,7 @@ function instantiateAllTools(): array
     return [
         CalculatorTool::class       => new CalculatorTool(),
         TimeTool::class      => new TimeTool(),
-        ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService),
+        ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService, new HttpTimeoutResolver(new Config())),
         UserInfoTool::class         => new UserInfoTool(),
         SubAgentTool::class         => new SubAgentTool(
             Mockery::mock(HandoverServiceInterface::class),
