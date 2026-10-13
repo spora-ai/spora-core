@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Spora\Console\Commands;
 
 use Closure;
+use Psr\Container\ContainerInterface;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
+use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSeeder;
 use Spora\Core\Paths;
@@ -21,6 +23,9 @@ use Throwable;
 
 final class SeedCommand extends Command
 {
+    use AppliesSettingsOverlay;
+
+
     /**
      * We accept a factory closure instead of AuthService directly,
      * to avoid PHP-DI eagerly constructing Delight\Auth\Auth (which requires
@@ -34,6 +39,7 @@ final class SeedCommand extends Command
         private readonly MailTemplateSyncService $mailTemplateSync,
         private readonly AgentTemplateImporter $templateImporter,
         private readonly Paths $paths,
+        private readonly ContainerInterface $container,
     ) {
         parent::__construct('db:seed');
     }
@@ -58,7 +64,7 @@ final class SeedCommand extends Command
             }
 
             // Boot the DB connection before constructing anything that touches Eloquent or Auth.
-            $this->database->bootDatabaseConnectionOnly();
+            $this->applyRuntimeSettings($this->container, $this->database);
 
             /** @var AuthService $authService */
             $authService = ($this->authServiceFactory)();

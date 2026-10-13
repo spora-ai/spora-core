@@ -8,6 +8,7 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
+use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
@@ -35,6 +36,8 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 final class WorkerRunCommand extends Command
 {
+    use AppliesSettingsOverlay;
+
     private const REAP_INTERVAL_SECONDS = 300;
 
     private bool $shouldQuit = false;
@@ -110,7 +113,7 @@ final class WorkerRunCommand extends Command
 
     private function runWorker(InputInterface $input, OutputInterface $output): int
     {
-        $this->database->bootDatabaseConnectionOnly();
+        $this->applyRuntimeSettings($this->container, $this->database);
 
         // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,
         // next_run_at, last_run_at, completed_at, created_at, updated_at), and the

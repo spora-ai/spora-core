@@ -157,6 +157,17 @@ describe('TaskRunCommand — task claiming', function (): void {
         $nullFactory->allows('makeFromAgent')->andReturn($nullDriver);
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the command fails on an unexpected `get`.
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+
 
         // Simulate what execute() does at the task claim step.
         $taskId = $task->id;
@@ -216,6 +227,17 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the command fails on an unexpected `get`.
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+
         $notificationMock = Mockery::mock(NotificationService::class);
         $notificationMock->allows('notifyTaskCompleted')->andReturnNull();
         $container->allows('get')->with(NotificationService::class)->andReturn($notificationMock);
@@ -292,6 +314,17 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the command fails on an unexpected `get`.
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+
         $notificationMock = Mockery::mock(NotificationService::class);
         $notificationMock->allows('notifyTaskCompleted')->andReturnNull();
         $container->allows('get')->with(NotificationService::class)->andReturn($notificationMock);
@@ -375,6 +408,17 @@ describe('TaskRunCommand — task claiming', function (): void {
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($nullFactory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the command fails on an unexpected `get`.
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+
         $container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );
@@ -471,6 +515,17 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $container->allows('get')->with(Database::class)->andReturn($db);
         $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
         $container->allows('get')->with('tool_instances')->andReturn([]);
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the command fails on an unexpected `get`.
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+
         $container->allows('get')->with(NotificationService::class)->andReturn(
             Mockery::mock(NotificationService::class),
         );

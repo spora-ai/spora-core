@@ -19,6 +19,8 @@ use Spora\Models\ScheduledRunNext;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Settings\SettingsRegistry;
+use Spora\Settings\SettingsRepository;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\NullOutput;
 
@@ -64,6 +66,12 @@ function makeWorkerRunCommand(): array
     /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
     $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
     $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+    // AppliesSettingsOverlay resolves these three; the mock container is
+    // strict, so without them the overlay gets nulls.
+    $container->allows('get')->with(SettingsRegistry::class)
+        ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+    $container->allows('get')->with(SettingsRepository::class)
+        ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
     // WorkerRunCommand now resolves WorkerReaper from the container (DI wiring
     // shipped in Plan 2). The real container's factory wires the optional
     // SubAgentServiceInterface as `null`; the test mock returns a fresh
@@ -519,6 +527,12 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
         );
@@ -926,6 +940,12 @@ describe('WorkerRunCommand --reap-only', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
         );
@@ -996,6 +1016,12 @@ describe('WorkerRunCommand --reap-only', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 1]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->allows('get')->with('tool_instances')->andReturn([]);
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notificationService, null),
@@ -1067,6 +1093,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );
@@ -1096,6 +1128,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );
@@ -1125,6 +1163,12 @@ describe('WorkerRunCommand mode flag validation', function (): void {
         /** @var Mockery\MockInterface&Psr\Container\ContainerInterface $container */
         $container    = Mockery::mock(Psr\Container\ContainerInterface::class)->shouldIgnoreMissing();
         $container->allows('get')->with(Config::class)->andReturn(new Config(['SPORA_WORKER_STALE_MINUTES' => 60]));
+        // AppliesSettingsOverlay resolves these three; the mock container is
+        // strict, so without them the overlay gets nulls.
+        $container->allows('get')->with(SettingsRegistry::class)
+            ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
+        $container->allows('get')->with(SettingsRepository::class)
+            ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
         $container->shouldReceive('get')->with(Spora\Console\Worker\WorkerReaper::class)->andReturn(
             new Spora\Console\Worker\WorkerReaper(new NullLogger(), $notification, null),
         );

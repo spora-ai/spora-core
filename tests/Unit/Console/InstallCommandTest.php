@@ -13,7 +13,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 function makeInstallTester(Database $db): CommandTester
 {
     Database::resetBootState();
-    $command = new InstallCommand($db, new DatabaseSchemaInstaller(null, null), new Paths(BASE_PATH));
+    $command = new InstallCommand($db, new DatabaseSchemaInstaller(null, null), new Paths(BASE_PATH), settingsAwareContainer());
     $command->setName('spora:install');
 
     return new CommandTester($command);

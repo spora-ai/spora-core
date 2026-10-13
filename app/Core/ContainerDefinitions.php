@@ -1508,6 +1508,7 @@ final class ContainerDefinitions
                     $c->get(MailTemplateSyncService::class),
                     $c->get(AgentTemplateImporter::class),
                     $c->get(Paths::class),
+                    $c,
                 );
             },
 

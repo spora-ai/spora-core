@@ -618,3 +618,23 @@ if (!function_exists('makeMediaArchiveService')) {
         ];
     }
 }
+
+/**
+ * A container able to resolve `Config`, `SettingsRepository` and
+ * `SettingsRegistry`.
+ *
+ * `AppliesSettingsOverlay` pulls all three from the container it is handed, so
+ * a command test that constructs one needs a real graph — a stub returning
+ * nulls would make the command under test appear to work.
+ *
+ * Lives here rather than in either command's test file because Pest shares one
+ * global function namespace across test files, so the same helper name in two
+ * of them is a fatal redeclare.
+ */
+function settingsAwareContainer(): Psr\Container\ContainerInterface
+{
+    $builder = new DI\ContainerBuilder();
+    $builder->addDefinitions(Spora\Core\ContainerDefinitions::all());
+
+    return $builder->build();
+}
