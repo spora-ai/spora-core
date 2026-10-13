@@ -61,6 +61,7 @@ use Spora\Http\GroupMemberController;
 use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
 use Spora\Http\GroupToolsController;
+use Spora\Http\GlobalSettingsController;
 use Spora\Http\HealthController;
 use Spora\Http\LLMConfigController;
 use Spora\Http\MailConfigController;
@@ -1243,6 +1244,8 @@ final class ContainerDefinitions
                     $c->get(UserServiceInterface::class),
                 );
             },
+
+            GlobalSettingsController::class => \DI\autowire(),
 
             MailConfigController::class => static function (ContainerInterface $c): MailConfigController {
                 return new MailConfigController(

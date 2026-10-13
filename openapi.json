@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.29.0-19-ged814894"
+        "version": "0.30.0-28-g041249e4"
     },
     "servers": [
         {
@@ -4496,6 +4496,90 @@
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/settings": {
+            "get": {
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Every declared setting, its current value and where that value came from",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Settings grouped by section"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Upsert settings",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Keys written"
+                    },
+                    "422": {
+                        "description": "Unknown key, boot-only key, or failed validation"
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/settings/{group}/{key}": {
+            "delete": {
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Reset one setting to its declared default",
+                "parameters": [
+                    {
+                        "name": "group",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "key",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Key reset"
+                    },
+                    "422": {
+                        "description": "Unknown or boot-only key"
                     }
                 },
                 "security": [

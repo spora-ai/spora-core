@@ -23,6 +23,7 @@ use Spora\Http\GroupToolsController;
 use Spora\Http\HealthController;
 use Spora\Http\KeepMediaController;
 use Spora\Http\LLMConfigController;
+use Spora\Http\GlobalSettingsController;
 use Spora\Http\MailConfigController;
 use Spora\Http\MailTemplateController;
 use Spora\Http\MediaAllowedTypesController;
@@ -67,6 +68,9 @@ final class RouteDefinitions
     public const ROUTE_LLM_CONFIGS_ID = '/api/v1/llm-configs/{id}';
     public const ROUTE_USERS_ID = '/api/v1/users/{id}';
     public const ROUTE_MAIL_TEMPLATES_ID = '/api/v1/mail-templates/{id}';
+
+    public const ROUTE_ADMIN_SETTINGS = '/api/v1/admin/settings';
+    public const ROUTE_ADMIN_SETTINGS_ITEM = '/api/v1/admin/settings/{group}/{key}';
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
@@ -425,6 +429,16 @@ final class RouteDefinitions
 
     private static function registerMailRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
+        $adminOnly = [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class];
+
+        // The global settings store. Every route here is admin-gated:
+        // `SPORA_ALLOW_REGISTRATION`, mail credentials and the plugin-install
+        // flag are all things a non-admin must not be able to change for
+        // everyone.
+        $r->addRoute('GET', self::ROUTE_ADMIN_SETTINGS, [GlobalSettingsController::class, 'index'], $adminOnly);
+        $r->addRoute('PATCH', self::ROUTE_ADMIN_SETTINGS, [GlobalSettingsController::class, 'update'], $adminOnly);
+        $r->addRoute('DELETE', self::ROUTE_ADMIN_SETTINGS_ITEM, [GlobalSettingsController::class, 'reset'], $adminOnly);
+
         $r->addRoute('GET', '/api/v1/mail-config', [MailConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/mail-config', [MailConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/mail-config/test', [MailConfigController::class, 'test'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);

@@ -35,6 +35,26 @@ use Spora\Services\PluginCatalogService;
  */
 final class SettingsRegistry
 {
+    /**
+     * Section key => operator-facing label, in display order.
+     *
+     * The UI groups by this, not by key shape, so flattening the nested
+     * config keys cost the operator nothing.
+     *
+     * @var array<string, string>
+     */
+    public const SECTION_LABELS = [
+        'general'   => 'General',
+        'access'    => 'Access',
+        'timeouts'  => 'Timeouts',
+        'worker'    => 'Worker',
+        'plugins'   => 'Plugins',
+        'media'     => 'Media',
+        'mail'      => 'Mail',
+        'database'  => 'Database',
+        'security'  => 'Security',
+    ];
+
     /** @var array<string, SettingDefinition>|null */
     private ?array $definitions = null;
 
@@ -46,6 +66,14 @@ final class SettingsRegistry
     public function all(): array
     {
         return $this->definitions ??= $this->build();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function sectionLabels(): array
+    {
+        return self::SECTION_LABELS;
     }
 
     public function has(string $key): bool
