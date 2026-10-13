@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use Psr\Log\LoggerInterface;
 use ReflectionClass;
+use Spora\Tools\Attributes\SharedSettings;
 use Spora\Tools\Attributes\Tool;
 
 /**
@@ -19,22 +20,38 @@ use Spora\Tools\Attributes\Tool;
 final class ToolConfigNameResolver
 {
     /** @var array<string, string> tool name (from #[Tool(name:)]) => fully-qualified class name */
+    /** Namespace for shared settings group ids inside the name map. */
+    public const GROUP_PREFIX = 'group:';
+
     private ?array $toolNameMap = null;
 
     /** @var list<string> */
     private readonly array $toolClasses;
+
+    /** @var list<class-string> */
+    private readonly array $settingsGroupClasses;
 
     private readonly LoggerInterface $logger;
 
     /**
      * @param list<string> $toolClasses
      */
+    /**
+ * @param list<class-string> $toolClasses
+ * @param list<class-string> $settingsGroupClasses Classes carrying
+ *        `#[SharedSettings]`. Indexed by their `group` slug so a group id
+ *        resolves like a tool name — without this the only writer of
+ *        `tool_configurations` cannot address a group at all, and the whole
+ *        shared-settings feature is unreachable from the API.
+ */
     public function __construct(
         LoggerInterface $logger,
         array $toolClasses = [],
+        array $settingsGroupClasses = [],
     ) {
         $this->logger = $logger;
         $this->toolClasses = $toolClasses;
+        $this->settingsGroupClasses = $settingsGroupClasses;
     }
 
     /**
@@ -92,6 +109,20 @@ final class ToolConfigNameResolver
     }
 
     /**
+     * Resolve a shared settings group's slug to its declaring class.
+     *
+     * Namespaced under `group:` in the same map rather than indexed bare,
+     * because a bare slug that happens to equal a tool name would make a
+     * group write silently resolve to a tool write.
+     */
+    public function resolveGroupClass(string $groupId): ?string
+    {
+        $class = $this->buildToolNameMap()[self::GROUP_PREFIX . $groupId] ?? null;
+
+        return $class;
+    }
+
+    /**
      * Return all registered tool class names.
      *
      * @return list<string>
@@ -125,6 +156,24 @@ final class ToolConfigNameResolver
                 $tool = $attrs[0]->newInstance();
                 $this->toolNameMap[$tool->name] = $class;
             }
+        }
+
+        // Shared settings groups carry no `#[Tool]` — they are not tools — so
+        // the loop above can never see them. Indexed here by their group slug
+        // so `PUT /api/v1/tools/{groupId}/settings` resolves, which is what
+        // makes the shared credential writable at all.
+        foreach ($this->settingsGroupClasses as $class) {
+            if (!class_exists($class)) {
+                $this->logger->warning('buildToolNameMap: skipping non-existent settings group', ['class' => $class]);
+                continue;
+            }
+            $groupAttrs = (new ReflectionClass($class))->getAttributes(SharedSettings::class);
+            if ($groupAttrs === []) {
+                continue;
+            }
+            /** @var SharedSettings $group */
+            $group = $groupAttrs[0]->newInstance();
+            $this->toolNameMap[self::GROUP_PREFIX . $group->group] = $class;
         }
 
         return $this->toolNameMap;

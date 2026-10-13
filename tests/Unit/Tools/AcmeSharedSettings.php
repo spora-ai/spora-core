@@ -17,7 +17,7 @@ use Spora\Tools\Attributes\ToolSetting;
  * layer was in the resolution.
  */
 #[SharedSettings(
-    group: 'acme',
+    group: 'acme',  // see self::ID
     label: 'Acme',
     description: 'Credentials shared by every Acme tool.',
     icon: 'key',
@@ -27,4 +27,8 @@ use Spora\Tools\Attributes\ToolSetting;
 #[ToolSetting(key: 'api_key', label: 'API key', type: 'password', required: true)]
 #[ToolSetting(key: 'region', label: 'Region', type: 'text')]
 #[ToolSetting(key: 'retries', label: 'Retries', type: 'text', default: '3')]
-final class AcmeSharedSettings {}
+final class AcmeSharedSettings
+{
+    /** Must match the `group:` above — the id the API addresses it by. */
+    public const ID = 'acme';
+}

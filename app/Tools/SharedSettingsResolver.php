@@ -57,6 +57,28 @@ final class SharedSettingsResolver
     }
 
     /**
+     * The declaring classes, so a caller can index them somewhere reachable —
+     * {@see \Spora\Services\ToolConfigNameResolver} needs them for a group id
+     * to resolve to a class the settings writer can address.
+     *
+     * @return list<class-string>
+     */
+    public function settingsClasses(): array
+    {
+        return $this->settingsClasses;
+    }
+
+    /**
+     * The group ids in declaration order, for discovery on the API surface.
+     *
+     * @return list<string>
+     */
+    public function groupIds(): array
+    {
+        return array_keys($this->groupsById);
+    }
+
+    /**
      * The settings class whose values a tool falls back to, or null when the
      * tool names no group, implements no {@see ConsumesSharedSettings}, or
      * names a group no loaded plugin declared.

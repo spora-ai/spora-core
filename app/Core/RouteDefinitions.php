@@ -35,6 +35,7 @@ use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Http\Middleware\GroupAdminMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\NotificationSubscriptionController;
 use Spora\Http\PluginsController;
@@ -260,9 +261,14 @@ final class RouteDefinitions
     private static function registerToolRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
         $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'getSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PUT', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'putSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'deleteSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // Tool settings carry credentials. They were readable and writable by
+        // any signed-in user until this gate; see GroupAdminMiddleware for why
+        // the bar is group administration rather than the global admin role.
+        $toolSettings = [AuthMiddleware::class, CsrfMiddleware::class, GroupAdminMiddleware::class];
+
+        $r->addRoute('GET', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'getSettings'], $toolSettings);
+        $r->addRoute('PUT', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'putSettings'], $toolSettings);
+        $r->addRoute('DELETE', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'deleteSettings'], $toolSettings);
 
         $r->addRoute('GET', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'getUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'putUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);

@@ -91,7 +91,11 @@ class ToolConfigService implements ToolConfigServiceInterface
         // always passes the resolver.
         $this->schema = $schema ?? new ToolConfigSchemaInspector(principalResolver: $principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
-        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
+        // The shared-settings classes go in too: `ToolController` writes through
+        // this resolver, and without them a group id resolves to nothing — so
+        // the shared credential the feature exists to store had no reachable
+        // write path at all.
+        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses, $sharedSettings?->settingsClasses() ?? []);
         $this->cascade = new ToolConfigPrincipalCascade(
             $principalService ?? new PrincipalService($principalResolver ?? new PrincipalResolver()),
             $groupCascadeEnabled,
