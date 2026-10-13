@@ -77,20 +77,22 @@ final class TestDatabaseFactory
         if (self::$workerSchemaInstalled) {
             // Re-establish the skip flag — resetBootState() clears it so test files that bypass the factory don't inherit "already installed" against an empty DB.
             Database::setSchemaInstallSkipped(true);
-
-            // The shared engine keeps every row a previous test wrote, and
-            // `settings` has a unique index on (group_key, setting_key). A test
-            // that writes a key a previous test already wrote collides on it,
-            // and a test asserting "nothing was stored" sees the earlier row.
-            // SQLite gets a fresh `:memory:` on every boot(), so it never showed
-            // there — this is the one place the difference can be papered over
-            // for every test file rather than per file.
-            if (Capsule::connection()->getSchemaBuilder()->hasTable('settings')) {
-                Capsule::table('settings')->delete();
-            }
         }
 
         (new Database(self::buildConfigForDriver()))->boot();
+
+        // The shared engine keeps every row a previous test wrote, and
+        // `settings` has a unique index on (group_key, setting_key). A test
+        // that writes a key a previous test already wrote collides on it, and a
+        // test asserting "nothing was stored" sees the earlier row. SQLite gets
+        // a fresh `:memory:` on every boot(), so it never showed there.
+        //
+        // After the boot, not before: `resetBootState()` tears the connection
+        // down, and querying it first left the MySQL and MariaDB jobs hanging
+        // on a connection that was no longer usable.
+        if (self::$workerSchemaInstalled && Capsule::connection()->getSchemaBuilder()->hasTable('settings')) {
+            Capsule::table('settings')->delete();
+        }
 
         self::$workerSchemaInstalled = true;
     }
