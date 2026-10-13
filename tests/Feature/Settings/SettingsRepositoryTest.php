@@ -148,3 +148,40 @@ it('reads back cleanly after a secret was cleared with an empty string', functio
     // read of the key throw, so the whole settings page fails to load.
     expect($repository->allForGroup('mail'))->toBe([]);
 });
+
+it('writes a key that already exists without violating the unique index', function (): void {
+    // `updateOrInsert()` is SELECT-then-INSERT with no retry: MariaDB raised
+    // "Duplicate entry 'mail-SPORA_MAIL_HOST'" against the unique index. An
+    // atomic upsert removes the window entirely, and a second write has to
+    // update the row rather than add one.
+    [$registry, $repository] = settingsRepositoryFixture();
+
+    $repository->put($registry->get('SPORA_MAIL_HOST'), 'smtp.example.com', null);
+    $repository->put($registry->get('SPORA_MAIL_HOST'), 'other.example.com', null);
+
+    $rows = Capsule::table('settings')->where('setting_key', 'SPORA_MAIL_HOST')->get();
+
+    expect($rows)->toHaveCount(1)
+        ->and($rows->first()->value)->toBe('other.example.com');
+});
+
+it('keeps created_at across a second write', function (): void {
+    [$registry, $repository] = settingsRepositoryFixture();
+
+    Capsule::table('settings')->insert([
+        'group_key'   => 'mail',
+        'setting_key' => 'SPORA_MAIL_PORT',
+        'value'       => '25',
+        'encrypted'   => false,
+        'updated_by'  => null,
+        'created_at'  => '2020-01-01 00:00:00',
+        'updated_at'  => '2020-01-01 00:00:00',
+    ]);
+
+    $repository->put($registry->get('SPORA_MAIL_PORT'), '587', null);
+
+    $row = Capsule::table('settings')->where('setting_key', 'SPORA_MAIL_PORT')->first();
+
+    expect((string) $row->created_at)->toStartWith('2020-01-01')
+        ->and($row->value)->toBe('587');
+});

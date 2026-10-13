@@ -107,9 +107,22 @@ final class SettingsRepository
             'updated_at' => Carbon::now(),
         ];
 
-        Capsule::table('settings')->updateOrInsert(
-            ['group_key' => $definition->group, 'setting_key' => $definition->key],
-            $payload,
+        // A native upsert, not `updateOrInsert()`. That one is a SELECT
+        // followed by an INSERT or an UPDATE with no transaction and no retry,
+        // so two writers racing on a key neither has stored both miss, both
+        // insert, and the second one dies on the unique index — which surfaces
+        // as a 500 on a settings save rather than as a lost write.
+        //
+        // `created_at` is deliberately absent from the update list, so it is
+        // written on insert and left alone afterwards.
+        Capsule::table('settings')->upsert(
+            [$payload + [
+                'group_key'   => $definition->group,
+                'setting_key' => $definition->key,
+                'created_at'  => Carbon::now(),
+            ]],
+            ['group_key', 'setting_key'],
+            ['value', 'encrypted', 'updated_by', 'updated_at'],
         );
     }
 
