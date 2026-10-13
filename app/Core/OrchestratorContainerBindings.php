@@ -187,8 +187,8 @@ final class OrchestratorContainerBindings
                 return new NotificationService(
                     $c->get(MercurePublisherInterface::class),
                     $c->get(PrincipalResolver::class),
-                    $c->get(SystemMailer::class),
                     $c->get(Config::class),
+                    $c->get(SystemMailer::class),
                     $c->get(NotificationSubscriptionService::class),
                 );
             },
