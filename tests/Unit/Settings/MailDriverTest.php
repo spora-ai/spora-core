@@ -50,3 +50,18 @@ it('can represent the log driver it always accepted', function (): void {
 
     expect($registry->coerce($driver, 'log'))->toBe('log');
 });
+
+it('offers only the encryption values the mailer accepts', function (): void {
+    // `SystemMailer::buildSmtpDsn()` throws for anything outside `tls`/`ssl`.
+    // The registry is the authority the admin UI renders its dropdown from,
+    // so an option it declares is one an operator can pick — and "None"
+    // (value '') bricked every send once taken, with a 200 to confirm it.
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
+    $encryption = $registry->get('SPORA_MAIL_ENCRYPTION');
+
+    $offered = array_column($encryption->options, 'value');
+
+    expect($offered)->toBe(['tls', 'ssl'])
+        ->and($offered)->not->toContain('')
+        ->and($offered)->toContain($encryption->default);
+});

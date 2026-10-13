@@ -631,8 +631,13 @@ final class SettingsRegistry
             default: 'tls',
             group: 'mail',
             section: 'mail',
+            // No "None" here: `SystemMailer::buildSmtpDsn()` throws for
+            // anything that is not `tls` or `ssl`, so an empty option put a
+            // choice in the operator's hands that bricks every send once
+            // taken — with a 200 confirming it was saved. The registry is what
+            // the admin dropdown renders from, so it must not advertise a
+            // value the application rejects.
             options: [
-                ['value' => '', 'label' => 'None'],
                 ['value' => 'tls', 'label' => 'TLS'],
                 ['value' => 'ssl', 'label' => 'SSL'],
             ],
