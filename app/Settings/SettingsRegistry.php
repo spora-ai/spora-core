@@ -257,7 +257,18 @@ final class SettingsRegistry
         }
         $normalized = [];
         foreach ($tokens as $token) {
-            $t = ltrim(strtolower(trim($token)), '.');
+            // A token can arrive wrapped in JSON or quoting — the admin UI
+            // renders a `list` setting as a textarea, and a list that came
+            // back through one is re-tokenised from whatever the operator
+            // left behind. `trim()` strips whitespace, not the quote
+            // characters or the brackets a JSON array carries, and a
+            // `"svg"` token would otherwise sail past the check below
+            // because it does not *start with* `svg`.
+            //
+            // This is a security control, so it must hold for the spelling
+            // the UI produces as readily as for the one a person types.
+            $t = strtolower(trim($token, " \t\n\r\0\x0B\"'[]"));
+            $t = ltrim($t, '.');
             if ($t === '') {
                 continue;
             }

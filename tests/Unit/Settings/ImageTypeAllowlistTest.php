@@ -28,8 +28,15 @@ it('rejects svg from every input form', function (mixed $input): void {
         ? $registry->coerce($definition, $input)
         : $registry->decode($definition, $input);
 
-    expect($result)->not->toContain('svg')
-        ->and($result)->not->toContain('svg+xml');
+    // Joined and compared as one string rather than by array membership.
+    // Membership let this pass against the bug it was written for: a JSON
+    // input yields the token `"svg"` — quotes still attached — and
+    // `'"svg"' !== 'svg'`, so the assertion held while the allowlist carried
+    // an SVG entry. This test reported the control as covered; it was not.
+    //
+    // One assertion over the joined value rather than a loop, so a fully
+    // rejected list still counts as an assertion instead of a risky test.
+    expect(strtolower(implode(' ', array_map('strval', $result))))->not->toContain('svg');
 })->with([
     'env var, comma separated' => ['png,svg,jpeg'],
     'env var, whitespace'      => ["png\nsvg\njpeg"],
@@ -88,4 +95,40 @@ it('does not apply the svg rule to lists that do not declare it', function (): v
     $plain = new SettingDefinition(key: 'SPORA_TEST_PLAIN_LIST', label: 't', type: SettingDefinition::TYPE_LIST);
 
     expect($registry->decode($plain, 'png,svg'))->toBe(['png', 'svg']);
+});
+
+/**
+ * The admin page renders a `list` setting into a textarea. The datasets
+ * above all pass, and did so while the control was open: an array input
+ * reaches `coerce()` and an array-shaped string reaches `decode()`, which
+ * JSON-decodes before tokenising — so neither of them ever produced the
+ * quotes that defeat the `svg` check.
+ *
+ * The write path is the one that sees them. `SettingsRepository::put()`
+ * passes the textarea's text to `coerce()`, where it is split on whitespace
+ * and commas *without* being JSON-decoded first, so `[` and `"` survive into
+ * the tokens. `'svg'` quoted is not `svg`-prefixed, so it was allowed.
+ */
+it('rejects svg from the write path when the value arrives as textarea text', function (string $input): void {
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
+    $definition = $registry->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+    $result = $registry->coerce($definition, $input);
+
+    expect(strtolower(implode(' ', array_map('strval', $result))))->not->toContain('svg');
+})->with([
+    'as the textarea renders an untouched list' => '["png","svg"]',
+    'with an operator edit below it'            => "[\"png\",\"svg\"]\ngif",
+    'single quoted'                             => "'svg'",
+    'bracketed without quotes'                  => '[svg]',
+]);
+
+it('stores clean tokens when a textarea-sent list is coerced', function (): void {
+    // Without this the allowlist is silently corrupted for every edit: the
+    // quotes become part of each stored entry, so `png` stops matching the
+    // real MIME subtype and the allowlist permits nothing at all.
+    $registry = new SettingsRegistry(new Paths(BASE_PATH));
+    $definition = $registry->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
+
+    expect($registry->coerce($definition, "[\"png\",\"jpeg\"]\ngif"))->toBe(['png', 'jpeg', 'gif']);
 });
