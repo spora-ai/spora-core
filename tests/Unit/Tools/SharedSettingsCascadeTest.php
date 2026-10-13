@@ -187,3 +187,27 @@ it('encrypts the shared credential at rest like any other password setting', fun
         ->and($stored->getRawOriginal('settings'))->not->toContain('shared-secret')
         ->and($service->getGlobalSettings(AcmeSharedSettings::class)['api_key'])->toBe('shared-secret');
 });
+
+it('labels a group value that overrode a code default as shared', function (): void {
+    // `applyToDefaults()` writes the group's value into the same array it was
+    // given, so testing the merged result against the schema defaults could
+    // not tell them apart: `retries` came back as `"99"` from the group and
+    // was annotated `default`, contradicting the method's own contract.
+    $service = sharedToolConfig();
+    $service->putGlobalSettings(AcmeSharedSettings::class, ['retries' => '99']);
+
+    $annotated = $service->getEffectiveSettingsWithSource(AcmeChatTool::class, 0);
+
+    expect($annotated['retries']['value'])->toBe('99')
+        ->and($annotated['retries']['source'])->toBe('shared');
+});
+
+it('still labels a key only the schema declares as default', function (): void {
+    $service = sharedToolConfig();
+    $service->putGlobalSettings(AcmeSharedSettings::class, ['api_key' => 'from-group']);
+
+    $annotated = $service->getEffectiveSettingsWithSource(AcmeChatTool::class, 0);
+
+    expect($annotated['api_key']['source'])->toBe('shared')
+        ->and($annotated['region']['source'] ?? 'default')->toBe('default');
+});

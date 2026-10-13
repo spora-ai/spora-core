@@ -201,7 +201,11 @@ final class RouteDefinitions
         // stays per-group RBAC. The SPA mirrors this via the `/api/v1/config`
         // endpoint (`allow_group_creation`) so it knows whether to surface the
         // Create-group button on MyGroupsPage.
-        $createMiddleware = ($config?->getBool('SPORA_ALLOW_GROUP_CREATION') ?? true)
+        // `getBool()` returns bool and defaults to false for a missing key, so
+        // `?? true` could only ever fire for a null Config. Written out, because
+        // it reads as a guard: the pre-migration `($config['allow_group_creation']
+        // ?? true)` did default to open, and this silently inverted that.
+        $createMiddleware = ($config === null ? true : $config->getBool('SPORA_ALLOW_GROUP_CREATION', true))
             ? [AuthMiddleware::class, CsrfMiddleware::class]
             : [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class];
         $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], $createMiddleware);

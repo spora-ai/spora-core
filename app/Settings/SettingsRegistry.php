@@ -123,10 +123,14 @@ final class SettingsRegistry
     }
 
     /**
-     * Normalise a raw value from any layer into this setting's declared type.
+     * Normalise a raw value into this setting's declared type.
      *
-     * Every layer goes through here, so `config.php`, `.env` and the DB cannot
-     * disagree about what `'1'` means for a toggle.
+     * `config.php` and `.env` come through here. The database is read by
+     * {@see self::decode()}, which normalises list and toggle forms but applies
+     * no `transform` — so the two can disagree about a key that has one. A row
+     * written through {@see \Spora\Settings\SettingsRepository::put()} is
+     * canonical already, because that path coerces before it encodes; one
+     * inserted by any other means comes back un-normalised.
      */
     public function coerce(SettingDefinition $d, mixed $raw): mixed
     {

@@ -381,6 +381,13 @@ final class ContainerDefinitions
             SharedSettingsResolver::class => static fn(ContainerInterface $c): SharedSettingsResolver
                 => new SharedSettingsResolver($c->get(PluginLoader::class)->settingsClasses()),
 
+            // Explicit rather than autowired: every other class-keyed service a
+            // factory pulls in is registered, and autowiring hides the fact
+            // that this one resolves only because its single argument happens
+            // to be autowirable.
+            HttpTimeoutResolver::class => static fn(ContainerInterface $c): HttpTimeoutResolver
+                => new HttpTimeoutResolver($c->get(Config::class)),
+
             ToolConfigService::class => static function (ContainerInterface $c): ToolConfigService {
                 $config = $c->get(Config::class);
                 return new ToolConfigService(

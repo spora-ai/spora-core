@@ -538,12 +538,31 @@ class ToolConfigService implements ToolConfigServiceInterface
     {
         [$cascadePrincipalIds, $userPrincipalId] = $this->cascade->resolvePrincipalIdsWithUserRef($userId, $context);
 
-        $defaults = $this->schema->getSchemaDefaults($toolClass);
-        $shared = $this->sharedSettings->applyToDefaults($toolClass, $defaults, $this->getGlobalSettings(...));
+        $schemaDefaults = $this->schema->getSchemaDefaults($toolClass);
+        $shared = $this->sharedSettings->applyToDefaults($toolClass, $schemaDefaults, $this->getGlobalSettings(...));
+
+        // Which keys the group actually supplied. `applyToDefaults()` writes
+        // them into the same array, so testing the merged result against
+        // `$schemaDefaults` cannot tell the two apart — a group value that
+        // overrode a code default was labelled `default`, contradicting the
+        // method's own contract and mis-rendering in the form that reads
+        // `source`.
+        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
+        $fromGroup  = $groupClass === null
+            ? []
+            : array_keys(array_filter(
+                $this->getGlobalSettings($groupClass),
+                static fn(mixed $v): bool => $v !== null && $v !== '',
+            ));
 
         $result = [];
         foreach ($shared as $key => $value) {
-            $result[$key] = ['value' => $value, 'source' => array_key_exists($key, $defaults) ? 'default' : 'shared'];
+            $result[$key] = [
+                'value'  => $value,
+                'source' => in_array($key, $fromGroup, true)
+                    ? 'shared'
+                    : (array_key_exists($key, $schemaDefaults) ? 'default' : 'shared'),
+            ];
         }
 
         $global = $this->getGlobalSettings($toolClass);
@@ -582,7 +601,7 @@ class ToolConfigService implements ToolConfigServiceInterface
             if (($result[$key]['value'] ?? null) === '') {
                 $result[$key] = [
                     'value'  => $value,
-                    'source' => array_key_exists($key, $defaults) ? 'default' : 'shared',
+                    'source' => array_key_exists($key, $schemaDefaults) ? 'default' : 'shared',
                 ];
             }
         }
