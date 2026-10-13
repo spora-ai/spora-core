@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use Mockery;
 use Psr\Log\LoggerInterface;
+use Spora\Core\Config;
 use Spora\Services\MediaArchive\PdfMarkdownExtractor;
 use Spora\Services\ToolConfigService;
+use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\ReadUrlTool;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -16,6 +18,12 @@ function makeReadUrlToolConfig(): ToolConfigService
     $config = Mockery::mock(ToolConfigService::class);
     $config->allows('getEffectiveSettings')->andReturn([]);
     return $config;
+}
+
+/** @param array<string, mixed> $globalSettings */
+function makeReadUrlTimeoutResolver(array $globalSettings = []): HttpTimeoutResolver
+{
+    return new HttpTimeoutResolver(new Config($globalSettings));
 }
 
 /**
@@ -52,7 +60,7 @@ it('fetches valid html and converts to markdown', function () {
 
     $client->expects('request')->with('GET', 'https://example.com', Mockery::any())->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
     $result = $tool->execute(['url' => 'https://example.com'], 1);
 
     expect($result->success)->toBeTrue()
@@ -71,7 +79,7 @@ it('fetches xml or rss directly without converting to markdown', function () {
 
     $client->expects('request')->with('GET', 'https://example.com/feed.xml', Mockery::any())->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
     $result = $tool->execute(['url' => 'https://example.com/feed.xml'], 1);
 
     expect($result->success)->toBeTrue()
@@ -81,7 +89,7 @@ it('fetches xml or rss directly without converting to markdown', function () {
 
 it('returns error on invalid url', function () {
     $client = Mockery::mock(HttpClientInterface::class);
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
 
     $result = $tool->execute(['url' => 'not-a-valid-url'], 1);
 
@@ -91,7 +99,7 @@ it('returns error on invalid url', function () {
 
 it('blocks non-http schemes to prevent SSRF', function () {
     $client = Mockery::mock(HttpClientInterface::class);
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
 
     foreach (['file:///etc/passwd', 'ftp://internal.host/file', 'gopher://evil.com'] as $url) {
         $result = $tool->execute(['url' => $url], 1);
@@ -110,7 +118,7 @@ it('truncates very large responses to protect the context window', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
     $result = $tool->execute(['url' => 'https://example.com/huge'], 1);
 
     expect($result->success)->toBeTrue()
@@ -126,7 +134,7 @@ it('gracefully handles http error response', function () {
 
     $client->expects('request')->with('GET', 'https://example.com/404', Mockery::any())->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
     $result = $tool->execute(['url' => 'https://example.com/404'], 1);
 
     expect($result->success)->toBeFalse()
@@ -141,11 +149,60 @@ it('gracefully handles http client exceptions', function () {
 
     $client->expects('request')->andThrows(new Exception('Network timeout'));
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), $logger);
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), $logger);
     $result = $tool->execute(['url' => 'https://example.com/timeout'], 1);
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('Network timeout');
+});
+
+/**
+ * Asserts at the HTTP client rather than on the resolver: the value an
+ * operator configured has to arrive as the request's own `timeout` option.
+ *
+ * @param array<string, mixed> $toolSettings
+ */
+function assertTimeoutReachesHttpClient(array $toolSettings, int $expected, int $globalTimeout = 30): void
+{
+    $captured = null;
+
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
+    $response->allows('getStatusCode')->andReturn(200);
+    $response->allows('getHeaders')->andReturn(['content-type' => ['text/plain']]);
+    $response->allows('getContent')->andReturn('body text');
+
+    $client->expects('request')->andReturnUsing(
+        static function (string $method, string $url, array $options) use (&$captured, $response): ResponseInterface {
+            $captured = $options['timeout'] ?? null;
+
+            return $response;
+        },
+    );
+
+    $configService = Mockery::mock(ToolConfigService::class);
+    $configService->allows('getEffectiveSettings')->andReturn($toolSettings);
+
+    $tool = new ReadUrlTool(
+        $client,
+        $configService,
+        makeReadUrlTimeoutResolver(['SPORA_TOOL_HTTP_TIMEOUT' => $globalTimeout]),
+    );
+    $tool->execute(['url' => 'https://example.com'], 1);
+
+    expect($captured)->toBe($expected);
+}
+
+it('sends the global timeout configured through Config, not a hard-coded one', function () {
+    assertTimeoutReachesHttpClient([], 7, 7);
+});
+
+it('sends the tool setting in preference to the global timeout', function () {
+    assertTimeoutReachesHttpClient(['http_timeout' => 12], 12, 7);
+});
+
+it('treats a tool setting of 0 as unset rather than as a zero-second timeout', function () {
+    assertTimeoutReachesHttpClient(['http_timeout' => 0], 7, 7);
 });
 
 // ---------------------------------------------------------------------
@@ -160,7 +217,7 @@ it('fetches a PDF and returns its text as markdown', function () {
 
     $client->expects('request')->with('GET', 'https://example.com/doc.pdf', Mockery::any())->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor("# Heading\n\nbody text"));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor("# Heading\n\nbody text"));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeTrue()
@@ -170,7 +227,7 @@ it('fetches a PDF and returns its text as markdown', function () {
 
 it('returns an error when no PDF extractor is wired', function () {
     $client = Mockery::mock(HttpClientInterface::class);
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig());
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver());
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -189,7 +246,7 @@ it('returns an error when the extractor throws during conversion', function () {
     $logger->allows('error');
     $logger->allows('debug');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), $logger, makePdfExtractor(new RuntimeException('corrupt pdf')));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), $logger, makePdfExtractor(new RuntimeException('corrupt pdf')));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/doc.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -204,7 +261,7 @@ it('returns an error when the PDF fetch itself fails (HTTP 4xx)', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/missing.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -221,7 +278,7 @@ it('returns an error when the PDF is over the 50 MiB cap', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/big.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -236,7 +293,7 @@ it('returns an error when the extractor yields no readable text', function () {
 
     $client->expects('request')->andReturn($response);
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('   '));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('   '));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'https://example.com/scanned.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -247,7 +304,7 @@ it('refuses to fetch a PDF over the cloud-metadata IP (SSRF guard)', function ()
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://169.254.169.254/latest/meta-data/'], 1);
 
     expect($result->success)->toBeFalse()
@@ -258,7 +315,7 @@ it('refuses to fetch a PDF from a loopback hostname', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://localhost/secret.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -269,7 +326,7 @@ it('refuses to fetch a PDF from a private RFC1918 IP', function () {
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://10.0.0.5/internal.pdf'], 1);
 
     expect($result->success)->toBeFalse()
@@ -283,7 +340,7 @@ it('returns a helpful error when the fetch_pdf URL has no hostname after validat
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
-    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), null, makePdfExtractor('unused'));
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
     // `http://%20/path` is a syntactically valid URL whose host part
     // (%20) cannot resolve; verify it isn't fetched.
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://%20/path.pdf'], 1);
