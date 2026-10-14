@@ -349,7 +349,8 @@ final class SettingsRegistry
                 ['value' => 'WARNING', 'label' => 'Warning'],
                 ['value' => 'ERROR', 'label' => 'Error'],
             ],
-            description: 'Applies without a restart — the logger is built on first use, after boot.',
+            description: 'File-only. The log level is what you reach for when the interface itself is broken, so it cannot be changed from here.',
+            bootOnly: true,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_LOG_PATH',
@@ -418,7 +419,8 @@ final class SettingsRegistry
                 ['value' => 'server', 'label' => 'Server — bin/spora worker:run drains the queue'],
                 ['value' => 'client', 'label' => 'Client — browser SharedWorker, no daemon'],
             ],
-            description: 'Where queued tasks are executed.',
+            description: 'Where queued tasks are executed. File-only — a worker reads this at startup, so a change would not reach the daemon already running.',
+            bootOnly: true,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_TICK_LEASE_SECONDS',
@@ -445,9 +447,9 @@ final class SettingsRegistry
             type: SettingDefinition::TYPE_NUMBER,
             default: 0,
             section: 'worker',
-            description: 'Zero means no limit.',
+            description: 'Zero means no limit. File-only — a change needs a worker restart, which is exactly when the file is the right place for it.',
             validation: self::VALIDATION_UINT,
-            workerRestart: true,
+            bootOnly: true,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_TOOLS_GROUP_CASCADE_ENABLED',

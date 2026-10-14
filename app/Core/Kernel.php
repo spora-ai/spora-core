@@ -358,18 +358,11 @@ final class Kernel implements KernelInterface
         }
         ini_set('display_errors', '0');
 
-        // Capture $container, not $this: a closure on PHP's error-handler
+        // Capture $logger, not $this: a closure on PHP's error-handler
         // stack that captures $this forms an unbreakable cycle, so
         // __destruct can't restore_error_handler().
-        //
-        // The logger is resolved inside the handler rather than here. This
-        // method runs from the constructor, before
-        // `Config::applySettingsOverlay()`, so building the logger now would
-        // bake in a log level from the file layers and make a stored
-        // SPORA_LOG_LEVEL inert — the admin page would show it as saved from
-        // the database, and nothing would change.
-        $container = $this->container;
-        set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($container): bool {
+        $logger = $this->container->get(LoggerInterface::class);
+        set_error_handler(static function (int $errno, string $errstr, string $errfile, int $errline) use ($logger): bool {
             if (!(error_reporting() & $errno)) {
                 return true;
             }
@@ -386,7 +379,7 @@ final class Kernel implements KernelInterface
                 E_NOTICE, E_USER_NOTICE => 'info',
                 default => 'error',
             };
-            $container->get(LoggerInterface::class)->$logLevel(
+            $logger->$logLevel(
                 sprintf('PHP error %d: %s in %s:%d', $errno, $errstr, $errfile, $errline),
             );
 

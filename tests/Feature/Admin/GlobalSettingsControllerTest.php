@@ -176,6 +176,24 @@ test('PATCH refuses to write a boot-only key', function (): void {
         ->and(gsBody($response)['error']['code'])->toBe('VALIDATION_ERROR');
 });
 
+/**
+ * Why a setting is file-only is not the same reason twice: the database ones
+ * are read before the connection that would hold them exists, the log level is
+ * the diagnostic you reach for when the interface is broken, and a running
+ * worker never re-reads its mode or its worker count. The refusal must not
+ * depend on the controller knowing which reason applies, so it is asserted for
+ * every file-only key from the registry's own list.
+ *
+ * The message is asserted too — a 422 from type validation would otherwise
+ * satisfy a bare status check on, say, a toggle handed the string 'anything'.
+ */
+test('PATCH refuses every file-only setting, whatever the reason', function (string $key): void {
+    $response = gsPatch(gsController(), ['settings' => [['key' => $key, 'value' => 'anything']]]);
+
+    expect($response->getStatusCode())->toBe(422)
+        ->and(gsBody($response)['error']['message'])->toContain('cannot be edited here');
+})->with(gsRegistry()->bootOnlyKeys());
+
 test('PATCH enforces the declared validation regex', function (): void {
     $response = gsPatch(gsController(), [
         'settings' => [['key' => 'SPORA_MAIL_FROM', 'value' => 'not-an-address']],

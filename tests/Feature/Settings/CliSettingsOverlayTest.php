@@ -15,9 +15,11 @@ use Spora\Settings\SettingsRepository;
  * of the container without ever calling `handle()`, so every CLI process read
  * defaults, `config.php` and `.env` only.
  *
- * The admin page showed `source: database` and `applies_on: worker_restart`
- * for values the worker would never read — including `SPORA_WORKER_RUNTIME_MODE`,
- * which is what tells the worker to run at all.
+ * The admin page showed `source: database` for values the worker would never
+ * read. Two fixes landed, and they are independent: the commands opt into the
+ * overlay, and the settings a worker cannot honour after it has started
+ * (`SPORA_WORKER_RUNTIME_MODE`, `SPORA_MAX_WORKERS`) are `bootOnly`, so no
+ * value can reach the page in the first place.
  */
 beforeEach(function (): void {
     TestDatabaseFactory::boot();
@@ -54,16 +56,18 @@ it('reads a stored setting on the CLI path', function (): void {
 it('does not read a stored setting without the overlay — the bug', function (): void {
     $registry = new SettingsRegistry(new Spora\Core\Paths(BASE_PATH));
     (new SettingsRepository(new SecurityManager(random_bytes(32)), $registry))
-        ->put($registry->get('SPORA_WORKER_RUNTIME_MODE'), 'server', null);
+        ->put($registry->get('SPORA_TOOL_HTTP_TIMEOUT'), 7, null);
 
     // Exactly what `bin/spora` produced: the container's Config, untouched.
     $builder = new ContainerBuilder();
     $builder->addDefinitions(Spora\Core\ContainerDefinitions::all());
     $config = $builder->build()->get(Config::class);
 
-    expect($config->sourceOf('SPORA_WORKER_RUNTIME_MODE'))->toBe('default')
-        ->and($config->getString('SPORA_WORKER_RUNTIME_MODE'))
-        ->toBe($registry->get('SPORA_WORKER_RUNTIME_MODE')->default);
+    // The same row, the same key, the same value as the test above — only the
+    // overlay is missing, so the default is what survives.
+    expect($config->sourceOf('SPORA_TOOL_HTTP_TIMEOUT'))->toBe('default')
+        ->and($config->getInt('SPORA_TOOL_HTTP_TIMEOUT'))
+        ->toBe($registry->get('SPORA_TOOL_HTTP_TIMEOUT')->default);
 });
 
 it('the worker command opts into the overlay', function (): void {
@@ -108,29 +112,4 @@ it('no longer carries a raw-env reader for the flag', function (): void {
 
     expect($source)->not->toContain('mercureLegacyUserTopicEnabled')
         ->and($source)->not->toContain("\$_ENV['SPORA_MERCURE_LEGACY_USER_TOPIC']");
-});
-
-it('does not build the logger before the overlay runs', function (): void {
-    // `configureErrorHandling()` ran from the constructor and resolved
-    // LoggerInterface, whose factory reads SPORA_LOG_LEVEL — one step before
-    // `applySettingsOverlay()`. A stored log level therefore never reached the
-    // Monolog handler, while the page reported it as database-sourced.
-    $source = (string) file_get_contents(BASE_PATH . '/app/Core/Kernel.php');
-
-    $constructEnd = strpos($source, 'public function handle(');
-    $configuring = strpos($source, 'private function configureErrorHandling(');
-
-    expect($configuring)->toBeGreaterThan($constructEnd)
-        // The handler must resolve the logger, not hold one built at
-        // registration time.
-        ->and($source)->toContain('$container->get(LoggerInterface::class)->$logLevel(');
-});
-
-it('a stored log level reaches the resolved Config', function (): void {
-    $registry = new SettingsRegistry(new Spora\Core\Paths(BASE_PATH));
-    (new SettingsRepository(new SecurityManager(random_bytes(32)), $registry))
-        ->put($registry->get('SPORA_LOG_LEVEL'), 'DEBUG', null);
-
-    expect(cliContainer()->getString('SPORA_LOG_LEVEL'))->toBe('DEBUG')
-        ->and(cliContainer()->sourceOf('SPORA_LOG_LEVEL'))->toBe('database');
 });
