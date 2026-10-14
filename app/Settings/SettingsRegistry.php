@@ -59,7 +59,7 @@ final class SettingsRegistry
         'media'     => 'Media',
         'mail'      => 'Mail',
         'database'  => 'Database',
-        'security'  => 'Security',
+        'realtime' => 'Realtime',
     ];
 
     /** @var array<string, SettingDefinition>|null */
@@ -665,31 +665,23 @@ final class SettingsRegistry
             key: 'SPORA_MERCURE_URL',
             label: 'Mercure hub URL',
             type: SettingDefinition::TYPE_TEXT,
-            section: 'security',
+            section: 'realtime',
             description: 'Live-update hub. Leave empty if you do not use live updates.',
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MERCURE_PUBLISH_URL',
             label: 'Mercure publish URL',
             type: SettingDefinition::TYPE_TEXT,
-            section: 'security',
+            section: 'realtime',
             description: 'Publisher endpoint, when it differs from the hub URL.',
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MERCURE_JWT_KEY',
             label: 'Mercure JWT key',
             type: SettingDefinition::TYPE_PASSWORD,
-            section: 'security',
+            section: 'realtime',
             secret: true,
             description: 'Shared secret used to sign Mercure update tokens.',
-        ));
-        $add(new SettingDefinition(
-            key: 'SPORA_MERCURE_LEGACY_USER_TOPIC',
-            label: 'Publish to the legacy user topic',
-            type: SettingDefinition::TYPE_TOGGLE,
-            default: false,
-            section: 'security',
-            description: 'Also publish updates to the pre-principals per-user topic. Only useful if something is still subscribed to it.',
         ));
 
         // Database and keys — every one of these is read before the database
@@ -764,7 +756,7 @@ final class SettingsRegistry
             key: 'SPORA_KEY_PATH',
             label: 'Secret key file',
             type: SettingDefinition::TYPE_TEXT,
-            section: 'security',
+            section: 'realtime',
             bootOnly: true,
             description: 'Absolute path to the 32-byte secret.key. Changing it makes every stored secret undecryptable.',
             secret: true,
@@ -774,7 +766,7 @@ final class SettingsRegistry
             label: 'Application URL',
             type: SettingDefinition::TYPE_TEXT,
             default: RequestOrigin::detect(),
-            section: 'security',
+            section: 'realtime',
             bootOnly: true,
             description: 'Used in links in outbound mail. Detected from the request when not set.',
         ));
@@ -783,7 +775,7 @@ final class SettingsRegistry
             label: 'Application path prefix',
             type: SettingDefinition::TYPE_TEXT,
             default: RequestOrigin::detectWithPrefix()[1],
-            section: 'security',
+            section: 'realtime',
             bootOnly: true,
             description: 'Set when Spora is installed in a subdirectory, for example /spora.',
             transform: 'app_prefix',

@@ -12,11 +12,8 @@ use Throwable;
  * Publishes task state change events to a Mercure hub for real-time SSE delivery.
  *
  * Configuration (env vars):
- *   SPORA_MERCURE_URL               Full hub URL, e.g. https://example.com/.well-known/mercure
- *   SPORA_MERCURE_JWT_KEY           JWT key that Mercure uses to validate publisher tokens
- *   SPORA_MERCURE_LEGACY_USER_TOPIC Set to "true" to also publish to the legacy
- *                                   user-keyed topic for one release during the
- *                                   fan-out rollout. Default: false (new topic only).
+ *   SPORA_MERCURE_URL         Full hub URL, e.g. https://example.com/.well-known/mercure
+ *   SPORA_MERCURE_JWT_KEY     JWT key that Mercure uses to validate publisher tokens
  *
  * When SPORA_MERCURE_URL is not set, publish*() is a no-op (Mercure is optional).
  */
@@ -27,8 +24,6 @@ final class MercurePublisher implements MercurePublisherInterface
         private readonly ?string $hubUrl = null,
         private readonly ?string $jwtKey = null,
         private readonly ?LoggerInterface $logger = null,
-        private readonly bool $legacyUserTopicEnabled = false,
-        private readonly ?PrincipalResolver $principalResolver = null,
     ) {}
 
     /**
@@ -43,37 +38,7 @@ final class MercurePublisher implements MercurePublisherInterface
             return false;
         }
 
-        $topic = "principal/{$principalId}/tasks";
-        $ok = $this->doPublish($taskId, $principalId, $topic, $taskData);
-
-        // Rollout fallback: also publish to user-keyed topics for every
-        // visible user so currently-deployed frontends keep receiving
-        // events until they migrate to the subscription fan-out. Removed
-        // in the release after the frontend cutover.
-        if ($ok && $this->legacyUserTopicEnabled && $this->principalResolver !== null) {
-            $userIds = $this->principalResolver->visibleUserIds($principalId);
-            foreach ($userIds as $userId) {
-                $this->doPublish($taskId, $userId, "user/{$userId}/tasks", $taskData);
-            }
-        }
-
-        return $ok;
-    }
-
-    /**
-     * @deprecated Use {@see publishForPrincipal()} — group peers do not
-     *             receive events on this user-keyed topic. Retained
-     *             during the Plan B migration window for any callers
-     *             that have not yet been swept.
-     */
-    public function publish(int $taskId, int $userId, array $taskData): bool
-    {
-        if ($this->hubUrl === null || $this->jwtKey === null) {
-            $this->logger?->debug('MercurePublisher: publish skipped - Mercure not configured');
-            return false;
-        }
-
-        return $this->doPublish($taskId, $userId, "user/{$userId}/tasks", $taskData);
+        return $this->doPublish($taskId, $principalId, "principal/{$principalId}/tasks", $taskData);
     }
 
     /**

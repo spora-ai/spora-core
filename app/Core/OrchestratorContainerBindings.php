@@ -178,8 +178,6 @@ final class OrchestratorContainerBindings
                     $hubUrl,
                     $jwtKey,
                     $c->get(LoggerInterface::class),
-                    $c->get(Config::class)->getBool('SPORA_MERCURE_LEGACY_USER_TOPIC'),
-                    $c->get(PrincipalResolver::class),
                 );
             },
 

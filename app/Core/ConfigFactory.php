@@ -173,7 +173,6 @@ final class ConfigFactory
             'mercure_url'                    => 'SPORA_MERCURE_URL',
             'mercure_publish_url'            => 'SPORA_MERCURE_PUBLISH_URL',
             'mercure_jwt_key'                => 'SPORA_MERCURE_JWT_KEY',
-            'mercure_legacy_user_topic'      => 'SPORA_MERCURE_LEGACY_USER_TOPIC',
             'app_url'                        => 'SPORA_APP_URL',
             'app_prefix'                     => 'SPORA_APP_PREFIX',
             'plugin_install_enabled'         => 'SPORA_PLUGIN_INSTALL_ENABLED',

@@ -288,7 +288,6 @@ it('configDefinition honours env var overrides for every declared key', function
         'SPORA_MERCURE_URL'                      => 'https://mercure.example.com',
         'SPORA_MERCURE_PUBLISH_URL'              => 'https://mercure.example.com/hub',
         'SPORA_MERCURE_JWT_KEY'                  => 'jwt-key',
-        'SPORA_MERCURE_LEGACY_USER_TOPIC'        => 'true',
     ];
 
     try {
@@ -345,8 +344,7 @@ it('configDefinition honours env var overrides for every declared key', function
             ->and($config->getString('SPORA_MAIL_ENCRYPTION'))->toBe('ssl')
             ->and($config->getString('SPORA_MERCURE_URL'))->toBe('https://mercure.example.com')
             ->and($config->getString('SPORA_MERCURE_PUBLISH_URL'))->toBe('https://mercure.example.com/hub')
-            ->and($config->getString('SPORA_MERCURE_JWT_KEY'))->toBe('jwt-key')
-            ->and($config->getBool('SPORA_MERCURE_LEGACY_USER_TOPIC'))->toBeTrue();
+            ->and($config->getString('SPORA_MERCURE_JWT_KEY'))->toBe('jwt-key');
     } finally {
         foreach ($overrides as $key => $_value) {
             unset($_ENV[$key]);

@@ -95,21 +95,33 @@ it('db:reset stays exempt, so resetting a database never needs to read it', func
     expect($source)->not->toContain('use AppliesSettingsOverlay;');
 });
 
-it('reads the Mercure legacy-user-topic flag through Config, not the raw environment', function (): void {
-    // It used to be read from $_ENV while being a declared, DB-storable
-    // setting, so the admin page listed it as editable and a stored value was
-    // silently ignored. The docblock said it was not declared; both of its
-    // claims were false.
-    $registry = new SettingsRegistry(new Spora\Core\Paths(BASE_PATH));
-    (new SettingsRepository(new SecurityManager(random_bytes(32)), $registry))
-        ->put($registry->get('SPORA_MERCURE_LEGACY_USER_TOPIC'), true, null);
+/**
+ * The rollout flag is gone, and with it the whole user-keyed task path it
+ * gated. `publish()` on the publisher was already dead — nothing in `app/` had
+ * called it since the fan-out landed — so removing the flag had nothing left to
+ * switch.
+ *
+ * Asserted as an absence across the whole source tree rather than as the
+ * absence of one symbol, because the flag reached the publisher through four
+ * unrelated places: the registry, the legacy key map, the container binding and
+ * the publisher itself. A grep for any one of them would pass while another
+ * survived.
+ */
+it('carries no Mercure legacy user-topic code', function (): void {
+    $offenders = [];
 
-    expect(cliContainer()->getBool('SPORA_MERCURE_LEGACY_USER_TOPIC'))->toBeTrue();
-});
+    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(BASE_PATH . '/app'));
+    foreach ($files as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $source = (string) file_get_contents($file->getPathname());
+        foreach (['LEGACY_USER_TOPIC', 'legacyUserTopic', 'legacy_user_topic'] as $needle) {
+            if (str_contains($source, $needle)) {
+                $offenders[] = $file->getPathname() . ' (' . $needle . ')';
+            }
+        }
+    }
 
-it('no longer carries a raw-env reader for the flag', function (): void {
-    $source = (string) file_get_contents(BASE_PATH . '/app/Core/OrchestratorContainerBindings.php');
-
-    expect($source)->not->toContain('mercureLegacyUserTopicEnabled')
-        ->and($source)->not->toContain("\$_ENV['SPORA_MERCURE_LEGACY_USER_TOPIC']");
+    expect($offenders)->toBe([]);
 });

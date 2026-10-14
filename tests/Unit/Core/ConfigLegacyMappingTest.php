@@ -24,7 +24,7 @@ function legacyReadPaths(): array
         'llm_timeout', 'tool_http_timeout', 'worker_runtime_mode', 'tick_lease_seconds',
         'worker_stale_minutes', 'max_workers', 'tools_group_cascade_enabled',
         'plugin_install_enabled', 'plugin_catalog_enabled', 'plugin_catalog_ttl',
-        'mercure_url', 'mercure_publish_url', 'mercure_jwt_key', 'mercure_legacy_user_topic',
+        'mercure_url', 'mercure_publish_url', 'mercure_jwt_key',
         'notifications.email_enabled',
         'media_archive.fetch_timeout_seconds', 'media_archive.allowed_image_types',
         'media_archive.promote_external', 'media_archive.max_promote_bytes',
