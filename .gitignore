@@ -36,6 +36,11 @@ storage/.schema_stamp
 storage/.plugins_stamp
 storage/.plugins_stamp.cache.json
 
+# Plugin catalog HTTP cache. Written into `Paths::storage()`, and the full suite
+# leaks one into the repo's own storage/ — a test in a run other than
+# PluginsCatalogControllerTest, which correctly uses a temp root.
+storage/.spora_plugin_catalog.json
+
 # Keep the empty storage/ directory in the repo
 !storage/.gitkeep
 
