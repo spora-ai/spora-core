@@ -39,7 +39,6 @@ final readonly class SettingDefinition
      * @param string     $description  Why an operator would change this. Not a restatement of the label.
      * @param bool       $secret       Stored encrypted, never sent over the wire. The API returns `'***'`.
      * @param bool       $bootOnly     Needed before, or to open, the database. Never stored in it.
-     * @param bool       $workerRestart Read once before the worker loop, so a change needs a worker restart.
      * @param list<array{value: string, label: string}> $options For `select`.
      * @param string     $validation   Regex the raw string must match, or '' for none.
      * @param string     $transform    Named coercion for a value the raw-string form cannot express.
@@ -54,7 +53,6 @@ final readonly class SettingDefinition
         public string $description = '',
         public bool $secret = false,
         public bool $bootOnly = false,
-        public bool $workerRestart = false,
         public array $options = [],
         public string $validation = '',
         public string $transform = '',

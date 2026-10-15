@@ -439,7 +439,6 @@ final class SettingsRegistry
             section: 'worker',
             description: 'Minutes without a heartbeat before a worker is considered dead.',
             validation: self::VALIDATION_UINT,
-            workerRestart: true,
         ));
         $add(new SettingDefinition(
             key: 'SPORA_MAX_WORKERS',
@@ -458,7 +457,6 @@ final class SettingsRegistry
             default: false,
             section: 'worker',
             description: 'When on, a value set on a group also applies to that group\'s members.',
-            workerRestart: true,
         ));
 
         // Plugins.
@@ -468,7 +466,7 @@ final class SettingsRegistry
             type: SettingDefinition::TYPE_TOGGLE,
             default: false,
             section: 'plugins',
-            description: 'Required for installing plugins from the catalog. Turning this off does not uninstall anything.',
+            description: 'Required for installing plugins from the catalog. Needs a reachable Composer binary. Turning this off does not uninstall anything.',
         ));
         $add(new SettingDefinition(
             key: 'SPORA_PLUGIN_CATALOG_ENABLED',
@@ -493,7 +491,7 @@ final class SettingsRegistry
             type: SettingDefinition::TYPE_TEXT,
             default: 'composer',
             section: 'plugins',
-            description: 'Name on PATH, or an absolute path to composer.phar. On shared hosting there is usually no global composer.',
+            description: 'Name on PATH, or an absolute path to composer.phar, which is run through this PHP binary. On shared hosting there is usually no global composer, and the Docker image ships none — it is only present while building.',
         ));
 
         // Asset storage.

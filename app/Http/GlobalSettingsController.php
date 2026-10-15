@@ -204,7 +204,6 @@ final class GlobalSettingsController
             'readonly'      => $definition->bootOnly,
             'secret'        => $definition->secret,
             'undecryptable' => $isUndecryptable,
-            'applies_on'    => $definition->workerRestart ? 'worker_restart' : 'request',
             'options'       => $definition->options,
         ];
     }
