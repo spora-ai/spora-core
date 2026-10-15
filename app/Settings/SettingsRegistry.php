@@ -58,7 +58,7 @@ final class SettingsRegistry
 
     private readonly SettingDeclarations $declarations;
 
-    public function __construct(private readonly Paths $paths)
+    public function __construct(Paths $paths)
     {
         $this->declarations = new SettingDeclarations($paths);
     }
