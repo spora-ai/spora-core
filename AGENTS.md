@@ -68,10 +68,11 @@ in `app/Build/`; gates on the `zircote/swagger-php` dev dependency. Today:
 - `php.log` — PHP error/fatal logs
 
 ### Configuration
-Spora's settings are **declared once** in `app/Settings/SettingsRegistry.php`.
-That file is the authority on every setting key, its type, its default and
-whether it is `bootOnly` — nothing else needs a matching edit, and a key that
-is not declared there is not a setting.
+Spora's settings are **declared once**, one method per section in
+`app/Settings/SettingDeclarations.php`, which `SettingsRegistry` is the reader
+for. Together they are the authority on every setting key, its type, its
+default and whether it is `bootOnly` — nothing else needs a matching edit, and
+a key that is not declared there is not a setting.
 
 Read them through the `Config` value object (`app/Core/Config.php`):
 

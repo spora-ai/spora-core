@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Core\Paths;
+use Spora\Settings\SettingDeclarations;
 use Spora\Settings\SettingDefinition;
 use Spora\Settings\SettingsRegistry;
 
@@ -22,8 +23,12 @@ function settingsRegistryFixture(): SettingsRegistry
 it('declares every setting key exactly once', function (): void {
     $registry = settingsRegistryFixture();
 
-    $source = (string) file_get_contents((string) (new ReflectionClass(SettingsRegistry::class))->getFileName());
+    // Read from the declarations, not the registry: the definitions moved out
+    // of it, and a grep that silently found nothing would make this test pass
+    // by asserting an empty array equals an empty array.
+    $source = (string) file_get_contents((string) (new ReflectionClass(SettingDeclarations::class))->getFileName());
     preg_match_all("/key: '(SPORA_[A-Z0-9_]+)'/", $source, $matches);
+    expect($matches[1])->not->toBe([]);
     $declared = $matches[1];
 
     $repeated = array_keys(array_filter(
