@@ -159,6 +159,7 @@ use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
@@ -394,14 +395,16 @@ final class ContainerDefinitions
                     $c->get(SecurityManagerInterface::class),
                     $c->get(LoggerInterface::class),
                     InstalledToolClasses::for($c),
-                    // Guarded because some build/test contexts resolve this
-                    // graph without the orchestrator slice; null yields an
-                    // empty skills map, matching a bare `new` call site.
-                    $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
-                    $c->get(PrincipalService::class),
-                    $config->getBool('SPORA_TOOLS_GROUP_CASCADE_ENABLED'),
-                    $c->get(PrincipalResolver::class),
-                    $c->get(SharedSettingsResolver::class),
+                    new ToolConfigOverrides(
+                        // Guarded because some build/test contexts resolve this
+                        // graph without the orchestrator slice; null yields an
+                        // empty skills map, matching a bare `new` call site.
+                        schema: $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
+                        principalService: $c->get(PrincipalService::class),
+                        groupCascadeEnabled: $config->getBool('SPORA_TOOLS_GROUP_CASCADE_ENABLED'),
+                        principalResolver: $c->get(PrincipalResolver::class),
+                        sharedSettings: $c->get(SharedSettingsResolver::class),
+                    ),
                 );
             },
 
@@ -762,6 +765,7 @@ final class ContainerDefinitions
                     $c->get(ToolConfigService::class),
                     $c->get(LLMConfigService::class),
                     $c->get(PrincipalResolver::class),
+                    schema: $c->has(ToolConfigSchemaInspector::class) ? $c->get(ToolConfigSchemaInspector::class) : null,
                 );
             },
 

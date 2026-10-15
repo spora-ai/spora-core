@@ -74,6 +74,32 @@ final class GlobalSettingsController
     )]
     public function update(Request $request): JsonResponse
     {
+        $incoming = $this->incomingEntries($request);
+        if ($incoming instanceof JsonResponse) {
+            return $incoming;
+        }
+
+        $userId = $this->authService->currentUserId();
+
+        $accepted = $this->admitAll($incoming);
+        if ($accepted instanceof JsonResponse) {
+            return $accepted;
+        }
+
+        $written = [];
+        foreach ($accepted as [$definition, $value]) {
+            $this->repository->put($definition, $value, $userId);
+            $written[] = $definition->key;
+        }
+
+        return new JsonResponse(['data' => ['updated' => $written]], Response::HTTP_OK);
+    }
+
+    /**
+     * @return array<mixed>|JsonResponse
+     */
+    private function incomingEntries(Request $request): array|JsonResponse
+    {
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
             return $body;
@@ -84,11 +110,22 @@ final class GlobalSettingsController
             return $this->error('VALIDATION_ERROR', 'Expected a `settings` array.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $userId = $this->authService->currentUserId();
-        // Two phases, and the order is load-bearing: a batch refused half-way
-        // through leaves the operator unable to say what was saved. Validating
-        // and writing in one pass persisted everything before the failing
-        // entry and then answered 422 saying nothing about those rows.
+        return $incoming;
+    }
+
+    /**
+     * Validate the whole batch before anything is written.
+     *
+     * The order is load-bearing: a batch refused half-way through leaves the
+     * operator unable to say what was saved. Validating and writing in one
+     * pass persisted everything before the failing entry and then answered
+     * 422 saying nothing about those rows.
+     *
+     * @param array<mixed> $incoming
+     * @return list<array{0: SettingDefinition, 1: mixed}>|JsonResponse
+     */
+    private function admitAll(array $incoming): array|JsonResponse
+    {
         $accepted = [];
 
         foreach ($incoming as $entry) {
@@ -107,13 +144,7 @@ final class GlobalSettingsController
             $accepted[] = [$definition, $value];
         }
 
-        $written = [];
-        foreach ($accepted as [$definition, $value]) {
-            $this->repository->put($definition, $value, $userId);
-            $written[] = $definition->key;
-        }
-
-        return new JsonResponse(['data' => ['updated' => $written]], Response::HTTP_OK);
+        return $accepted;
     }
 
     #[OA\Delete(
@@ -150,20 +181,9 @@ final class GlobalSettingsController
      */
     private function admit(mixed $entry): array|JsonResponse
     {
-        if (!is_array($entry) || !isset($entry['key'])) {
-            return $this->error('VALIDATION_ERROR', 'Each entry needs a `key`.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
-        $key = (string) $entry['key'];
-        $definition = $this->registry->get($key);
-        if ($definition === null) {
-            return $this->error('VALIDATION_ERROR', sprintf('Unknown setting "%s".', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-        if ($definition->bootOnly) {
-            // A DB-backed `db_host` would lock the operator out on the very
-            // request that wrote it. These are read before the database this
-            // row lives in is open.
-            return $this->error('VALIDATION_ERROR', sprintf('"%s" is set in .env or config.php and cannot be edited here.', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
+        $definition = $this->lookUp($entry);
+        if ($definition instanceof JsonResponse) {
+            return $definition;
         }
 
         $value = $entry['value'] ?? null;
@@ -171,9 +191,32 @@ final class GlobalSettingsController
             return [null, null];
         }
 
-        $invalid = $this->rejectInvalid($definition, $value);
+        return $this->rejectInvalid($definition, $value) ?? [$definition, $value];
+    }
 
-        return $invalid ?? [$definition, $value];
+    /**
+     * Resolve one batch entry to the setting it names, or say why it cannot.
+     *
+     * @return SettingDefinition|JsonResponse
+     */
+    private function lookUp(mixed $entry): SettingDefinition|JsonResponse
+    {
+        $key = is_array($entry) && isset($entry['key']) ? (string) $entry['key'] : null;
+        if ($key === null) {
+            return $this->error('VALIDATION_ERROR', 'Each entry needs a `key`.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $definition = $this->registry->get($key);
+        if ($definition === null) {
+            return $this->error('VALIDATION_ERROR', sprintf('Unknown setting "%s".', $key), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // A DB-backed `db_host` would lock the operator out on the very
+        // request that wrote it. These are read before the database this
+        // row lives in is open.
+        return $definition->bootOnly
+            ? $this->error('VALIDATION_ERROR', sprintf('"%s" is set in .env or config.php and cannot be edited here.', $key), Response::HTTP_UNPROCESSABLE_ENTITY)
+            : $definition;
     }
 
     /**
@@ -237,6 +280,16 @@ final class GlobalSettingsController
                 : sprintf('"%s" takes a single value.', $definition->key);
         }
 
+        return $this->singleValueRejection($definition, $value, $isList);
+    }
+
+    /**
+     * The two rules that can only be applied to a single scalar value.
+     *
+     * @param bool $isList Whether the declared type is a list.
+     */
+    private function singleValueRejection(SettingDefinition $definition, mixed $value, bool $isList): ?string
+    {
         if (!$isList && $definition->validation !== '' && is_scalar($value)
             && preg_match($definition->validation, (string) $value) !== 1) {
             return sprintf('"%s" does not accept that value.', $definition->key);

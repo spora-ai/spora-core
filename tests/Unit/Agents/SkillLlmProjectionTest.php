@@ -7,6 +7,7 @@ use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Skills\SkillProviderRegistry;
@@ -34,7 +35,9 @@ function skillProjectionService(SkillProviderRegistry $registry): ToolConfigServ
         $security,
         new Monolog\Logger('test'),
         [SkillTool::class],
-        new ToolConfigSchemaInspector(new Spora\Services\SkillListProjector($registry), new PrincipalResolver()),
+        new ToolConfigOverrides(
+            schema: new ToolConfigSchemaInspector(new Spora\Services\SkillListProjector($registry), new PrincipalResolver()),
+        ),
     );
 }
 

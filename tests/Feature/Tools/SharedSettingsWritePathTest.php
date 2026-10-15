@@ -12,6 +12,7 @@ use Spora\Models\GroupMembership;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigNameResolver;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SharedSettingsResolver;
@@ -51,11 +52,12 @@ function groupWriteService(): ToolConfigService
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Logger('test'),
         [],
-        new ToolConfigSchemaInspector(),
-        new PrincipalService(new PrincipalResolver()),
-        false,
-        new PrincipalResolver(),
-        $shared,
+        new ToolConfigOverrides(
+            schema: new ToolConfigSchemaInspector(),
+            principalService: new PrincipalService(new PrincipalResolver()),
+            principalResolver: new PrincipalResolver(),
+            sharedSettings: $shared,
+        ),
     );
 }
 
@@ -213,7 +215,7 @@ it('does not let the enable pre-seed shadow the shared group', function (): void
 
     $service->putGlobalSettings(AcmeSharedSettings::class, ['retries' => '99']);
 
-    expect($service->getSchemaDefaults($tool)['retries'] ?? null)->toBe('3')
+    expect((new ToolConfigSchemaInspector())->getSchemaDefaults($tool)['retries'] ?? null)->toBe('3')
         ->and($service->sharedGroupHasValues($tool))->toBeTrue();
 });
 

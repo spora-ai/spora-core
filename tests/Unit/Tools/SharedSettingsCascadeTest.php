@@ -7,6 +7,7 @@ namespace Tests\Unit\Tools;
 use Monolog\Logger;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SharedSettingsResolver;
 
@@ -24,7 +25,9 @@ function sharedToolConfig(): ToolConfigService
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Logger('test'),
         [AcmeChatTool::class, AcmeStandaloneTool::class],
-        sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        new ToolConfigOverrides(
+            sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        ),
     );
 }
 

@@ -197,8 +197,11 @@ final class MailConfigController
             return sprintf('%s must be a single value.', $definition->key);
         }
 
-        $raw = (string) $value;
+        return $this->singleValueRejection($definition, (string) $value);
+    }
 
+    private function singleValueRejection(SettingDefinition $definition, string $raw): ?string
+    {
         if ($definition->validation !== '' && preg_match($definition->validation, $raw) !== 1) {
             return sprintf('%s must match %s.', $definition->key, $definition->validation);
         }

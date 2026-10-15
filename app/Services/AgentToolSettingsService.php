@@ -47,13 +47,17 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
     private readonly AgentToolOperationsResolver $operationsResolver;
     private readonly PrincipalResolver $principalResolver;
 
+    private readonly ToolConfigSchemaInspector $schema;
+
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         LLMConfigService $llmConfig,
         ?PrincipalResolver $principalResolver = null,
         ?LLMConfigPreferences $preferences = null,
+        ?ToolConfigSchemaInspector $schema = null,
     ) {
         $this->principalResolver  = $principalResolver ?? new PrincipalResolver();
+        $this->schema = $schema ?? new ToolConfigSchemaInspector(principalResolver: $this->principalResolver);
         $this->instanceResolver   = new AgentToolInstanceResolver();
         $preferences             = $preferences ?? new LLMConfigPreferences();
         $this->overrideResolver   = new AgentToolOverrideResolver(
@@ -109,7 +113,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             // as missing.
             $defaults = $this->toolConfig->sharedGroupHasValues($toolClass)
                 ? []
-                : $this->toolConfig->getSchemaDefaults($toolClass);
+                : $this->schema->getSchemaDefaults($toolClass);
 
             if ($defaults !== []) {
                 $this->toolConfig->putAgentOverride($toolClass, $agentId, $defaults);
@@ -258,7 +262,7 @@ final class AgentToolSettingsService implements AgentToolSettingsServiceInterfac
             includeSharedSettings: self::STATUS_INCLUDES_SHARED_SETTINGS,
         );
 
-        return ['missing' => $this->toolConfig->getMissingRequiredSettings($toolClass, $effective)];
+        return ['missing' => $this->schema->getMissingRequiredSettings($toolClass, $effective)];
     }
 
     /**

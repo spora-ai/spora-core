@@ -7,6 +7,7 @@ namespace Spora\AgentTemplates;
 use ReflectionClass;
 use Spora\Models\AgentTool;
 use Spora\Models\AgentToolOperationOverride;
+use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -26,10 +27,15 @@ final class AgentTemplateToolsApplier
 {
     private const DATETIME_FORMAT = 'Y-m-d H:i:s';
 
+    private readonly ToolConfigSchemaInspector $schema;
+
     public function __construct(
         private readonly ToolConfigService $toolConfig,
         private readonly ?AgentTemplateSettingsApplier $settingsApplier = null,
-    ) {}
+        ?ToolConfigSchemaInspector $schema = null,
+    ) {
+        $this->schema = $schema ?? new ToolConfigSchemaInspector();
+    }
 
     /**
      * Walk the template's tools array and return the per-tool summary.
@@ -165,7 +171,7 @@ final class AgentTemplateToolsApplier
             $warnings,
         ) ?? 0;
 
-        $missing = $this->toolConfig->getMissingRequiredSettings(
+        $missing = $this->schema->getMissingRequiredSettings(
             $toolClass,
             $this->toolConfig->getEffectiveSettings($toolClass, $agentId),
         );

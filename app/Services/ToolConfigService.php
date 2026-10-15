@@ -60,47 +60,49 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     private readonly SharedSettingsResolver $sharedSettings;
 
+    private readonly EffectiveToolSettings $effective;
+
     /**
-     * @param list<string> $toolClasses
-     * @param ToolConfigSchemaInspector|null $schema The single shared inspector.
-     *        Injecting it is what keeps the LLM-facing `allowed_skills`
-     *        projection consistent with what the `skill` tool will authorise
-     *        — the container builds it once over the same skill registry
-     *        ({@see OrchestratorContainerBindings}). Null (every test call
-     *        site) yields an empty registry, so the projection is empty under
-     *        test and only ever populated in the DI runtime. A test that needs
-     *        a real skill list must hand-build an inspector over a registry,
-     *        not rely on this default.
-     * @param SharedSettingsResolver|null $sharedSettings Carries the plugin-declared
-     *        shared groups. The default is an empty registry, which resolves
-     *        every tool to no group — so a host with no group shipped behaves
-     *        exactly as before this layer existed.
+     * @param list<string>                    $toolClasses
+     * @param ToolConfigOverrides|null        $overrides The collaborators to use
+     *        instead of building them. A null value is equivalent to an
+     *        all-null instance, which is what every test call site relies on.
      */
     public function __construct(
         SecurityManagerInterface $security,
         LoggerInterface $logger,
         array $toolClasses = [],
-        ?ToolConfigSchemaInspector $schema = null,
-        ?PrincipalService $principalService = null,
-        bool $groupCascadeEnabled = false,
-        ?PrincipalResolver $principalResolver = null,
-        ?SharedSettingsResolver $sharedSettings = null,
+        ?ToolConfigOverrides $overrides = null,
     ) {
+        $overrides ??= new ToolConfigOverrides();
+
         // Without the resolver the inspector's LLM-facing `allowed_target_agents`
         // enumerates "#id" placeholders; null is fine for tests, the DI runtime
         // always passes the resolver.
-        $this->schema = $schema ?? new ToolConfigSchemaInspector(principalResolver: $principalResolver);
+        $this->schema = $overrides->schema ?? new ToolConfigSchemaInspector(principalResolver: $overrides->principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
         // The shared-settings classes go in too: `ToolController` writes through
         // this resolver, and without them a group id resolves to nothing — so
         // the shared credential the feature exists to store had no reachable
         // write path at all.
-        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses, $sharedSettings?->settingsClasses() ?? []);
+        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses, $overrides->sharedSettings?->settingsClasses() ?? []);
         $this->cascade = new ToolConfigPrincipalCascade(
-            $principalService ?? new PrincipalService($principalResolver ?? new PrincipalResolver()),
-            $groupCascadeEnabled,
+            $overrides->principalService ?? new PrincipalService($overrides->principalResolver ?? new PrincipalResolver()),
+            $overrides->groupCascadeEnabled,
         );
-        $this->sharedSettings = $sharedSettings ?? new SharedSettingsResolver();
+        $this->sharedSettings = $overrides->sharedSettings ?? new SharedSettingsResolver();
+        // Always built here rather than injected: it reads its levels through the
+        // closures below, which are bound to this instance, so a pre-built one
+        // could not be supplied from the container without a circular
+        // dependency on the service it reads from.
+        $this->effective = new EffectiveToolSettings(
+            $this->schema,
+            $this->cascade,
+            $this->sharedSettings,
+            $this->crypto,
+            $this->getGlobalSettings(...),
+            $this->getPrincipalSettings(...),
+        );
     }
 
     /**
@@ -263,55 +265,7 @@ class ToolConfigService implements ToolConfigServiceInterface
         ?PrincipalContext $context = null,
         bool $includeSharedSettings = true,
     ): array {
-        $cascadePrincipalIds = $this->cascade->resolvePrincipalIds($userId, $context);
-
-        $defaults = $this->schema->getSchemaDefaults($toolClass);
-        if ($includeSharedSettings) {
-            $defaults = $this->sharedSettings->applyToDefaults($toolClass, $defaults, $this->getGlobalSettings(...));
-        }
-
-        $merged = $this->getGlobalSettings($toolClass);
-
-        foreach ($cascadePrincipalIds as $principalId) {
-            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
-            foreach ($principalSettings as $key => $value) {
-                $merged[$key] = $value;
-            }
-        }
-
-        $override = AgentToolOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        if ($override !== null) {
-            $overrideSettings = $this->crypto->decodeSettings(
-                $toolClass,
-                $override->getRawOriginal('settings'),
-            );
-
-            foreach ($overrideSettings as $key => $value) {
-                $merged[$key] = $value;
-            }
-        }
-
-        foreach ($defaults as $key => $defaultValue) {
-            if (!isset($merged[$key])) {
-                $merged[$key] = $defaultValue;
-            }
-
-            // `putGlobalSettings()` stores '' when the operator clears a key to
-            // inherit. '' is *set*, so the branch above leaves it alone and the
-            // tool would keep running on an empty credential instead of
-            // reaching the shared value it was cleared for. An empty value
-            // means inherit — but only when there is something below to
-            // inherit, so a key with no default and no group keeps the ''
-            // every non-consuming tool has always seen.
-            if (($merged[$key] ?? null) === '' && $defaultValue !== null && $defaultValue !== '') {
-                $merged[$key] = $defaultValue;
-            }
-        }
-
-        return $this->schema->normalizeMultiSelectValues($toolClass, $merged);
+        return $this->effective->getEffectiveSettings($toolClass, $agentId, $userId, $context, $includeSharedSettings);
     }
 
     /**
@@ -323,50 +277,38 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function maskForApi(array $settings, string $toolClass): array
     {
-        return $this->schema->maskForApi($settings, $toolClass, $this->maskablePasswordKeys($toolClass));
+        return $this->schema->maskForApi($settings, $toolClass, $this->effective->maskablePasswordKeys($toolClass));
     }
 
     /**
-     * Which layer a base-level value came from, for the annotation.
-     *
-     * @param list<string>            $fromGroup      keys the shared group supplied
-     * @param array<string, mixed>    $schemaDefaults the tool's declared defaults
-     */
-    private function baseSource(string $key, array $fromGroup, array $schemaDefaults): string
-    {
-        if (in_array($key, $fromGroup, true)) {
-            return 'shared';
-        }
-
-        return array_key_exists($key, $schemaDefaults) ? 'default' : 'shared';
-    }
-
-    /**
-     * Every key whose value must be masked before it leaves the process, for
-     * `$toolClass` or for the shared group it consumes.
-     *
-     * Exposed rather than folded into {@see self::maskForApi()} because the
-     * agent-override path masks a `{value, source}` pair key by key, and
-     * duplicating the union there is how the two paths drifted apart once
-     * already.
-     *
-     * @return list<string>
-     */
+ * Every key whose value must be masked before it leaves the process, for
+ * `$toolClass` or for the shared group it consumes.
+ *
+ * Exposed rather than folded into {@see self::maskForApi()} because the
+ * agent-override path masks a `{value, source}` pair key by key, and
+ * duplicating the union there is how the two paths drifted apart once
+ * already. {@see EffectiveToolSettings} owns the union because it is a
+ * shared-group question; this stays the way in, since that class reads its
+ * levels through this service and so cannot be built without it.
+ *
+ * @return list<string>
+ */
     public function maskablePasswordKeys(string $toolClass): array
     {
-        $passwordKeys = $this->schema->getPasswordKeys($toolClass);
+        return $this->effective->maskablePasswordKeys($toolClass);
+    }
 
-        // A value the shared group supplied was encrypted under the *group's*
-        // `#[ToolSetting(type: 'password')]` list, so the tool's own list is
-        // not enough to mask it. A tool that declares the key as `text` —
-        // a mistyping the schema cannot detect — would otherwise publish the
-        // plugin-wide credential on routes that are not admin-gated.
-        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
-        if ($groupClass !== null) {
-            $passwordKeys = array_merge($passwordKeys, $this->schema->getPasswordKeys($groupClass));
-        }
-
-        return array_values(array_unique($passwordKeys));
+    /**
+     * Whether the shared group has any stored value at all.
+     *
+     * Callers that persist a value at a level that outranks the group use this
+     * to decide whether that level should be seeded at all. Seeding the schema
+     * default would shadow the group; seeding the group's value would let it
+     * cross the status boundary that deliberately resolves without it.
+     */
+    public function sharedGroupHasValues(string $toolClass): bool
+    {
+        return $this->effective->sharedGroupHasValues($toolClass);
     }
 
     /**
@@ -488,46 +430,6 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Return schema defaults as key => default_value for all #[ToolSetting] fields.
-     * Used to pre-seed agent overrides when enabling a tool.
-     *
-     * @return array<string, mixed>
-     */
-    public function getSchemaDefaults(string $toolClass): array
-    {
-        return $this->schema->getSchemaDefaults($toolClass);
-    }
-
-    /**
-     * Whether the shared group has any stored value at all.
-     *
-     * Callers that persist a value at a level that outranks the group use this
-     * to decide whether that level should be seeded at all. Seeding the schema
-     * default would shadow the group; seeding the group's value would let it
-     * cross the status boundary that deliberately resolves without it.
-     */
-    public function sharedGroupHasValues(string $toolClass): bool
-    {
-        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
-        if ($groupClass === null) {
-            return false;
-        }
-
-        return array_filter($this->getGlobalSettings($groupClass), static fn(mixed $v): bool => $v !== null && $v !== '') !== [];
-    }
-
-    /**
-     * Return keys of required settings that have no value (null or empty) in the given effective settings.
-     *
-     * @param  array<string, mixed> $effectiveSettings
-     * @return list<string>
-     */
-    public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array
-    {
-        return $this->schema->getMissingRequiredSettings($toolClass, $effectiveSettings);
-    }
-
-    /**
      * Return effective settings annotated with their source.
      *
      * In the principals-and-groups model the source values are
@@ -551,72 +453,7 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        [$cascadePrincipalIds, $userPrincipalId] = $this->cascade->resolvePrincipalIdsWithUserRef($userId, $context);
-
-        $schemaDefaults = $this->schema->getSchemaDefaults($toolClass);
-        $shared = $this->sharedSettings->applyToDefaults($toolClass, $schemaDefaults, $this->getGlobalSettings(...));
-
-        // Which keys the group actually supplied. `applyToDefaults()` writes
-        // them into the same array, so testing the merged result against
-        // `$schemaDefaults` cannot tell the two apart — a group value that
-        // overrode a code default was labelled `default`, contradicting the
-        // method's own contract and mis-rendering in the form that reads
-        // `source`.
-        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
-        $fromGroup  = $groupClass === null
-            ? []
-            : array_keys(array_filter(
-                $this->getGlobalSettings($groupClass),
-                static fn(mixed $v): bool => $v !== null && $v !== '',
-            ));
-
-        $result = [];
-        foreach ($shared as $key => $value) {
-            $result[$key] = ['value' => $value, 'source' => $this->baseSource($key, $fromGroup, $schemaDefaults)];
-        }
-
-        $global = $this->getGlobalSettings($toolClass);
-        foreach ($global as $key => $value) {
-            $result[$key] = ['value' => $value, 'source' => 'global'];
-        }
-
-        foreach ($cascadePrincipalIds as $principalId) {
-            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
-            $source = ($principalId === $userPrincipalId) ? 'principal' : 'group';
-            foreach ($principalSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => $source];
-            }
-        }
-
-        $override = AgentToolOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        if ($override !== null) {
-            $overrideSettings = $this->crypto->decodeSettings(
-                $toolClass,
-                $override->getRawOriginal('settings'),
-            );
-
-            foreach ($overrideSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => 'agent'];
-            }
-        }
-
-        // Cleared-key rule from {@see self::getEffectiveSettings()}: a level above
-        // that left the key at '' supplied nothing, so the base value shows
-        // through and the annotation reports the base's own source rather
-        // than crediting the empty level.
-        foreach ($shared as $key => $value) {
-            if (($result[$key]['value'] ?? null) === '') {
-                $result[$key] = [
-                    'value'  => $value,
-                    'source' => array_key_exists($key, $schemaDefaults) ? 'default' : 'shared',
-                ];
-            }
-        }
-
-        return $result;
+        return $this->effective->getEffectiveSettingsWithSource($toolClass, $agentId, $userId, $context);
     }
 
     /**
@@ -646,12 +483,6 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId, $context);
-
-        // `$context` is forwarded, not dropped. The settings cascade has
-        // already used it; the `resolveAs: 'skill'` projection needs it too, or
-        // a provider-supplied skill is authorised by the `skill` tool and
-        // simultaneously absent from the tool definition that would suggest it.
-        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId, $agentId, $context);
+        return $this->effective->getLlmToolSettings($toolClass, $agentId, $userId, $context);
     }
 }

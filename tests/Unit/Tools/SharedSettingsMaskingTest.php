@@ -10,6 +10,7 @@ use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SharedSettingsResolver;
@@ -47,11 +48,12 @@ function sharedLeakFixture(): array
         $security,
         new Logger('test'),
         $classes,
-        new ToolConfigSchemaInspector(),
-        new PrincipalService(new PrincipalResolver()),
-        false,
-        new PrincipalResolver(),
-        new SharedSettingsResolver([AcmeSharedSettings::class]),
+        new ToolConfigOverrides(
+            schema: new ToolConfigSchemaInspector(),
+            principalService: new PrincipalService(new PrincipalResolver()),
+            principalResolver: new PrincipalResolver(),
+            sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        ),
     );
 
     $llmConfig = new LLMConfigService($security, []);

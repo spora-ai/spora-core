@@ -222,7 +222,7 @@ test('getMissingRequiredSettings: required field is empty → reported as missin
     // TestTool has no required fields by default, so create a fake tool class inline
     // We test the logic by passing an empty effective settings array — nothing is missing
     // since no field is required in TestTool.
-    $missing = $service->getMissingRequiredSettings(TestTool::class, [
+    $missing = (new Spora\Services\ToolConfigSchemaInspector())->getMissingRequiredSettings(TestTool::class, [
         'api_key' => null,
     ]);
 
@@ -234,7 +234,7 @@ test('getMissingRequiredSettings returns empty when no settings provided for a t
     [$service] = makeToolConfigService();
 
     // TestTool has no required #[ToolSetting] fields
-    $missing = $service->getMissingRequiredSettings(TestTool::class, []);
+    $missing = (new Spora\Services\ToolConfigSchemaInspector())->getMissingRequiredSettings(TestTool::class, []);
 
     expect($missing)->toBe([]);
 });
@@ -243,7 +243,7 @@ test('getMissingRequiredSettings ignores non-required fields even if empty', fun
     [$service] = makeToolConfigService();
 
     // max_results is not required in TestTool
-    $missing = $service->getMissingRequiredSettings(TestTool::class, [
+    $missing = (new Spora\Services\ToolConfigSchemaInspector())->getMissingRequiredSettings(TestTool::class, [
         'api_key' => 'some-key',
         // max_results omitted
     ]);
@@ -254,7 +254,7 @@ test('getMissingRequiredSettings ignores non-required fields even if empty', fun
 test('getMissingRequiredSettings returns empty array for unknown tool class', function (): void {
     [$service] = makeToolConfigService();
 
-    $missing = $service->getMissingRequiredSettings('NonExistent\\Tool', ['api_key' => 'val']);
+    $missing = (new Spora\Services\ToolConfigSchemaInspector())->getMissingRequiredSettings('NonExistent\\Tool', ['api_key' => 'val']);
 
     expect($missing)->toBe([]);
 });

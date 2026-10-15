@@ -7,6 +7,7 @@ namespace Tests\Unit\Tools;
 use Monolog\Logger;
 use Spora\Core\SecurityManager;
 use Spora\Http\ToolController;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SharedSettingsResolver;
 use Symfony\Component\HttpFoundation\Request;
@@ -45,7 +46,9 @@ function inheritedController(): array
         $security,
         new Logger('test'),
         [AcmeChatTool::class, AcmeStandaloneTool::class, AcmeMistypedTool::class],
-        sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        new ToolConfigOverrides(
+            sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        ),
     );
 
     $controller = new ToolController(

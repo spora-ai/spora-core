@@ -382,6 +382,7 @@ final class OrchestratorContainerBindings
                 return new AgentTemplateToolsApplier(
                     $c->get(ToolConfigService::class),
                     $c->get(AgentTemplateSettingsApplier::class),
+                    $c->get(ToolConfigSchemaInspector::class),
                 );
             },
 

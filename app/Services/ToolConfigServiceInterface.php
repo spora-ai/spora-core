@@ -92,17 +92,6 @@ interface ToolConfigServiceInterface
     public function getRegisteredToolClasses(): array;
 
     /**
-     * @return array<string, mixed>
-     */
-    public function getSchemaDefaults(string $toolClass): array;
-
-    /**
-     * @param  array<string, mixed> $effectiveSettings
-     * @return list<string>
-     */
-    public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array;
-
-    /**
      * @return array<string, array{label: string, value: mixed}>
      */
     public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;

@@ -10,6 +10,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\LLMConfigService;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\SharedSettingsResolver;
 
@@ -34,7 +35,9 @@ function statusToolConfig(): ToolConfigService
         new SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Logger('test'),
         [AcmeChatTool::class, AcmeStandaloneTool::class],
-        sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        new ToolConfigOverrides(
+            sharedSettings: new SharedSettingsResolver([AcmeSharedSettings::class]),
+        ),
     );
 }
 

@@ -61,49 +61,72 @@ HELP);
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io    = new SymfonyStyle($input, $output);
-        $force = (bool) $input->getOption('force');
+        $removed = $this->reset(
+            new SymfonyStyle($input, $output),
+            (bool) $input->getOption('force'),
+        );
 
+        return $removed ? Command::SUCCESS : Command::FAILURE;
+    }
+
+    /**
+     * Remove every stored row, reporting what happened on `$io`.
+     *
+     * One success exit and one failure exit: the two "nothing to do" cases
+     * differ in wording, not in outcome, and the delete stays inside the
+     * `try` so a failure part-way through is reported rather than counted as
+     * a reset.
+     */
+    private function reset(SymfonyStyle $io, bool $force): bool
+    {
         try {
             $this->database->bootDatabaseConnectionOnly();
             $rows = $this->storedRows();
 
-            if ($rows === []) {
-                $io->success('No stored settings. Nothing to reset.');
+            $removed = 0;
+            if ($rows !== []) {
+                $this->report($io, $rows);
 
-                return Command::SUCCESS;
+                if (!$force && !$io->confirm('Remove them all?', false)) {
+                    $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
+
+                    return false;
+                }
+
+                // No key filter: a row left behind by an uninstalled plugin has
+                // no declared setting to address it by, and it is exactly the
+                // row that would otherwise survive a "reset".
+                Capsule::table('settings')->delete();
+                $removed = count($rows);
             }
 
-            foreach ($rows as $row) {
-                $io->writeln(sprintf('  <comment>%s</comment> / %s', $row['group'], $row['key']));
-            }
-            $io->writeln(sprintf(
-                'About to remove %d stored setting(s). Every value falls back to <comment>config.php</comment> / <comment>.env</comment>.',
-                count($rows),
-            ));
+            $io->success($removed === 0
+                ? 'No stored settings. Nothing to reset.'
+                : sprintf(
+                    'Removed %d stored setting(s). They resolve from <comment>config.php</comment> / <comment>.env</comment> again.',
+                    $removed,
+                ));
 
-            if (!$force && !$io->confirm('Remove them all?', false)) {
-                $io->writeln('Aborted. No changes made. (Pass --force to skip the prompt in non-interactive runs.)');
-
-                return Command::FAILURE;
-            }
-
-            // No key filter: a row left behind by an uninstalled plugin has no
-            // declared setting to address it by, and it is exactly the row that
-            // would otherwise survive a "reset".
-            Capsule::table('settings')->delete();
+            return true;
         } catch (Throwable $e) {
             $io->error('Settings reset failed: ' . $e->getMessage());
 
-            return Command::FAILURE;
+            return false;
         }
+    }
 
-        $io->success(sprintf(
-            'Removed %d stored setting(s). They resolve from <comment>config.php</comment> / <comment>.env</comment> again.',
+    /**
+     * @param list<array{group: string, key: string}> $rows
+     */
+    private function report(SymfonyStyle $io, array $rows): void
+    {
+        foreach ($rows as $row) {
+            $io->writeln(sprintf('  <comment>%s</comment> / %s', $row['group'], $row['key']));
+        }
+        $io->writeln(sprintf(
+            'About to remove %d stored setting(s). Every value falls back to <comment>config.php</comment> / <comment>.env</comment>.',
             count($rows),
         ));
-
-        return Command::SUCCESS;
     }
 
     /**
