@@ -6,6 +6,7 @@ use Delight\Auth\Role;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\SeedCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Plugins\PluginLoader;
@@ -22,7 +23,7 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
     // The connection is already booted by tests/Pest.php beforeEach; do NOT
     // resetBootState() here, that would create a fresh in-memory SQLite that
     // the factory closure's Auth can't see.
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly(); // no-op: already booted
 
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
@@ -50,7 +51,7 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
 
-    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH));
+    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH), settingsAwareContainer());
     $command->setName('db:seed');
 
     return new CommandTester($command);
@@ -103,7 +104,7 @@ it('generates a fresh storage/secret.key on first run', function (): void {
 it('reports failure and exits with FAILURE when the factory throws', function (): void {
     // The factory closure is invoked AFTER bootDatabaseConnectionOnly, so a
     // throwing factory exercises the catch (Throwable) branch in SeedCommand::execute.
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $templateLoader = new EmailTemplateLoader(new Paths(BASE_PATH));
@@ -125,7 +126,7 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
     );
 
-    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH));
+    $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH), settingsAwareContainer());
     $command->setName('db:seed');
     $tester = new CommandTester($command);
 

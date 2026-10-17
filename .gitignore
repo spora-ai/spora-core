@@ -5,7 +5,11 @@
 # ── Secrets & user-generated config ─────────────────────────────────────────
 # config.php is created by install.php and may contain the DB password.
 # It must never be committed. Use config.php.example as the reference template.
-config.php
+#
+# Anchored to the repository root: unanchored, this also matched
+# app/Core/Config.php (the Config value object) on a case-insensitive
+# filesystem, so `git add` on it was a silent no-op.
+/config.php
 
 # Dotenv (used by Docker / VPS users instead of config.php)
 .env
@@ -31,6 +35,11 @@ storage/.schema_stamp
 # Plugin loader stamp + sidecar — regenerated on every plugin boot, not source
 storage/.plugins_stamp
 storage/.plugins_stamp.cache.json
+
+# Plugin catalog HTTP cache. Written into `Paths::storage()`, and the full suite
+# leaks one into the repo's own storage/ — a test in a run other than
+# PluginsCatalogControllerTest, which correctly uses a temp root.
+storage/.spora_plugin_catalog.json
 
 # Keep the empty storage/ directory in the repo
 !storage/.gitkeep

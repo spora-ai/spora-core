@@ -15,6 +15,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
 use Spora\Core\Database;
 
 final class TestDatabaseFactory
@@ -55,7 +57,7 @@ final class TestDatabaseFactory
         if ($driver === 'sqlite') {
             Database::resetBootState();
             Database::setSchemaInstallSkipped(false);
-            (new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+            (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->boot();
             return;
         }
 
@@ -79,6 +81,19 @@ final class TestDatabaseFactory
 
         (new Database(self::buildConfigForDriver()))->boot();
 
+        // The shared engine keeps every row a previous test wrote, and
+        // `settings` has a unique index on (group_key, setting_key). A test
+        // that writes a key a previous test already wrote collides on it, and a
+        // test asserting "nothing was stored" sees the earlier row. SQLite gets
+        // a fresh `:memory:` on every boot(), so it never showed there.
+        //
+        // After the boot, not before: `resetBootState()` tears the connection
+        // down, and querying it first left the MySQL and MariaDB jobs hanging
+        // on a connection that was no longer usable.
+        if (self::$workerSchemaInstalled && Capsule::connection()->getSchemaBuilder()->hasTable('settings')) {
+            Capsule::table('settings')->delete();
+        }
+
         self::$workerSchemaInstalled = true;
     }
 
@@ -90,7 +105,7 @@ final class TestDatabaseFactory
         if ($driver === 'sqlite') {
             Database::resetBootState();
             Database::setSchemaInstallSkipped(false);
-            (new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->boot();
+            (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->boot();
             return;
         }
 
@@ -115,7 +130,7 @@ final class TestDatabaseFactory
         if ($driver === 'sqlite') {
             Database::resetBootState();
             Database::setSchemaInstallSkipped(false);
-            (new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->bootDatabaseConnectionOnly();
+            (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->bootDatabaseConnectionOnly();
             return;
         }
 
@@ -138,7 +153,7 @@ final class TestDatabaseFactory
         if ($driver === 'sqlite') {
             Database::resetBootState();
             Database::setSchemaInstallSkipped(false);
-            (new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']))->bootDatabaseConnectionOnly();
+            (new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:'])))->bootDatabaseConnectionOnly();
             return;
         }
 
@@ -155,19 +170,16 @@ final class TestDatabaseFactory
         self::$workerSchemaInstalled = false;
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private static function buildConfigForDriver(): array
+    private static function buildConfigForDriver(): Config
     {
-        return [
-            'db_driver'   => self::driver(),
-            'db_host'     => (string) (getenv('SPORA_TEST_DB_HOST') ?: '127.0.0.1'),
-            'db_port'     => (int) (getenv('SPORA_TEST_DB_PORT') ?: 3306),
-            'db_name'     => (string) self::$workerDbName,
-            'db_user'     => (string) (getenv('SPORA_TEST_DB_USER') ?: 'root'),
-            'db_password' => (string) (getenv('SPORA_TEST_DB_PASSWORD') ?: ''),
-        ];
+        return new Config([
+            'SPORA_DB_DRIVER'   => self::driver(),
+            'SPORA_DB_HOST'     => (string) (getenv('SPORA_TEST_DB_HOST') ?: '127.0.0.1'),
+            'SPORA_DB_PORT'     => (int) (getenv('SPORA_TEST_DB_PORT') ?: 3306),
+            'SPORA_DB_NAME'     => (string) self::$workerDbName,
+            'SPORA_DB_USER'     => (string) (getenv('SPORA_TEST_DB_USER') ?: 'root'),
+            'SPORA_DB_PASSWORD' => (string) (getenv('SPORA_TEST_DB_PASSWORD') ?: ''),
+        ]);
     }
 
     /** `CREATE DATABASE` the worker's unique DB; SIGTERM/SIGINT handler drops it so Pest's parent kills don't leak. */

@@ -6,6 +6,7 @@ use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Tests\Fixtures\TestTool;
 
@@ -129,10 +130,7 @@ test('getLlmToolSettings resolves agent names when a PrincipalResolver is wired'
         new SecurityManager($key),
         new Monolog\Logger('test'),
         [TestTool::class],
-        null,
-        null,
-        false,
-        $resolver,
+        new ToolConfigOverrides(principalResolver: $resolver),
     );
     $service->putAgentOverride(TestTool::class, $source->id, [
         'allowed_target_agents' => [$target->id],

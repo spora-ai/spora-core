@@ -8,10 +8,12 @@ use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
+use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Console\WorkerLoopOptions;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Services\MercurePublisherInterface;
@@ -34,6 +36,8 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 final class WorkerRunCommand extends Command
 {
+    use AppliesSettingsOverlay;
+
     private const REAP_INTERVAL_SECONDS = 300;
 
     private bool $shouldQuit = false;
@@ -109,7 +113,7 @@ final class WorkerRunCommand extends Command
 
     private function runWorker(InputInterface $input, OutputInterface $output): int
     {
-        $this->database->bootDatabaseConnectionOnly();
+        $this->applyRuntimeSettings($this->container, $this->database);
 
         // Pin UTC before any timestamp comparison. The DB columns are UTC (due_at,
         // next_run_at, last_run_at, completed_at, created_at, updated_at), and the
@@ -131,7 +135,7 @@ final class WorkerRunCommand extends Command
         $staleMinutesRaw = $input->getOption('stale-minutes');
         $staleMinutes = (int) ($staleMinutesRaw !== null
             ? $staleMinutesRaw
-            : ($this->container->get('config')['worker_stale_minutes'] ?? 60));
+            : (int) $this->container->get(Config::class)->getInt('SPORA_WORKER_STALE_MINUTES', 60));
 
         $limit = (int) $input->getOption('limit');
         $sleep = (int) $input->getOption('sleep');
@@ -140,7 +144,7 @@ final class WorkerRunCommand extends Command
         $workersCli = $input->getOption('workers');
         $maxWorkers = match (true) {
             $workersCli !== null && $workersCli !== '0' => (int) $workersCli,
-            default => (int) ($this->container->get('config')['max_workers'] ?? 0),
+            default => (int) $this->container->get(Config::class)->getInt('SPORA_MAX_WORKERS', 0),
         };
 
         $earlyExit = $this->prepareForRun(

@@ -10,6 +10,7 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
+use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Core\Database;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Task;
@@ -45,6 +46,9 @@ use Throwable;
  */
 final class TaskRunCommand extends Command
 {
+    use AppliesSettingsOverlay;
+
+
     public const TASK_RUN_COMMAND_ABORTED_EXIT = 2;
 
     public function __construct(
@@ -85,7 +89,7 @@ final class TaskRunCommand extends Command
     {
         $taskId = (int) $input->getArgument('taskId');
 
-        $this->database->bootDatabaseConnectionOnly();
+        $this->applyRuntimeSettings($this->container, $this->database);
 
         // Graceful SIGTERM / SIGINT handling — exit cleanly without DB corruption.
         if (extension_loaded('pcntl')) {

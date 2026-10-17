@@ -311,7 +311,7 @@ describe('MediaTool::get_media', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
             $config,
-            ['app_url' => 'https://example.test'],
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
         );
         try {
             $result = $tool->execute(
@@ -724,7 +724,7 @@ describe('MediaTool::get_media', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
             null,
-            ['app_url' => 'https://configured.example/'],
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://configured.example/']),
         );
         try {
             $result = $tool->execute(
@@ -780,7 +780,7 @@ describe('MediaTool::get_public_url', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
             null,
-            ['app_url' => 'https://spora.example/'],
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://spora.example/']),
         );
         try {
             $result = $tool->execute(
@@ -809,7 +809,7 @@ describe('MediaTool::get_public_url', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
             null,
-            ['app_url' => 'https://spora.example/'],
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://spora.example/']),
         );
         try {
             $result = $tool->execute(
@@ -902,7 +902,7 @@ describe('MediaTool::get_public_url', function (): void {
         ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
             makeMediaToolNonAdminAuth(),
             null,
-            ['app_url' => 'https://configured.example/'],
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://configured.example/']),
         );
         try {
             $result = $tool->execute(

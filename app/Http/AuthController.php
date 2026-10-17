@@ -7,6 +7,7 @@ namespace Spora\Http;
 use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
@@ -43,8 +44,8 @@ final class AuthController
         private readonly CsrfTokenService $csrfService,
         private readonly AuthValidator $validator,
         private readonly AuthWorkflow $workflow,
+        private readonly Config $config,
         private readonly ?SystemMailer $systemMailer = null,
-        private readonly array $config = [],
     ) {}
 
     public function register(Request $request): JsonResponse
@@ -55,7 +56,7 @@ final class AuthController
             return $this->rateLimitedResponse($clientIp);
         }
 
-        if (!($this->config['allow_registration'] ?? true)) {
+        if (!$this->config->getBool('SPORA_ALLOW_REGISTRATION')) {
             return $this->validator->error('REGISTRATION_DISABLED', 'Registration is currently disabled.', Response::HTTP_FORBIDDEN);
         }
 
@@ -228,11 +229,8 @@ final class AuthController
         return $this->workflow->performEmailChangeConfirmation($body);
     }
 
-    // ---------------------------------------------------------------------
     // HTTP-layer helpers — kept here because they own request-header and
     // client-IP concerns that don't belong in the workflow or validator.
-    // ---------------------------------------------------------------------
-
     private function getClientIp(Request $request): string
     {
         $serverVar = $request->server->get('HTTP_X_FORWARDED_FOR');

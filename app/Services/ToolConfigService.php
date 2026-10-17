@@ -11,6 +11,7 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOverride;
 use Spora\Models\ToolConfiguration;
 use Spora\Models\ToolUserSetting;
+use Spora\Tools\SharedSettingsResolver;
 
 /**
  * The ONLY class permitted to read or write tool_configurations.settings
@@ -32,7 +33,10 @@ use Spora\Models\ToolUserSetting;
  *
  * Migration 0067 renamed `tool_user_settings.user_id` to
  * `tool_user_settings.principal_id`. The effective-settings cascade
- * is `schema defaults → global → group[0..N] → user-principal → agent`.
+ * is `schema defaults → shared group → global → group[0..N] → user-principal → agent`.
+ * The "shared group" level is the plugin-declared credential group
+ * ({@see \Spora\Tools\SharedSettingsResolver}) and is absent for every tool
+ * that names no group.
  * When the caller passes an explicit `PrincipalContext` only that
  * single principal id is consulted (preserves the legacy single-principal
  * semantics for callers that want to bypass the user/group cascade).
@@ -54,36 +58,50 @@ class ToolConfigService implements ToolConfigServiceInterface
 
     private readonly ToolConfigPrincipalCascade $cascade;
 
+    private readonly SharedSettingsResolver $sharedSettings;
+
+    private readonly EffectiveToolSettings $effective;
+
     /**
-     * @param list<string> $toolClasses
-     * @param ToolConfigSchemaInspector|null $schema The single shared inspector.
-     *        Injecting it is what keeps the LLM-facing `allowed_skills`
-     *        projection consistent with what the `skill` tool will authorise
-     *        — the container builds it once over the same skill registry
-     *        ({@see OrchestratorContainerBindings}). Null (every test call
-     *        site) yields an empty registry, so the projection is empty under
-     *        test and only ever populated in the DI runtime. A test that needs
-     *        a real skill list must hand-build an inspector over a registry,
-     *        not rely on this default.
+     * @param list<string>                    $toolClasses
+     * @param ToolConfigOverrides|null        $overrides The collaborators to use
+     *        instead of building them. A null value is equivalent to an
+     *        all-null instance, which is what every test call site relies on.
      */
     public function __construct(
         SecurityManagerInterface $security,
         LoggerInterface $logger,
         array $toolClasses = [],
-        ?ToolConfigSchemaInspector $schema = null,
-        ?PrincipalService $principalService = null,
-        bool $groupCascadeEnabled = false,
-        ?PrincipalResolver $principalResolver = null,
+        ?ToolConfigOverrides $overrides = null,
     ) {
+        $overrides ??= new ToolConfigOverrides();
+
         // Without the resolver the inspector's LLM-facing `allowed_target_agents`
         // enumerates "#id" placeholders; null is fine for tests, the DI runtime
         // always passes the resolver.
-        $this->schema = $schema ?? new ToolConfigSchemaInspector(principalResolver: $principalResolver);
+        $this->schema = $overrides->schema ?? new ToolConfigSchemaInspector(principalResolver: $overrides->principalResolver);
         $this->crypto = new ToolConfigCryptographer($security, $this->schema->getPasswordKeys(...));
-        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses);
+        // The shared-settings classes go in too: `ToolController` writes through
+        // this resolver, and without them a group id resolves to nothing — so
+        // the shared credential the feature exists to store had no reachable
+        // write path at all.
+        $this->nameResolver = new ToolConfigNameResolver($logger, $toolClasses, $overrides->sharedSettings?->settingsClasses() ?? []);
         $this->cascade = new ToolConfigPrincipalCascade(
-            $principalService ?? new PrincipalService($principalResolver ?? new PrincipalResolver()),
-            $groupCascadeEnabled,
+            $overrides->principalService ?? new PrincipalService($overrides->principalResolver ?? new PrincipalResolver()),
+            $overrides->groupCascadeEnabled,
+        );
+        $this->sharedSettings = $overrides->sharedSettings ?? new SharedSettingsResolver();
+        // Always built here rather than injected: it reads its levels through the
+        // closures below, which are bound to this instance, so a pre-built one
+        // could not be supplied from the container without a circular
+        // dependency on the service it reads from.
+        $this->effective = new EffectiveToolSettings(
+            $this->schema,
+            $this->cascade,
+            $this->sharedSettings,
+            $this->crypto,
+            $this->getGlobalSettings(...),
+            $this->getPrincipalSettings(...),
         );
     }
 
@@ -211,59 +229,43 @@ class ToolConfigService implements ToolConfigServiceInterface
      * Return effective settings: global defaults merged with principal
      * settings and agent-specific overrides.
      *
-     * Cascade: schema defaults → global settings → group[0..N] settings →
-     * user-principal settings → agent overrides. The group-principal
-     * rows are consulted in `principal.id` ASCENDING order so the
-     * iteration is stable across calls; the user-principal is iterated
-     * last so user-scoped settings win on conflict.
+     * Cascade: schema defaults → shared group → global settings →
+     * group[0..N] settings → user-principal settings → agent overrides.
+     * The group-principal rows are consulted in `principal.id` ASCENDING
+     * order so the iteration is stable across calls; the user-principal is
+     * iterated last so user-scoped settings win on conflict.
      *
-     * The `?PrincipalContext` parameter is the preferred shape — it
-     * carries the principal id directly so we don't re-derive a
-     * user-principal from `currentUserId()`, and the explicit context
-     * bypasses the group cascade (only the single named principal is
-     * consulted). The legacy `?int $userId` parameter is preserved at
-     * the front so existing call sites (tools, controllers) don't have
-     * to be updated as part of the migration; new callers should pass
-     * an explicit `PrincipalContext`.
+     * The shared-group layer is the exception to how this reads top-down: it
+     * is applied to the schema defaults *before* the tool's own rows are
+     * merged, never appended to the finished array. Appending it would put
+     * the group above the tool's global value and silently turn a fallback
+     * into an override — the one inversion this method cannot tolerate.
      *
+     * `?PrincipalContext` is the preferred shape — it carries the principal id
+     * directly so we don't re-derive a user-principal from `currentUserId()`,
+     * and the explicit context bypasses the group cascade (only the single
+     * named principal is consulted). The legacy `?int $userId` parameter is
+     * preserved at the front so existing call sites (tools, controllers) don't
+     * have to be updated as part of the migration; new callers should pass an
+     * explicit `PrincipalContext`.
+     *
+     * @param  bool $includeSharedSettings False for the `ToolStatus` path. The
+     *         status derives `missing_required` from what this method returns,
+     *         and a plugin group supplying the credential would make every tool
+     *         that consumes it report itself configured the moment the plugin
+     *         is installed — before the operator has entered anything. Kept
+     *         here rather than in a second resolution so the two paths cannot
+     *         drift apart in any of the levels above.
      * @return array<string, mixed>
      */
-    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
-    {
-        $cascadePrincipalIds = $this->cascade->resolvePrincipalIds($userId, $context);
-
-        $merged = $this->getGlobalSettings($toolClass);
-
-        foreach ($cascadePrincipalIds as $principalId) {
-            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
-            foreach ($principalSettings as $key => $value) {
-                $merged[$key] = $value;
-            }
-        }
-
-        $override = AgentToolOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        if ($override !== null) {
-            $overrideSettings = $this->crypto->decodeSettings(
-                $toolClass,
-                $override->getRawOriginal('settings'),
-            );
-
-            foreach ($overrideSettings as $key => $value) {
-                $merged[$key] = $value;
-            }
-        }
-
-        $defaults = $this->schema->getSchemaDefaults($toolClass);
-        foreach ($defaults as $key => $defaultValue) {
-            if (!isset($merged[$key])) {
-                $merged[$key] = $defaultValue;
-            }
-        }
-
-        return $this->schema->normalizeMultiSelectValues($toolClass, $merged);
+    public function getEffectiveSettings(
+        string $toolClass,
+        int $agentId,
+        ?int $userId = null,
+        ?PrincipalContext $context = null,
+        bool $includeSharedSettings = true,
+    ): array {
+        return $this->effective->getEffectiveSettings($toolClass, $agentId, $userId, $context, $includeSharedSettings);
     }
 
     /**
@@ -275,7 +277,38 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function maskForApi(array $settings, string $toolClass): array
     {
-        return $this->schema->maskForApi($settings, $toolClass);
+        return $this->schema->maskForApi($settings, $toolClass, $this->effective->maskablePasswordKeys($toolClass));
+    }
+
+    /**
+ * Every key whose value must be masked before it leaves the process, for
+ * `$toolClass` or for the shared group it consumes.
+ *
+ * Exposed rather than folded into {@see self::maskForApi()} because the
+ * agent-override path masks a `{value, source}` pair key by key, and
+ * duplicating the union there is how the two paths drifted apart once
+ * already. {@see EffectiveToolSettings} owns the union because it is a
+ * shared-group question; this stays the way in, since that class reads its
+ * levels through this service and so cannot be built without it.
+ *
+ * @return list<string>
+ */
+    public function maskablePasswordKeys(string $toolClass): array
+    {
+        return $this->effective->maskablePasswordKeys($toolClass);
+    }
+
+    /**
+     * Whether the shared group has any stored value at all.
+     *
+     * Callers that persist a value at a level that outranks the group use this
+     * to decide whether that level should be seeded at all. Seeding the schema
+     * default would shadow the group; seeding the group's value would let it
+     * cross the status boundary that deliberately resolves without it.
+     */
+    public function sharedGroupHasValues(string $toolClass): bool
+    {
+        return $this->effective->sharedGroupHasValues($toolClass);
     }
 
     /**
@@ -397,86 +430,30 @@ class ToolConfigService implements ToolConfigServiceInterface
     }
 
     /**
-     * Return schema defaults as key => default_value for all #[ToolSetting] fields.
-     * Used to pre-seed agent overrides when enabling a tool.
-     *
-     * @return array<string, mixed>
-     */
-    public function getSchemaDefaults(string $toolClass): array
-    {
-        return $this->schema->getSchemaDefaults($toolClass);
-    }
-
-    /**
-     * Return keys of required settings that have no value (null or empty) in the given effective settings.
-     *
-     * @param  array<string, mixed> $effectiveSettings
-     * @return list<string>
-     */
-    public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array
-    {
-        return $this->schema->getMissingRequiredSettings($toolClass, $effectiveSettings);
-    }
-
-    /**
      * Return effective settings annotated with their source.
      *
      * In the principals-and-groups model the source values are
-     * `'global' | 'group' | 'principal' | 'agent' | 'default'`.
-     * `'group'` is the new label for any group-principal row consulted
+     * `'global' | 'group' | 'principal' | 'agent' | 'default'`, plus
+     * `'shared'` for a value that came from the plugin's shared settings
+     * group. `'group'` is the label for any group-principal row consulted
      * through the cascade; `'principal'` continues to label the
      * user-principal level (the source name predates the user/group
      * split and matches the `tool_user_settings.principal_id` column).
-     * Because the cascade iterates `global → group[0..N] → principal →
-     * agent`, the source label for a key is determined by the LAST level
-     * that overwrote it (last write wins), which keeps
+     * `'shared'` is the plugin-declared credential group and is unrelated
+     * to the group-principal axis — they are different meanings of the
+     * word, which is why the plugin one needed its own label rather than
+     * reusing `'group'`.
+     * Because the cascade iterates `shared → global → group[0..N] →
+     * principal → agent`, the source label for a key is determined by the
+     * LAST level that overwrote it (last write wins), which keeps
      * `getEffectiveSettingsWithSource` in lockstep with
      * {@see self::getEffectiveSettings()}.
      *
-     * @return array<string, array{value: mixed, source: 'global'|'group'|'principal'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'shared'|'global'|'group'|'principal'|'agent'|'default'}>
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        [$cascadePrincipalIds, $userPrincipalId] = $this->cascade->resolvePrincipalIdsWithUserRef($userId, $context);
-
-        $global = $this->getGlobalSettings($toolClass);
-        $result = [];
-
-        foreach ($global as $key => $value) {
-            $result[$key] = ['value' => $value, 'source' => 'global'];
-        }
-
-        foreach ($cascadePrincipalIds as $principalId) {
-            $principalSettings = $this->getPrincipalSettings($toolClass, $principalId);
-            $source = ($principalId === $userPrincipalId) ? 'principal' : 'group';
-            foreach ($principalSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => $source];
-            }
-        }
-
-        $override = AgentToolOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->first();
-
-        if ($override !== null) {
-            $overrideSettings = $this->crypto->decodeSettings(
-                $toolClass,
-                $override->getRawOriginal('settings'),
-            );
-
-            foreach ($overrideSettings as $key => $value) {
-                $result[$key] = ['value' => $value, 'source' => 'agent'];
-            }
-        }
-
-        $defaults = $this->schema->getSchemaDefaults($toolClass);
-        foreach ($defaults as $key => $defaultValue) {
-            if (!array_key_exists($key, $result)) {
-                $result[$key] = ['value' => $defaultValue, 'source' => 'default'];
-            }
-        }
-
-        return $result;
+        return $this->effective->getEffectiveSettingsWithSource($toolClass, $agentId, $userId, $context);
     }
 
     /**
@@ -506,12 +483,6 @@ class ToolConfigService implements ToolConfigServiceInterface
      */
     public function getLlmToolSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array
     {
-        $effective = $this->getEffectiveSettings($toolClass, $agentId, $userId, $context);
-
-        // `$context` is forwarded, not dropped. The settings cascade has
-        // already used it; the `resolveAs: 'skill'` projection needs it too, or
-        // a provider-supplied skill is authorised by the `skill` tool and
-        // simultaneously absent from the tool definition that would suggest it.
-        return $this->schema->getLlmToolSettings($toolClass, $effective, $userId, $agentId, $context);
+        return $this->effective->getLlmToolSettings($toolClass, $agentId, $userId, $context);
     }
 }

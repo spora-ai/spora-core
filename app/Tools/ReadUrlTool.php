@@ -93,18 +93,10 @@ final class ReadUrlTool extends AbstractTool
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
+        private readonly HttpTimeoutResolver $timeoutResolver,
         private readonly ?LoggerInterface    $logger = null,
         private readonly ?PdfMarkdownExtractor $pdfExtractor = null,
     ) {}
-
-    private function effectiveTimeout(array $settings): int
-    {
-        if (isset($settings['http_timeout']) && (int) $settings['http_timeout'] > 0) {
-            return (int) $settings['http_timeout'];
-        }
-        $envTimeout = (int) ($_ENV['SPORA_TOOL_HTTP_TIMEOUT'] ?? getenv('SPORA_TOOL_HTTP_TIMEOUT') ?: 0);
-        return $envTimeout > 0 ? $envTimeout : 30;
-    }
 
     public function execute(
         array $arguments,
@@ -167,7 +159,7 @@ final class ReadUrlTool extends AbstractTool
      */
     private function processFetchedContent(string $url, array $settings): ToolResult
     {
-        $timeout = $this->effectiveTimeout($settings);
+        $timeout = $this->timeoutResolver->resolve($settings['http_timeout'] ?? null);
         $headers = [
             'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
             'Accept'     => 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8',
@@ -220,7 +212,7 @@ final class ReadUrlTool extends AbstractTool
         if ($denied !== null) {
             return $denied;
         }
-        $timeout = $this->effectiveTimeout($settings);
+        $timeout = $this->timeoutResolver->resolve($settings['http_timeout'] ?? null);
         $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
 
         $response = $this->httpClient->request('GET', $url, [

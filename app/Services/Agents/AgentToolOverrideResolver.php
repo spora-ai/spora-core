@@ -25,7 +25,6 @@ final class AgentToolOverrideResolver
         private readonly ToolConfigService $toolConfig,
         private readonly LLMConfigService $llmConfig,
         private readonly LLMConfigPreferences $preferences,
-        private readonly AgentToolInstanceResolver $instanceResolver,
         ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
@@ -112,7 +111,14 @@ final class AgentToolOverrideResolver
     private function resolveAnnotatedOverride(int $agentId, string $toolClass): array
     {
         $annotated = $this->toolConfig->getEffectiveSettingsWithSource($toolClass, $agentId);
-        $passwordKeys = $this->instanceResolver->getToolPasswordKeys($toolClass);
+
+        // The tool's own password keys are not the whole set once a shared
+        // group is in play: a value the group supplied was encrypted against
+        // the group's password list, and `maskForApi()` knows that union.
+        // Asking the tool alone leaves the plugin-wide credential in clear on
+        // a route that carries only `AuthMiddleware`.
+        $passwordKeys = $this->maskableKeys($toolClass);
+
         $result = [];
         foreach ($annotated as $key => $item) {
             $result[$key] = [
@@ -121,6 +127,14 @@ final class AgentToolOverrideResolver
             ];
         }
         return $result;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function maskableKeys(string $toolClass): array
+    {
+        return $this->toolConfig->maskablePasswordKeys($toolClass);
     }
 
     private function maskAnnotatedValueIfPassword(string $key, mixed $value, array $passwordKeys): mixed

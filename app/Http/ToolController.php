@@ -9,6 +9,7 @@ use Spora\Auth\AuthService;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
+use Spora\Tools\SharedSettingsResolver;
 use Spora\Tools\ToolSchemaPresenter;
 use Spora\Tools\ToolSettingSchema;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -23,6 +24,9 @@ final class ToolController
 
     /**
      * @param string[] $toolClasses Registered tool class names (injected via container).
+     * @param ?SharedSettingsResolver $sharedSettings Plugin-declared credential
+     *        groups. Null (the default, and every host that ships no group) means
+     *        `inherited` is always `[]`.
      */
     public function __construct(
         private readonly AuthService $authService,
@@ -30,6 +34,7 @@ final class ToolController
         private readonly array $toolClasses = [],
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?ToolsRecommendsSkillsValidator $recommendsSkillsValidator = null,
+        private readonly ?SharedSettingsResolver $sharedSettings = null,
     ) {}
 
     public function index(): JsonResponse
@@ -65,7 +70,44 @@ final class ToolController
         $settings = $this->toolConfigService->getGlobalSettings($toolClass);
         $masked   = $this->toolConfigService->maskForApi($settings, $toolClass);
 
-        return new JsonResponse(['data' => ['settings' => $masked]]);
+        return new JsonResponse([
+            'data' => [
+                'settings'  => $masked,
+                'inherited' => $this->sharedInheritedSettings($toolClass),
+            ],
+        ]);
+    }
+
+    /**
+     * The shared-group values this tool would fall back to, for the form to
+     * render read-only as "inherited from <group>".
+     *
+     * This endpoint is authenticated, not admin-gated, so `inherited` carries
+     * the same credential every logged-in user would be able to read once the
+     * masking is gone. The masking is therefore not optional and is keyed off
+     * the group's own schema rather than the tool's: the value was decrypted
+     * under the shared group's `#[ToolSetting(type: 'password')]` list, so a
+     * tool that misdeclares the key as plain text would otherwise publish the
+     * plugin credential in clear.
+     *
+     * @return array<string, mixed>
+     */
+    private function sharedInheritedSettings(string $toolClass): array
+    {
+        if ($this->sharedSettings === null) {
+            return [];
+        }
+
+        $inherited = $this->sharedSettings->inheritedValues(
+            $toolClass,
+            $this->toolConfigService->getGlobalSettings(...),
+        );
+
+        $groupClass = $this->sharedSettings->groupClassFor($toolClass);
+
+        return $groupClass === null
+            ? []
+            : $this->toolConfigService->maskForApi($inherited, $groupClass);
     }
 
     public function putSettings(Request $request): JsonResponse

@@ -8,6 +8,7 @@ use Delight\Auth\Role;
 use Illuminate\Database\Capsule\Manager as DB;
 use Mockery;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Http\AuthController;
 use Spora\Models\User;
 use Spora\Security\CsrfTokenService;
@@ -26,6 +27,10 @@ const AUTHCTL_TEST_PASSWORD = 'Password1!';
  * Build a controller with a real AuthService/UserService/CsrfTokenService by default,
  * but allow any of the three collaborators to be replaced with a Mockery mock.
  *
+ * `$config` defaults to the registry's `SPORA_ALLOW_REGISTRATION`, so the tests
+ * that are not about the registration gate still exercise an open one. An empty
+ * `Config` would resolve the toggle to false and 403 every register() call.
+ *
  * @return array{0: AuthController, 1: AuthService, 2: UserServiceInterface, 3: CsrfTokenService}
  */
 function makeAuthController(
@@ -33,7 +38,7 @@ function makeAuthController(
     ?UserServiceInterface $userService = null,
     ?CsrfTokenService $csrfService = null,
     ?AuthValidator $validator = null,
-    array $config = [],
+    ?Config $config = null,
 ): array {
     $authService ??= bootAuthLayer();
     $userService ??= new UserService();
@@ -41,7 +46,13 @@ function makeAuthController(
     $validator ??= new AuthValidator();
     $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
 
-    $controller = new AuthController($authService, $csrfService, $validator, $workflow, null, $config);
+    $controller = new AuthController(
+        $authService,
+        $csrfService,
+        $validator,
+        $workflow,
+        $config ?? new Config(['SPORA_ALLOW_REGISTRATION' => true]),
+    );
 
     return [$controller, $authService, $userService, $csrfService];
 }
@@ -156,7 +167,7 @@ describe('AuthController::register', function (): void {
     });
 
     test('returns 403 when registration is disabled by config', function (): void {
-        [$controller] = makeAuthController(config: ['allow_registration' => false]);
+        [$controller] = makeAuthController(config: new Config(['SPORA_ALLOW_REGISTRATION' => false]));
 
         $request = jsonRequest('POST', '/api/v1/auth/register', [
             'email'            => 'blocked@example.com',
@@ -320,7 +331,7 @@ describe('AuthController::login', function (): void {
         $csrfService = new CsrfTokenService();
         $validator = new AuthValidator();
         $workflow = new AuthWorkflow($authService, $userService, $csrfService, $validator);
-        $controller = new AuthController($authService, $csrfService, $validator, $workflow);
+        $controller = new AuthController($authService, $csrfService, $validator, $workflow, new Config());
 
         $request = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => 'no-profile@example.com',
@@ -1284,12 +1295,13 @@ describe('AuthController::requestEmailChange', function (): void {
         simulateLoggedInSession($userId, 'chg-probe-iae@example.com');
 
         // No SMTP host → buildSmtpDsn throws InvalidArgumentException
-        $systemMailer = new SystemMailer(['mail_driver' => 'smtp']);
+        $systemMailer = new SystemMailer(new Config(['SPORA_MAIL_DRIVER' => 'smtp']));
         $controller = new AuthController(
             $authService,
             new CsrfTokenService(),
             new AuthValidator(),
             new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            new Config(),
             $systemMailer,
         );
 
@@ -1315,12 +1327,16 @@ describe('AuthController::requestEmailChange', function (): void {
         User::where('id', $userId)->update(['verified' => 1]);
         simulateLoggedInSession($userId, 'chg-probe-ok@example.com');
 
-        $systemMailer = new SystemMailer(['mail_driver' => 'log']);
+        $systemMailer = new SystemMailer(new Config([
+            'SPORA_MAIL_DRIVER'     => 'log',
+            'SPORA_MAIL_FROM_NAME' => 'Spora',
+        ]));
         $controller = new AuthController(
             $authService,
             new CsrfTokenService(),
             new AuthValidator(),
             new AuthWorkflow($authService, new UserService(), new CsrfTokenService(), new AuthValidator()),
+            new Config(),
             $systemMailer,
         );
 

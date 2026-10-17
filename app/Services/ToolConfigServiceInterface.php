@@ -50,12 +50,21 @@ interface ToolConfigServiceInterface
     public function getRawAgentOverride(string $toolClass, int $agentId): array;
 
     /**
+     * @param  bool $includeSharedSettings False for the ToolStatus path — see
+     *         {@see \Spora\Services\ToolConfigService::getEffectiveSettings()}
+     *         for why the shared group must not reach `missing_required`.
      * @return array<string, mixed>
      */
-    public function getEffectiveSettings(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
+    public function getEffectiveSettings(
+        string $toolClass,
+        int $agentId,
+        ?int $userId = null,
+        ?PrincipalContext $context = null,
+        bool $includeSharedSettings = true,
+    ): array;
 
     /**
-     * @return array<string, array{value: mixed, source: 'global'|'group'|'principal'|'agent'|'default'}>
+     * @return array<string, array{value: mixed, source: 'shared'|'global'|'group'|'principal'|'agent'|'default'}>
      */
     public function getEffectiveSettingsWithSource(string $toolClass, int $agentId, ?int $userId = null, ?PrincipalContext $context = null): array;
 
@@ -81,17 +90,6 @@ interface ToolConfigServiceInterface
      * @return list<string>
      */
     public function getRegisteredToolClasses(): array;
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function getSchemaDefaults(string $toolClass): array;
-
-    /**
-     * @param  array<string, mixed> $effectiveSettings
-     * @return list<string>
-     */
-    public function getMissingRequiredSettings(string $toolClass, array $effectiveSettings): array;
 
     /**
      * @return array<string, array{label: string, value: mixed}>

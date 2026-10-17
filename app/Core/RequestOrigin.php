@@ -5,31 +5,35 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 /**
- * Resolves the public base URL and path prefix from the container `config`
- * array. Resolution order — first wins:
+ * Resolves the public base URL and path prefix from {@see Config}.
+ * Resolution order — first wins:
  *
- *   1. `config['app_url']` (from `config.php`, `SPORA_APP_URL`, or the
- *      default seeder in {@see ContainerDefinitions})
+ *   1. `SPORA_APP_URL` (from `config.php`, `SPORA_APP_URL`, or the
+ *      default seeder in {@see \Spora\Settings\SettingsRegistry})
  *   2. Web-server `HTTP_HOST` (request-supplied)
  *   3. Web-server `SERVER_NAME` (Apache `ServerName` — trusted; operator-controlled)
  *   4. `http://localhost` (CLI / worker / console / tests)
  *
- * For the path prefix: `config['app_prefix']` defaults to `/spora` (the
+ * For the path prefix: `SPORA_APP_PREFIX` defaults to `/spora` (the
  * packaged admin UI lives at `public/spora/`; plugins at
  * `public/plugins/<name>/`). Operators hosting their own frontend at the
- * host root opt out by setting `app_prefix = ''` in `config.php` or
- * `SPORA_APP_PREFIX=""`.
+ * host root opt out by setting `SPORA_APP_PREFIX=""`.
  *
  * Does NOT read `X-Forwarded-*` — those headers are spoofable and there is
  * no trusted-proxy allowlist. Operators behind a proxy that rewrites `Host`
- * MUST set `app_url` explicitly.
+ * MUST set `SPORA_APP_URL` explicitly.
+ *
+ * The `Config` argument is optional because {@see \Spora\Settings\SettingsRegistry}
+ * calls this while *building* that very Config, to seed the defaults the other
+ * layers then override. A null argument therefore means "nothing configured
+ * yet", and falls back to request detection.
  */
 final class RequestOrigin
 {
     private const LOCALHOST_ORIGIN = 'http://localhost';
 
     /**
-     * Default path prefix when `config['app_prefix']` is not set.
+     * Default path prefix when `SPORA_APP_PREFIX` is not set.
      * Matches the packaged admin UI (`public/spora/`) and plugin URLs
      * (`public/plugins/<name>/`).
      */
@@ -37,12 +41,10 @@ final class RequestOrigin
 
     /**
      * Resolve the public base URL.
-     *
-     * @param array<string, mixed> $config the container's merged config array
      */
-    public static function detect(array $config = []): string
+    public static function detect(?Config $config = null): string
     {
-        $configured = (string) ($config['app_url'] ?? '');
+        $configured = $config?->getString('SPORA_APP_URL') ?? '';
         if ($configured !== '') {
             return rtrim($configured, '/');
         }
@@ -58,16 +60,14 @@ final class RequestOrigin
      * Resolve the public base URL and the path prefix under which Spora is
      * mounted.
      *
-     * @param array<string, mixed> $config the container's merged config array
      * @return array{0: string, 1: string} [baseUrl, pathPrefix]
      *   `pathPrefix` is `/foo`-normalized; empty string when no prefix is set.
      */
-    public static function detectWithPrefix(array $config = []): array
+    public static function detectWithPrefix(?Config $config = null): array
     {
-        $prefix = (string) ($config['app_prefix'] ?? self::DEFAULT_APP_PREFIX);
-        $prefix = self::normalizePrefix($prefix);
+        $prefix = $config?->getString('SPORA_APP_PREFIX') ?? self::DEFAULT_APP_PREFIX;
 
-        return [self::detect($config), $prefix];
+        return [self::detect($config), self::normalizePrefix($prefix)];
     }
 
     /**

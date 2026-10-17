@@ -6,6 +6,7 @@ namespace Spora\Console\Commands;
 
 use Closure;
 use PDO;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -69,7 +70,7 @@ HELP);
     {
         $io       = new SymfonyStyle($input, $output);
         $config   = $this->database->getConfig();
-        $driver   = strtolower((string) ($config['db_driver'] ?? 'sqlite'));
+        $driver   = strtolower((string) $config->getString('SPORA_DB_DRIVER', 'sqlite'));
         $force    = (bool) $input->getOption('force');
         $stampPath = $this->database->getStampPath();
 
@@ -103,13 +104,12 @@ HELP);
      * A fresh `touch`'d file is always 0 bytes, so `filesize() > 0` is a
      * reliable "this has user data" signal — we only prompt in that case.
      *
-     * @param array<string, mixed> $config
      */
-    private function resetSqlite(SymfonyStyle $io, bool $force, array $config): int
+    private function resetSqlite(SymfonyStyle $io, bool $force, Config $config): int
     {
         // `??` alone lets an explicit `db_path => null` (or empty string) slip
         // through to the filesystem calls and explode — normalise to a real path.
-        $rawPath  = $config['db_path'] ?? null;
+        $rawPath  = $config->getString('SPORA_DB_PATH');
         $dbPath   = (is_string($rawPath) && $rawPath !== '' && $rawPath !== ':memory:')
             ? $rawPath
             : ($this->paths?->storage('database.sqlite') ?? BASE_PATH . '/storage/database.sqlite');
@@ -139,15 +139,14 @@ HELP);
     }
 
     /**
-     * @param array<string, mixed> $config
      */
-    private function resetMysql(SymfonyStyle $io, bool $force, array $config): int
+    private function resetMysql(SymfonyStyle $io, bool $force, Config $config): int
     {
-        $name = (string) ($config['db_name'] ?? '');
-        $host = $config['db_host'] ?? null;
-        $port = (int) ($config['db_port'] ?? 3306);
-        $user     = $config['db_user']     ?? null;
-        $password = $config['db_password'] ?? null;
+        $name = (string) $config->getString('SPORA_DB_NAME', '');
+        $host = $config->getString('SPORA_DB_HOST');
+        $port = (int) $config->getInt('SPORA_DB_PORT', 3306);
+        $user     = $config->getString('SPORA_DB_USER');
+        $password = $config->getString('SPORA_DB_PASSWORD');
 
         $precondition = $this->checkMysqlPreconditions($io, $force, $name, $host, $port, $config);
         if ($precondition !== null) {
@@ -182,7 +181,6 @@ HELP);
      * missing-config scan, and interactive confirmation. Returns a failure
      * exit code on the first violation, or null when it is safe to proceed.
      *
-     * @param array<string, mixed> $config
      */
     private function checkMysqlPreconditions(
         SymfonyStyle $io,
@@ -190,7 +188,7 @@ HELP);
         string $name,
         ?string $host,
         int $port,
-        array $config,
+        Config $config,
     ): ?int {
         foreach ([
             $this->validateMysqlName($io, $name),
@@ -225,13 +223,12 @@ HELP);
      * `empty()` would false-positive on a password literally equal to "0"
      * and raise a notice on absent keys — check string-presence directly.
      *
-     * @param array<string, mixed> $config
      */
-    private function validateMysqlConfig(SymfonyStyle $io, array $config): ?int
+    private function validateMysqlConfig(SymfonyStyle $io, Config $config): ?int
     {
         $missing = [];
-        foreach (['db_host' => 'SPORA_DB_HOST', 'db_user' => 'SPORA_DB_USER', 'db_password' => 'SPORA_DB_PASSWORD'] as $key => $env) {
-            $value = $config[$key] ?? null;
+        foreach (['SPORA_DB_HOST', 'SPORA_DB_USER', 'SPORA_DB_PASSWORD'] as $env) {
+            $value = $config->getString($env);
             if (!is_string($value) || $value === '') {
                 $missing[] = $env;
             }

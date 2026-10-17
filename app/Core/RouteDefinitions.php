@@ -14,6 +14,7 @@ use Spora\Http\AppsController;
 use Spora\Http\AssetController;
 use Spora\Http\AuthController;
 use Spora\Http\ConfigController;
+use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
 use Spora\Http\GroupMemberController;
@@ -34,6 +35,7 @@ use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Http\Middleware\GroupAdminMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\NotificationSubscriptionController;
 use Spora\Http\PluginsController;
@@ -67,6 +69,9 @@ final class RouteDefinitions
     public const ROUTE_LLM_CONFIGS_ID = '/api/v1/llm-configs/{id}';
     public const ROUTE_USERS_ID = '/api/v1/users/{id}';
     public const ROUTE_MAIL_TEMPLATES_ID = '/api/v1/mail-templates/{id}';
+
+    public const ROUTE_ADMIN_SETTINGS = '/api/v1/admin/settings';
+    public const ROUTE_ADMIN_SETTINGS_ITEM = '/api/v1/admin/settings/{group}/{key}';
     public const ROUTE_AGENTS_TEMPLATES_TEMPLATE_ID = '/api/v1/agents/{id}/templates/{templateId}';
     public const ROUTE_AGENTS_SCHEDULED_RUNS_RUN_ID = '/api/v1/agents/{id}/scheduled-runs/{runId}';
     public const ROUTE_SKILLS_SLUG = '/api/v1/skills/{slug}';
@@ -85,7 +90,7 @@ final class RouteDefinitions
 
     public const ROUTE_NOTIFICATIONS_SUBSCRIPTIONS = '/api/v1/notifications/subscriptions';
 
-    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r, array $config = []): void
+    public static function register(MiddlewareRouteCollector | RouteSpecCollector $r, ?Config $config = null): void
     {
         self::registerCoreRoutes($r);
         self::registerAssetRoutes($r);
@@ -184,20 +189,25 @@ final class RouteDefinitions
         $r->addRoute('PATCH', '/api/v1/agents/{id}/tools/{toolId}/operations/{operation}', [AgentOverrideController::class, 'patchOperationOverride'], [AuthMiddleware::class, CsrfMiddleware::class]);
     }
 
-    private static function registerGroupRoutes(MiddlewareRouteCollector | RouteSpecCollector $r, array $config = []): void
+    private static function registerGroupRoutes(MiddlewareRouteCollector | RouteSpecCollector $r, ?Config $config = null): void
     {
         // Groups + members + principal-discovery. Group writes are admin-only;
         // member writes accept admin OR group-owner (the controller enforces
         // the owner branch via GroupService::fetchCallerRole).
         //
         // POST opens up to every authenticated caller when
-        // `config#allow_group_creation` is true (default; env override
-        // `SPORA_ALLOW_GROUP_CREATION`). PATCH/DELETE stay admin-only —
-        // "create" is platform-wide governance, "modify" stays per-group
-        // RBAC. The SPA mirrors this via the `/api/v1/config` endpoint
-        // (`allow_group_creation`) so it knows whether to surface the
+        // `SPORA_ALLOW_GROUP_CREATION` is true (the registry default). PATCH/DELETE
+        // stay admin-only — "create" is platform-wide governance, "modify"
+        // stays per-group RBAC. The SPA mirrors this via the `/api/v1/config`
+        // endpoint (`allow_group_creation`) so it knows whether to surface the
         // Create-group button on MyGroupsPage.
-        $createMiddleware = ($config['allow_group_creation'] ?? true) === true
+        // `getBool()` returns bool and defaults to false for a missing key, so
+        // `?? true` could only ever fire for a null Config. Written out, because
+        // it reads as a guard: the pre-migration `($config['allow_group_creation']
+        // ?? true)` did default to open, and this silently inverted that.
+        $groupCreationOpen = $config === null || $config->getBool('SPORA_ALLOW_GROUP_CREATION', true);
+
+        $createMiddleware = $groupCreationOpen
             ? [AuthMiddleware::class, CsrfMiddleware::class]
             : [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class];
         $r->addRoute('POST', self::ROUTE_GROUPS, [GroupController::class, 'store'], $createMiddleware);
@@ -257,9 +267,14 @@ final class RouteDefinitions
     private static function registerToolRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
         $r->addRoute('GET', '/api/v1/tools', [ToolController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('GET', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'getSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PUT', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'putSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'deleteSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // Tool settings carry credentials. They were readable and writable by
+        // any signed-in user until this gate; see GroupAdminMiddleware for why
+        // the bar is group administration rather than the global admin role.
+        $toolSettings = [AuthMiddleware::class, CsrfMiddleware::class, GroupAdminMiddleware::class];
+
+        $r->addRoute('GET', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'getSettings'], $toolSettings);
+        $r->addRoute('PUT', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'putSettings'], $toolSettings);
+        $r->addRoute('DELETE', self::ROUTE_TOOLS_SETTINGS, [ToolController::class, 'deleteSettings'], $toolSettings);
 
         $r->addRoute('GET', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'getUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', self::ROUTE_TOOLS_USER_SETTINGS, [ToolController::class, 'putUserSettings'], [AuthMiddleware::class, CsrfMiddleware::class]);
@@ -426,6 +441,16 @@ final class RouteDefinitions
 
     private static function registerMailRoutes(MiddlewareRouteCollector | RouteSpecCollector $r): void
     {
+        $adminOnly = [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class];
+
+        // The global settings store. Every route here is admin-gated:
+        // `SPORA_ALLOW_REGISTRATION`, mail credentials and the plugin-install
+        // flag are all things a non-admin must not be able to change for
+        // everyone.
+        $r->addRoute('GET', self::ROUTE_ADMIN_SETTINGS, [GlobalSettingsController::class, 'index'], $adminOnly);
+        $r->addRoute('PATCH', self::ROUTE_ADMIN_SETTINGS, [GlobalSettingsController::class, 'update'], $adminOnly);
+        $r->addRoute('DELETE', self::ROUTE_ADMIN_SETTINGS_ITEM, [GlobalSettingsController::class, 'reset'], $adminOnly);
+
         $r->addRoute('GET', '/api/v1/mail-config', [MailConfigController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/mail-config', [MailConfigController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);
         $r->addRoute('POST', '/api/v1/mail-config/test', [MailConfigController::class, 'test'], [AuthMiddleware::class, CsrfMiddleware::class, AdminMiddleware::class]);

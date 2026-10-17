@@ -317,8 +317,8 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
      */
     function makeMediaToolWithRealArchive(
         ?Spora\Auth\AuthService $auth = null,
-        ?Spora\Services\ToolConfigService $config = null,
-        array $globalConfig = [],
+        ?Spora\Services\ToolConfigService $toolConfigService = null,
+        ?Spora\Core\Config $config = null,
     ): array {
         // Reuse the same builder that MediaArchiveServiceTest uses so we get a
         // fully-wired service (asset store, resolver, converters, decoder).
@@ -344,8 +344,8 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
-            $config,
-            $globalConfig,
+            $config ?? new Spora\Core\Config(),
+            $toolConfigService,
         );
 
         return [
@@ -396,6 +396,7 @@ if (!function_exists('buildMediaToolForSchema')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
+            new Spora\Core\Config(),
         );
     }
 }
@@ -616,4 +617,24 @@ if (!function_exists('makeMediaArchiveService')) {
             'restore'    => $ctx['restore'],
         ];
     }
+}
+
+/**
+ * A container able to resolve `Config`, `SettingsRepository` and
+ * `SettingsRegistry`.
+ *
+ * `AppliesSettingsOverlay` pulls all three from the container it is handed, so
+ * a command test that constructs one needs a real graph — a stub returning
+ * nulls would make the command under test appear to work.
+ *
+ * Lives here rather than in either command's test file because Pest shares one
+ * global function namespace across test files, so the same helper name in two
+ * of them is a fatal redeclare.
+ */
+function settingsAwareContainer(): Psr\Container\ContainerInterface
+{
+    $builder = new DI\ContainerBuilder();
+    $builder->addDefinitions(Spora\Core\ContainerDefinitions::all());
+
+    return $builder->build();
 }

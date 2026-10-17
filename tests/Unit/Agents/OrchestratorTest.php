@@ -4175,7 +4175,10 @@ describe('Orchestrator::start — attachment serialization round-trip', function
 
 it('retry resets failed-task state in place (error fields cleared, history preserved, task re-ticked)', function (): void {
     Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Spora\Core\Database(new Spora\Core\Config([
+        'SPORA_DB_DRIVER' => 'sqlite',
+        'SPORA_DB_PATH'   => ':memory:',
+    ]));
     $db->boot();
 
     [$agentId, $userId] = seedAgent();
@@ -4222,7 +4225,10 @@ it('retry resets failed-task state in place (error fields cleared, history prese
 
 it('retry resets the failed task in place and clears retry_of_task_id so the main QUEUED loop can claim it (Async mode)', function (): void {
     Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Spora\Core\Database(new Spora\Core\Config([
+        'SPORA_DB_DRIVER' => 'sqlite',
+        'SPORA_DB_PATH'   => ':memory:',
+    ]));
     $db->boot();
 
     [$agentId, $userId] = seedAgent();
@@ -4264,7 +4270,10 @@ it('retry resets the failed task in place and clears retry_of_task_id so the mai
 
 it('retry throws when the task is not in FAILED status', function (): void {
     Spora\Core\Database::resetBootState();
-    $db = new Spora\Core\Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Spora\Core\Database(new Spora\Core\Config([
+        'SPORA_DB_DRIVER' => 'sqlite',
+        'SPORA_DB_PATH'   => ':memory:',
+    ]));
     $db->boot();
 
     [$agentId, $userId] = seedAgent();

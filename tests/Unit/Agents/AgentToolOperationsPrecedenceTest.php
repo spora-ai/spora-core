@@ -59,7 +59,6 @@ function precedenceResolver(): AgentToolOperationsResolver
         $toolConfig,
         $llmConfig,
         new LLMConfigPreferences(),
-        $instanceResolver,
     );
 
     return new AgentToolOperationsResolver($instanceResolver, $overrideResolver);

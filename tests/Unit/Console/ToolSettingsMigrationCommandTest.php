@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Console\Commands\ToolSettingsMigrationCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\SecurityManager;
 use Symfony\Component\Console\Command\Command;
@@ -14,7 +15,7 @@ const BAD_JSON_TOOL_CLASS = 'Spora\Tools\BadJsonTool';
 
 function makeToolSettingsTester(): CommandTester
 {
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $security = new SecurityManager(TOOL_SETTINGS_TEST_MASTER_KEY);

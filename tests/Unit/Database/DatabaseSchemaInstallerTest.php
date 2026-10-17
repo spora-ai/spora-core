@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Plugins\PluginLoader;
@@ -23,7 +24,7 @@ function bootInstaller(
     ?Spora\Extensions\AppLoader $appLoader = null,
 ): DatabaseSchemaInstaller {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:'], $pluginLoader);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']), $pluginLoader);
     $db->bootDatabaseConnectionOnly();
 
     return new DatabaseSchemaInstaller($pluginLoader, $stampPath, null, null, $appLoader);
@@ -250,7 +251,7 @@ test('install() throws RuntimeException when a plugin migration file lacks the s
 test('Database::boot() installs the full schema end-to-end', function (): void {
     Database::resetBootState();
 
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->boot();
 
     expect(Capsule::schema()->hasTable('users'))->toBeTrue();
@@ -396,7 +397,7 @@ test('installer is unchanged when no AppLoader is provided (backward compatibili
 
 test('constructor override is used verbatim when provided', function (): void {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     // Point at an empty dir: version 0 → no migrations to run, no upsert past 0.
@@ -417,7 +418,7 @@ test('constructor override is used verbatim when provided', function (): void {
 
 test('resolver prefers the explicit override over the implicit fallback chain', function (): void {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     // Override short-circuits resolveCoreMigrationsPath(): a non-existent path
@@ -435,7 +436,7 @@ test('implicit resolver finds migrations when BASE_PATH/database/migrations exis
     // Pass null to opt into the implicit resolver; relies on the real
     // spora-core checkout (BASE_PATH/database/migrations is populated).
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $installer = new DatabaseSchemaInstaller(null, null, null);

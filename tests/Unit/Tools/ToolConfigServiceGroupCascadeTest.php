@@ -10,6 +10,7 @@ use Spora\Core\SecurityManager;
 use Spora\Models\Agent;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
+use Spora\Services\ToolConfigOverrides;
 use Spora\Services\ToolConfigService;
 use Tests\Concerns\CreatesPrincipal;
 use Tests\Fixtures\TestTool;
@@ -39,9 +40,7 @@ function makeCascadeToolConfigService(): ToolConfigService
         new SecurityManager(random_bytes(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
         new Logger('test'),
         [TestTool::class],
-        null,
-        null,
-        true, // group cascade enabled for these tests
+        new ToolConfigOverrides(groupCascadeEnabled: true),
     );
 }
 

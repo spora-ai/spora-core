@@ -23,6 +23,8 @@ use Spora\Services\Exceptions\CatalogUnavailableException;
 use Spora\Services\Exceptions\MalformedCatalogException;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
+use Spora\Settings\SettingsRegistry;
+use Spora\Settings\SettingsRepository;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -103,7 +105,11 @@ final class Kernel implements KernelInterface
 
         $this->container = $builder->build();
 
-        $this->configureErrorHandling($this->container->get('config')['app_env'] ?? 'production');
+        // Read before the container can reach the database, so this sees only
+        // the boot layers — which is why SPORA_APP_ENV is declared `bootOnly`.
+        $this->configureErrorHandling(
+            $this->container->get(Config::class)->getString('SPORA_APP_ENV', 'production'),
+        );
 
         if ($this->pluginBootError !== null) {
             $this->container->get(LoggerInterface::class)->warning($this->pluginBootError);
@@ -123,6 +129,16 @@ final class Kernel implements KernelInterface
     {
         try {
             $this->container->get(Database::class)->boot();
+            // The settings layer only becomes visible from here. It cannot be
+            // part of the `Config` factory: `Kernel::__construct()` reads
+            // SPORA_APP_ENV before the container finishes building, and
+            // `Database` needs SPORA_DB_* to open the connection these rows
+            // live in. Applied here, every read from this point on sees it —
+            // including `RouteDefinitions`, built immediately below.
+            $this->container->get(Config::class)->applySettingsOverlay(
+                $this->container->get(SettingsRepository::class),
+                $this->container->get(SettingsRegistry::class),
+            );
             $router = $this->buildRouter();
             // BootingEvent is dispatched per request once the container is
             // live and the DB is up — services are safe to resolve inside
@@ -182,14 +198,16 @@ final class Kernel implements KernelInterface
     {
         // Pass the resolved config down so {@see RouteDefinitions} can
         // pick conditional middleware on boot (e.g. POST /api/v1/groups
-        // honours `allow_group_creation` — admin-only when the operator
-        // sets `SPORA_ALLOW_GROUP_CREATION=false`, open to all callers
-        // otherwise).
-        $config = $this->container->get('config');
+        // honours `SPORA_ALLOW_GROUP_CREATION` — admin-only when the operator
+        // turns it off, open to all callers otherwise).
+        //
+        // A change made after this point does not alter this request's
+        // middleware list; it applies from the next request.
+        $config = $this->container->get(Config::class);
         return new Router(
             $this->container,
             function (MiddlewareRouteCollector $r) use ($config): void {
-                RouteDefinitions::register($r, is_array($config) ? $config : []);
+                RouteDefinitions::register($r, $config);
                 // PluginLoader::registerRoutes() is the single dispatch
                 // site for RoutesRegisteringEvent; plugin subscribers
                 // extend the core routes registered above.
@@ -205,8 +223,9 @@ final class Kernel implements KernelInterface
             return $response;
         }
 
-        $config  = $this->container->has('config') ? $this->container->get('config') : [];
-        $appEnv  = $config['app_env'] ?? 'production';
+        $appEnv  = $this->container->has(Config::class)
+            ? (string) $this->container->get(Config::class)->getString('SPORA_APP_ENV', 'production')
+            : 'production';
         $isDebug = $appEnv === 'development' || $appEnv === 'local';
 
         $body = ['error' => ['code' => 'INTERNAL_SERVER_ERROR', 'message' => 'An unexpected error occurred.']];

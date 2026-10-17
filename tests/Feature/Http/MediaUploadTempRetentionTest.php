@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Http\MediaUploadController;
@@ -115,6 +116,7 @@ function buildUploadController(int $userId = 1): MediaUploadController
         $auth,
         new PrincipalResolver(),
         $sniffer,
+        new Config(),
     );
 }
 

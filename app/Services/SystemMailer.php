@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
+use Spora\Core\Config;
 use Spora\Core\RequestOrigin;
 use Spora\Mailer\LogTransport;
 use Spora\Models\MailTemplate;
@@ -19,7 +20,8 @@ use Symfony\Component\Mime\Email;
 /**
  * System-level transactional mailer powered by Symfony Mailer.
  *
- * Reads mail configuration from container config (merged config.php + .env via SPORA_MAIL_* vars).
+ * Reads the mail settings from the injected {@see Config}, i.e. the same
+ * resolved values the admin UI edits and `.env` overrides.
  * Uses MailTemplate records for templated emails (verification, password reset, welcome, etc.).
  *
  * The Markdown body stored on each MailTemplate is rendered into HTML + plain-text
@@ -30,7 +32,7 @@ use Symfony\Component\Mime\Email;
 final class SystemMailer implements MailerInterface
 {
     public function __construct(
-        private readonly array $config,
+        private readonly Config $config,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?MailTemplateRenderer $renderer = null,
     ) {}
@@ -43,12 +45,10 @@ final class SystemMailer implements MailerInterface
      */
     public function buildMailer(): Mailer
     {
-        $config = $this->getMailConfig();
-
-        $driver = $config['mail_driver'] ?? null;
+        $driver = $this->config->getString('SPORA_MAIL_DRIVER', 'sendmail');
 
         $dsn = match ($driver) {
-            'smtp' => $this->buildSmtpDsn($config),
+            'smtp' => $this->buildSmtpDsn(),
             'php_mail', 'sendmail' => 'sendmail://default',
             'log' => 'log://default',
             default => throw new InvalidArgumentException(
@@ -106,11 +106,7 @@ final class SystemMailer implements MailerInterface
             throw new InvalidArgumentException("Mail template '{$templateName}' rendered to an empty body.");
         }
 
-        $config = $this->getMailConfig();
-        $from   = new Address(
-            $config['mail_from'] ?? 'noreply@spora.local',
-            $config['mail_from_name'] ?? 'Spora',
-        );
+        $from = $this->buildSender();
 
         $email = (new Email())
             ->from($from)
@@ -136,7 +132,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('email_verification', [
             'email'              => $email,
             'verification_link'  => $verificationUrl,
-            'site_name'          => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'site_name'          => $this->config->getString('SPORA_MAIL_FROM_NAME'),
         ], [$email]);
     }
 
@@ -155,7 +151,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('email_change_verification', [
             'email'             => $email,
             'verification_link' => $verificationUrl,
-            'site_name'         => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'site_name'         => $this->config->getString('SPORA_MAIL_FROM_NAME'),
         ], [$email]);
     }
 
@@ -171,7 +167,7 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('password_reset', [
             'email'     => $email,
             'reset_link' => $resetUrl,
-            'site_name' => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'site_name' => $this->config->getString('SPORA_MAIL_FROM_NAME'),
         ], [$email]);
     }
 
@@ -190,24 +186,40 @@ final class SystemMailer implements MailerInterface
         return $this->sendTemplatedEmail('welcome', [
             'user_name'     => $userName,
             'email'         => $email,
-            'site_name'     => $this->getMailConfig()['mail_from_name'] ?? 'Spora',
+            'site_name'     => $this->config->getString('SPORA_MAIL_FROM_NAME'),
             'dashboard_url' => $this->buildDashboardUrl(),
         ], [$email]);
     }
 
     /**
-     * Resolve the welcome-email dashboard CTA URL from `config.app_url` and
-     * `config.app_prefix`. `RequestOrigin::normalizePrefix()` keeps the prefix
+     * Resolve the welcome-email dashboard CTA URL from `SPORA_APP_URL` and
+     * `SPORA_APP_PREFIX`. `RequestOrigin::normalizePrefix()` keeps the prefix
      * canonical (`/spora`, never `spora/` or `/`), so a single trailing slash
      * on the suffix is enough to cover both the prefixed and host-root cases
      * without producing `//` or a missing-slash collision.
      */
     private function buildDashboardUrl(): string
     {
-        $baseUrl = rtrim((string) ($this->config['app_url'] ?? ''), '/');
-        $prefix  = RequestOrigin::normalizePrefix((string) ($this->config['app_prefix'] ?? ''));
+        $baseUrl = rtrim((string) $this->config->getString('SPORA_APP_URL', ''), '/');
+        $prefix  = RequestOrigin::normalizePrefix((string) $this->config->getString('SPORA_APP_PREFIX', ''));
 
         return $baseUrl . $prefix . '/dashboard';
+    }
+
+    /**
+     * The From address for every outbound message.
+     *
+     * `Address` takes a non-nullable name, and `SPORA_MAIL_FROM_NAME` came
+     * from the deleted `getMailConfig()` that always supplied one — so it was
+     * non-nullable by accident. `ConfigFactory` populates every declared key
+     * in production; the defaults cover a hand-built Config.
+     */
+    private function buildSender(): Address
+    {
+        return new Address(
+            $this->config->getString('SPORA_MAIL_FROM', 'noreply@spora.local'),
+            $this->config->getString('SPORA_MAIL_FROM_NAME', 'Spora'),
+        );
     }
 
     /**
@@ -218,11 +230,7 @@ final class SystemMailer implements MailerInterface
      */
     public function sendTestEmail(string $to): bool
     {
-        $config = $this->getMailConfig();
-        $from   = new Address(
-            $config['mail_from'] ?? 'noreply@spora.local',
-            $config['mail_from_name'] ?? 'Spora',
-        );
+        $from = $this->buildSender();
 
         $email = (new Email())
             ->from($from)
@@ -236,49 +244,27 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Read mail configuration from the container config.
-     *
-     * @throws InvalidArgumentException if required mail config is not set (driver, host, from)
-     * @return array<string, mixed>
-     */
-    private function getMailConfig(): array
-    {
-        $config = $this->config;
-
-        // Layer mail config from SPORA_MAIL_* env vars
-        $env = static fn(string $k): ?string => $_ENV[$k] ?? (getenv($k) ?: null);
-
-        return [
-            'mail_driver'     => $env('SPORA_MAIL_DRIVER')     ?? $config['mail_driver']     ?? 'php_mail',
-            'mail_host'       => $env('SPORA_MAIL_HOST')       ?? $config['mail_host']       ?? null,
-            'mail_port'       => $env('SPORA_MAIL_PORT')       ?? $config['mail_port']       ?? 587,
-            'mail_username'   => $env('SPORA_MAIL_USERNAME')   ?? $config['mail_username']   ?? null,
-            'mail_password'   => $env('SPORA_MAIL_PASSWORD')   ?? $config['mail_password']   ?? null,
-            'mail_encryption' => $env('SPORA_MAIL_ENCRYPTION') ?? $config['mail_encryption'] ?? 'tls',
-            'mail_from'       => $env('SPORA_MAIL_FROM')       ?? $config['mail_from']       ?? null,
-            'mail_from_name'  => $env('SPORA_MAIL_FROM_NAME')  ?? $config['mail_from_name']  ?? 'Spora',
-        ];
-    }
-
-    /**
      * Port 587 = STARTTLS (smtp://); port 465 = implicit TLS (smtps://).
-     * The configured `mail_encryption` selects the scheme so the handshake
-     * matches the server's expected protocol.
+     * The configured `SPORA_MAIL_ENCRYPTION` selects the scheme so the
+     * handshake matches the server's expected protocol.
      *
-     * @param array<string, mixed> $config
      * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */
-    private function buildSmtpDsn(array $config): string
+    private function buildSmtpDsn(): string
     {
-        $host       = $config['mail_host']       ?? null;
-        $port       = (int) ($config['mail_port']       ?? 587);
-        $user       = $config['mail_username']   ?? null;
-        $pass       = $config['mail_password']   ?? null;
-        $encryption = strtolower((string) ($config['mail_encryption'] ?? 'tls'));
+        $host       = $this->config->getString('SPORA_MAIL_HOST');
+        $port       = (int) $this->config->getInt('SPORA_MAIL_PORT', 587);
+        $user       = $this->config->getString('SPORA_MAIL_USERNAME');
+        $pass       = $this->config->getString('SPORA_MAIL_PASSWORD');
+        $encryption = strtolower((string) $this->config->getString('SPORA_MAIL_ENCRYPTION', 'tls'));
 
+        // Unreachable for a Config built by ConfigFactory, which defaults
+        // SPORA_MAIL_HOST to 'localhost'. Kept because rawurlencode(null) is
+        // a TypeError under strict_types, and "you never configured a host"
+        // is a better answer to that than the TypeError is.
         if ($host === null) {
             throw new InvalidArgumentException(
-                'SMTP mail driver configured but SPORA_MAIL_HOST / mail_host is not set.',
+                'SMTP mail driver configured but SPORA_MAIL_HOST is not set.',
             );
         }
 

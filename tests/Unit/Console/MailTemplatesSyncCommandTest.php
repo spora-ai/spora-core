@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Schema\Blueprint;
 use Spora\Console\Commands\MailTemplatesSyncCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Models\MailTemplate;
@@ -18,7 +19,7 @@ use Symfony\Component\Console\Tester\CommandTester;
 function makeSyncTester(): CommandTester
 {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     Capsule::schema()->create('mail_templates', static function (Blueprint $table): void {
@@ -144,7 +145,7 @@ it('leaves orphan DB rows untouched and does not list them in the summary', func
 
 it('exits non-zero when a YAML template fails to parse', function (): void {
     Database::resetBootState();
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $tmpDir = sys_get_temp_dir() . '/spora-broken-yaml-' . uniqid('', true);

@@ -5,13 +5,14 @@ declare(strict_types=1);
 use Delight\Auth\Role;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Console\Commands\RepairAdminCommand;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 function makeRepairAdminTester(): CommandTester
 {
-    $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
+    $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => ':memory:']));
     $db->bootDatabaseConnectionOnly();
 
     $command = new RepairAdminCommand($db);

@@ -14,6 +14,7 @@ use OpenApi\Annotations\Response;
 use OpenApi\Annotations\SecurityScheme;
 use OpenApi\Annotations\Server;
 use ReflectionMethod;
+use Spora\Core\Config;
 use Spora\Core\RouteDefinitions;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -36,13 +37,13 @@ final class RouteToOpenApi
         private readonly HandlerOperationExtractor $operationExtractor = new HandlerOperationExtractor(),
     ) {}
 
-    public function build(array $config = []): OpenApi
+    public function build(?Config $config = null): OpenApi
     {
         $collector = new RouteSpecCollector();
         // Pass the resolved config so {@see RouteDefinitions::register()}
         // picks the open variant for routes whose middleware depends on
         // a runtime flag (e.g. POST /api/v1/groups honours
-        // `allow_group_creation`).
+        // `SPORA_ALLOW_GROUP_CREATION`).
         RouteDefinitions::register($collector, $config);
 
         $openapi = new OpenApi([]);

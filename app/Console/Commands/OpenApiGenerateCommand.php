@@ -6,6 +6,7 @@ namespace Spora\Console\Commands;
 
 use JsonException;
 use OpenApi\Annotations\OpenApi;
+use Spora\Core\Config;
 use Spora\OpenApi\RouteToOpenApi;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -153,7 +154,7 @@ final class OpenApiGenerateCommand extends Command
      *
      * @return int Command::SUCCESS on write, Command::FAILURE on I/O or encode failure.
      */
-    public static function regenerate(string $outputPath, array $config = []): int
+    public static function regenerate(string $outputPath, ?Config $config = null): int
     {
         try {
             $json = (new RouteToOpenApi())->build(self::resolveConfigForBuild($config));
@@ -223,24 +224,28 @@ final class OpenApiGenerateCommand extends Command
     }
 
     /**
-     * Reconcile the build-time config snapshot with the runtime env vars
-     * read by `bin/spora-build` (which skips Kernel boot).
+     * Reconcile the build-time config with the runtime env var read by
+     * `bin/spora-build` (which skips Kernel boot).
      *
-     * The build variant defaults `allow_group_creation` to `true`
-     * (matching `config.php`) — operators who set
-     * `SPORA_ALLOW_GROUP_CREATION=false` re-run `bin/spora spora:openapi`
-     * (full Kernel) to refresh the spec under their config.
+     * The build variant leaves `SPORA_ALLOW_GROUP_CREATION` unset, and
+     * `RouteDefinitions` treats an absent value as open. Operators who set it
+     * to `false` re-run `bin/spora spora:openapi` (full Kernel) to refresh the
+     * spec under their config.
      *
-     * @param array<string, mixed> $callerConfig
-     * @return array<string, mixed>
+     * A caller-supplied config is returned untouched when the env var is
+     * absent. When it is set, a fresh `Config` replaces it: the only key
+     * `RouteDefinitions` consults is this one, so carrying the rest forward
+     * would be dead weight.
      */
-    private static function resolveConfigForBuild(array $callerConfig = []): array
+    private static function resolveConfigForBuild(?Config $callerConfig = null): ?Config
     {
         $envValue = getenv('SPORA_ALLOW_GROUP_CREATION');
         if ($envValue === false || $envValue === '') {
             return $callerConfig;
         }
-        $callerConfig['allow_group_creation'] = filter_var($envValue, FILTER_VALIDATE_BOOLEAN);
-        return $callerConfig;
+
+        return new Config([
+            'SPORA_ALLOW_GROUP_CREATION' => filter_var($envValue, FILTER_VALIDATE_BOOLEAN),
+        ]);
     }
 }

@@ -147,6 +147,8 @@ final class OrchestratorContainerBindings
             },
 
             WorkerController::class => static function (ContainerInterface $c): WorkerController {
+                $config = $c->get(Config::class);
+
                 return new WorkerController(
                     $c->get(AuthService::class),
                     $c->get(WorkerRuntimeMode::class),
@@ -154,8 +156,10 @@ final class OrchestratorContainerBindings
                     $c->get(HousekeepingLock::class),
                     $c->get(WorkerReaper::class),
                     $c->get(ScheduledRunProcessor::class),
-                    (int) ($c->get('config')['worker_stale_minutes'] ?? 60),
-                    (int) ($c->get('config')['tick_lease_seconds'] ?? 600),
+                    // The registry declares both defaults; the coalesce only
+                    // fires for a hand-built `Config` that omits them.
+                    $config->getInt('SPORA_WORKER_STALE_MINUTES') ?? 60,
+                    $config->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
                 );
             },
         ];
@@ -165,18 +169,15 @@ final class OrchestratorContainerBindings
     {
         return [
             MercurePublisherInterface::class => static function (ContainerInterface $c): MercurePublisherInterface {
-                $config   = $c->get('config');
-                $hubUrl   = $config['mercure_publish_url'] ?? $config['mercure_url'] ?? null;
-                $jwtKey   = $config['mercure_jwt_key'] ?? null;
-                $client   = $c->get(HttpClientInterface::class);
+                $config = $c->get(Config::class);
+                $hubUrl = $config->getString('SPORA_MERCURE_PUBLISH_URL') ?? $config->getString('SPORA_MERCURE_URL');
+                $jwtKey = $config->getString('SPORA_MERCURE_JWT_KEY');
 
                 return new MercurePublisher(
-                    $client,
+                    $c->get(HttpClientInterface::class),
                     $hubUrl,
                     $jwtKey,
                     $c->get(LoggerInterface::class),
-                    (bool) ($config['mercure_legacy_user_topic'] ?? false),
-                    $c->get(PrincipalResolver::class),
                 );
             },
 
@@ -184,8 +185,8 @@ final class OrchestratorContainerBindings
                 return new NotificationService(
                     $c->get(MercurePublisherInterface::class),
                     $c->get(PrincipalResolver::class),
+                    $c->get(Config::class),
                     $c->get(SystemMailer::class),
-                    $c->get('config'),
                     $c->get(NotificationSubscriptionService::class),
                 );
             },
@@ -200,7 +201,7 @@ final class OrchestratorContainerBindings
 
             SystemMailer::class => static function (ContainerInterface $c): SystemMailer {
                 return new SystemMailer(
-                    $c->get('config'),
+                    $c->get(Config::class),
                     $c->get(LoggerInterface::class),
                     $c->get(MailTemplateRenderer::class),
                 );
@@ -381,6 +382,7 @@ final class OrchestratorContainerBindings
                 return new AgentTemplateToolsApplier(
                     $c->get(ToolConfigService::class),
                     $c->get(AgentTemplateSettingsApplier::class),
+                    $c->get(ToolConfigSchemaInspector::class),
                 );
             },
 

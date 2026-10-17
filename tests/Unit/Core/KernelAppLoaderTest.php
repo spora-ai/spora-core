@@ -9,10 +9,30 @@ use Spora\Core\Paths;
 use Spora\Extensions\AppLoader;
 use Spora\Extensions\SporaExtensionInterface;
 
+beforeEach(function (): void {
+    // Restored, not just cleared. A `Kernel` built by the next test file
+    // resolves its secret key from `SPORA_SECRET_KEY`, then from
+    // `storage/secret.key` — which a fresh checkout does not have. Unsetting
+    // the variable here surfaces as a `MissingSecretKeyException` in whatever
+    // file runs next.
+    $GLOBALS['__kernel_app_loader_env'] = [
+        'SPORA_SECRET_KEY' => $_ENV['SPORA_SECRET_KEY'] ?? null,
+        'SPORA_APP_DIR'    => $_ENV['SPORA_APP_DIR'] ?? null,
+    ];
+});
+
 afterEach(function (): void {
-    unset($_ENV['SPORA_SECRET_KEY'], $_ENV['SPORA_APP_DIR']);
-    putenv('SPORA_SECRET_KEY');
-    putenv('SPORA_APP_DIR');
+    foreach ((array) ($GLOBALS['__kernel_app_loader_env'] ?? []) as $key => $value) {
+        if ($value === null) {
+            unset($_ENV[$key]);
+            putenv($key);
+
+            continue;
+        }
+        $_ENV[$key] = $value;
+        putenv($key . '=' . $value);
+    }
+    unset($GLOBALS['__kernel_app_loader_env']);
     $_SESSION = [];
     gc_collect_cycles();
 });

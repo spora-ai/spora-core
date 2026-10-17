@@ -403,7 +403,6 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
             $toolConfig,
             $llmConfig,
             new LLMConfigPreferences(),
-            new AgentToolInstanceResolver(),
         );
     }
 
@@ -486,7 +485,6 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
             $toolConfig,
             $llmConfig,
             new LLMConfigPreferences(),
-            new AgentToolInstanceResolver(),
         );
         $ref  = new ReflectionClass(AgentToolOverrideResolver::class);
         $meth = $ref->getMethod('maskLlmConfig');

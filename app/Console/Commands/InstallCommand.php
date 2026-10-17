@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Console\Commands;
 
+use Psr\Container\ContainerInterface;
+use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Core\Paths;
@@ -20,10 +22,14 @@ use Throwable;
 )]
 final class InstallCommand extends Command
 {
+    use AppliesSettingsOverlay;
+
+
     public function __construct(
         private readonly Database $database,
         private readonly DatabaseSchemaInstaller $installer,
         private readonly Paths $paths,
+        private readonly ContainerInterface $container,
     ) {
         parent::__construct();
     }
@@ -42,7 +48,7 @@ final class InstallCommand extends Command
                 $output->writeln('<info>Updated config.php key_path</info>');
             }
 
-            $this->database->bootDatabaseConnectionOnly();
+            $this->applyRuntimeSettings($this->container, $this->database);
             $this->installer->install();
 
             $output->writeln('<info>Done. Schema is up to date.</info>');

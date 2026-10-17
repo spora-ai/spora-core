@@ -7,7 +7,7 @@ use DI\ContainerBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
-use Spora\Core\ConfigMerger;
+use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
 use Spora\Core\Kernel;
 use Spora\Core\Paths;
@@ -17,6 +17,8 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\ToolController;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
+use Spora\Settings\SettingsRegistry;
+use Spora\Settings\SettingsRepository;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\TimeTool;
 use Tests\Fixtures\TestTool;
@@ -31,45 +33,79 @@ function callContainerMethod(string $name, array $args = []): mixed
 }
 
 /**
- * Tiny throwaway container that resolves Paths::class only. Used by tests
- * that exercise a single ContainerDefinitions factory in isolation without
- * spinning up the full php-di container.
+ * Tiny throwaway container that resolves Paths::class and, optionally, the
+ * Config the caller supplies. Used by tests that exercise a single
+ * ContainerDefinitions factory in isolation without spinning up the full
+ * php-di container.
+ *
+ * A `Config` carries resolved values, not defaults: an empty one leaves every
+ * toggle `false` and every path `null`. Tests that used to receive a merged
+ * array here now have to say which keys they mean.
  */
-function makeFakeContainer(): Psr\Container\ContainerInterface
+function makeFakeContainer(?Config $config = null): Psr\Container\ContainerInterface
 {
-    return new class (new Paths(BASE_PATH)) implements Psr\Container\ContainerInterface {
-        public function __construct(private readonly Paths $paths) {}
+    return new class (new Paths(BASE_PATH), $config) implements Psr\Container\ContainerInterface {
+        public function __construct(private readonly Paths $paths, private readonly ?Config $config) {}
         public function get(string $id): mixed
         {
             if ($id === Paths::class) {
                 return $this->paths;
             }
+            if ($id === Config::class && $this->config !== null) {
+                return $this->config;
+            }
+            // `configDefinition()`'s Config factory builds a `Config` through a
+            // registry it takes from the container, so the registry has to be
+            // resolvable here or the binding cannot be exercised at all.
+            if ($id === SettingsRegistry::class) {
+                return new SettingsRegistry($this->paths);
+            }
             throw new RuntimeException("Unexpected container lookup: $id");
         }
         public function has(string $id): bool
         {
-            return $id === Paths::class;
+            return $id === Paths::class
+                || $id === SettingsRegistry::class
+                || ($id === Config::class && $this->config !== null);
         }
     };
 }
 
-function makeContainerWithPaths(string $baseDir): Psr\Container\ContainerInterface
+function makeContainerWithPaths(string $baseDir, ?Config $config = null): Psr\Container\ContainerInterface
 {
-    return new class (new Paths($baseDir)) implements Psr\Container\ContainerInterface {
-        public function __construct(private readonly Paths $paths) {}
+    return new class (new Paths($baseDir), $config) implements Psr\Container\ContainerInterface {
+        public function __construct(private readonly Paths $paths, private readonly ?Config $config) {}
         public function get(string $id): mixed
         {
             return match ($id) {
-                Paths::class => $this->paths,
-                'config'     => ['app_env' => 'testing', 'key_path' => null],
-                default      => throw new RuntimeException("Unexpected container lookup: $id"),
+                Paths::class  => $this->paths,
+                Config::class => $this->config ?? throw new RuntimeException("Unexpected container lookup: $id"),
+                default       => throw new RuntimeException("Unexpected container lookup: $id"),
             };
         }
         public function has(string $id): bool
         {
-            return $id === Paths::class || $id === 'config';
+            return $id === Paths::class || $id === Config::class;
         }
     };
+}
+
+/**
+ * The settings the factories under test read, as resolved values.
+ *
+ * Explicit rather than built through `ConfigFactory`, which would resolve the
+ * real `BASE_PATH` and the developer's own shell — the point of these tests is
+ * the wiring, not the layer precedence `ConfigResolutionTest` covers.
+ *
+ * @param array<string, mixed> $overrides
+ */
+function configDefinitionsStub(array $overrides = []): Config
+{
+    return new Config($overrides + [
+        'SPORA_APP_ENV'   => 'testing',
+        'SPORA_LOG_PATH'  => 'php://stdout',
+        'SPORA_LOG_LEVEL' => 'WARNING',
+    ]);
 }
 
 /**
@@ -84,12 +120,7 @@ function makeContainerForToolFactories(
 ): Container {
     $builder = new ContainerBuilder();
     $builder->addDefinitions(array_merge([
-        'config' => static fn(): array => [
-            'app_env'   => 'testing',
-            'key_path'  => null,
-            'log_path'  => 'php://stdout',
-            'log_level' => 'WARNING',
-        ],
+        Config::class => static fn(): Config => configDefinitionsStub(),
         'tool_classes' => $coreToolClasses,
         PluginLoader::class => $pluginLoader ?? makeToolsPluginLoader(),
         SecurityManagerInterface::class => static fn(): SecurityManager
@@ -145,16 +176,11 @@ afterEach(function (): void {
     putenv('SPORA_KEY_PATH');
     unset($_ENV['SPORA_CONFIG_PATH']);
     putenv('SPORA_CONFIG_PATH');
-    // Reset DB env overrides that some tests set.
-    foreach ([
-        'SPORA_DB_DRIVER', 'SPORA_DB_HOST', 'SPORA_DB_PORT', 'SPORA_DB_NAME', 'SPORA_DB_USER',
-        'SPORA_DB_PASSWORD', 'SPORA_SQLITE_BUSY_TIMEOUT', 'SPORA_APP_ENV',
-        'SPORA_ALLOW_REGISTRATION', 'SPORA_LOG_LEVEL', 'SPORA_LOG_PATH',
-        'SPORA_WORKER_RUNTIME_MODE', 'SPORA_TICK_LEASE_SECONDS',
-        'SPORA_WORKER_STALE_MINUTES', 'SPORA_MAX_WORKERS', 'SPORA_LLM_TIMEOUT',
-        'SPORA_TOOL_HTTP_TIMEOUT', 'SPORA_MERCURE_URL', 'SPORA_MERCURE_JWT_KEY',
-        'SPORA_MERCURE_PUBLISH_URL', 'SPORA_NOTIFICATIONS_EMAIL_ENABLED', 'SPORA_APP_URL',
-    ] as $key) {
+    // Every declared setting, from the registry rather than a hand-kept list:
+    // a key added to `SettingsRegistry` and left off a list here survives into
+    // the next test file as whatever the developer's shell or an earlier test
+    // set it to.
+    foreach (array_keys((new SettingsRegistry(new Paths(BASE_PATH)))->all()) as $key) {
         unset($_ENV[$key]);
         putenv($key);
     }
@@ -164,7 +190,9 @@ it('all() returns the merged definitions array', function (): void {
     $defs = ContainerDefinitions::all();
 
     expect($defs)->toBeArray();
-    expect($defs)->toHaveKey('config');
+    expect($defs)->toHaveKey(Config::class);
+    expect($defs)->toHaveKey(SettingsRegistry::class);
+    expect($defs)->toHaveKey(SettingsRepository::class);
     expect($defs)->toHaveKey('tool_classes');
     expect($defs)->toHaveKey('llm_driver_classes');
     expect($defs)->toHaveKey('app_apps');
@@ -180,46 +208,86 @@ it('all() returns the merged definitions array', function (): void {
     expect($defs)->toHaveKey(Spora\Services\EmailTemplateLoader::class);
 });
 
-it('configDefinition returns a closure that resolves the config array', function (): void {
+/**
+ * The binding has to produce a *resolved* Config, not an empty one: every
+ * consumer asks for a declared key by name, and an unresolved Config answers
+ * `false`/`null` for every one of them.
+ */
+it('configDefinition resolves a fully-populated Config object', function (): void {
     $def = callContainerMethod('configDefinition');
-    $closure = $def['config'];
-    $config = $closure(makeFakeContainer());
+    $config = $def[Config::class](makeFakeContainer());
+    $registry = $def[SettingsRegistry::class](makeFakeContainer());
 
-    expect($config['db_driver'])->toBeString();
-    expect($config['app_env'])->toBeString();
-    expect($config['allow_registration'])->toBeBool();
-    expect($config)->toHaveKey('db_path');
-    expect($config)->toHaveKey('app_url');
+    expect($config)->toBeInstanceOf(Config::class)
+        ->and($config->getString('SPORA_DB_DRIVER'))->toBeString()
+        ->and($config->getString('SPORA_APP_ENV'))->toBeString()
+        ->and($config->getBool('SPORA_ALLOW_REGISTRATION'))->toBeBool()
+        ->and($config->getString('SPORA_DB_PATH'))->toBeString()
+        ->and($config->getString('SPORA_APP_URL'))->toBeString();
+    // Every declared key is present, so a consumer reading one gets its
+    // declared default rather than a silent null.
+    expect(array_keys($config->all()))->toEqualCanonicalizing(array_keys($registry->all()));
 });
 
-it('configDefinition honours env var overrides for all keys', function (): void {
+it('configDefinition honours env var overrides for every declared key', function (): void {
     // Pest 4 flags tests that mutate $_ENV without restoring it as risky
     // and bleeds the contamination into subsequent tests in the run. Scope
     // every override in try/finally so a failing assertion still leaves
     // a clean env for the next test.
+    //
+    // One case per setting, because that is the shape that catches a renamed
+    // env var: a value the factory drops surfaces here as the registry
+    // default, which for nearly every key below is a different word or a
+    // different number.
     $overrides = [
-        'SPORA_DB_DRIVER'                => 'pgsql',
-        'SPORA_DB_HOST'                  => 'db.example.com',
-        'SPORA_DB_PORT'                  => '5432',
-        'SPORA_DB_NAME'                  => 'spora',
-        'SPORA_DB_USER'                  => 'spora_user',
-        'SPORA_DB_PASSWORD'              => 'secret',
-        'SPORA_SQLITE_BUSY_TIMEOUT'      => '5000',
-        'SPORA_APP_ENV'                  => 'staging',
-        'SPORA_ALLOW_REGISTRATION'       => 'false',
-        'SPORA_LOG_LEVEL'                => 'INFO',
-        'SPORA_LOG_PATH'                 => '/tmp/spora.log',
-        'SPORA_WORKER_RUNTIME_MODE'      => 'client',
-        'SPORA_TICK_LEASE_SECONDS'       => '900',
-        'SPORA_WORKER_STALE_MINUTES'     => '30',
-        'SPORA_MAX_WORKERS'              => '4',
-        'SPORA_LLM_TIMEOUT'              => '600',
-        'SPORA_TOOL_HTTP_TIMEOUT'        => '60',
-        'SPORA_MERCURE_URL'              => 'https://mercure.example.com',
-        'SPORA_MERCURE_JWT_KEY'          => 'jwt-key',
-        'SPORA_MERCURE_PUBLISH_URL'      => 'https://mercure.example.com/hub',
-        'SPORA_APP_URL'                  => 'https://spora.example.com',
-        'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => 'true',
+        'SPORA_DB_DRIVER'                        => 'sqlite',
+        'SPORA_DB_PATH'                          => '/tmp/spora.sqlite',
+        'SPORA_DB_HOST'                          => 'db.example.com',
+        'SPORA_DB_PORT'                          => '5432',
+        'SPORA_DB_NAME'                          => 'spora',
+        'SPORA_DB_USER'                          => 'spora_user',
+        'SPORA_DB_PASSWORD'                      => 'secret',
+        'SPORA_SQLITE_BUSY_TIMEOUT'              => '5000',
+        'SPORA_KEY_PATH'                         => '/tmp/spora-secret.key',
+        'SPORA_APP_ENV'                          => 'staging',
+        'SPORA_APP_NAME'                         => 'Spora Staging',
+        'SPORA_APP_URL'                          => 'https://spora.example.com',
+        'SPORA_APP_PREFIX'                       => 'spora',
+        'SPORA_LOG_LEVEL'                        => 'INFO',
+        'SPORA_LOG_PATH'                         => '/tmp/spora.log',
+        'SPORA_ALLOW_REGISTRATION'               => 'false',
+        'SPORA_ALLOW_GROUP_CREATION'             => 'false',
+        'SPORA_NOTIFICATIONS_EMAIL_ENABLED'      => 'false',
+        'SPORA_LLM_TIMEOUT'                      => '600',
+        'SPORA_TOOL_HTTP_TIMEOUT'                => '60',
+        'SPORA_WORKER_RUNTIME_MODE'              => 'client',
+        'SPORA_TICK_LEASE_SECONDS'               => '900',
+        'SPORA_WORKER_STALE_MINUTES'             => '30',
+        'SPORA_MAX_WORKERS'                      => '4',
+        'SPORA_TOOLS_GROUP_CASCADE_ENABLED'      => 'true',
+        'SPORA_PLUGIN_INSTALL_ENABLED'           => 'true',
+        'SPORA_PLUGIN_CATALOG_ENABLED'           => 'false',
+        'SPORA_PLUGIN_CATALOG_TTL'               => '120',
+        'SPORA_COMPOSER_BINARY'                  => '/usr/local/bin/composer',
+        'SPORA_ASSET_STORE_MODE'                 => 'local',
+        'SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES' => '2048',
+        'SPORA_ASSET_STORE_MAX_BYTES'            => '4096',
+        'SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'   => 'false',
+        'SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT'      => '45',
+        'SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES'  => '2048',
+        'SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED'    => 'true',
+        'SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES' => 'png,jpg',
+        'SPORA_MAIL_DRIVER'                      => 'sendmail',
+        'SPORA_MAIL_HOST'                        => 'smtp.example.com',
+        'SPORA_MAIL_PORT'                        => '2525',
+        'SPORA_MAIL_USERNAME'                    => 'spora',
+        'SPORA_MAIL_PASSWORD'                    => 'mail-secret',
+        'SPORA_MAIL_FROM'                        => 'noreply@spora.example.com',
+        'SPORA_MAIL_FROM_NAME'                   => 'Spora Staging',
+        'SPORA_MAIL_ENCRYPTION'                  => 'ssl',
+        'SPORA_MERCURE_URL'                      => 'https://mercure.example.com',
+        'SPORA_MERCURE_PUBLISH_URL'              => 'https://mercure.example.com/hub',
+        'SPORA_MERCURE_JWT_KEY'                  => 'jwt-key',
     ];
 
     try {
@@ -227,30 +295,56 @@ it('configDefinition honours env var overrides for all keys', function (): void 
             $_ENV[$key] = $value;
         }
 
-        $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
+        $config = callContainerMethod('configDefinition')[Config::class](makeFakeContainer());
 
-        expect($config['db_driver'])->toBe('pgsql')
-            ->and($config['db_host'])->toBe('db.example.com')
-            ->and($config['db_port'])->toBe(5432)
-            ->and($config['db_name'])->toBe('spora')
-            ->and($config['db_user'])->toBe('spora_user')
-            ->and($config['db_password'])->toBe('secret')
-            ->and($config['sqlite_busy_timeout'])->toBe(5000)
-            ->and($config['app_env'])->toBe('staging')
-            ->and($config['allow_registration'])->toBeFalse()
-            ->and($config['log_level'])->toBe('INFO')
-            ->and($config['log_path'])->toBe('/tmp/spora.log')
-            ->and($config['worker_runtime_mode'])->toBe('client')
-            ->and($config['tick_lease_seconds'])->toBe(900)
-            ->and($config['worker_stale_minutes'])->toBe(30)
-            ->and($config['max_workers'])->toBe(4)
-            ->and($config['llm_timeout'])->toBe(600)
-            ->and($config['tool_http_timeout'])->toBe(60)
-            ->and($config['mercure_url'])->toBe('https://mercure.example.com')
-            ->and($config['mercure_jwt_key'])->toBe('jwt-key')
-            ->and($config['mercure_publish_url'])->toBe('https://mercure.example.com/hub')
-            ->and($config['app_url'])->toBe('https://spora.example.com')
-            ->and($config['notifications']['email_enabled'])->toBeTrue();
+        expect($config->getString('SPORA_DB_DRIVER'))->toBe('sqlite')
+            ->and($config->getString('SPORA_DB_PATH'))->toBe('/tmp/spora.sqlite')
+            ->and($config->getString('SPORA_DB_HOST'))->toBe('db.example.com')
+            ->and($config->getInt('SPORA_DB_PORT'))->toBe(5432)
+            ->and($config->getString('SPORA_DB_NAME'))->toBe('spora')
+            ->and($config->getString('SPORA_DB_USER'))->toBe('spora_user')
+            ->and($config->getString('SPORA_DB_PASSWORD'))->toBe('secret')
+            ->and($config->getInt('SPORA_SQLITE_BUSY_TIMEOUT'))->toBe(5000)
+            ->and($config->getString('SPORA_KEY_PATH'))->toBe('/tmp/spora-secret.key')
+            ->and($config->getString('SPORA_APP_ENV'))->toBe('staging')
+            ->and($config->getString('SPORA_APP_NAME'))->toBe('Spora Staging')
+            ->and($config->getString('SPORA_APP_URL'))->toBe('https://spora.example.com')
+            ->and($config->getString('SPORA_APP_PREFIX'))->toBe('/spora')
+            ->and($config->getString('SPORA_LOG_LEVEL'))->toBe('INFO')
+            ->and($config->getString('SPORA_LOG_PATH'))->toBe('/tmp/spora.log')
+            ->and($config->getBool('SPORA_ALLOW_REGISTRATION'))->toBeFalse()
+            ->and($config->getBool('SPORA_ALLOW_GROUP_CREATION'))->toBeFalse()
+            ->and($config->getBool('SPORA_NOTIFICATIONS_EMAIL_ENABLED'))->toBeFalse()
+            ->and($config->getInt('SPORA_LLM_TIMEOUT'))->toBe(600)
+            ->and($config->getInt('SPORA_TOOL_HTTP_TIMEOUT'))->toBe(60)
+            ->and($config->getString('SPORA_WORKER_RUNTIME_MODE'))->toBe('client')
+            ->and($config->getInt('SPORA_TICK_LEASE_SECONDS'))->toBe(900)
+            ->and($config->getInt('SPORA_WORKER_STALE_MINUTES'))->toBe(30)
+            ->and($config->getInt('SPORA_MAX_WORKERS'))->toBe(4)
+            ->and($config->getBool('SPORA_TOOLS_GROUP_CASCADE_ENABLED'))->toBeTrue()
+            ->and($config->getBool('SPORA_PLUGIN_INSTALL_ENABLED'))->toBeTrue()
+            ->and($config->getBool('SPORA_PLUGIN_CATALOG_ENABLED'))->toBeFalse()
+            ->and($config->getInt('SPORA_PLUGIN_CATALOG_TTL'))->toBe(120)
+            ->and($config->getString('SPORA_COMPOSER_BINARY'))->toBe('/usr/local/bin/composer')
+            ->and($config->getString('SPORA_ASSET_STORE_MODE'))->toBe('local')
+            ->and($config->getInt('SPORA_ASSET_STORE_AUTO_THRESHOLD_BYTES'))->toBe(2048)
+            ->and($config->getInt('SPORA_ASSET_STORE_MAX_BYTES'))->toBe(4096)
+            ->and($config->getBool('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'))->toBeFalse()
+            ->and($config->getInt('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT'))->toBe(45)
+            ->and($config->getInt('SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES'))->toBe(2048)
+            ->and($config->getBool('SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED'))->toBeTrue()
+            ->and($config->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(['png', 'jpeg'])
+            ->and($config->getString('SPORA_MAIL_DRIVER'))->toBe('sendmail')
+            ->and($config->getString('SPORA_MAIL_HOST'))->toBe('smtp.example.com')
+            ->and($config->getInt('SPORA_MAIL_PORT'))->toBe(2525)
+            ->and($config->getString('SPORA_MAIL_USERNAME'))->toBe('spora')
+            ->and($config->getString('SPORA_MAIL_PASSWORD'))->toBe('mail-secret')
+            ->and($config->getString('SPORA_MAIL_FROM'))->toBe('noreply@spora.example.com')
+            ->and($config->getString('SPORA_MAIL_FROM_NAME'))->toBe('Spora Staging')
+            ->and($config->getString('SPORA_MAIL_ENCRYPTION'))->toBe('ssl')
+            ->and($config->getString('SPORA_MERCURE_URL'))->toBe('https://mercure.example.com')
+            ->and($config->getString('SPORA_MERCURE_PUBLISH_URL'))->toBe('https://mercure.example.com/hub')
+            ->and($config->getString('SPORA_MERCURE_JWT_KEY'))->toBe('jwt-key');
     } finally {
         foreach ($overrides as $key => $_value) {
             unset($_ENV[$key]);
@@ -258,6 +352,7 @@ it('configDefinition honours env var overrides for all keys', function (): void 
         }
     }
 });
+
 
 it('coreServiceDefinitions resolves core services', function (): void {
     $kernel = new Kernel();
@@ -287,11 +382,11 @@ it('every factory closure in the definitions array can be invoked', function ():
             continue;
         }
         // Skip if the key is already resolved (avoid re-resolution).
-        if (in_array($key, ['config', 'tool_classes', 'app_apps', 'llm_driver_classes', 'tool_instances'], true)) {
+        if (in_array($key, [Config::class, 'tool_classes', 'app_apps', 'llm_driver_classes', 'tool_instances'], true)) {
             // Call the closures directly to exercise their bodies.
             try {
                 $result = $c->get($key);
-                if ($key === 'config' || $key === 'tool_instances') {
+                if ($key === Config::class || $key === 'tool_instances') {
                     $resolved++;
                 } else {
                     $skipped++;
@@ -325,7 +420,7 @@ it('coreServiceDefinitions throws InvalidSecretKeyException for non-base64 secre
     $factory = $def[SecurityManagerInterface::class];
 
     $builder = new ContainerBuilder();
-    $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing']]);
+    $builder->addDefinitions([Config::class => static fn(): Config => configDefinitionsStub()]);
     $c = $builder->build();
 
     expect(fn() => $factory($c))->toThrow(Spora\Core\Exceptions\InvalidSecretKeyException::class);
@@ -343,7 +438,7 @@ it('coreServiceDefinitions throws MissingSecretKeyException when no key source i
     $tmpBase = sys_get_temp_dir() . '/spora_test_no_key_' . bin2hex(random_bytes(4));
     mkdir($tmpBase, 0o755, true);
     try {
-        $c = makeContainerWithPaths($tmpBase);
+        $c = makeContainerWithPaths($tmpBase, configDefinitionsStub());
         expect(fn() => $factory($c))->toThrow(Spora\Core\Exceptions\MissingSecretKeyException::class);
     } finally {
         @rmdir($tmpBase);
@@ -364,7 +459,7 @@ it('coreServiceDefinitions falls back to Paths::storage(secret.key) when env and
     try {
         $def = callContainerMethod('coreServiceDefinitions');
         $factory = $def[SecurityManagerInterface::class];
-        $c = makeContainerWithPaths($tmpBase);
+        $c = makeContainerWithPaths($tmpBase, configDefinitionsStub());
 
         $sm = $factory($c);
         expect($sm)->toBeInstanceOf(SecurityManager::class);
@@ -389,7 +484,7 @@ it('coreServiceDefinitions builds SecurityManager from SPORA_KEY_PATH', function
         $factory = $def[SecurityManagerInterface::class];
 
         $builder = new ContainerBuilder();
-        $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing']]);
+        $builder->addDefinitions([Config::class => static fn(): Config => configDefinitionsStub()]);
         $c = $builder->build();
 
         $sm = $factory($c);
@@ -399,7 +494,7 @@ it('coreServiceDefinitions builds SecurityManager from SPORA_KEY_PATH', function
     }
 });
 
-it('coreServiceDefinitions builds SecurityManager from config key_path', function (): void {
+it('coreServiceDefinitions builds SecurityManager from the configured key_path', function (): void {
     $tmpKeyFile = tempnam(sys_get_temp_dir(), 'spora_key_');
     file_put_contents($tmpKeyFile, random_bytes(32));
 
@@ -408,7 +503,9 @@ it('coreServiceDefinitions builds SecurityManager from config key_path', functio
         $factory = $def[SecurityManagerInterface::class];
 
         $builder = new ContainerBuilder();
-        $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'key_path' => $tmpKeyFile]]);
+        $builder->addDefinitions([
+            Config::class => static fn(): Config => configDefinitionsStub(['SPORA_KEY_PATH' => $tmpKeyFile]),
+        ]);
         $c = $builder->build();
 
         $sm = $factory($c);
@@ -423,7 +520,12 @@ it('coreServiceDefinitions builds Logger with stdout when log_path is stdout', f
     $factory = $def[LoggerInterface::class];
 
     $builder = new ContainerBuilder();
-    $builder->addDefinitions(['config' => static fn(): array => ['app_env' => 'testing', 'log_path' => 'stdout', 'log_level' => 'warning']]);
+    $builder->addDefinitions([
+        Config::class => static fn(): Config => configDefinitionsStub([
+            'SPORA_LOG_PATH'  => 'stdout',
+            'SPORA_LOG_LEVEL' => 'warning',
+        ]),
+    ]);
     $c = $builder->build();
 
     $logger = $factory($c);
@@ -489,12 +591,7 @@ it('apiAuthControllerDefinitions: LLMConfigController factory wires the right ty
 
     $builder = new ContainerBuilder();
     $builder->addDefinitions([
-        'config' => static fn(): array => [
-            'app_env'   => 'testing',
-            'key_path'  => null,
-            'log_path'  => 'php://stdout',
-            'log_level' => 'WARNING',
-        ],
+        Config::class => static fn(): Config => configDefinitionsStub(),
         SecurityManagerInterface::class => static fn(): SecurityManager => $security,
         AuthService::class => static fn(): AuthService => $authService,
         Spora\Services\LLMConfigServiceInterface::class => static fn(): Spora\Services\LLMConfigServiceInterface => $llmConfigService,
@@ -541,10 +638,14 @@ it('SseController factory falls back to mercure_url when no publish_url is set',
     $def = callContainerMethod('apiTaskControllerDefinitions');
     $factory = $def[Spora\Http\SseController::class];
 
-    $stubConfig = ['mercure_url' => 'https://hub.example.com/.well-known/mercure', 'mercure_jwt_key' => 'k', 'app_url' => 'https://hub.example.com'];
+    $stubConfig = new Config([
+        'SPORA_MERCURE_URL'     => 'https://hub.example.com/.well-known/mercure',
+        'SPORA_MERCURE_JWT_KEY' => 'k',
+        'SPORA_APP_URL'         => 'https://hub.example.com',
+    ]);
     $stubAuth = Mockery::mock(AuthService::class);
     $container = Mockery::mock(Psr\Container\ContainerInterface::class);
-    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(Config::class)->andReturn($stubConfig);
     $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
     $container->shouldReceive('get')->with(Spora\Services\PrincipalResolver::class)->andReturn(new Spora\Services\PrincipalResolver());
 
@@ -557,15 +658,15 @@ it('SseController factory prefers mercure_publish_url over mercure_url when both
     $def = callContainerMethod('apiTaskControllerDefinitions');
     $factory = $def[Spora\Http\SseController::class];
 
-    $stubConfig = [
-        'mercure_url' => 'https://browser.example.com/.well-known/mercure',
-        'mercure_publish_url' => 'http://spora:80/.well-known/mercure',
-        'mercure_jwt_key' => 'k',
-        'app_url' => 'https://browser.example.com',
-    ];
+    $stubConfig = new Config([
+        'SPORA_MERCURE_URL'         => 'https://browser.example.com/.well-known/mercure',
+        'SPORA_MERCURE_PUBLISH_URL' => 'http://spora:80/.well-known/mercure',
+        'SPORA_MERCURE_JWT_KEY'     => 'k',
+        'SPORA_APP_URL'             => 'https://browser.example.com',
+    ]);
     $stubAuth = Mockery::mock(AuthService::class);
     $container = Mockery::mock(Psr\Container\ContainerInterface::class);
-    $container->shouldReceive('get')->with('config')->andReturn($stubConfig);
+    $container->shouldReceive('get')->with(Config::class)->andReturn($stubConfig);
     $container->shouldReceive('get')->with(AuthService::class)->andReturn($stubAuth);
     $container->shouldReceive('get')->with(Spora\Services\PrincipalResolver::class)->andReturn(new Spora\Services\PrincipalResolver());
 
@@ -914,7 +1015,9 @@ it('tool_instances factory merges in App tools when AppLoader has a loaded App',
     expect($instances)->toHaveKey($appToolFqcn);
 });
 
-// Spora_PLUGIN_INSTALL_ENABLED env-var → plugin_install_enabled config mapping
+// SPORA_PLUGIN_INSTALL_ENABLED — the gate on the Web UI plugin install
+// endpoints. Off by default, so "off" has to survive every layer; a default
+// that silently became true would let anyone install a plugin.
 
 describe('SPORA_PLUGIN_INSTALL_ENABLED', function (): void {
     beforeEach(function (): void {
@@ -923,24 +1026,30 @@ describe('SPORA_PLUGIN_INSTALL_ENABLED', function (): void {
         unset($_ENV['SPORA_PLUGIN_INSTALL_ENABLED']);
     });
 
-    it('defaults to false when the env var is not set', function (): void {
-        $overrides = callContainerMethod('collectEnvOverrides');
-        expect($overrides)->not->toHaveKey('plugin_install_enabled');
+    it('defaults to false when no layer sets it', function (): void {
+        $config = callContainerMethod('configDefinition')[Config::class](makeFakeContainer());
+
+        expect($config->getBool('SPORA_PLUGIN_INSTALL_ENABLED'))->toBeFalse()
+            ->and($config->sourceOf('SPORA_PLUGIN_INSTALL_ENABLED'))->toBe(Config::SOURCE_DEFAULT);
     });
 
-    it('maps truthy spellings to true', function (string $value): void {
+    // The per-spelling datasets this used to carry moved to
+    // SettingsRegistryTest ("coerces a toggle from every string form a layer
+    // can hand it"), which drives `coerce()` for every toggle rather than
+    // for this one. What is left here is the wiring: the env layer has to
+    // reach this key at all.
+    it('reads :value from the environment layer', function (string $value, bool $expected): void {
         putenv("SPORA_PLUGIN_INSTALL_ENABLED=$value");
         $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = $value;
-        $overrides = callContainerMethod('collectEnvOverrides');
-        expect($overrides['plugin_install_enabled'])->toBeTrue();
-    })->with(['1', 'true', 'yes', 'on', 'TRUE', 'Yes']);
 
-    it('maps falsy spellings to false', function (string $value): void {
-        putenv("SPORA_PLUGIN_INSTALL_ENABLED=$value");
-        $_ENV['SPORA_PLUGIN_INSTALL_ENABLED'] = $value;
-        $overrides = callContainerMethod('collectEnvOverrides');
-        expect($overrides['plugin_install_enabled'])->toBeFalse();
-    })->with(['0', 'false', 'no', 'off', 'random-string']);
+        $config = callContainerMethod('configDefinition')[Config::class](makeFakeContainer());
+
+        expect($config->getBool('SPORA_PLUGIN_INSTALL_ENABLED'))->toBe($expected)
+            ->and($config->sourceOf('SPORA_PLUGIN_INSTALL_ENABLED'))->toBe(Config::SOURCE_ENV);
+    })->with([
+        'on'  => ['1', true],
+        'off' => ['0', false],
+    ]);
 });
 
 describe('resolvePluginInstallEnabled', function (): void {
@@ -948,14 +1057,14 @@ describe('resolvePluginInstallEnabled', function (): void {
         $c = new class implements Psr\Container\ContainerInterface {
             public function get(string $id): mixed
             {
-                if ($id === 'config') {
-                    return ['plugin_install_enabled' => true];
+                if ($id === Config::class) {
+                    return new Config(['SPORA_PLUGIN_INSTALL_ENABLED' => true]);
                 }
                 throw new RuntimeException("Unexpected lookup: $id");
             }
             public function has(string $id): bool
             {
-                return $id === 'config';
+                return $id === Config::class;
             }
         };
         expect(callContainerMethod('resolvePluginInstallEnabled', [$c]))->toBeTrue();
@@ -965,208 +1074,54 @@ describe('resolvePluginInstallEnabled', function (): void {
         $c = new class implements Psr\Container\ContainerInterface {
             public function get(string $id): mixed
             {
-                if ($id === 'config') {
-                    return [];
+                if ($id === Config::class) {
+                    return new Config();
                 }
                 throw new RuntimeException("Unexpected lookup: $id");
             }
             public function has(string $id): bool
             {
-                return $id === 'config';
+                return $id === Config::class;
             }
         };
         expect(callContainerMethod('resolvePluginInstallEnabled', [$c]))->toBeFalse();
     });
 });
 
-describe('nested env override merging', function (): void {
-    it('writes dotted env keys into the nested array (regression for the dotted-key bug)', function (): void {
-        // Pre-fix, $overrides['media_archive.promote_external'] was set as
-        // a literal top-level key and the deep merge landed it next to
-        // siblings; consumers reading $config['media_archive']['promote_external']
-        // never saw the env value.
-        try {
-            $_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'] = 'false';
-            $_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']   = '45';
-
-            $overrides = callContainerMethod('collectEnvOverrides');
-
-            expect($overrides)->toHaveKey('media_archive');
-            expect($overrides['media_archive'])->toBeArray();
-            expect($overrides['media_archive']['promote_external'])->toBeFalse();
-            expect($overrides['media_archive']['fetch_timeout_seconds'])->toBe(45);
-            // The literal dotted key must NOT leak to top level. Pest's
-            // toHaveKey recurses into nested arrays, so assert against
-            // the raw array.
-            expect(array_key_exists('media_archive.promote_external', $overrides))->toBeFalse();
-            expect(array_key_exists('media_archive.fetch_timeout_seconds', $overrides))->toBeFalse();
-        } finally {
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL']);
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']);
-            putenv('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL');
-            putenv('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT');
-        }
-    });
-
-    it('configDefinition exposes nested env values to consumers', function (): void {
-        try {
-            $_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL'] = 'false';
-            $_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']   = '45';
-
-            $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
-
-            expect($config['media_archive']['promote_external'])->toBeFalse();
-            expect($config['media_archive']['fetch_timeout_seconds'])->toBe(45);
-        } finally {
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL']);
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT']);
-            putenv('SPORA_MEDIA_ARCHIVE_PROMOTE_EXTERNAL');
-            putenv('SPORA_MEDIA_ARCHIVE_FETCH_TIMEOUT');
-        }
-    });
-
-    it('deep-merges associative maps across default + file + env layers', function (): void {
-        // The first layer carries the full default. The second layer adds a
-        // sibling key — deep merge must keep both. The third layer replaces
-        // a leaf — the leaf update must win without clobbering the sibling.
-        $base   = ['media_archive' => ['a' => 1, 'b' => 2]];
-        $file   = ['media_archive' => ['b' => 20, 'c' => 30]];
-        $env    = ['media_archive' => ['c' => 300]];
-
-        $merged = ConfigMerger::merge($base, $file, $env);
-
-        expect($merged['media_archive']['a'])->toBe(1);
-        expect($merged['media_archive']['b'])->toBe(20);
-        expect($merged['media_archive']['c'])->toBe(300);
-    });
-
-    it('replaces list (numerically indexed) arrays atomically', function (): void {
-        // Overriding ['png','jpeg','webp'] with ['gif'] must yield ['gif'],
-        // not ['png','jpeg','webp','gif']. The merge recognises list-vs-map
-        // by checking `array_is_list()` on both sides.
-        $base = ['media_archive' => ['allowed_image_types' => ['png', 'jpeg', 'webp']]];
-        $env  = ['media_archive' => ['allowed_image_types' => ['gif']]];
-
-        $merged = ConfigMerger::merge($base, $env);
-
-        expect($merged['media_archive']['allowed_image_types'])->toBe(['gif']);
-    });
-
-    it('precedence: defaults < file config < env overrides', function (): void {
-        // Defaults set both keys; file config updates one; env updates the
-        // other. The end state must reflect both overrides, with env
-        // winning where it overlaps.
-        $defaults = ['k' => 'default-k', 'shared' => 'default-shared'];
-        $file     = ['shared' => 'file-shared', 'file_only' => 'file-only'];
-        $env      = ['shared' => 'env-shared', 'env_only' => 'env-only'];
-
-        $merged = ConfigMerger::merge($defaults, $file, $env);
-
-        expect($merged['k'])->toBe('default-k');
-        expect($merged['shared'])->toBe('env-shared');
-        expect($merged['file_only'])->toBe('file-only');
-        expect($merged['env_only'])->toBe('env-only');
-    });
-});
-
+/**
+ * The image allowlist seen through the container binding, i.e. the two layers
+ * an operator can actually reach before the database exists. Per-spelling
+ * normalisation, the SVG refusal and the deliberate empty value are asserted
+ * against `SettingsRegistry::coerce()` and against a resolved `Config` in
+ * SettingsRegistryTest and ConfigResolutionTest; repeating them here would
+ * test the same three lines a fourth time.
+ */
 describe('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES', function (): void {
-    it('omits the key when env is unset so the $defaults triple applies', function (): void {
+    it('falls back to the registry default triple when no layer sets it', function (): void {
         unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
         putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
 
-        $overrides = callContainerMethod('collectEnvOverrides');
+        $config = callContainerMethod('configDefinition')[Config::class](makeFakeContainer());
 
-        // `collectEnvOverrides()` is only the env layer. When the env
-        // var is unset, the key is absent here — the default flows
-        // through from `$defaults` in `configDefinition()` instead.
-        expect($overrides)->not->toHaveKey('media_archive');
-
-        // End-to-end check via configDefinition: the merged result must
-        // carry the default triple.
-        $config = callContainerMethod('configDefinition')['config'](makeFakeContainer());
-        expect($config['media_archive']['allowed_image_types'])
-            ->toBe(['png', 'jpeg', 'webp']);
+        expect($config->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(['png', 'jpeg', 'webp'])
+            ->and($config->sourceOf('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(Config::SOURCE_DEFAULT);
     });
 
-    it('parses a comma-separated list and normalizes', function (): void {
+    it('parses a comma-separated list from the environment and normalizes it', function (): void {
         try {
             $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = ' png , JPG ,webp ';
+            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=png,JPG,webp');
 
-            $overrides = callContainerMethod('collectEnvOverrides');
+            $config = callContainerMethod('configDefinition')[Config::class](makeFakeContainer());
 
-            expect($overrides['media_archive']['allowed_image_types'])
-                ->toBe(['png', 'jpeg', 'webp']);
+            expect($config->get('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'))->toBe(['png', 'jpeg', 'webp']);
         } finally {
             unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
             putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
         }
-    });
-
-    it('rejects svg variants even when configured', function (): void {
-        try {
-            $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = 'png,svg,svg+xml';
-
-            $overrides = callContainerMethod('collectEnvOverrides');
-
-            expect($overrides['media_archive']['allowed_image_types'])
-                ->toBe(['png']);
-        } finally {
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
-            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
-        }
-    });
-
-    it('returns empty array when set to empty value (operator disabled images)', function (): void {
-        try {
-            $_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES'] = '';
-
-            $overrides = callContainerMethod('collectEnvOverrides');
-
-            expect($overrides['media_archive']['allowed_image_types'])->toBe([]);
-        } finally {
-            unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
-            putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
-        }
-    });
-
-    it('omits the key entirely when env is unset (defaults flow through)', function (): void {
-        unset($_ENV['SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES']);
-        putenv('SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES');
-
-        // Default `$overrides` (no env) should NOT contain the key —
-        // downstream consumers fall back to defaults in that case.
-        $overrides = callContainerMethod('collectEnvOverrides');
-
-        // collectEnvOverrides() only writes keys that came from the
-        // env layer. When the env var is unset the layer is empty at
-        // this dot-path.
-        expect(array_key_exists('media_archive', $overrides))->toBeFalse();
     });
 });
 
-describe('parseImageTypesCsv', function (): void {
-    it('returns null when input is null', function (): void {
-        expect(ConfigMerger::parseImageTypesCsv(null))->toBeNull();
-    });
-
-    it('returns empty array for empty string (distinct from null)', function (): void {
-        expect(ConfigMerger::parseImageTypesCsv(''))->toBe([]);
-    });
-
-    it('collapses jpg → jpeg', function (): void {
-        expect(ConfigMerger::parseImageTypesCsv('jpg,jpeg'))->toBe(['jpeg']);
-    });
-
-    it('drops duplicates while preserving first occurrence', function (): void {
-        expect(ConfigMerger::parseImageTypesCsv('png,PNG,jpg'))
-            ->toBe(['png', 'jpeg']);
-    });
-
-    it('excludes svg regardless of casing or leading dot', function (): void {
-        expect(ConfigMerger::parseImageTypesCsv('.svg,SVG,svg+xml,png'))
-            ->toBe(['png']);
-    });
-});
 
 describe('AgentController wiring', function (): void {
     /**
