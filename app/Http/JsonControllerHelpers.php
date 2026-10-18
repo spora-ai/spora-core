@@ -32,7 +32,15 @@ trait JsonControllerHelpers
             return [];
         }
 
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+        $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+
+        // Valid JSON is not the same as a JSON *object*: `"text"`, `42`,
+        // `true` and `null` all decode without throwing, to a scalar. The
+        // array return type then trips, and a TypeError is not a JsonException
+        // so the caller's catch does not see it — the request dies as a 500
+        // for a body the caller could easily have written by mistake.
+        // A body that is not an object simply has no fields in it.
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function error(string $code, string $message, int $status): JsonResponse
