@@ -22,6 +22,13 @@ final class AgentApiKeyIssuer
     private const SECRET_BYTES = 32;
 
     /**
+     * The exact shape of a key. Kept as a constant because `parse()` and
+     * the tests both need to agree on it, and a second copy of a regex is a
+     * second thing to forget to update.
+     */
+    private const SHAPE = '/^spk_([a-f0-9]{32})_([A-Za-z0-9_-]+)$/';
+
+    /**
      * @return array{0: AgentApiKey, 1: string} the stored row and the plaintext key, the only moment it exists
      */
     public function issue(int $agentId, string $name, ?int $createdBy = null): array
@@ -60,49 +67,34 @@ final class AgentApiKeyIssuer
         return [hash_equals($key->secret_hash, $this->hashSecret($presented)), $key->id];
     }
 
+    /**
+     * Split a presented key into its id and secret, or return null.
+     *
+     * Matches the whole shape rather than splitting on the first underscore:
+     * the secret is base64url, whose alphabet *includes* `_`, so a
+     * `strpos($body, '_')` split reads the wrong boundary roughly half the
+     * time and would hand a caller a plausible-looking id that belongs to
+     * nobody.
+     *
+     * @return array{0: string, 1: string}|null
+     */
+    public function parse(string $keyString): ?array
+    {
+        if (preg_match(self::SHAPE, $keyString, $m) !== 1) {
+            return null;
+        }
+
+        return [$m[1], $m[2]];
+    }
+
     public function secretFrom(string $keyString): ?string
     {
-        $prefix = self::PREFIX;
-
-        if (!str_starts_with($keyString, $prefix)) {
-            return null;
-        }
-
-        $body = substr($keyString, strlen($prefix));
-        $separator = strpos($body, '_');
-
-        if ($separator === false) {
-            return null;
-        }
-
-        $id = substr($body, 0, $separator);
-        $secret = substr($body, $separator + 1);
-
-        if (!preg_match('/^[a-f0-9]{32}$/', $id) || $secret === '') {
-            return null;
-        }
-
-        return $secret;
+        return $this->parse($keyString)[1] ?? null;
     }
 
     public function idFrom(string $keyString): ?string
     {
-        $prefix = self::PREFIX;
-
-        if (!str_starts_with($keyString, $prefix)) {
-            return null;
-        }
-
-        $body = substr($keyString, strlen($prefix));
-        $separator = strpos($body, '_');
-
-        if ($separator === false) {
-            return null;
-        }
-
-        $id = substr($body, 0, $separator);
-
-        return preg_match('/^[a-f0-9]{32}$/', $id) === 1 ? $id : null;
+        return $this->parse($keyString)[0] ?? null;
     }
 
     public function compose(string $id, string $secret): string

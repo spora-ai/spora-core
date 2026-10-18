@@ -87,14 +87,55 @@ describe('AgentApiKeyIssuer', function (): void {
 
         foreach ([
             'no prefix' => 'nope_' . $id . '_' . $secret,
-            'no separator' => 'spk_' . $id . $secret,
+            'id one char short' => 'spk_' . substr($id, 0, 31) . '_' . $secret,
+            'id one char long' => 'spk_' . $id . 'a' . '_' . $secret,
             'short id' => 'spk_abc_' . $secret,
             'non hex id' => 'spk_' . str_repeat('z', 32) . '_' . $secret,
+            'illegal character in secret' => 'spk_' . $id . '_' . $secret . '!',
+            'empty secret' => 'spk_' . $id . '_',
             'empty' => '',
         ] as $label => $bad) {
             expect($issuer->idFrom($bad))->toBeNull("{$label} should not yield an id");
             expect($issuer->secretFrom($bad))->toBeNull("{$label} should not yield a secret");
         }
+    });
+
+    it('parses a secret that itself contains an underscore', function (): void {
+        $issuer = new AgentApiKeyIssuer();
+
+        // The secret is base64url, whose alphabet includes `_`. A parser that
+        // splits on the first underscore reads the wrong boundary here and
+        // hands back a secret one character short of the real one, which then
+        // fails verification against the digest for no visible reason. Most
+        // secrets contain an underscore, so this is the common case.
+        $id = str_repeat('a1b2', 8);
+        $secret = '_b_c_d_e_f_g_h_i_j_k_l_m_n_o_p';
+
+        expect($issuer->parse($issuer->compose($id, $secret)))->toBe([$id, $secret]);
+    });
+
+    it('round-trips every issued key regardless of what the secret contains', function (): void {
+        $issuer = new AgentApiKeyIssuer();
+        $agentId = agent()->id;
+
+        // 64 issued keys: enough that a secret containing `_` is all but
+        // guaranteed, which is what makes a boundary-splitting bug
+        // reproducible rather than intermittent.
+        $withUnderscore = 0;
+
+        for ($i = 0; $i < 64; $i++) {
+            [$key, $plaintext] = $issuer->issue($agentId, 'rt');
+            $secret = $issuer->secretFrom($plaintext);
+
+            expect($issuer->idFrom($plaintext))->toBe($key->id);
+            expect($issuer->verify($secret, $key->fresh())[0])->toBeTrue();
+
+            if (str_contains((string) $secret, '_')) {
+                $withUnderscore++;
+            }
+        }
+
+        expect($withUnderscore)->toBeGreaterThan(0);
     });
 
     it('binds the secret to its row rather than to the id alone', function (): void {
