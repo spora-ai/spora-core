@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http\Middleware;
 
 use Closure;
+use Illuminate\Support\Carbon;
 use Spora\Auth\AgentApiKeyIssuer;
 use Spora\Core\Config;
 use Spora\Models\Agent;
@@ -20,13 +21,23 @@ use Symfony\Component\HttpFoundation\Response;
  * Authenticates an Agent API request from its bearer key.
  *
  * The key is the only credential here: a valid session cookie is not a
- * fallback, because the surface is agent-scoped and a session is not. A
- * missing, malformed, unknown or wrong key all answer the same 401, so a
- * caller cannot distinguish a bad id from a bad secret.
+ * fallback, because the surface is agent-scoped and a session is not.
+ *
+ * A missing, malformed, unknown or wrong key all answer the same 401,
+ * always. The rate limiter is consulted only after the secret verifies, so
+ * a wrong secret against a real key id cannot be told apart from a
+ * nonexistent key by watching for a 429: only a key that actually
+ * authenticates can be limited. Bucketing per authenticated key also means
+ * a leaked key id — which every callback sends in `X-Spora-Key-Id` — buys
+ * an attacker nothing, because without the secret the attempt never
+ * reaches the limiter.
  */
 final class AgentApiKeyMiddleware implements MiddlewareInterface
 {
     private const RATE_LIMIT_WINDOW_SECONDS = 60;
+
+    /** Minute granularity: enough for the admin tab, cheap enough for the hot path. */
+    private const LAST_USED_RESOLUTION_SECONDS = 60;
 
     public function __construct(
         private readonly AgentApiKeyIssuer $issuer,
@@ -56,17 +67,17 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
             return $this->unauthorized();
         }
 
-        $limit = $this->config->getInt('SPORA_AGENT_API_RATE_LIMIT_MAX') ?? 60;
-        $bucket = 'agentapi:' . $id;
-
-        if (!$this->rateLimiter->attempt($bucket, max(1, $limit), self::RATE_LIMIT_WINDOW_SECONDS)) {
-            return $this->rateLimited();
-        }
-
         [$valid] = $this->issuer->verify($secret, $key);
 
         if (!$valid) {
             return $this->unauthorized();
+        }
+
+        $limit = $this->config->getInt('SPORA_AGENT_API_RATE_LIMIT_MAX') ?? 60;
+        $bucket = 'agentapi:' . $id;
+
+        if (!$this->rateLimiter->attempt($bucket, max(1, $limit), self::RATE_LIMIT_WINDOW_SECONDS)) {
+            return $this->rateLimited($this->rateLimiter->retryAfterSeconds($bucket, self::RATE_LIMIT_WINDOW_SECONDS));
         }
 
         $agent = Agent::find($key->agent_id);
@@ -83,7 +94,29 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
             AgentApiContext::build($key, $agent, $this->principalResolver),
         );
 
+        $this->touchLastUsed($key);
+
         return $next($request);
+    }
+
+    /**
+     * Stamp the key's last-used time, at most once a minute.
+     *
+     * The column is what tells an operator which of an agent's keys are still
+     * live before revoking one, so it has to be written — but on every
+     * request it would put a second write on the hot path of a polling
+     * integrator. The UI renders a relative time, so minute granularity costs
+     * it nothing.
+     */
+    private function touchLastUsed(AgentApiKey $key): void
+    {
+        $last = $key->last_used_at?->getTimestamp() ?? 0;
+
+        if (time() - $last < self::LAST_USED_RESOLUTION_SECONDS) {
+            return;
+        }
+
+        $key->forceFill(['last_used_at' => Carbon::now('UTC')])->save();
     }
 
     private function bearerToken(Request $request): ?string
@@ -107,12 +140,12 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
         );
     }
 
-    private function rateLimited(): JsonResponse
+    private function rateLimited(int $retryAfter): JsonResponse
     {
         return new JsonResponse(
             ['error' => ['code' => 'TOO_MANY_REQUESTS', 'message' => 'Agent API rate limit exceeded.']],
             Response::HTTP_TOO_MANY_REQUESTS,
-            ['Retry-After' => (string) self::RATE_LIMIT_WINDOW_SECONDS],
+            ['Retry-After' => (string) $retryAfter],
         );
     }
 }

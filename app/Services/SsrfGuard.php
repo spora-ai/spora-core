@@ -5,20 +5,24 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 /**
- * Blocks outbound fetches to URLs that resolve inside the deployment's
+ * Blocks outbound requests to URLs that resolve inside the deployment's
  * own network.
  *
- * Extracted from `ReadUrlTool`, where the checks were private constants
- * applied only on the `fetch_pdf` path — the plain `fetch` path had no
- * private-IP guard at all. Anything that POSTs to a caller-supplied URL
- * (the Agent API's `callback_url`) needs the same gate.
+ * Used by the Agent API, which POSTs to a caller-supplied `callback_url`.
+ * `ReadUrlTool` has its own, narrower guard: it allows `http` as well as
+ * `https`, and its deny list is a private constant there. The two are not
+ * unified — merging them would tighten `ReadUrlTool`'s scheme policy, which
+ * is a behaviour change to that tool and belongs in its own PR. Until then,
+ * a fix to one is not automatically a fix to the other, and the deny lists
+ * do not agree.
  *
  * The resolve-then-check sequence has a DNS-rebinding window: the host is
  * resolved here and resolved again inside the HTTP client, and the two
  * answers can differ. Closing that would mean pinning the resolved IP into
  * the request, which `symfony/http-client` does not expose for the TLS
  * SNI/hostname pair these callers need. The guard raises the cost of an
- * attack rather than making it impossible.
+ * attack rather than making it impossible — which is why every caller must
+ * also refuse to follow redirects, or a redirect is an unscreened host.
  */
 final class SsrfGuard
 {
@@ -69,11 +73,6 @@ final class SsrfGuard
         return $this->rejectReasonForHost($host);
     }
 
-    public function isAcceptable(string $url): bool
-    {
-        return $this->rejectReason($url) === null;
-    }
-
     private function rejectReasonForHost(string $host): ?string
     {
         $bare = trim($host, '[]');
@@ -84,30 +83,69 @@ final class SsrfGuard
                 : null;
         }
 
-        // An unresolvable host is left to the HTTP client, which will fail
-        // with a DNS error — there is nothing to protect against if the
-        // name never resolves.
-        $resolved = @gethostbynamel($host);
-
-        if (!is_array($resolved)) {
-            return null;
-        }
-
-        foreach ($resolved as $candidate) {
-            if ($this->matchesDenyPrefix((string) $candidate)) {
+        // Both families. `gethostbynamel()` is A-only, so a name whose sole
+        // record is `AAAA ::1` returned `false` and was treated as
+        // acceptable — the guard's IPv6 branch was unreachable from this
+        // path and only ever fired on a literal `[::1]` host.
+        foreach ($this->resolveBothFamilies($host) as $candidate) {
+            if ($this->matchesDenyPrefix($candidate)) {
                 return 'Callback URL resolves to a private or reserved address.';
             }
         }
 
+        // A name that resolves to nothing is left to the HTTP client, which
+        // will fail with a DNS error. There is nothing to protect against
+        // from a name that never resolves.
         return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveBothFamilies(string $host): array
+    {
+        $addresses = [];
+
+        $v4 = @gethostbynamel($host);
+
+        if (is_array($v4)) {
+            foreach ($v4 as $address) {
+                $addresses[] = (string) $address;
+            }
+        }
+
+        $v6 = @dns_get_record($host, DNS_AAAA);
+
+        if (is_array($v6)) {
+            foreach ($v6 as $record) {
+                if (isset($record['ipv6'])) {
+                    $addresses[] = (string) $record['ipv6'];
+                }
+            }
+        }
+
+        return $addresses;
     }
 
     private function matchesDenyPrefix(string $ip): bool
     {
-        if (str_contains($ip, ':')) {
-            // IPv6: only loopback and unspecified are refused. Unique-local
-            // (fc00::/7) has no text prefix that can be matched safely here.
-            return $ip === '::1' || $ip === '::';
+        $packed = @inet_pton($ip);
+
+        if ($packed === false) {
+            return false;
+        }
+
+        if (strlen($packed) === 16) {
+            // IPv6, by prefix bits rather than by text prefix: unique-local
+            // (fc00::/7) and link-local (fe80::/10) have no leading text
+            // that can be matched safely, so a host written as `0:0:0:0:0:
+            // 0:0:1` or `fd12::1` would otherwise pass. `/7` covers both
+            // 0xFC and 0xFD — testing 0xFC alone misses half the range.
+            $first = ord($packed[0]);
+
+            return $first === 0
+                || ($first & 0xFE) === 0xFC                                  // fc00::/7
+                || ($first === 0xFE && (ord($packed[1]) & 0xC0) === 0x80);    // fe80::/10
         }
 
         foreach (self::DENY_IPV4_PREFIXES as $prefix) {

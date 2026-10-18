@@ -44,7 +44,7 @@ final class AgentApiKeyIssuer
             'created_by' => $createdBy,
         ]);
 
-        return [$key, self::PREFIX . $id . '_' . $secret];
+        return [$key, $this->compose($id, $secret)];
     }
 
     /**

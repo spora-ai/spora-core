@@ -38,6 +38,21 @@ final class AgentApiCallbackDispatcher
 
     private const BATCH_LIMIT = 25;
 
+    /**
+     * How long a callback waits before the sweep re-checks whether its chat
+     * has settled. This is the delivery latency floor: a chat that settles
+     * between two checks waits out the remainder.
+     */
+    private const SETTLE_POLL_SECONDS = 5;
+
+    /**
+     * How often a chat already reported as blocked is re-checked for a second
+     * settlement. Slow, because a blocked chat is waiting on a person and the
+     * alternative — watching it every sweep — makes a chat nobody clears
+     * cost a query per iteration indefinitely.
+     */
+    private const BLOCKED_POLL_SECONDS = 30;
+
     private const TIMEOUT_SECONDS = 5.0;
 
     private const MAX_DURATION_SECONDS = 10.0;
@@ -108,7 +123,15 @@ final class AgentApiCallbackDispatcher
         }
 
         if (!$this->projection->hasSettled($task)) {
-            // Nothing to report yet. Leave the row armed for the next pass.
+            // Nothing to report yet, so push the row out of the due window
+            // rather than leaving it due. Leaving it due looks harmless and
+            // is not: the sweep is `ORDER BY id LIMIT 25`, so 25 chats still
+            // running — all with lower ids — would occupy every batch and
+            // starve every settled chat behind them, for as long as they ran.
+            // Deferring is what lets a settled row reach the front.
+            $row->next_attempt_at = Carbon::now('UTC')->addSeconds(self::SETTLE_POLL_SECONDS);
+            $row->save();
+
             return false;
         }
 
@@ -122,13 +145,30 @@ final class AgentApiCallbackDispatcher
         }
 
         if ($row->delivered_status === $row->pending_status) {
-            $row->next_attempt_at = null;
+            $this->armOrDisarm($row, $status);
             $row->save();
 
             return false;
         }
 
         return $this->deliver($row, $task);
+    }
+
+    /**
+     * Decide whether the sweep should keep watching a row after it has
+     * reported `$status`.
+     *
+     * A terminal status cannot change, so the row is disarmed and never read
+     * again. A blocked one can: the caller may approve, reject or answer, and
+     * the chat then settles a second time and is owed a second delivery.
+     * Disarming those drops that delivery silently, so they stay armed on a
+     * slow cadence instead.
+     */
+    private function armOrDisarm(AgentApiCallback $row, string $status): void
+    {
+        $row->next_attempt_at = in_array($status, AgentApiChatProjection::BLOCKED_STATUSES, true)
+            ? Carbon::now('UTC')->addSeconds(self::BLOCKED_POLL_SECONDS)
+            : null;
     }
 
     private function deliver(AgentApiCallback $row, Task $task): bool
@@ -159,6 +199,13 @@ final class AgentApiCallbackDispatcher
                 'body' => $payload,
                 'timeout' => self::TIMEOUT_SECONDS,
                 'max_duration' => self::MAX_DURATION_SECONDS,
+                // `SsrfGuard` screened the URL as supplied, once. Following a
+                // redirect would re-issue the POST to a host that was never
+                // screened — a `302` to the cloud metadata endpoint turns the
+                // guard into a comment. A 3xx falls through to
+                // `recordFailure()` and is retried, which is the right answer
+                // for a receiver that has no reason to redirect.
+                'max_redirects' => 0,
             ]);
 
             $statusCode = $response->getStatusCode();
@@ -170,7 +217,7 @@ final class AgentApiCallbackDispatcher
 
         if ($statusCode >= 200 && $statusCode < 300) {
             $row->delivered_status = $row->pending_status;
-            $row->next_attempt_at = null;
+            $this->armOrDisarm($row, (string) $task->status);
             $row->attempts = (int) $row->attempts + 1;
             $row->last_status_code = $statusCode;
             $row->last_error = null;

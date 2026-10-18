@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services\AgentApi;
 
+use Illuminate\Support\Carbon;
 use Spora\Models\AgentApiCallback;
 use Spora\Models\Task;
 
@@ -19,10 +20,6 @@ use Spora\Models\Task;
  */
 final class AgentApiCallbackRecorder
 {
-    public function __construct(
-        private readonly AgentApiChatProjection $projection,
-    ) {}
-
     public function record(AgentApiContext $context, Task $task, ?string $callbackUrl): ?AgentApiCallback
     {
         if ($callbackUrl === null || $callbackUrl === '') {
@@ -37,11 +34,12 @@ final class AgentApiCallbackRecorder
             // Nothing is owed yet: the chat has not settled.
             'pending_status' => null,
             'attempts' => 0,
+            // Armed immediately rather than left NULL. The sweep selects
+            // `next_attempt_at IS NOT NULL AND <= now`, so a NULL here is a
+            // row nothing can ever pick up — the chat would finish and no
+            // callback would fire. `AgentApiCallbackDispatcher` defers the
+            // row again while the chat is still running.
+            'next_attempt_at' => Carbon::now('UTC'),
         ]);
-    }
-
-    public function hasSettled(Task $task): bool
-    {
-        return $this->projection->hasSettled($task);
     }
 }

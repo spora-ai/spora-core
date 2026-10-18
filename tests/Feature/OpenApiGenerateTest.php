@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use OpenApi\Annotations\OpenApi;
+use OpenApi\Annotations\Operation;
+use OpenApi\Annotations\PathItem;
 use Spora\Console\Commands\OpenApiGenerateCommand;
 use Spora\Http\HealthController;
 use Spora\OpenApi\RouteSpecCollector;
@@ -25,6 +27,30 @@ function openApiTestCollectRoutes(): array
 function openApiTestSpec(): OpenApi
 {
     return (new RouteToOpenApi())->build();
+}
+
+/**
+ * The HTTP operations on a path item.
+ *
+ * A `PathItem` is not iterable, so the methods are listed rather than
+ * discovered — and listing them is what keeps this from mistaking the
+ * path-level `parameters` entry for an operation.
+ *
+ * @return array<string, Operation>
+ */
+function openApiTestOperations(PathItem $pathItem): array
+{
+    $operations = [];
+
+    foreach (['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as $method) {
+        $operation = $pathItem->{$method} ?? null;
+
+        if ($operation instanceof Operation) {
+            $operations[$method] = $operation;
+        }
+    }
+
+    return $operations;
 }
 
 function openApiTestFindOperation(OpenApi $spec, string $method, string $path): ?object
@@ -62,6 +88,66 @@ describe('OpenAPI specification generation', function (): void {
         $bearer = $spec->components->securitySchemes[array_search('bearerAuth', $names, true)];
         expect($bearer->type)->toBe('http');
         expect($bearer->scheme)->toBe('bearer');
+    });
+
+    it('declares no scheme that no operation requires', function (): void {
+        $spec = openApiTestSpec();
+
+        $declared = array_map(
+            static fn($s) => $s->securityScheme,
+            $spec->components->securitySchemes,
+        );
+
+        $referenced = [];
+
+        foreach ($spec->paths as $path => $pathItem) {
+            foreach (openApiTestOperations($pathItem) as $operation) {
+                foreach ($operation->security as $requirement) {
+                    foreach (array_keys((array) $requirement) as $name) {
+                        $referenced[] = $name;
+                    }
+                }
+            }
+        }
+
+        // A scheme declared in `components` but referenced by nothing is
+        // decoration: generated clients ignore it, and the operations that
+        // should have required it read as `security: []` — which in OpenAPI
+        // means *no authentication required*. That is how a published spec can
+        // tell integrators an authenticated surface is open.
+        expect(array_values(array_diff($declared, $referenced)))
+            ->toBe([], 'every declared security scheme must be required by some operation');
+    });
+
+    it('requires bearerAuth on every Agent API operation', function (): void {
+        $spec = openApiTestSpec();
+
+        $checked = 0;
+        $unsecured = [];
+
+        foreach ($spec->paths as $path => $pathItem) {
+            if (!str_starts_with((string) $path, '/api/v1/agent-api/')) {
+                continue;
+            }
+
+            foreach (openApiTestOperations($pathItem) as $method => $operation) {
+                $checked++;
+
+                $required = [];
+                foreach ($operation->security as $requirement) {
+                    foreach (array_keys((array) $requirement) as $name) {
+                        $required[] = $name;
+                    }
+                }
+
+                if (!in_array('bearerAuth', $required, true)) {
+                    $unsecured[] = strtoupper((string) $method) . ' ' . $path;
+                }
+            }
+        }
+
+        expect($checked)->toBeGreaterThan(0, 'the Agent API routes should be present in the spec');
+        expect($unsecured)->toBe([], 'every Agent API operation must require bearerAuth');
     });
 
     it('covers every route registered in RouteDefinitions', function (): void {

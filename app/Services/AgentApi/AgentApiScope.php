@@ -31,6 +31,11 @@ final class AgentApiScope
     /** Sub-agent nesting is shallow; this is a cycle guard, not a real limit. */
     private const MAX_ANCESTOR_WALK = 16;
 
+    private const DEFAULT_PER_PAGE = 25;
+
+    /** Above this the per-row projection cost makes a page expensive. */
+    private const MAX_PER_PAGE = 100;
+
     public function __construct(
         private readonly TaskServiceInterface $taskService,
         private readonly MediaArchiveService $mediaArchive,
@@ -93,6 +98,14 @@ final class AgentApiScope
     }
 
     /**
+     * Always paginated, defaulting to a page rather than to everything.
+     *
+     * Each row goes through `AgentApiChatProjection::status()`, which adds
+     * up to two more queries for a chat with no `final_response` or one
+     * parked on an approval. An agent with a long backlog would turn one
+     * uncapped request into an unbounded body and O(n) queries — and the
+     * per-key rate limit bounds request count, not response size.
+     *
      * @return list<Task>
      */
     public function listChats(int $agentId, ?string $since, ?int $page, ?int $perPage): array
@@ -104,10 +117,10 @@ final class AgentApiScope
             $query->where('updated_at', '>', $since);
         }
 
-        if ($page !== null && $page > 0) {
-            $perPage = $perPage !== null && $perPage > 0 ? min($perPage, 100) : 25;
-            $query->forPage($page, $perPage);
-        }
+        $query->forPage(
+            max(1, $page ?? 1),
+            $perPage !== null && $perPage > 0 ? min($perPage, self::MAX_PER_PAGE) : self::DEFAULT_PER_PAGE,
+        );
 
         return $query->get()->all();
     }

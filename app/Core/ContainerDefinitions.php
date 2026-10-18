@@ -1342,9 +1342,7 @@ final class ContainerDefinitions
                 );
             },
 
-            AgentApiCallbackRecorder::class => static function (ContainerInterface $c): AgentApiCallbackRecorder {
-                return new AgentApiCallbackRecorder($c->get(AgentApiChatProjection::class));
-            },
+            AgentApiCallbackRecorder::class => static fn(): AgentApiCallbackRecorder => new AgentApiCallbackRecorder(),
 
             AgentApiFileIngest::class => static function (ContainerInterface $c): AgentApiFileIngest {
                 return new AgentApiFileIngest(

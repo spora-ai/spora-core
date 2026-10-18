@@ -49,13 +49,18 @@ final class AgentApiTestSupport
      * The overrides are `set()` after `build()`, which PHP-DI allows because
      * it resolves lazily — so nothing may be `get()`-ed before this returns.
      *
+     * Returns the concrete container, not `ContainerInterface`, because
+     * callers override bindings with `set()` — an override the interface does
+     * not declare. PHP-DI resolves lazily, so nothing may be `get()`-ed before
+     * the overrides below are in place.
+     *
      * @param list<\Spora\Tools\ToolInterface> $tools
      */
     public static function container(
         ScriptedLlmDriver $llm,
         ?HttpClientInterface $http = null,
         array $tools = [],
-    ): \Psr\Container\ContainerInterface {
+    ): \DI\Container {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($llm);
 
@@ -206,19 +211,39 @@ final class AgentApiTestSupport
      * eventually see it. There is no clock double in the suite, so this is the
      * same fast-into-the-past UPDATE the retry tests use.
      */
-    public static function makeCallbackDue(int $callbackId): void
+    /**
+     * Skip a retry backoff by making a deferred row due now.
+     *
+     * Only for rows the dispatcher has already deferred after a failed
+     * delivery. It asserts there is a backoff to skip, because using it to
+     * arm a fresh row is what hid a real bug: the recorder used to leave
+     * `next_attempt_at` NULL, the sweep filtered on `notNull`, and every
+     * callback test force-wrote the column before sweeping — so no test ever
+     * saw that nothing was ever delivered. A row with a NULL or already-past
+     * timestamp fails here rather than being quietly fixed up.
+     */
+    public static function skipBackoff(int $callbackId): void
     {
+        $row = Capsule::table('agent_api_callbacks')->where('id', $callbackId)->first();
+
+        if ($row === null || $row->next_attempt_at === null) {
+            throw new RuntimeException(
+                "Callback {$callbackId} has no backoff to skip — it was never armed. "
+                . 'Do not use this helper to make a fresh row due.',
+            );
+        }
+
         Capsule::table('agent_api_callbacks')
             ->where('id', $callbackId)
             ->update(['next_attempt_at' => gmdate('Y-m-d H:i:s', time() - 60)]);
     }
 
     /**
-     * Record `next_attempt_at` as due and run one sweep.
+     * Run one worker sweep.
      *
-     * Called after a state change rather than before, because the recorder
-     * writes the row with `next_attempt_at = null` — nothing is owed until
-     * the chat settles, and it is the sweep that must notice.
+     * The row is already armed by the recorder, so no test-side setup is
+     * needed before calling this — which is the property that
+     * {@see self::skipBackoff()} exists to protect.
      */
     public static function dispatchDue(\Psr\Container\ContainerInterface $container): int
     {

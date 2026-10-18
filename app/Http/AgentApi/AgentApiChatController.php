@@ -27,11 +27,12 @@ use Symfony\Component\HttpFoundation\Response;
  * session fallback: a bearer key is the only credential this surface accepts,
  * so holding a browser cookie cannot widen a key's reach.
  *
- * Every method repeats the feature gate. The routes are registered
- * unconditionally and refuse at call time, which is what lets an operator
- * flip `SPORA_AGENT_API` without a restart; the gate answers 404 rather than
- * 403 so an instance that has not enabled the feature leaks nothing about
- * what sits behind it.
+ * The feature gate lives in `AgentApiRouteDefinitions`, not here: the
+ * routes are simply not registered when `SPORA_AGENT_API` is off or the
+ * instance runs client-worker mode, so an instance without the feature
+ * answers 404 from the router and the surface stays unenumerable. `SPORA_AGENT_API`
+ * is database-backed and `Kernel::handle()` applies the settings overlay
+ * before `buildRouter()`, so flipping it needs no restart.
  */
 #[OA\Tag(name: 'Agent-api', description: 'Per-agent API for external tools')]
 final class AgentApiChatController
@@ -48,14 +49,32 @@ final class AgentApiChatController
     ) {}
 
     #[OA\Get(path: '/api/v1/agent-api/chats', summary: "List this agent's chats", tags: ['Agent-api'])]
-    #[OA\Response(response: 200, description: 'Chats, newest first.')]
+    #[OA\Parameter(
+        name: 'since',
+        in: 'query',
+        required: false,
+        description: 'ISO-8601 timestamp; only chats updated after it.',
+        schema: new OA\Schema(type: 'string', format: 'date-time'),
+    )]
+    #[OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
+    #[OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
+    #[OA\Response(response: 200, description: 'One page of chats, newest first. 25 per page by default.')]
+    #[OA\Response(response: 422, description: '`since` was not a parseable date.')]
     public function index(Request $request): JsonResponse
     {
+        $since = $this->queryString($request, 'since');
+
+        if ($since !== null && strtotime($since) === false) {
+            // Engines disagree about an unparseable date — SQLite coerces it
+            // to something, MySQL errors — so refuse it rather than let the
+            // caller discover the difference by running on another host.
+            return $this->unprocessable('VALIDATION_ERROR', 'since must be a parseable date.');
+        }
 
         $context = AgentApiContext::fromRequest($request);
         $tasks = $this->scope->listChats(
             $context->agentId(),
-            $this->queryString($request, 'since'),
+            $since,
             $this->queryInt($request, 'page'),
             $this->queryInt($request, 'per_page'),
         );

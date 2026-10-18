@@ -17,6 +17,7 @@ use ReflectionMethod;
 use Spora\Core\Config;
 use Spora\Core\RouteDefinitions;
 use Spora\Http\Middleware\AdminMiddleware;
+use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 
@@ -313,6 +314,7 @@ final class RouteToOpenApi
                 // middleware itself enforces as a skip.
                 CsrfMiddleware::class => $this->isSafeMethod($method) ? null : 'csrfToken',
                 AdminMiddleware::class => 'cookieAuth',
+                AgentApiKeyMiddleware::class => 'bearerAuth',
                 default => null,
             };
             if ($name !== null) {

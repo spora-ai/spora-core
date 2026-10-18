@@ -54,7 +54,6 @@ describe('WorkerRunCommand callback sweep', function (): void {
         // Settle it here, not in the loop: what the loop's sweep does is
         // independent of how the chat reached its terminal state.
         AgentApiTestSupport::runToCompletion($container, $chatId);
-        AgentApiTestSupport::makeCallbackDue((int) AgentApiTestSupport::callbackFor($chatId)->id);
 
         return [$container, $http, $chatId];
     }

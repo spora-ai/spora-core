@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AgentApi;
 
+use Spora\Core\Config;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
+use Spora\Models\RatelimitHit;
 use Spora\Models\Task;
+use Symfony\Component\HttpFoundation\Response;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
 
@@ -68,10 +71,14 @@ describe('Agent API end-to-end', function (): void {
         expect($task->status)->toBe('QUEUED');
 
         // The callback row exists before the chat has settled — this is what
-        // lets delivery work without a task-lifecycle hook.
+        // lets delivery work without a task-lifecycle hook — and it is
+        // armed at creation. A row left unarmed is invisible to the sweep,
+        // which filters on `next_attempt_at IS NOT NULL`, and no callback
+        // would ever be delivered.
         $callback = AgentApiTestSupport::callbackFor($chatId);
         expect($callback->pending_status)->toBeNull();
         expect($callback->url)->toBe('https://hooks.example.test/spora');
+        expect($callback->next_attempt_at)->not->toBeNull();
 
         // A sweep while the chat is still QUEUED must post nothing.
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(0);
@@ -125,7 +132,10 @@ describe('Agent API end-to-end', function (): void {
         expect($transcript['totals'])->toHaveKey('input_tokens');
 
         // Now the sweep has something to deliver, and delivers it once.
-        AgentApiTestSupport::makeCallbackDue((int) $callback->id);
+        // The earlier sweep found the chat unsettled and deferred the row, so
+        // its backoff has to elapse before it comes due again — which is what
+        // the worker loop's repeated sweeps are for.
+        AgentApiTestSupport::skipBackoff((int) $callback->id);
 
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);
         expect($http->requests)->toHaveCount(1);
@@ -147,7 +157,6 @@ describe('Agent API end-to-end', function (): void {
         ));
 
         // A second sweep has nothing left to say.
-        AgentApiTestSupport::makeCallbackDue((int) $callback->id);
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(0);
         expect($http->requests)->toHaveCount(1);
     });
@@ -197,7 +206,6 @@ describe('Agent API end-to-end', function (): void {
         expect($status['blocked']['tool_calls'][0]['name'])->toBe('stub_output');
 
         // Parking is a settle, so the receiver is told about it.
-        AgentApiTestSupport::makeCallbackDue((int) $callback->id);
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);
         expect(json_decode($http->body(0), true)['status'])->toBe('PENDING_APPROVAL');
         expect(json_decode($http->body(0), true)['blocked']['reason'])->toBe('PENDING_APPROVAL');
@@ -224,7 +232,11 @@ describe('Agent API end-to-end', function (): void {
         expect(Task::findOrFail($chatId)->status)->toBe('COMPLETED');
 
         // The second settle is a different status, so it is a new delivery.
-        AgentApiTestSupport::makeCallbackDue((int) $callback->id);
+        // The row stayed armed through the blocked phase rather than being
+        // disarmed after the first delivery — that is what makes a second
+        // settlement reachable at all.
+        AgentApiTestSupport::skipBackoff((int) $callback->id);
+
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);
         expect($http->requests)->toHaveCount(2);
         expect(json_decode($http->body(1), true)['status'])->toBe('COMPLETED');
@@ -278,6 +290,117 @@ describe('Agent API authorisation', function (): void {
         expect($wrong->getStatusCode())->toBe(401);
         expect($unknown->getStatusCode())->toBe(401);
         expect(AgentApiTestSupport::decode($unknown))->toBe(AgentApiTestSupport::decode($wrong));
+    });
+
+    it('never turns a bad credential into a 429, however often it is repeated', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('oracle');
+        [, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'oracle');
+
+        $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'o1'));
+
+        // A limit low enough that a handful of attempts would exhaust it.
+        $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
+        $container->set(Config::class, new Config([
+            'SPORA_AGENT_API' => '1',
+            'SPORA_AGENT_API_RATE_LIMIT_MAX' => '2',
+            'SPORA_LOG_LEVEL' => 'error',
+        ]));
+
+        $wrongSecret = substr($plaintext, 0, -1) . ($plaintext[-1] === 'A' ? 'B' : 'A');
+
+        // Ten wrong secrets against a real key id. If the limiter ran before
+        // the verify, some of these would answer 429 — a response a caller
+        // could use to learn that the id exists. A leaked id is not secret:
+        // every callback sends it in cleartext as `X-Spora-Key-Id`.
+        for ($i = 0; $i < 10; $i++) {
+            $response = AgentApiTestSupport::call(
+                $container,
+                AgentApiChatController::class,
+                'index',
+                jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $wrongSecret]),
+            );
+
+            expect($response->getStatusCode())->toBe(401);
+        }
+
+        // The real key still authenticates — a wrong-secret flood must not
+        // lock out the legitimate integration.
+        $valid = AgentApiTestSupport::call(
+            $container,
+            AgentApiChatController::class,
+            'index',
+            jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $plaintext]),
+        );
+
+        expect($valid->getStatusCode())->toBe(200);
+    });
+
+    it('counts only authenticated requests against the rate limit', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('rl');
+        [$keyRow, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'rl');
+        $bucket = 'agentapi:' . $keyRow->id;
+
+        $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'r1'));
+        $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
+        $container->set(Config::class, new Config([
+            'SPORA_AGENT_API' => '1',
+            'SPORA_AGENT_API_RATE_LIMIT_MAX' => '2',
+            'SPORA_LOG_LEVEL' => 'error',
+        ]));
+
+        $send = fn(): Response => AgentApiTestSupport::call(
+            $container,
+            AgentApiChatController::class,
+            'index',
+            jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $plaintext]),
+        );
+
+        // One hit is recorded per call. `DbRateLimiter` cannot count a
+        // second hit inside the same second — `ratelimit_hits` is keyed
+        // `(key, hit_at)` at second resolution, so a same-second burst
+        // collides, fails open, and goes uncounted. That is pre-existing and
+        // affects `/tick` identically; see the backlog item
+        // `2026-10-18-db-rate-limiter-same-second-collision.md`. What this
+        // test pins is that a *rejected* request records no hit, which is the
+        // half the Agent API owns.
+        expect($send()->getStatusCode())->toBe(200);
+        expect(RatelimitHit::where('key', $bucket)->count())->toBe(1);
+
+        // A rejected request must not consume a slot, or an attacker could
+        // lock a legitimate integration out simply by guessing at a key.
+        $wrong = AgentApiTestSupport::call(
+            $container,
+            AgentApiChatController::class,
+            'index',
+            jsonRequest('GET', '/api/v1/agent-api/chats', [], [
+                'Authorization' => 'Bearer ' . substr($plaintext, 0, -1) . ($plaintext[-1] === 'A' ? 'B' : 'A'),
+            ]),
+        );
+
+        expect($wrong->getStatusCode())->toBe(401);
+        expect(RatelimitHit::where('key', $bucket)->count())->toBe(1);
+    });
+
+    it('stamps last_used_at when a key authenticates', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('lastused');
+        [$keyRow, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'lastused');
+
+        expect($keyRow->last_used_at)->toBeNull();
+
+        $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'l1'));
+        $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
+
+        AgentApiTestSupport::call(
+            $container,
+            AgentApiChatController::class,
+            'index',
+            jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $plaintext]),
+        );
+
+        // The column is what tells an operator which keys are still live
+        // before revoking one; if nothing writes it the tab reads "Never"
+        // forever and the field is decoration.
+        expect($keyRow->fresh()->last_used_at)->not->toBeNull();
     });
 
     it('cannot see another agent\'s chat', function (): void {
@@ -381,7 +504,7 @@ describe('Agent API callback delivery failures', function (): void {
         $callback = AgentApiTestSupport::callbackFor($chatId);
 
         for ($attempt = 1; $attempt <= 5; $attempt++) {
-            AgentApiTestSupport::makeCallbackDue((int) $callback->id);
+            AgentApiTestSupport::skipBackoff((int) $callback->id);
 
             expect(AgentApiTestSupport::dispatchDue($container))->toBe(0);
 
@@ -394,7 +517,7 @@ describe('Agent API callback delivery failures', function (): void {
         }
 
         // The sixth failure exhausts the budget and dead-letters the row.
-        AgentApiTestSupport::makeCallbackDue((int) $callback->id);
+        AgentApiTestSupport::skipBackoff((int) $callback->id);
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(0);
 
         $callback->refresh();

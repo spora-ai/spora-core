@@ -47,7 +47,6 @@ final class AgentApiKeyController
         path: '/api/v1/agents/{agentId}/api-keys',
         summary: "List an agent's API keys",
         tags: ['Agents'],
-        security: [['cookieAuth' => [], 'csrfToken' => []]],
     )]
     #[OA\Response(response: 200, description: 'Key metadata. Secrets are never returned.')]
     #[OA\Response(response: 403, description: 'The caller cannot manage this agent.')]
@@ -73,7 +72,6 @@ final class AgentApiKeyController
         path: '/api/v1/agents/{agentId}/api-keys',
         summary: 'Mint an API key',
         tags: ['Agents'],
-        security: [['cookieAuth' => [], 'csrfToken' => []]],
     )]
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
         required: ['name'],
@@ -120,7 +118,6 @@ final class AgentApiKeyController
         path: '/api/v1/agents/{agentId}/api-keys/{keyId}',
         summary: 'Revoke an API key',
         tags: ['Agents'],
-        security: [['cookieAuth' => [], 'csrfToken' => []]],
     )]
     #[OA\Response(response: 204, description: 'Revoked. Idempotent.')]
     public function destroy(Request $request): JsonResponse
@@ -134,8 +131,9 @@ final class AgentApiKeyController
         $agentId = (int) $request->attributes->get('agentId', 0);
         $keyId = (string) $request->attributes->get('keyId', '');
 
-        // Scoped by agent so a caller cannot revoke another agent's key by
-        // guessing its id; the 404 hides whether the id exists at all.
+        // Scoped by agent, so a key id cannot be used to revoke another agent's
+        // key. Answering 204 whether or not the row existed is what stops
+        // that from being a probe for which key ids are real.
         AgentApiKey::where('agent_id', $agentId)->where('id', $keyId)->delete();
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);

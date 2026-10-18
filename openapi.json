@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-1-g068bd673"
+        "version": "0.30.0-4-g0eb17dd1"
     },
     "servers": [
         {
@@ -3410,13 +3410,44 @@
                     "Agent-api"
                 ],
                 "summary": "List this agent's chats",
-                "parameters": [],
+                "parameters": [
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "description": "ISO-8601 timestamp; only chats updated after it.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             },
             "post": {
                 "tags": [
@@ -3467,7 +3498,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/status": {
@@ -3491,7 +3526,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/messages": {
@@ -3523,7 +3562,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             },
             "post": {
                 "tags": [
@@ -3571,7 +3614,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/transcript": {
@@ -3603,7 +3650,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/approve": {
@@ -3647,7 +3698,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/reject": {
@@ -3684,7 +3739,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/chats/{chatId}/answer": {
@@ -3729,7 +3788,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/media": {
@@ -3760,7 +3823,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-api/media/{mediaId}": {
@@ -3792,7 +3859,11 @@
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
                     }
                 },
-                "security": []
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/agent-templates": {
