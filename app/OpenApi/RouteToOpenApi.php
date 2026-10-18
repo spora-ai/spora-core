@@ -55,18 +55,24 @@ final class RouteToOpenApi
         $components = new Components([]);
         $components->securitySchemes = [
             $this->buildSecurityScheme(
-                'cookieAuth',
-                'apiKey',
-                'cookie',
-                'PHPSESSID',
-                'Session cookie issued by `delight-im/auth`. Required by `AuthMiddleware`.',
+                name: 'cookieAuth',
+                type: 'apiKey',
+                in: 'cookie',
+                keyName: 'PHPSESSID',
+                description: 'Session cookie issued by `delight-im/auth`. Required by `AuthMiddleware`.',
             ),
             $this->buildSecurityScheme(
-                'csrfToken',
-                'apiKey',
-                'header',
-                'X-CSRF-Token',
-                'CSRF token issued alongside the session. Required by `CsrfMiddleware` on every write method.',
+                name: 'csrfToken',
+                type: 'apiKey',
+                in: 'header',
+                keyName: 'X-CSRF-Token',
+                description: 'CSRF token issued alongside the session. Required by `CsrfMiddleware` on every write method.',
+            ),
+            $this->buildSecurityScheme(
+                name: 'bearerAuth',
+                type: 'http',
+                scheme: 'bearer',
+                description: 'Agent API key (`spk_<id>_<secret>`), scoped to one agent. Required by `AgentApiKeyMiddleware`; no session or CSRF token is accepted on that surface.',
             ),
         ];
         $openapi->components = $components;
@@ -105,14 +111,21 @@ final class RouteToOpenApi
         return new Server(['url' => '/', 'description' => 'Same-origin']);
     }
 
-    private function buildSecurityScheme(string $name, string $type, ?string $in, string $keyName, string $description): SecurityScheme
-    {
+    private function buildSecurityScheme(
+        string $name,
+        string $type,
+        ?string $description,
+        ?string $in = null,
+        ?string $keyName = null,
+        ?string $scheme = null,
+    ): SecurityScheme {
         return new SecurityScheme([
             'securityScheme' => $name,
             'type' => $type,
             'in' => $in,
             'name' => $keyName,
             'description' => $description,
+            'scheme' => $scheme,
         ]);
     }
 

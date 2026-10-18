@@ -5,17 +5,14 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Spora\Auth\AuthService;
-use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
-use Spora\Services\AssetStorageException;
-use Spora\Services\DatabaseAssetStore;
+use Spora\Services\AssetStreamer;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Serves files referenced by the {@see MediaArchiveService}.
@@ -49,13 +46,10 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 final class AssetController
 {
-    /** 24h browser cache: asset bytes don't change post-ingest. */
-    private const CACHE_HEADER = 'private, max-age=86400';
-
     public function __construct(
         private readonly MediaArchiveService $archive,
-        private readonly DatabaseAssetStore $database,
         private readonly LocalAssetStore $local,
+        private readonly AssetStreamer $streamer,
         private readonly AuthService $auth,
         private readonly ?PrincipalResolver $resolver = null,
     ) {}
@@ -75,7 +69,7 @@ final class AssetController
         $resolved = $this->local->resolve($filename);
         if ($resolved !== null) {
             $response = new BinaryFileResponse($resolved['path'], 200, ['Content-Type' => $resolved['mime']]);
-            $response->headers->set('Cache-Control', self::CACHE_HEADER);
+            $response->headers->set('Cache-Control', AssetStreamer::CACHE_HEADER);
             return $response;
         }
 
@@ -163,62 +157,7 @@ final class AssetController
 
     private function streamAsset(MediaAsset $asset): Response
     {
-        try {
-            $payload = match ($asset->storage_mode) {
-                'data_url' => $this->database->read($asset),
-                'local'    => $this->local->readFromAsset($asset),
-                'external' => throw new AssetStorageException("External assets have no Spora-side payload"),
-                default    => throw new AssetStorageException("Unsupported storage_mode: {$asset->storage_mode}"),
-            };
-        } catch (AssetStorageException) {
-            return $this->notFound();
-        }
-
-        if (array_key_exists('bytes', $payload)) {
-            // StreamedResponse avoids loading the BLOB into PHP memory
-            // twice (once via read(), once via echo).
-            $bytes = (string) $payload['bytes'];
-            $mime  = (string) $payload['mime'];
-            $response = new StreamedResponse(static function () use ($bytes): void {
-                echo $bytes;
-            }, 200, [
-                'Content-Type'   => $mime,
-                'Content-Length' => (string) strlen($bytes),
-                'Cache-Control'  => self::CACHE_HEADER,
-            ]);
-            $this->applyContentDisposition($response, $asset);
-            return $response;
-        }
-
-        $path = (string) $payload['path'];
-        $mime = (string) $payload['mime'];
-        $response = new BinaryFileResponse($path, 200, ['Content-Type' => $mime]);
-        $response->headers->set('Cache-Control', self::CACHE_HEADER);
-        $this->applyContentDisposition($response, $asset);
-        return $response;
-    }
-
-    /**
-     * Set `Content-Disposition: attachment; filename="..."` when the row
-     * carries a user-facing `filename`. Falls back to the opaque UUID +
-     * extension so the browser still gets a sensible default download
-     * name for legacy rows.
-     */
-    private function applyContentDisposition(Response $response, MediaAsset $asset): void
-    {
-        $name = $asset->filename !== null && $asset->filename !== ''
-            ? $asset->filename
-            : $asset->publicUrl();
-
-        // `ingest()` stores the filename as handed, so this is the only place a
-        // CR/LF cannot reach the header. PHP's `header()` would refuse the whole
-        // value — a SAPI backstop, not a fix; the download just loses its name.
-        $name = basename(preg_replace('/[\x00-\x1F\x7F]/', '', $name) ?? '');
-
-        $response->headers->set(
-            'Content-Disposition',
-            sprintf('attachment; filename="%s"', $name === '' ? 'download' : addcslashes($name, '"\\')),
-        );
+        return $this->streamer->stream($asset) ?? $this->notFound();
     }
 
     private function notFound(): JsonResponse

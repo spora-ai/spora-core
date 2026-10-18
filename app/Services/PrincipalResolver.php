@@ -249,4 +249,32 @@ final class PrincipalResolver
             ->where('role', GroupMembership::ROLE_OWNER)
             ->exists();
     }
+
+    /**
+     * Whether the user may configure a principal's resources — the gate on
+     * editing an agent, a tool binding, or an API key.
+     *
+     * Mirrors `GroupAuthorizationTrait::callerCanManageGroup()` so the group
+     * rule has one definition: a user principal is manageable by its owner,
+     * a group principal by its owner and admins. Global admins bypass at the
+     * call site, not here.
+     */
+    public function canManagePrincipal(int $principalId, int $userId): bool
+    {
+        $principal = Principal::find($principalId);
+
+        if ($principal === null) {
+            return false;
+        }
+
+        if ($principal->type === Principal::TYPE_USER) {
+            return (int) $principal->user_id === $userId;
+        }
+
+        $role = GroupMembership::where('group_id', $principal->group_id)
+            ->where('user_id', $userId)
+            ->value('role');
+
+        return $role === GroupMembership::ROLE_OWNER || $role === GroupMembership::ROLE_ADMIN;
+    }
 }

@@ -1070,3 +1070,300 @@ The new task status `AWAITING_INPUT` is the parallel to `PENDING_APPROVAL`:
 - stays `AWAITING_INPUT` when other batches are still pending
 - `ToolCallDisposition::AwaitingInput` is the parallel to `AwaitingApproval`
 
+
+## Agent API
+
+Per-agent HTTP surface for external tools, gated behind the `SPORA_AGENT_API`
+setting. Operator guide: [`docs/15_agent_api.md`](15_agent_api.md). Contract in
+this document.
+
+The bearer surface authenticates with `Authorization: Bearer spk_<id>_<secret>`
+and nothing else — no session cookie, no CSRF token, no fallback to either.
+The key-management endpoints below are ordinary admin routes (session + CSRF).
+
+A key is scoped to one agent: it reaches that agent's chats, their
+transcripts, and the media those chats produced, and nothing else. Out-of-scope
+reads answer `404` rather than `403`, so a key cannot probe which ids exist.
+
+### `GET /api/v1/agents/{agentId}/api-keys`
+
+**Auth:** `AuthMiddleware` + `CsrfMiddleware`, plus the manage role on the
+agent's principal — the same gate as editing the agent.
+
+### 200 — response
+
+```json
+{ "data": { "keys": [
+  { "id": "9f2c…", "agent_id": 7, "name": "n8n",
+    "last_used_at": "2026-10-17T09:12:44+00:00",
+    "created_at": "2026-10-01T08:00:00+00:00" }
+]}}
+```
+
+Secrets are never present. `id` is the key's random public half, not a
+sequential value.
+
+### Errors
+
+- `401 UNAUTHENTICATED` — no session.
+- `403 FORBIDDEN` — the caller can see the agent but not manage it.
+- `404 AGENT_NOT_FOUND` — no such agent.
+
+### `POST /api/v1/agents/{agentId}/api-keys`
+
+**Auth:** as above.
+
+### Request
+
+```jsonc
+{ "name": "n8n" }   // required, 100 characters or fewer
+```
+
+### 201 — response
+
+```json
+{
+  "data": {
+    "key": { "id": "9f2c…", "agent_id": 7, "name": "n8n", "created_at": "…" },
+    "secret": "spk_9f2c…_qRt…"
+  }
+}
+```
+
+`data.secret` is the only time the plaintext exists on the wire. Only a
+SHA-256 digest is stored, so a lost key must be replaced rather than
+recovered.
+
+### Errors
+
+- `401 UNAUTHENTICATED` / `403 FORBIDDEN` / `404 AGENT_NOT_FOUND` — as above.
+- `400 INVALID_JSON` — the body is not JSON.
+- `422 VALIDATION_ERROR` — `name` missing or longer than 100 characters.
+
+### `DELETE /api/v1/agents/{agentId}/api-keys/{keyId}`
+
+**Auth:** as above. Idempotent — `204` whether or not the key existed, so a
+caller cannot probe for key ids.
+
+---
+
+### `GET /api/v1/agent-api/chats`
+
+Lists the key's agent's chats, newest first. `?since=`, `?page=`, `?per_page=`
+(capped at 100).
+
+**Auth:** `AgentApiKeyMiddleware`.
+
+### 200 — response
+
+```json
+{ "data": { "chats": [ { "id": 412, "agent_id": 7, "status": "COMPLETED",
+                        "answer": "…", "error": null, "blocked": null,
+                        "created_at": "…", "updated_at": "…" } ]}}
+```
+
+Each entry has the same shape as `/status` below.
+
+### Errors
+
+- `401 UNAUTHENTICATED` — missing, malformed, unknown or wrong key. The four
+  are indistinguishable on purpose.
+- `429 TOO_MANY_REQUESTS` — per-key limit, with `Retry-After`.
+- `404 NOT_FOUND` — the feature is off, or this instance runs client-worker
+  mode. Neither case is distinguishable from the outside.
+
+### `POST /api/v1/agent-api/chats`
+
+**Auth:** `AgentApiKeyMiddleware`.
+
+### Request
+
+```jsonc
+{
+  "text": "Summarise Q3",              // required; `prompt` also accepted
+  "media_ids": ["…"],                 // optional, must be readable by this agent
+  "files": [                           // optional, small inline attachments
+    { "filename": "chart.png", "data_url": "data:image/png;base64,…" }
+  ],
+  "callback_url": "https://hooks.example/spora",   // optional, https only
+  "max_steps": 10                                 // optional, clamped to 1..100
+}
+```
+
+Inline files are held to 16 MiB each and at most 8 per request; the declared
+MIME is never trusted, bytes are sniffed. For anything larger use
+`POST /api/v1/agent-api/media`. The agent is taken from the key — any
+`agent_id` in the body is ignored.
+
+### 202 — response
+
+```json
+{ "data": { "chat": { "id": 412, "status": "QUEUED", "answer": null, … }}}
+```
+
+`202`, not `200`: the API is never a worker. Poll `/status` or supply a
+`callback_url`.
+
+### Errors
+
+- `401 UNAUTHENTICATED` / `429 TOO_MANY_REQUESTS` / `404 NOT_FOUND` — as above.
+- `400 INVALID_JSON` — the body is not JSON.
+- `422 VALIDATION_ERROR` — `text` missing, `files` not an array, or a
+  `callback_url` that is not an acceptable https endpoint. A refused
+  `callback_url` is rejected before the chat is queued, so nothing runs
+  without its callback registered.
+
+### `GET /api/v1/agent-api/chats/{chatId}/status`
+
+The default projection: a status, an answer, and any block. No tool calls, no
+thinking, no token totals.
+
+**Auth:** `AgentApiKeyMiddleware`.
+
+### 200 — response
+
+```json
+{ "data": { "chat": {
+  "id": 412, "agent_id": 7, "status": "COMPLETED",
+  "answer": "…", "error": null, "blocked": null,
+  "created_at": "…", "updated_at": "…"
+}}}
+```
+
+`blocked` is non-null exactly when only the caller can move the chat on:
+
+```jsonc
+"blocked": { "reason": "PENDING_APPROVAL",
+             "tool_calls": [{ "id": 55, "name": "send_email", "operation": "send",
+                              "description": "…", "arguments": { … } }] }
+
+"blocked": { "reason": "AWAITING_INPUT", "questions": [ … ] }
+```
+
+`AWAITING_SUB_AGENTS` is deliberately not a block — it resolves on its own.
+
+`answer` falls back to the last assistant turn for a chat that ended without a
+`final_response` (aborted, failed mid-loop), so an integrator is never handed
+a null where partial work exists.
+
+### Errors
+
+- `401` / `429` / `404` — as above.
+- `404 NOT_FOUND` — no such chat on this agent. A chat that exists but belongs
+  to another agent answers the same.
+
+### `GET /api/v1/agent-api/chats/{chatId}/messages`
+
+The conversation without the tool turns. `?since_sequence=N`.
+
+```json
+{ "data": { "messages": [
+  { "sequence": 0, "role": "user", "text": "Summarise Q3", "at": "…",
+    "attachments": [{ "media_id": "…", "kind": "image",
+                      "url": "https://host/api/v1/agent-api/media/…" }] },
+  { "sequence": 7, "role": "assistant", "text": "Q3 revenue was …", "at": "…",
+    "attachments": null }
+]}}
+```
+
+An assistant turn that only carried tool calls has no prose and is omitted
+here; it belongs to the transcript.
+
+Errors as for `/status`.
+
+### `GET /api/v1/agent-api/chats/{chatId}/transcript`
+
+Everything the admin UI shows: `tool_calls`, full `history` including
+`content_blocks` (thinking included), `totals`, and `data`. `?since_sequence=N`.
+Errors as for `/status`.
+
+### `POST /api/v1/agent-api/chats/{chatId}/messages`
+
+Continues the chat. Same body shape as `POST /chats` minus `callback_url` and
+`files`.
+
+- `202` — the follow-up was queued.
+- `404 NOT_FOUND` — no such chat on this agent.
+- `409 INVALID_STATE` — the chat is not in a state that can be continued.
+
+### `POST /api/v1/agent-api/chats/{chatId}/approve`
+
+```json
+{ "decisions": [{ "provider_call_id": "call_1", "decision": "approve",
+                  "arguments": { … } }] }
+```
+
+- `202` — approval recorded, chat queued again.
+- `422 VALIDATION_ERROR` — `decisions` missing or empty.
+- `404` / `409 INVALID_STATE` — as for continue.
+
+### `POST /api/v1/agent-api/chats/{chatId}/reject`
+
+Optional `reason`. Same status codes as approve.
+
+### `POST /api/v1/agent-api/chats/{chatId}/answer`
+
+```json
+{ "tool_call_id": "call_1", "content": "Northern region" }
+```
+
+- `202` — answer recorded, chat queued again.
+- `422 VALIDATION_ERROR` — either field missing.
+- `404` / `409 INVALID_STATE` — as for continue.
+
+### `POST /api/v1/agent-api/media`
+
+`multipart/form-data` with a single `file` part, ingested as the key's agent.
+The agent's MIME allowlist is enforced against the *sniffed* type.
+
+- `201` — `{"data": <serialised media asset>}`.
+- `400 BAD_REQUEST` — no `file` part, or PHP rejected the upload.
+- `415 UNSUPPORTED_MEDIA_TYPE` — the sniffed type is not accepted by the agent.
+
+### `GET /api/v1/agent-api/media/{mediaId}`
+
+Streams the bytes, `Content-Disposition: inline`. Readable when the agent
+produced the asset, when it belongs to a chat in the agent's tree (which is
+how a sub-agent's output becomes reachable through its parent), or when one of
+the agent's chats attached it.
+
+- `404 NOT_FOUND` — no such asset, or not this agent's to read. The two are
+  indistinguishable on purpose.
+
+### Callbacks
+
+`callback_url` is delivered once the chat settles. The payload is the same
+shape as `/status`:
+
+```json
+{ "id": 412, "agent_id": 7, "status": "COMPLETED",
+  "answer": "…", "error": null, "blocked": null,
+  "created_at": "…", "updated_at": "…" }
+```
+
+Three headers accompany it:
+
+| Header | Value |
+| --- | --- |
+| `X-Spora-Key-Id` | the key's public id |
+| `X-Spora-Timestamp` | unix seconds at send |
+| `X-Spora-Signature` | `hex(hmac_sha256(timestamp + "." + rawBody, key_digest))` |
+
+The signature is keyed on the **stored digest**, not the plaintext secret, so
+a receiver holding only its issued secret can verify without Spora ever
+holding that secret again:
+
+```php
+$expected = hash_hmac('sha256', $timestamp . '.' . $rawBody, hash('sha256', $secret));
+$ok = hash_equals($expected, $receivedSignature) && abs(time() - (int) $timestamp) < 300;
+```
+
+A chat that settles twice — parked on an approval, then completed after it was
+approved — is **delivered twice**, once per distinct status. A refused delivery
+is retried with exponential backoff (30s → 16m, 6 attempts) and then
+dead-lettered; the attempt count and last error stay on the row and are
+visible in `agent_api_callbacks`. A revoked key's pending deliveries are
+dropped.
+
+Delivery never blocks the agent loop, and a receiver that is down cannot take
+the worker with it.

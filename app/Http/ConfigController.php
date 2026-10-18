@@ -41,6 +41,12 @@ final class ConfigController
             'allow_group_creation'  => $this->config->getBool('SPORA_ALLOW_GROUP_CREATION'),
             'plugin_install_enabled' => $this->config->getBool('SPORA_PLUGIN_INSTALL_ENABLED'),
             'plugin_catalog_enabled' => $this->config->getBool('SPORA_PLUGIN_CATALOG_ENABLED'),
+            // The SPA gates the agent's API keys tab on this. It mirrors the
+            // setting alone, not the worker mode, so an operator who enabled
+            // the feature on a client-worker instance still sees the tab and
+            // the page's warning — hiding it would suggest their existing
+            // keys had stopped working when they had not.
+            'agent_api_enabled'     => $this->config->getBool('SPORA_AGENT_API'),
             'worker_runtime_mode'    => $this->workerRuntimeMode->value,
             'client_worker'          => [
                 'enabled'                       => $this->workerRuntimeMode === WorkerRuntimeMode::Client,

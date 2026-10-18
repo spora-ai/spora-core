@@ -16,12 +16,14 @@ use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
+use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Throwable;
 
 /**
  * Queue drain and persistent daemon worker.
@@ -33,6 +35,7 @@ use Symfony\Component\Console\Output\OutputInterface;
  *   - WorkerReaper:          orphan task reaper
  *   - WorkerQueueProcessor:  queue/retry/child-process lifecycle
  *   - ScheduledRunProcessor: scheduled-run claim, dispatch, finalize
+ *   - AgentApiCallbackDispatcher: Agent API webhook delivery
  */
 final class WorkerRunCommand extends Command
 {
@@ -50,6 +53,9 @@ final class WorkerRunCommand extends Command
     private readonly WorkerQueueProcessor $queueProcessor;
     private readonly ScheduledRunProcessor $scheduledRunProcessor;
 
+    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
+    private readonly ?AgentApiCallbackDispatcher $callbackDispatcher;
+
     public function __construct(
         private readonly Database            $database,
         OrchestratorInterface                $orchestrator,
@@ -61,6 +67,13 @@ final class WorkerRunCommand extends Command
         private readonly WorkerRuntimeMode    $workerRuntimeMode,
     ) {
         $this->reaper = $container->get(WorkerReaper::class);
+        // Resolved from the container rather than injected, for the same
+        // reason the reaper is: the command's constructor is positional and
+        // eight arguments deep already. Optional, because a test container
+        // that does not know the class must still be able to build this.
+        $this->callbackDispatcher = $container->has(AgentApiCallbackDispatcher::class)
+            ? $container->get(AgentApiCallbackDispatcher::class)
+            : null;
         $this->queueProcessor = new WorkerQueueProcessor(
             $orchestrator,
             $logger,
@@ -74,6 +87,7 @@ final class WorkerRunCommand extends Command
             $mercure,
             $notificationService,
         );
+
         parent::__construct('worker:run');
     }
 
@@ -179,6 +193,12 @@ final class WorkerRunCommand extends Command
         );
 
         $this->runWorkerLoop($options, $output, $limit, $processed);
+
+        // A second sweep, after the loop rather than only inside it: in
+        // `--once --include-queue -l N` the loop exits as soon as its budget
+        // is spent, which can be before the task it just ran synchronously
+        // settles. Without this, cron deployments never deliver a callback.
+        $this->dispatchAgentApiCallbacks();
 
         $this->queueProcessor->shutdownParent();
         $this->releaseLock();
@@ -346,6 +366,7 @@ final class WorkerRunCommand extends Command
         if ($options->isDaemon || $options->isOnce) {
             $this->scheduledRunProcessor->process($output);
             $this->lastScheduledProcessedCount = $this->scheduledRunProcessor->lastProcessed;
+            $this->dispatchAgentApiCallbacks();
         }
 
         $this->queueProcessor->reapChildren($output);
@@ -370,6 +391,24 @@ final class WorkerRunCommand extends Command
             return time();
         }
         return $lastReapAt;
+    }
+
+    /**
+     * Drain any Agent API callback the last iteration made due. Swallows
+     * everything: a receiver that is down must never take the worker with it,
+     * and `dispatchDue()` already logs rather than throws.
+     */
+    private function dispatchAgentApiCallbacks(): void
+    {
+        if ($this->callbackDispatcher === null) {
+            return;
+        }
+
+        try {
+            $this->callbackDispatcher->dispatchDue();
+        } catch (Throwable $e) {
+            $this->logger->error('Agent API callback sweep failed', ['error' => $e->getMessage()]);
+        }
     }
 
     /**

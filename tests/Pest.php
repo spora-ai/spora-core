@@ -52,12 +52,22 @@ function bootAuthLayer(string $appUrl = '', string $appPrefix = '/spora'): Spora
 
 /**
  * Create a JSON Request with an optional body array.
+ *
+ * `$headers` exists for surfaces that authenticate with something other
+ * than the session — the Agent API's bearer key, for instance, which cannot
+ * be set after construction because the middleware reads it.
+ *
+ * @param array<string, string> $headers
  */
-function jsonRequest(string $method, string $uri, array $body = []): Symfony\Component\HttpFoundation\Request
-{
+function jsonRequest(
+    string $method,
+    string $uri,
+    array $body = [],
+    array $headers = [],
+): Symfony\Component\HttpFoundation\Request {
     $content = $body !== [] ? json_encode($body) : '';
 
-    return Symfony\Component\HttpFoundation\Request::create(
+    $request = Symfony\Component\HttpFoundation\Request::create(
         $uri,
         strtoupper($method),
         [],
@@ -66,6 +76,12 @@ function jsonRequest(string $method, string $uri, array $body = []): Symfony\Com
         ['CONTENT_TYPE' => 'application/json'],
         $content,
     );
+
+    foreach ($headers as $name => $value) {
+        $request->headers->set($name, $value);
+    }
+
+    return $request;
 }
 
 /**

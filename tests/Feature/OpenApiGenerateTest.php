@@ -46,14 +46,22 @@ describe('OpenAPI specification generation', function (): void {
         expect($spec->servers[0]->url)->toBe('/');
     });
 
-    it('declares cookieAuth and csrfToken security schemes', function (): void {
+    it('declares a security scheme per auth mechanism Spora has', function (): void {
         $spec = openApiTestSpec();
 
-        expect($spec->components->securitySchemes)->toHaveCount(2);
+        // One per mechanism, so adding a new one is a deliberate edit here
+        // rather than a silent gap. `bearerAuth` is the Agent API's key; the
+        // other two are the admin SPA's cookie + CSRF pair.
+        expect($spec->components->securitySchemes)->toHaveCount(3);
 
         $names = array_map(static fn($s) => $s->securityScheme, $spec->components->securitySchemes);
         expect($names)->toContain('cookieAuth');
         expect($names)->toContain('csrfToken');
+        expect($names)->toContain('bearerAuth');
+
+        $bearer = $spec->components->securitySchemes[array_search('bearerAuth', $names, true)];
+        expect($bearer->type)->toBe('http');
+        expect($bearer->scheme)->toBe('bearer');
     });
 
     it('covers every route registered in RouteDefinitions', function (): void {

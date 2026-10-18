@@ -86,4 +86,55 @@ trait JsonControllerHelpers
             Response::HTTP_UNPROCESSABLE_ENTITY,
         );
     }
+
+    /**
+     * The decoded body, or an `INVALID_JSON` response when the body is not
+     * JSON. Returns `array<empty,array>` for an empty body, which every
+     * caller treats as "no fields supplied" rather than an error.
+     *
+     * @return array<string, mixed>|JsonResponse
+     */
+    private function jsonBody(Request $request): array|JsonResponse
+    {
+        return $this->safeDecodeJson($request);
+    }
+
+    /**
+     * A query parameter as a trimmed string, or null when absent or blank.
+     */
+    private function queryString(Request $request, string $name): ?string
+    {
+        $value = $request->query->get($name);
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * A query parameter as an int, or null when absent or not numeric.
+     */
+    private function queryInt(Request $request, string $name): ?int
+    {
+        $value = $this->queryString($request, $name);
+
+        return $value !== null && is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * Clamp an optional int into `[min, max]`, falling back to null — which
+     * the services read as "not supplied, use your own default".
+     */
+    private function boundedInt(?int $value, int $min, int $max): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return max($min, min($max, $value));
+    }
 }

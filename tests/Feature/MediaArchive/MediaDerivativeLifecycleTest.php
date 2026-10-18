@@ -10,6 +10,7 @@ use Spora\Core\SecurityManager;
 use Spora\Http\AssetController;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
+use Spora\Services\AssetStreamer;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
@@ -256,14 +257,17 @@ describe('per-field inheritance — the two access failures and the storage leak
         expect($derivative)->not->toBeNull();
         expect((int) $derivative->user_id)->toBe($userId);
 
+        $databaseStore = new DatabaseAssetStore(50 * 1024 * 1024);
+        $localStore = new LocalAssetStore(
+            new Paths(BASE_PATH),
+            new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            50 * 1024 * 1024,
+        );
+
         $controller = new AssetController(
             $service,
-            new DatabaseAssetStore(50 * 1024 * 1024),
-            new LocalAssetStore(
-                new Paths(BASE_PATH),
-                new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
-                50 * 1024 * 1024,
-            ),
+            $localStore,
+            new AssetStreamer($databaseStore, $localStore),
             // Non-admin on purpose: the admin branch bypasses
             // `ownsDirectly()` entirely, so an admin fixture would pass
             // even with no `user_id` inheritance at all.
