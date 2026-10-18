@@ -17,6 +17,13 @@ use Tests\Concerns\CreatesPrincipal;
 describe('AgentApiKeyIssuer', function (): void {
     uses(CreatesPrincipal::class);
 
+    /**
+     * A fresh user and agent per test.
+     *
+     * Per test rather than cached: `Pest.php` wraps every test in a
+     * transaction it rolls back, so anything cached across tests would name
+     * rows that no longer exist.
+     */
     function agent(): Agent
     {
         $auth = bootAuthLayer();

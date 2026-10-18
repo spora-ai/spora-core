@@ -182,6 +182,51 @@ describe('AgentApiChatProjection', function (): void {
         ]);
     });
 
+    it('folds an attachment row into the user turn it belongs to', function (): void {
+        $task = task(['user_prompt' => 'look']);
+
+        // The orchestrator writes the user row first and the synthetic
+        // attachment row directly after it. Dropping the attachment — which
+        // is what a role filter that excludes `attachment` does — means the
+        // caller never sees the file they sent.
+        $task->taskHistory()->create(['sequence' => 0, 'role' => 'user', 'content' => 'look']);
+        $task->taskHistory()->create([
+            'sequence' => 1,
+            'role' => 'attachment',
+            'content' => '',
+            'attachments' => [['media_id' => 'm-1', 'kind' => 'image']],
+        ]);
+        $task->taskHistory()->create(['sequence' => 2, 'role' => 'assistant', 'content' => 'a chart']);
+
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test');
+
+        expect($messages)->toHaveCount(2);
+        expect($messages[0]['role'])->toBe('user');
+        expect($messages[0]['attachments'][0]['url'])
+            ->toBe('https://spora.test/api/v1/agent-api/media/m-1');
+        // The attachment is folded in, not appended as a turn of its own.
+        expect($messages[1]['role'])->toBe('assistant');
+        expect($messages[1]['attachments'])->toBeNull();
+    });
+
+    it('emits an attachment with no user turn rather than dropping it', function (): void {
+        $task = task(['user_prompt' => 'hi']);
+
+        $task->taskHistory()->create([
+            'sequence' => 0,
+            'role' => 'attachment',
+            'content' => '',
+            'attachments' => [['media_id' => 'm-1', 'kind' => 'image']],
+        ]);
+
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test');
+
+        expect($messages)->toHaveCount(1);
+        expect($messages[0]['role'])->toBe('attachment');
+        expect($messages[0]['text'])->toBeNull();
+        expect($messages[0]['attachments'][0]['media_id'])->toBe('m-1');
+    });
+
     it('omits attachments when a turn has none', function (): void {
         $task = task();
 

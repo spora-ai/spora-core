@@ -28,6 +28,9 @@ final class AgentApiScope
 {
     private const ERR_NOT_FOUND = 'Chat not found.';
 
+    /** Sub-agent nesting is shallow; this is a cycle guard, not a real limit. */
+    private const MAX_ANCESTOR_WALK = 16;
+
     public function __construct(
         private readonly TaskServiceInterface $taskService,
         private readonly MediaArchiveService $mediaArchive,
@@ -211,15 +214,40 @@ final class AgentApiScope
         return $this->isAttachedToScopedChat((string) $asset->id, $agentId);
     }
 
+    /**
+     * Whether a task belongs to this agent, or descends from one of its tasks.
+     *
+     * Walks *up* the `parent_task_id` chain rather than down: the asset on a
+     * sub-agent's chat carries the sub-task's id, and it is the parent's chat
+     * that a caller of the parent can see. A depth cap stops a cycle in the
+     * chain from hanging the request.
+     */
     private function isTaskInScope(int $taskId, int $agentId): bool
     {
-        if (Task::where('id', $taskId)->where('agent_id', $agentId)->exists()) {
-            return true;
+        $seen = [];
+        $current = $taskId;
+
+        for ($depth = 0; $depth < self::MAX_ANCESTOR_WALK; $depth++) {
+            $task = Task::find($current);
+
+            if ($task === null || isset($seen[$current])) {
+                return false;
+            }
+
+            $seen[$current] = true;
+
+            if ((int) $task->agent_id === $agentId) {
+                return true;
+            }
+
+            if ($task->parent_task_id === null) {
+                return false;
+            }
+
+            $current = (int) $task->parent_task_id;
         }
 
-        return Task::where('parent_task_id', $taskId)
-            ->where('agent_id', $agentId)
-            ->exists();
+        return false;
     }
 
     /**

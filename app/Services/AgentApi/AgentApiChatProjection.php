@@ -49,12 +49,22 @@ final class AgentApiChatProjection
     }
 
     /**
+     * The conversation, in order, with tool and thinking rows omitted.
+     *
+     * An `attachment` row is a synthetic record the orchestrator writes beside
+     * the message it belongs to; it has no wire equivalent of its own. It is
+     * folded into the user turn it accompanies so a caller sees the file they
+     * sent come back with a URL — the same pairing
+     * {@see \Spora\Agents\MessageHistoryBuilder} performs for the LLM, and
+     * order-symmetric with it. An attachment with no user turn to join becomes
+     * a message carrying only the files, rather than disappearing.
+     *
      * @return list<array<string, mixed>>
      */
     public function messages(int $chatId, ?int $sinceSequence, ?string $appUrl): array
     {
         $query = TaskHistory::where('task_id', $chatId)
-            ->whereIn('role', ['user', 'assistant'])
+            ->whereIn('role', ['user', 'assistant', 'attachment'])
             ->orderBy('sequence');
 
         if ($sinceSequence !== null) {
@@ -62,26 +72,77 @@ final class AgentApiChatProjection
         }
 
         $messages = [];
+        /** @var list<array{media_id: string, kind: string, url?: string}> $orphaned */
+        $orphaned = [];
+        $orphanedSequence = null;
 
         foreach ($query->get() as $row) {
-            $text = $row->content;
+            if ($row->role === 'attachment') {
+                $this->attach($messages, $this->attachments($row, $appUrl), $orphaned, $orphanedSequence, (int) $row->sequence);
 
-            if ($row->role === 'assistant' && ($text === null || $text === '')) {
+                continue;
+            }
+
+            if ($row->role === 'assistant' && ($row->content === null || $row->content === '')) {
                 // An assistant turn that only carried tool calls has no
                 // prose; it belongs to the transcript, not the conversation.
                 continue;
             }
 
+            $own = $this->attachments($row, $appUrl);
+            $carried = $orphaned;
+            $sequence = $orphanedSequence ?? (int) $row->sequence;
+            $orphaned = [];
+            $orphanedSequence = null;
+
             $messages[] = [
-                'sequence' => (int) $row->sequence,
-                'role' => (string) $row->role,
-                'text' => $text,
-                'attachments' => $this->attachments($row, $appUrl),
+                'sequence' => $sequence,
+                'role' => $row->role,
+                'text' => $row->content,
+                'attachments' => $own === null && $carried === [] ? null : [...$carried, ...($own ?? [])],
                 'at' => $row->created_at?->toIso8601String(),
             ];
         }
 
+        if ($orphaned !== []) {
+            $messages[] = [
+                'sequence' => $orphanedSequence ?? 0,
+                'role' => 'attachment',
+                'text' => null,
+                'attachments' => $orphaned,
+                'at' => null,
+            ];
+        }
+
         return $messages;
+    }
+
+    /**
+     * Fold an attachment row into the user turn it belongs to, or hold it for
+     * the next message.
+     *
+     * @param list<array<string, mixed>>              $messages
+     * @param list<array{media_id: string, kind: string, url?: string}>|null $refs
+     * @param list<array{media_id: string, kind: string, url?: string}> $orphaned
+     */
+    private function attach(array &$messages, ?array $refs, array &$orphaned, ?int &$orphanedSequence, int $sequence): void
+    {
+        if ($refs === null || $refs === []) {
+            return;
+        }
+
+        $last = $messages[count($messages) - 1] ?? null;
+
+        // The orchestrator writes the attachment row directly after the user
+        // turn it belongs to, so the last message is normally the right one.
+        if ($last !== null && $last['role'] === 'user' && ($last['attachments'] ?? null) === null) {
+            $messages[count($messages) - 1]['attachments'] = $refs;
+
+            return;
+        }
+
+        $orphaned = [...$orphaned, ...$refs];
+        $orphanedSequence ??= $sequence;
     }
 
     /**

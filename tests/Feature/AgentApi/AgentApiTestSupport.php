@@ -53,7 +53,7 @@ final class AgentApiTestSupport
      */
     public static function container(
         ScriptedLlmDriver $llm,
-        ?RecordingHttpClient $http = null,
+        ?HttpClientInterface $http = null,
         array $tools = [],
     ): \Psr\Container\ContainerInterface {
         $factory = Mockery::mock(DriverFactory::class);
