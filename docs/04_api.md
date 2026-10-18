@@ -1149,8 +1149,10 @@ caller cannot probe for key ids.
 
 ### `GET /api/v1/agent-api/chats`
 
-Lists the key's agent's chats, newest first. `?since=`, `?page=`, `?per_page=`
-(capped at 100).
+Lists the key's agent's chats, newest first. Always paginated: `?page=`
+defaults to `1` and `?per_page=` to `25`, capped at `100`. `?since=` takes an
+ISO-8601 timestamp and is validated — an unparseable value is `422`, because
+engines disagree about what an invalid date means.
 
 **Auth:** `AgentApiKeyMiddleware`.
 
@@ -1168,7 +1170,10 @@ Each entry has the same shape as `/status` below.
 
 - `401 UNAUTHENTICATED` — missing, malformed, unknown or wrong key. The four
   are indistinguishable on purpose.
-- `429 TOO_MANY_REQUESTS` — per-key limit, with `Retry-After`.
+- `429 TOO_MANY_REQUESTS` — per-key limit, with `Retry-After` set to the
+  remaining time in the window. The ceiling is `SPORA_AGENT_API_RATE_LIMIT_MAX`
+  (default `60` requests per rolling minute per key). Only a key that has
+  authenticated is counted, so a wrong secret never returns `429`.
 - `404 NOT_FOUND` — the feature is off, or this instance runs client-worker
   mode. Neither case is distinguishable from the outside.
 
@@ -1360,10 +1365,16 @@ $ok = hash_equals($expected, $receivedSignature) && abs(time() - (int) $timestam
 
 A chat that settles twice — parked on an approval, then completed after it was
 approved — is **delivered twice**, once per distinct status. A refused delivery
-is retried with exponential backoff (30s → 16m, 6 attempts) and then
-dead-lettered; the attempt count and last error stay on the row and are
-visible in `agent_api_callbacks`. A revoked key's pending deliveries are
-dropped.
+is retried with exponential backoff — five retries at 30s, 1m, 2m, 4m and 8m
+— and the sixth failed attempt is dead-lettered; the attempt count and last
+error stay on the row and are visible in `agent_api_callbacks`. A `3xx` counts
+as a refusal: redirects are never followed, because the `callback_url` was
+screened once and a redirect target was not. A revoked key's pending
+deliveries are dropped.
+
+Delivery is at-least-once, not exactly-once: a delivery that succeeds but whose
+response is lost is retried. Receivers should deduplicate on the
+`(X-Spora-Key-Id, status)` pair.
 
 Delivery never blocks the agent loop, and a receiver that is down cannot take
 the worker with it.

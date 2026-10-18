@@ -44,12 +44,28 @@ Callback latency therefore depends on your worker:
 
 | Worker | Latency |
 | --- | --- |
-| `worker:run --daemon` | sub-second — the loop sweeps on every iteration |
+| `worker:run --daemon` | seconds — the sweep re-checks an unsettled chat every 5s |
 | `worker:run --once` from cron | up to one cron interval |
+
+The 5s floor is deliberate. A callback row is armed when the chat is created and re-checked
+until the chat settles; deferring that re-check is what stops a long-running chat from occupying
+the sweep's batch — see {@see \Spora\Services\AgentApi\AgentApiCallbackDispatcher} — but it also
+means a chat that settles just after a check waits out the remainder of the interval.
 
 A worker that is *configured* but not *alive* leaves chats `QUEUED` and
 callbacks undelivered. The API does not detect this; it is a deployment
 health question, and the usual signals apply.
+
+## Rate limiting
+
+Every `/api/v1/agent-api/*` request is counted per **key** in the database, not per IP, so a
+shared NAT does not throttle an integrator and one integration cannot exhaust another's budget.
+The ceiling is **Agent API rate limit** (`SPORA_AGENT_API_RATE_LIMIT_MAX`), 60 requests per
+rolling minute by default; exceeding it answers `429` with `Retry-After`.
+
+The counter is only consulted **after** the secret verifies. That ordering is deliberate: if the
+limiter ran first, a wrong secret against a real key id would eventually answer `429` while an
+unknown id always answered `401`, and the difference would tell a caller whether the id exists.
 
 ## Callbacks
 
