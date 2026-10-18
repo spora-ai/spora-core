@@ -1142,8 +1142,18 @@ recovered.
 
 ### `DELETE /api/v1/agents/{agentId}/api-keys/{keyId}`
 
-**Auth:** as above. Idempotent — `204` whether or not the key existed, so a
-caller cannot probe for key ids.
+**Auth:** as above. Idempotent — the same body whether or not the key
+existed, so a caller cannot probe for key ids.
+
+### 200 — response
+
+```json
+{ "data": { "revoked": true, "key_id": "9f2c…" } }
+```
+
+A bodied `200` rather than `204 No Content`. A 204 goes out with no body and
+no `Content-Length`, and Vite's dev proxy turns exactly that into
+`502 No Content` on the way through to the SPA.
 
 ---
 

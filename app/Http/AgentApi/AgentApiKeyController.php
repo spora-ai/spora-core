@@ -119,7 +119,7 @@ final class AgentApiKeyController
         summary: 'Revoke an API key',
         tags: ['Agents'],
     )]
-    #[OA\Response(response: 204, description: 'Revoked. Idempotent.')]
+    #[OA\Response(response: 200, description: 'Revoked. Idempotent — the same body whether or not the key existed.')]
     public function destroy(Request $request): JsonResponse
     {
         $denied = $this->guard($request);
@@ -132,11 +132,21 @@ final class AgentApiKeyController
         $keyId = (string) $request->attributes->get('keyId', '');
 
         // Scoped by agent, so a key id cannot be used to revoke another agent's
-        // key. Answering 204 whether or not the row existed is what stops
-        // that from being a probe for which key ids are real.
+        // key. The response does not say whether the row existed, which is what
+        // stops this being a probe for which key ids are real.
+        //
+        // 200 with a body rather than 204: a 204 goes out with no body and no
+        // Content-Length, and Vite's dev proxy turns exactly that into
+        // `502 No Content` on the way through. A normal bodied response also
+        // gives the caller something to log.
         AgentApiKey::where('agent_id', $agentId)->where('id', $keyId)->delete();
 
-        return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+        return new JsonResponse([
+            'data' => [
+                'revoked' => true,
+                'key_id' => $keyId,
+            ],
+        ]);
     }
 
     /**

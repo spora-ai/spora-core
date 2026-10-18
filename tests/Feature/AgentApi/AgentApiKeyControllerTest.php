@@ -148,8 +148,26 @@ describe('Agent API key management', function (): void {
 
         $response = callKeyAdmin('destroy', $agentId, [], ['keyId' => $key->id]);
 
-        expect($response->getStatusCode())->toBe(204);
+        expect($response->getStatusCode())->toBe(200);
         expect(AgentApiKey::find($key->id))->toBeNull();
+    });
+
+    it('answers with a body rather than 204 No Content', function (): void {
+        [, $agentId] = ownedAgent('body');
+        [$key] = AgentApiTestSupport::mintKey($agentId, 'body');
+
+        $response = callKeyAdmin('destroy', $agentId, [], ['keyId' => $key->id]);
+
+        // A 204 goes out with no body and no Content-Length, and Vite's dev
+        // proxy turns exactly that into `502 No Content` on the way through —
+        // which is how this was found. A bodied 200 proxies cleanly.
+        expect($response->getStatusCode())->toBe(200);
+        expect($response->headers->get('Content-Type'))->toBe('application/json');
+        expect($response->getContent())->not->toBe('');
+
+        $body = AgentApiTestSupport::decode($response);
+        expect($body['data']['revoked'])->toBeTrue();
+        expect($body['data']['key_id'])->toBe($key->id);
     });
 
     it('revokes idempotently', function (): void {
@@ -157,7 +175,8 @@ describe('Agent API key management', function (): void {
 
         $response = callKeyAdmin('destroy', $agentId, [], ['keyId' => 'does-not-exist']);
 
-        expect($response->getStatusCode())->toBe(204);
+        expect($response->getStatusCode())->toBe(200);
+        expect(AgentApiTestSupport::decode($response)['data']['revoked'])->toBeTrue();
     });
 
     it('cannot revoke another agent\'s key', function (): void {
@@ -170,9 +189,10 @@ describe('Agent API key management', function (): void {
 
         $response = callKeyAdmin('destroy', $mine, [], ['keyId' => $theirKey->id]);
 
-        // 204 either way, and the row survives: the delete is scoped by
-        // agent, so a key id is not a way to reach across agents.
-        expect($response->getStatusCode())->toBe(204);
+        // The same 200 body either way, and the row survives: the delete is
+        // scoped by agent, so a key id is not a way to reach across agents.
+        expect($response->getStatusCode())->toBe(200);
+        expect(AgentApiTestSupport::decode($response)['data']['revoked'])->toBeTrue();
         expect(AgentApiKey::find($theirKey->id))->not->toBeNull();
     });
 
