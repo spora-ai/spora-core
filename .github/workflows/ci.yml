@@ -256,6 +256,19 @@ jobs:
       - name: Check OpenAPI drift
         run: composer openapi:check
 
+      # Translation catalogues. `locales/en.json` is generated from the
+      # English literals in the source, so it drifts exactly the way the
+      # OpenAPI spec does and for the same reason — a copy edit that never
+      # reached the artefact. Rule 2 is the other half: every harvested
+      # message needs a German value, because `i18n:check` failing on a gap
+      # is what keeps a German install from showing some errors in German
+      # and some in English.
+      #
+      # No `if:`, for the same reason as the OpenAPI step above — this one
+      # reads no diff range.
+      - name: Check translation catalogues
+        run: composer i18n:check
+
       # Unresolved conflict markers in the *committed* changeset.
       #
       # Two mistakes this replaces, both of which made the guard a silent

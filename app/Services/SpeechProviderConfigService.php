@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
@@ -64,6 +66,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     private readonly SpeechProviderConfigPreferences $preferences;
     private readonly PrincipalResolver $principalResolver;
     private readonly SpeechProviderConfigMutator $mutator;
+    private readonly Translator $translator;
 
     public function __construct(
         SpeechProviderConfigValidator $validator,
@@ -72,6 +75,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         PrincipalService $principalService,
         ?PrincipalResolver $principalResolver = null,
         ?SpeechProviderConfigMutator $mutator = null,
+        ?Translator $translator = null,
     ) {
         $this->validator = $validator;
         $this->persistence = $persistence;
@@ -82,6 +86,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             $preferences,
             $principalService,
         );
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
     }
 
     /**
@@ -98,11 +103,28 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             }
             $rows[] = [
                 'class' => $class,
-                'display_name' => $provider->getDisplayName(),
-                'settings_schema' => $settings,
+                'display_name' => $this->translator->trans($provider->getDisplayName()),
+                'settings_schema' => $this->localiseSettingDescriptions($settings),
             ];
         }
         return $rows;
+    }
+
+    /**
+     * Translate the operator-facing setting blurbs. `label` and
+     * `options[].label` stay English — see
+     * {@see \Spora\Plugins\PluginInterface::translationsPaths()} for why a
+     * setting label is never a catalogue key.
+     *
+     * @param list<array<string, mixed>> $settings
+     * @return list<array<string, mixed>>
+     */
+    private function localiseSettingDescriptions(array $settings): array
+    {
+        foreach ($settings as $index => $setting) {
+            $settings[$index]['description'] = $this->translator->trans((string) $setting['description']);
+        }
+        return $settings;
     }
 
     /**

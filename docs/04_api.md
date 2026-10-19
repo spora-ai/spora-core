@@ -665,6 +665,134 @@ Omitted filter (legacy) returns every agent the caller can see across their visi
 
 Accepts an optional `principal_id` body field. The caller must be admin OR control the target principal (`AgentPrincipalService::callerControlsPrincipal`). When omitted, or when the caller doesn't control the value, the agent lands on the caller's own user-principal (materialised on demand).
 
+## Locale
+
+A request renders in the first locale of this chain that has a catalogue:
+
+```
+users.locale  →  SPORA_DEFAULT_LANG  →  en
+```
+
+`Accept-Language` is **not** consulted. The instance owner sets one default in
+Settings → General; a browser header overriding it would make the rendered
+language depend on the machine rather than the install, and the same user see
+two languages on two machines.
+
+### `GET /api/v1/user-preferences/locale`
+
+**Auth:** session.
+
+### 200 — response
+
+```json
+{
+  "data": {
+    "locale": "de",
+    "resolved": "de",
+    "available": ["de", "en"]
+  }
+}
+```
+
+- `locale` — the caller's stored value, or `null` for "auto".
+- `resolved` — the first link of the chain above that has a catalogue.
+- `available` — every locale with a catalogue in core or in an installed plugin.
+  The language picker's whole option list; adding a language is a file, not a release.
+
+### Errors
+
+- `401 UNAUTHENTICATED`.
+
+### `PUT /api/v1/user-preferences/locale`
+
+**Auth:** session + CSRF.
+
+### Request
+
+```json
+{ "locale": "de" }
+```
+
+`null` is a real value — it clears the choice and restores "auto". Writes to
+`users.locale` (migration 0096), **not** to `principal_preferences`: the
+language belongs to the person, who acts as a user-principal *and* any number of
+group principals, so a principal-scoped column would change the language
+whenever the active principal did.
+
+### 200 — response
+
+```json
+{ "data": { "locale": "de", "resolved": "de" } }
+```
+
+### Errors
+
+- `400 INVALID_JSON` — the body is not valid JSON.
+- `401 UNAUTHENTICATED`.
+- `404 NOT_FOUND` — the session's user row is gone.
+- `422 VALIDATION_ERROR` — a locale nobody has a catalogue for.
+
+### Boot config
+
+`GET /api/v1/config` carries `default_lang` (`SPORA_DEFAULT_LANG`). A pre-login
+visitor has no preference to fetch, so this is the only thing telling the SPA
+which language the instance is in; without it the first paint would be English
+on a German instance.
+
+## Translatable vs. model-facing attributes
+
+**The rule: the operator sees exactly what the model sees.** If a string ever
+reaches the LLM, it stays English — and so does the operator's view of that same
+string. There is no translated twin of a model-facing string.
+
+Translated (the catalogue key is the English source text, `locales/de.json` maps
+it):
+
+| Attribute / field | Where it surfaces |
+| --- | --- |
+| `#[Tool].displayName`, `#[Tool].category` | `GET /api/v1/tools` |
+| `#[ToolSetting].description` | every settings schema |
+| declared `SettingDefinition` label / description / `options[].label` | `GET /api/v1/admin/settings` |
+| `AppInterface::displayName()` / `description()` | `GET /api/v1/apps` |
+| `plugin.json#description` | `GET /api/v1/plugins` |
+| backend error `message` literals | every JSON error envelope |
+
+Never translated:
+
+| Attribute / field | Why |
+| --- | --- |
+| `#[Tool].name`, `.description` | the OpenAI function payload and the `AgentManifest` tool block |
+| `#[ToolOperation].name`, `.description`, `.operatorDescription` | same two paths — the model reads `operator_description` too |
+| `#[ToolParameter].description` | the LLM parameter schema |
+| `#[ToolSetting].label` — **all of them** | six carry `exposeToLlm: true` and enter the model's prompt, and because the catalogue key *is* the English text a translated label would apply to every setting reusing the word |
+| `#[ToolSetting].options[].label` | mostly language endonyms that must read verbatim |
+| `ToolResult::ok()` / `fail()` content, all LLM output | model input |
+| CLI output (`app/Console/**`) | a permanent documented non-goal |
+
+The one exception to "the key is the English text": the language picker's own
+options (`SPORA_DEFAULT_LANG`) are **not** harvested. `Deutsch` has to read
+`Deutsch` in the German catalogue so a user can find their own language, and the
+`i18n:check` identical-value rule would otherwise reject it as untranslated.
+
+### Tooling
+
+```
+composer i18n:extract   # regenerate locales/en.json from the source
+composer i18n:check     # CI gate, in the static-analysis job
+```
+
+`en.json` is generated and never hand-edited; `de.json` is hand-edited beside
+it. `i18n:check` fails on drift from the source, on a key `de.json` is missing,
+on an empty or English-identical value, and on a message carrying an unescaped
+`{`, `}` or `|` — vue-i18n compiles those as interpolation and plural syntax and
+throws at render.
+
+Plugins declare their own catalogue directory through
+`PluginInterface::translationsPaths()` (default `[]` on `AbstractPlugin`), and
+the host merges it under core's. On a key collision **core wins, the plugin
+entry is dropped, and a warning is logged** — a third-party package can never
+brick an install by shipping a duplicate.
+
 ## STT provider capability resolution
 
 `GET /api/v1/speech/capability` resolves the list of STT providers the

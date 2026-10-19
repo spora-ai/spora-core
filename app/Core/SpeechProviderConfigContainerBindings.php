@@ -70,6 +70,7 @@ final class SpeechProviderConfigContainerBindings
                     $c->get(PrincipalService::class),
                     null,
                     $c->get(SpeechProviderConfigMutator::class),
+                    $c->get(\Spora\I18n\Translator::class),
                 );
             },
 

@@ -224,6 +224,27 @@ final class PluginLoader
     }
 
     /**
+     * Catalogue directories contributed by loaded plugins, in load order.
+     * Mirrors {@see skillPaths()} minus the slug pairing:
+     * {@see \Spora\I18n\CatalogLoader} resolves the owner itself, from the
+     * fact that core's catalogue is merged last and therefore wins.
+     *
+     * @return list<string>
+     */
+    public function translationsPaths(): array
+    {
+        $paths = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->translationsPaths() as $path) {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
      * All {@see \Spora\Skills\SkillProviderInterface} classes contributed by
      * loaded plugins, as a static class list. Mirrors
      * {@see speechToTextProviderClasses()}.

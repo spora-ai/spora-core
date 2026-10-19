@@ -50,6 +50,7 @@ use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
+use Spora\Http\UserLocaleController;
 use Spora\Http\UserPictureAssetController;
 use Spora\Http\UserPictureController;
 use Spora\Http\UserPreferenceController;
@@ -386,6 +387,11 @@ final class RouteDefinitions
     {
         $r->addRoute('GET', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PUT', '/api/v1/user-preferences/llm', [UserPreferenceController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+
+        // User-scoped, not principal-scoped: the language belongs to the
+        // person, so there is no `?principal_id=` here.
+        $r->addRoute('GET', '/api/v1/user-preferences/locale', [UserLocaleController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PUT', '/api/v1/user-preferences/locale', [UserLocaleController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', '/api/v1/notifications', [NotificationController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/notifications/read-all', [NotificationController::class, 'markAllRead'], [AuthMiddleware::class, CsrfMiddleware::class]);

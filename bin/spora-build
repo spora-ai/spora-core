@@ -5,6 +5,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+use Spora\Build\I18nCheckCommand;
+use Spora\Build\I18nExtractCommand;
 use Spora\Build\OpenApiCheckCommand;
 use Spora\Build\OpenApiGenerateCommand;
 use Spora\Core\Version;
@@ -22,4 +24,6 @@ use Symfony\Component\Console\Application;
 $app = new Application('Spora Build', Version::current());
 $app->addCommand(new OpenApiGenerateCommand());
 $app->addCommand(new OpenApiCheckCommand());
+$app->addCommand(new I18nExtractCommand());
+$app->addCommand(new I18nCheckCommand());
 $app->run();

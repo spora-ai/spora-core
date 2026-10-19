@@ -79,6 +79,20 @@ final class Paths
     }
 
     /**
+     * The framework's own translation catalogues, one `<locale>.json` per
+     * language. `en.json` is generated from the English literals in the
+     * source; every other file is hand-edited beside it.
+     *
+     * Plugin catalogues are *not* resolved here — a plugin declares its own
+     * directory through `PluginInterface::translationsPaths()` and
+     * {@see \Spora\I18n\CatalogLoader} merges the two.
+     */
+    public function locales(string $sub = ''): string
+    {
+        return $this->framework($this->join('locales', $sub));
+    }
+
+    /**
      * Path to the project-level App extension directory.
      * Default: `<basePath>/app`. Override with SPORA_APP_DIR.
      */

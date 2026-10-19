@@ -40,6 +40,7 @@
         "symfony/http-foundation": "^8.0",
         "symfony/mailer": "^8.0",
         "symfony/process": "^8.0",
+        "symfony/translation": "^8.1",
         "symfony/yaml": "^8.0",
         "vlucas/phpdotenv": "^5.6"
     },
@@ -60,6 +61,7 @@
     "autoload-dev": {
         "files": [
             "tests/Support/CrossFileTestHelpers.php",
+            "tests/Support/I18nTestSupport.php",
             "tests/Support/TestDatabaseFactory.php"
         ],
         "psr-4": {
@@ -102,7 +104,9 @@
         "analyse": "./vendor/bin/phpstan analyse --memory-limit=2G",
         "format": "./vendor/bin/php-cs-fixer fix",
         "openapi": "@php bin/spora-build openapi:generate",
-        "openapi:check": "@php bin/spora-build openapi:check"
+        "openapi:check": "@php bin/spora-build openapi:check",
+        "i18n:extract": "@php bin/spora-build i18n:extract",
+        "i18n:check": "@php bin/spora-build i18n:check"
     },
     "config": {
         "optimize-autoloader": true,

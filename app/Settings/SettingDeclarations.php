@@ -114,6 +114,18 @@ final class SettingDeclarations
                 description: 'A filesystem path, so it cannot live in the database it would be written from.',
                 bootOnly: true,
             ),
+            new SettingDefinition(
+                key: 'SPORA_DEFAULT_LANG',
+                label: 'Default language',
+                type: SettingDefinition::TYPE_SELECT,
+                default: 'en',
+                section: 'general',
+                options: [
+                    ['value' => 'en', 'label' => 'English'],
+                    ['value' => 'de', 'label' => 'Deutsch'],
+                ],
+                description: 'Language for people who have not chosen one of their own. A user\'s own choice wins over this.',
+            ),
         ];
     }
 

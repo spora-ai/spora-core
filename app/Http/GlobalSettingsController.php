@@ -7,6 +7,8 @@ namespace Spora\Http;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Settings\SettingDefinition;
 use Spora\Settings\SettingsRegistry;
 use Spora\Settings\SettingsRepository;
@@ -29,12 +31,17 @@ final class GlobalSettingsController
     /** The mask. Submitted back unchanged, it means "leave this alone". */
     private const MASK = '***';
 
+    private readonly Translator $translator;
+
     public function __construct(
         private readonly SettingsRegistry $registry,
         private readonly SettingsRepository $repository,
         private readonly Config $config,
         private readonly AuthService $authService,
-    ) {}
+        ?Translator $translator = null,
+    ) {
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
+    }
 
     #[OA\Get(
         path: '/api/v1/admin/settings',
@@ -55,7 +62,7 @@ final class GlobalSettingsController
         $sections = [];
         foreach ($this->registry->sectionLabels() as $key => $label) {
             if (isset($bySection[$key])) {
-                $sections[] = ['key' => $key, 'label' => $label, 'settings' => $bySection[$key]];
+                $sections[] = ['key' => $key, 'label' => $this->translator->trans($label), 'settings' => $bySection[$key]];
             }
         }
 
@@ -238,17 +245,36 @@ final class GlobalSettingsController
             // several sections — and `DELETE /{group}/{key}` is addressed by
             // this one.
             'group'         => $definition->group,
-            'label'         => $definition->label,
+            'label'         => $this->translator->trans($definition->label),
             'type'          => $definition->type,
-            'description'   => $definition->description,
+            'description'   => $this->translator->trans($definition->description),
             'value'         => $value,
             'default'       => $definition->default,
             'source'        => $this->config->sourceOf($definition->key),
             'readonly'      => $definition->bootOnly,
             'secret'        => $definition->secret,
             'undecryptable' => $isUndecryptable,
-            'options'       => $definition->options,
+            'options'       => $this->localiseOptions($definition),
         ];
+    }
+
+    /**
+     * A declared setting's option labels are operator copy, unlike a
+     * `#[ToolSetting]` option label — this surface never reaches a model.
+     * The stored `value` is left alone so a translated label cannot change
+     * what gets written.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private function localiseOptions(SettingDefinition $definition): array
+    {
+        $options = [];
+        foreach ($definition->options as $option) {
+            $option['label'] = $this->translator->trans($option['label']);
+            $options[] = $option;
+        }
+
+        return $options;
     }
 
     private function rejectInvalid(SettingDefinition $definition, mixed $value): ?JsonResponse
