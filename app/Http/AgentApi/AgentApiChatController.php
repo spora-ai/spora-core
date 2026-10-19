@@ -39,6 +39,9 @@ final class AgentApiChatController
 {
     use JsonControllerHelpers;
 
+    /** Ceiling on `media_ids`, each of which costs a lookup to authorise. */
+    private const MAX_MEDIA_IDS = 32;
+
     public function __construct(
         private readonly AgentApiScope $scope,
         private readonly AgentApiChatProjection $projection,
@@ -120,6 +123,11 @@ final class AgentApiChatController
         }
 
         $mediaIds = $this->readableMediaIds($body, $context);
+
+        if ($mediaIds === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
+        }
+
         $files = $body['files'] ?? null;
 
         if ($files !== null && !is_array($files)) {
@@ -150,7 +158,7 @@ final class AgentApiChatController
 
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/status', summary: 'Status and final answer', tags: ['Agent-api'])]
     #[OA\Response(response: 200, description: 'Status, answer, and any block.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     public function status(Request $request, int $chatId): JsonResponse
     {
 
@@ -166,7 +174,7 @@ final class AgentApiChatController
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/messages', summary: 'User messages and answers only', tags: ['Agent-api'])]
     #[OA\Parameter(name: 'since_sequence', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
     #[OA\Response(response: 200, description: 'The conversation, tool calls omitted.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     public function messages(Request $request, int $chatId): JsonResponse
     {
 
@@ -190,7 +198,7 @@ final class AgentApiChatController
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/transcript', summary: 'Everything the admin UI shows', tags: ['Agent-api'])]
     #[OA\Parameter(name: 'since_sequence', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
     #[OA\Response(response: 200, description: 'Tool calls, thinking, usage totals.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     public function transcript(Request $request, int $chatId): JsonResponse
     {
 
@@ -203,7 +211,7 @@ final class AgentApiChatController
                 $this->queryInt($request, 'since_sequence'),
             );
         } catch (InvalidArgumentException) {
-            return $this->notFound('NOT_FOUND', 'Chat not found.');
+            return $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['chat' => $transcript]]);
@@ -219,7 +227,7 @@ final class AgentApiChatController
         ],
     ))]
     #[OA\Response(response: 202, description: 'The follow-up was queued.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not in a state that can be continued.')]
     public function continueChat(Request $request, int $chatId): JsonResponse
     {
@@ -237,6 +245,12 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
         }
 
+        $mediaIds = $this->readableMediaIds($body, $context);
+
+        if ($mediaIds === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
+        }
+
         try {
             $task = $this->scope->continueChat(
                 $chatId,
@@ -244,7 +258,7 @@ final class AgentApiChatController
                 $context->ownerUserId,
                 $text,
                 $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
-                $this->readableMediaIds($body, $context),
+                $mediaIds,
             );
         } catch (InvalidArgumentException $e) {
             $status = $this->scope->chatMissing($chatId, $context->agentId())
@@ -253,7 +267,7 @@ final class AgentApiChatController
 
             return $this->error(
                 $status === 404 ? 'NOT_FOUND' : 'INVALID_STATE',
-                $status === 404 ? 'Chat not found.' : $e->getMessage(),
+                $status === 404 ? AgentApiScope::ERR_NOT_FOUND : $e->getMessage(),
                 $status,
             );
         }
@@ -269,7 +283,7 @@ final class AgentApiChatController
         try {
             return $this->scope->requireTask($chatId, AgentApiContext::fromRequest($request)->agentId());
         } catch (InvalidArgumentException) {
-            return $this->notFound('NOT_FOUND', 'Chat not found.');
+            return $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND);
         }
     }
 
@@ -307,15 +321,24 @@ final class AgentApiChatController
      * Only ids the key's own agent can read are forwarded, so a caller
      * cannot attach an asset id it observed somewhere else.
      *
+     * `null` when the request carries more ids than {@see self::MAX_MEDIA_IDS}:
+     * each one is a lookup, so an uncapped list is an uncapped number of
+     * queries. Rejected rather than truncated, because a caller that silently
+     * lost attachments has no way to tell that from one that sent none.
+     *
      * @param array<string, mixed> $body
-     * @return list<string>
+     * @return list<string>|null
      */
-    private function readableMediaIds(array $body, AgentApiContext $context): array
+    private function readableMediaIds(array $body, AgentApiContext $context): ?array
     {
         $raw = $body['media_ids'] ?? null;
 
         if (!is_array($raw)) {
             return [];
+        }
+
+        if (count($raw) > self::MAX_MEDIA_IDS) {
+            return null;
         }
 
         $ids = [];

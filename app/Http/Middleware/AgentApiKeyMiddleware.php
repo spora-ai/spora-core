@@ -48,33 +48,14 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
 
     public function handle(Request $request, Closure $next): Response
     {
-        $presented = $this->bearerToken($request);
-
-        if ($presented === null) {
-            return $this->unauthorized();
-        }
-
-        $id = $this->issuer->idFrom($presented);
-        $secret = $this->issuer->secretFrom($presented);
-
-        if ($id === null || $secret === null) {
-            return $this->unauthorized();
-        }
-
-        $key = AgentApiKey::find($id);
+        $key = $this->authenticate($request);
 
         if ($key === null) {
             return $this->unauthorized();
         }
 
-        [$valid] = $this->issuer->verify($secret, $key);
-
-        if (!$valid) {
-            return $this->unauthorized();
-        }
-
         $limit = $this->config->getInt('SPORA_AGENT_API_RATE_LIMIT_MAX') ?? 60;
-        $bucket = 'agentapi:' . $id;
+        $bucket = 'agentapi:' . $key->getKey();
 
         if (!$this->rateLimiter->attempt($bucket, max(1, $limit), self::RATE_LIMIT_WINDOW_SECONDS)) {
             return $this->rateLimited($this->rateLimiter->retryAfterSeconds($bucket, self::RATE_LIMIT_WINDOW_SECONDS));
@@ -100,6 +81,41 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
     }
 
     /**
+     * The key a request presents, or null.
+     *
+     * Every rejection here is the same answer with the same body: a caller
+     * that could tell a malformed key from an unknown id from a wrong secret
+     * would learn which key ids exist. Id is not secret — every callback
+     * sends it in cleartext as `X-Spora-Key-Id` — but the *combination* is,
+     * and a difference in timing would leak it just as well as a difference
+     * in status. Hence one exit, and the rate limiter runs only after this
+     * succeeds, so a wrong-secret flood cannot lock out the real key.
+     */
+    private function authenticate(Request $request): ?AgentApiKey
+    {
+        $presented = $this->bearerToken($request);
+
+        if ($presented === null) {
+            return null;
+        }
+
+        $id = $this->issuer->idFrom($presented);
+        $secret = $this->issuer->secretFrom($presented);
+
+        if ($id === null || $secret === null) {
+            return null;
+        }
+
+        $key = AgentApiKey::find($id);
+
+        if ($key === null) {
+            return null;
+        }
+
+        return $this->issuer->verify($secret, $key)[0] ? $key : null;
+    }
+
+    /**
      * Stamp the key's last-used time, at most once a minute.
      *
      * The column is what tells an operator which of an agent's keys are still
@@ -107,10 +123,20 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
      * request it would put a second write on the hot path of a polling
      * integrator. The UI renders a relative time, so minute granularity costs
      * it nothing.
+     *
+     * Parsed as UTC rather than through the cast, which reads it back in the
+     * process default timezone. The two disagree on any host whose php.ini
+     * sets a local zone — `Kernel` never calls `date_default_timezone_set()` —
+     * and the delta then reads as hours in one direction, which either
+     * freezes the column at mint time or makes every request write.
      */
     private function touchLastUsed(AgentApiKey $key): void
     {
-        $last = $key->last_used_at?->getTimestamp() ?? 0;
+        $raw = $key->getRawOriginal('last_used_at');
+
+        $last = is_string($raw)
+            ? Carbon::createFromFormat('Y-m-d H:i:s', $raw, 'UTC')->getTimestamp()
+            : 0;
 
         if (time() - $last < self::LAST_USED_RESOLUTION_SECONDS) {
             return;

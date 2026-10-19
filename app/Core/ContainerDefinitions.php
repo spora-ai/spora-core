@@ -1328,7 +1328,7 @@ final class ContainerDefinitions
                 return new CallbackSecretResolver();
             },
 
-            AgentApiChatProjection::class => static function (ContainerInterface $c): AgentApiChatProjection {
+            AgentApiChatProjection::class => static function (): AgentApiChatProjection {
                 return new AgentApiChatProjection();
             },
 

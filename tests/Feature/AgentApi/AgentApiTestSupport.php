@@ -60,6 +60,7 @@ final class AgentApiTestSupport
         ScriptedLlmDriver $llm,
         ?HttpClientInterface $http = null,
         array $tools = [],
+        int $rateLimitMax = 1000,
     ): \DI\Container {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($llm);
@@ -75,7 +76,7 @@ final class AgentApiTestSupport
 
         $container->set(Config::class, new Config([
             'SPORA_AGENT_API' => '1',
-            'SPORA_AGENT_API_RATE_LIMIT_MAX' => '1000',
+            'SPORA_AGENT_API_RATE_LIMIT_MAX' => (string) $rateLimitMax,
             'SPORA_APP_ENV' => 'testing',
             // The logger factory does `constant(Level::class . '::' . $level)`
             // against this, so it has to be present or resolution throws.

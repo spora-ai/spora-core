@@ -42,7 +42,7 @@ final class AgentApiChatActionController
         properties: [new OA\Property(property: 'decisions', type: 'array', items: new OA\Items(type: 'object'))],
     ))]
     #[OA\Response(response: 202, description: 'Approval recorded; the chat is queued again.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not pending approval.')]
     public function approve(Request $request, int $chatId): JsonResponse
     {
@@ -73,7 +73,7 @@ final class AgentApiChatActionController
         properties: [new OA\Property(property: 'reason', type: 'string')],
     ))]
     #[OA\Response(response: 202, description: 'Rejection recorded.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not pending approval.')]
     public function reject(Request $request, int $chatId): JsonResponse
     {
@@ -108,7 +108,7 @@ final class AgentApiChatActionController
         ],
     ))]
     #[OA\Response(response: 202, description: 'Answer recorded; the chat is queued again.')]
-    #[OA\Response(response: 404, description: 'No such chat on this agent.')]
+    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not awaiting input.')]
     public function answer(Request $request, int $chatId): JsonResponse
     {
@@ -155,7 +155,7 @@ final class AgentApiChatActionController
             $missing = $this->scope->chatMissing($chatId, $context->agentId());
 
             return $missing
-                ? $this->notFound('NOT_FOUND', 'Chat not found.')
+                ? $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND)
                 : $this->error('INVALID_STATE', $e->getMessage(), Response::HTTP_CONFLICT);
         }
 

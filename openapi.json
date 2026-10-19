@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-7-gd3a67aa1"
+        "version": "0.30.0-8-gc08d71f1"
     },
     "servers": [
         {
@@ -3307,8 +3307,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Key metadata. Secrets are never returned."
+                    },
+                    "403": {
+                        "description": "The caller cannot manage this agent."
                     }
                 },
                 "security": [
@@ -3351,8 +3354,11 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "201": {
+                        "description": "The key, with its plaintext secret. Shown once."
+                    },
+                    "422": {
+                        "description": "The name was missing or too long."
                     }
                 },
                 "security": [
@@ -3390,8 +3396,8 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Revoked. Idempotent — the same body whether or not the key existed."
                     }
                 },
                 "security": [
@@ -3439,8 +3445,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "One page of chats, newest first. 25 per page by default."
+                    },
+                    "422": {
+                        "description": "`since` was not a parseable date."
                     }
                 },
                 "security": [
@@ -3494,8 +3503,11 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "202": {
+                        "description": "The chat was queued."
+                    },
+                    "422": {
+                        "description": "The request body was not usable."
                     }
                 },
                 "security": [
@@ -3522,8 +3534,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Status, answer, and any block."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
                     }
                 },
                 "security": [
@@ -3558,8 +3573,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "The conversation, tool calls omitted."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
                     }
                 },
                 "security": [
@@ -3610,8 +3628,14 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "202": {
+                        "description": "The follow-up was queued."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not in a state that can be continued."
                     }
                 },
                 "security": [
@@ -3646,8 +3670,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "Tool calls, thinking, usage totals."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
                     }
                 },
                 "security": [
@@ -3694,8 +3721,14 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "202": {
+                        "description": "Approval recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
                     }
                 },
                 "security": [
@@ -3735,8 +3768,14 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "202": {
+                        "description": "Rejection recorded."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
                     }
                 },
                 "security": [
@@ -3784,8 +3823,14 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "202": {
+                        "description": "Answer recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not awaiting input."
                     }
                 },
                 "security": [
@@ -3819,8 +3864,14 @@
                     }
                 },
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "201": {
+                        "description": "The asset was ingested."
+                    },
+                    "400": {
+                        "description": "No file was sent under \"file\"."
+                    },
+                    "415": {
+                        "description": "The file type is not in the agent's allowlist."
                     }
                 },
                 "security": [
@@ -3855,8 +3906,11 @@
                     }
                 ],
                 "responses": {
-                    "default": {
-                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    "200": {
+                        "description": "The asset bytes."
+                    },
+                    "404": {
+                        "description": "No such asset, or not this agent's to read."
                     }
                 },
                 "security": [

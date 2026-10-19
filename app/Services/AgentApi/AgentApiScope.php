@@ -18,15 +18,22 @@ use Spora\Services\ToolCallSerializer;
 /**
  * Scopes an Agent API request to the one agent its key belongs to.
  *
- * Every read and write goes through here rather than through the
- * user-scoped `TaskServiceInterface` methods, because those resolve
- * visibility from `visiblePrincipalIds()`: a principal is shared by every
- * group member, which is the right rule for the admin UI and far too wide
- * for a credential. A key may only ever reach its own agent's chats.
+ * The *agent scope* is decided here rather than by the user-scoped
+ * `TaskServiceInterface` methods, whose visibility comes from
+ * `visiblePrincipalIds()`: a principal is shared by every group member,
+ * which is the right rule for the admin UI and far too wide for a
+ * credential. A key may only ever reach its own agent's chats.
  */
 final class AgentApiScope
 {
-    private const ERR_NOT_FOUND = 'Chat not found.';
+    /**
+     * The error vocabulary, public because the controllers answer with these
+     * strings and the OpenAPI annotations describe them — three places that
+     * have to keep agreeing, and cannot when each holds its own copy.
+     */
+    public const ERR_NOT_FOUND = 'Chat not found.';
+
+    public const ERR_NO_SUCH_CHAT = 'No such chat on this agent.';
 
     /** Sub-agent nesting is shallow; this is a cycle guard, not a real limit. */
     private const MAX_ANCESTOR_WALK = 16;

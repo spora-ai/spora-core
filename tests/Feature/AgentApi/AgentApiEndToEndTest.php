@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\AgentApi;
 
+use Illuminate\Support\Carbon;
 use Spora\Core\Config;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
@@ -11,6 +12,7 @@ use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
 use Spora\Models\RatelimitHit;
 use Spora\Models\Task;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Fixtures\StubInputTool;
 use Tests\Fixtures\StubOutputTool;
@@ -290,6 +292,57 @@ describe('Agent API authorisation', function (): void {
         expect($wrong->getStatusCode())->toBe(401);
         expect($unknown->getStatusCode())->toBe(401);
         expect(AgentApiTestSupport::decode($unknown))->toBe(AgentApiTestSupport::decode($wrong));
+    });
+
+    it('rate-limits a valid key and says for how long', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('oracle');
+        [, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'oracle');
+
+        $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'o1'));
+        $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()], rateLimitMax: 3);
+
+        $request = fn(): Request => jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $plaintext]);
+
+        // Pinned to one wall-clock second: the ceiling used to deduplicate
+        // same-second hits and count this burst as one request, so a test
+        // that merely ran fast would pass against the broken limiter.
+        Carbon::setTestNow(Carbon::now()->startOfSecond());
+
+        try {
+            for ($i = 0; $i < 3; $i++) {
+                expect(AgentApiTestSupport::call($container, AgentApiChatController::class, 'index', $request())->getStatusCode())->toBe(200);
+            }
+
+            $limited = AgentApiTestSupport::call($container, AgentApiChatController::class, 'index', $request());
+
+            expect($limited->getStatusCode())->toBe(429);
+            expect($limited->headers->get('Retry-After'))->not->toBeNull();
+        } finally {
+            Carbon::setTestNow();
+        }
+    });
+
+    it('refuses more media ids than it will look up', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('oracle');
+        [, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'oracle');
+
+        $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'o1'));
+        $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
+
+        // Each id costs an existence lookup before it is known to be this
+        // agent's, so an uncapped list is an uncapped number of queries on an
+        // authenticated route. Rejected, not truncated: a caller that lost
+        // attachments silently cannot tell it from one that sent none.
+        $tooMany = array_map(static fn(int $i): string => str_repeat('a', 16) . $i, range(1, 200));
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiChatController::class,
+            'store',
+            AgentApiTestSupport::bearer($plaintext, ['text' => 'look at these', 'media_ids' => $tooMany]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
     });
 
     it('never turns a bad credential into a 429, however often it is repeated', function (): void {

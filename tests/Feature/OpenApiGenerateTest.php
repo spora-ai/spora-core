@@ -119,6 +119,43 @@ describe('OpenAPI specification generation', function (): void {
             ->toBe([], 'every declared security scheme must be required by some operation');
     });
 
+    it('gives every Agent API operation its declared status codes', function (): void {
+        // A handler declares its codes as sibling `#[OA\Response]` attributes
+        // next to the `#[OA\Get]`/`#[OA\Post]`. Only the operation attribute
+        // used to be read, so every one of these fell back to a generic
+        // `default` response and the documented behaviour of each endpoint
+        // was missing from its own reference page.
+        //
+        // Asserted on the serialised spec rather than the annotation objects:
+        // the in-memory `responses` is a list, while the emitted document keys
+        // by status code, and only the latter is what a reader sees.
+        $json = json_decode(
+            (string) json_encode(openApiTestSpec()),
+            true,
+        );
+        expect($json)->toBeArray();
+
+        $defaultOnly = [];
+
+        foreach ($json['paths'] as $path => $pathItem) {
+            if (!str_starts_with((string) $path, '/api/v1/agent-api/')) {
+                continue;
+            }
+
+            foreach (['get', 'put', 'post', 'delete', 'patch'] as $method) {
+                if (!isset($pathItem[$method]['responses'])) {
+                    continue;
+                }
+
+                if (array_keys($pathItem[$method]['responses']) === ['default']) {
+                    $defaultOnly[] = strtoupper($method) . ' ' . $path;
+                }
+            }
+        }
+
+        expect($defaultOnly)->toBe([]);
+    });
+
     it('requires bearerAuth on every Agent API operation', function (): void {
         $spec = openApiTestSpec();
 

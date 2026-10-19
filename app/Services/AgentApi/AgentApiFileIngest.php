@@ -83,30 +83,19 @@ final class AgentApiFileIngest
                 break;
             }
 
-            if (!is_array($entry)) {
-                continue;
-            }
+            $decoded = $this->decodeInlineEntry($entry);
 
-            $source = $entry['data_url'] ?? $entry['base64'] ?? null;
-
-            if (!is_string($source) || $source === '') {
-                continue;
-            }
-
-            $decoded = str_starts_with($source, 'data:')
-                ? $this->decodeDataUrl($source)
-                : $this->decodeBase64($source);
-
-            if ($decoded === null || $decoded === '') {
+            if ($decoded === null) {
                 continue;
             }
 
             $seen++;
-            $filename = is_string($entry['filename'] ?? null) && $entry['filename'] !== ''
-                ? $entry['filename']
-                : 'inline-' . $seen;
 
-            $id = $this->ingestBytes($context, $decoded, $filename);
+            $id = $this->ingestBytes(
+                $context,
+                $decoded['bytes'],
+                $decoded['filename'] ?? 'inline-' . $seen,
+            );
 
             if ($id !== null) {
                 $ids[] = $id;
@@ -114,6 +103,42 @@ final class AgentApiFileIngest
         }
 
         return $ids;
+    }
+
+    /**
+     * One entry of the `files` array, or null when it carries nothing that
+     * decodes. The filename is left null when the caller did not name it, so
+     * the caller can number it from how many entries it has actually taken —
+     * a batch that skips its first file names two files `inline-1`.
+     *
+     * @return array{bytes: string, filename?: string}|null
+     */
+    private function decodeInlineEntry(mixed $entry): ?array
+    {
+        if (!is_array($entry)) {
+            return null;
+        }
+
+        $source = $entry['data_url'] ?? $entry['base64'] ?? null;
+
+        if (!is_string($source) || $source === '') {
+            return null;
+        }
+
+        $decoded = str_starts_with($source, 'data:')
+            ? $this->decodeDataUrl($source)
+            : $this->decodeBase64($source);
+
+        if ($decoded === null || $decoded === '') {
+            return null;
+        }
+
+        $filename = $entry['filename'] ?? null;
+
+        return [
+            'bytes' => $decoded,
+            'filename' => is_string($filename) && $filename !== '' ? $filename : null,
+        ];
     }
 
     private function decodeDataUrl(string $dataUrl): ?string

@@ -46,6 +46,18 @@ final class SsrfGuard
      */
     public function rejectReason(string $url): ?string
     {
+        $shape = $this->rejectReasonForShape($url);
+
+        if ($shape !== null) {
+            return $shape;
+        }
+
+        return $this->rejectReasonForHost((string) parse_url($url, PHP_URL_HOST));
+    }
+
+    /** Everything decidable without a host: length, well-formedness, scheme. */
+    private function rejectReasonForShape(string $url): ?string
+    {
         if ($url === '' || strlen($url) > 2048) {
             return 'Callback URL is empty or exceeds 2048 characters.';
         }
@@ -54,13 +66,16 @@ final class SsrfGuard
             return 'Callback URL is not a valid absolute URL.';
         }
 
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-
-        if (!in_array($scheme, self::ALLOWED_SCHEMES, true)) {
+        if (!in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), self::ALLOWED_SCHEMES, true)) {
             return 'Callback URL must use https.';
         }
 
-        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        return null;
+    }
+
+    private function rejectReasonForHost(string $host): ?string
+    {
+        $host = strtolower($host);
 
         if ($host === '') {
             return 'Callback URL has no host.';
@@ -70,11 +85,6 @@ final class SsrfGuard
             return 'Callback URL resolves to a loopback or link-local address.';
         }
 
-        return $this->rejectReasonForHost($host);
-    }
-
-    private function rejectReasonForHost(string $host): ?string
-    {
         $bare = trim($host, '[]');
 
         if (filter_var($bare, FILTER_VALIDATE_IP) !== false) {

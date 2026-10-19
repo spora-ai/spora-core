@@ -185,7 +185,7 @@ final class RouteToOpenApi
             $handlerOp['parameters'] ?? $this->operationExtractor->parametersFromHandler($entry['handler']),
         );
         $security = $this->securityFromMiddleware($entry['middleware'], $entry['method']);
-        $responses = $handlerOp['responses'] ?? $this->defaultResponses();
+        $responses = $handlerOp['responses'] ?? $this->operationExtractor->responsesFromHandler($entry['handler']) ?: $this->defaultResponses();
 
         $operation = [
             'method' => strtolower($entry['method']),

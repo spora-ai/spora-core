@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services\AgentApi;
 
 use LogicException;
-use RuntimeException;
+use Spora\Http\Exceptions\AgentApiContextException;
 use Spora\Models\Agent;
 use Spora\Models\AgentApiKey;
 use Spora\Services\PrincipalResolver;
@@ -52,7 +52,7 @@ final class AgentApiContext
         $ownerUserId = $resolver->ownerUserId($agent->principal_id);
 
         if ($ownerUserId === null) {
-            throw new RuntimeException('Agent has no resolvable owner principal.');
+            throw new AgentApiContextException('Agent has no resolvable owner principal.');
         }
 
         return new self($key, $agent, $ownerUserId);

@@ -49,9 +49,12 @@ final class DbRateLimiter
                 'key'    => $key,
                 'hit_at' => $nowString,
             ]))->save();
+
             return true;
         } catch (Throwable) {
             // Fail open — a DB hiccup shouldn't lock the operator out of /tick.
+            // Every hit owns its row, so this is only reachable on a genuine
+            // database failure, not on two requests inside one second.
             return true;
         }
     }

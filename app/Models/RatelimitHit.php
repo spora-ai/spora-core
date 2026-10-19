@@ -8,13 +8,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
 /**
- * Hit row for the DB-backed sliding-window rate limiter used by `/tick`
- * and `/housekeeping`. Composite PK `(key, hit_at)` keeps inserts hot
- * while allowing `DELETE … WHERE hit_at < ?` GC.
+ * Hit row for the DB-backed sliding-window rate limiter used by `/tick`,
+ * `/housekeeping` and the Agent API. Nothing reads a hit by primary key —
+ * the limiter only inserts and counts — so the surrogate `id` exists purely
+ * to give two hits in the same second their own row. The `(key, hit_at)`
+ * index carries the window query.
  *
- * Eloquent can't model a true composite PK; `key` is declared as the
- * model's $primaryKey and the DB enforces the full uniqueness.
- *
+ * @property int     $id
  * @property string  $key
  * @property Carbon  $hit_at
  */
@@ -24,13 +24,7 @@ final class RatelimitHit extends Model
     protected $table = 'ratelimit_hits';
 
     /** @var string */
-    protected $primaryKey = 'key';
-
-    /** @var string */
-    protected $keyType = 'string';
-
-    /** @var bool */
-    public $incrementing = false;
+    protected $primaryKey = 'id';
 
     /** @var bool */
     public $timestamps = false;
