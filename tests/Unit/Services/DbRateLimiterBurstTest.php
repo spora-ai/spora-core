@@ -40,7 +40,16 @@ it('refuses a burst that arrives inside a single second', function (): void {
 });
 
 it('still fails open when the table is unusable', function (): void {
+    // The database is per-worker on MySQL/MariaDB and persists across test
+    // files, and DDL auto-commits there, so a DROP cannot be rolled back.
+    // Restore it afterwards or the next suite to touch `ratelimit_hits` finds
+    // no table and fails — which is how this broke CI the first time.
+    TestDatabaseFactory::freshDatabase();
     Capsule::schema()->drop('ratelimit_hits');
 
-    expect((new DbRateLimiter())->attempt('gone', 1, 60))->toBeTrue();
+    try {
+        expect((new DbRateLimiter())->attempt('gone', 1, 60))->toBeTrue();
+    } finally {
+        TestDatabaseFactory::freshDatabase();
+    }
 });
