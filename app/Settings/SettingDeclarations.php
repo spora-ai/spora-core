@@ -148,6 +148,24 @@ final class SettingDeclarations
                 section: 'access',
                 description: 'Master switch for notification email. Individual subscriptions still apply.',
             ),
+            new SettingDefinition(
+                key: 'SPORA_AGENT_API',
+                label: 'Agent API',
+                type: SettingDefinition::TYPE_TOGGLE,
+                default: false,
+                section: 'access',
+                description: 'Mounts a per-agent HTTP API so external tools can start and continue chats with that agent. '
+                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . 'Each agent has its own API keys, under the agent\'s Settings → API keys.',
+            ),
+            new SettingDefinition(
+                key: 'SPORA_AGENT_API_RATE_LIMIT_MAX',
+                label: 'Agent API rate limit',
+                type: SettingDefinition::TYPE_NUMBER,
+                default: 60,
+                section: 'access',
+                description: 'Requests per minute a single Agent API key may make. Exceeding it answers 429 with a Retry-After header.',
+            ),
         ];
     }
 

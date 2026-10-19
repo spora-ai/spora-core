@@ -32,7 +32,15 @@ trait JsonControllerHelpers
             return [];
         }
 
-        return json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+        $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+
+        // Valid JSON is not the same as a JSON *object*: `"text"`, `42`,
+        // `true` and `null` all decode without throwing, to a scalar. The
+        // array return type then trips, and a TypeError is not a JsonException
+        // so the caller's catch does not see it — the request dies as a 500
+        // for a body the caller could easily have written by mistake.
+        // A body that is not an object simply has no fields in it.
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function error(string $code, string $message, int $status): JsonResponse
@@ -85,5 +93,44 @@ trait JsonControllerHelpers
             ['error' => ['code' => $code, 'message' => $message]],
             Response::HTTP_UNPROCESSABLE_ENTITY,
         );
+    }
+
+    /**
+     * A query parameter as a trimmed string, or null when absent or blank.
+     */
+    private function queryString(Request $request, string $name): ?string
+    {
+        $value = $request->query->get($name);
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * A query parameter as an int, or null when absent or not numeric.
+     */
+    private function queryInt(Request $request, string $name): ?int
+    {
+        $value = $this->queryString($request, $name);
+
+        return $value !== null && is_numeric($value) ? (int) $value : null;
+    }
+
+    /**
+     * Clamp an optional int into `[min, max]`, falling back to null — which
+     * the services read as "not supplied, use your own default".
+     */
+    private function boundedInt(?int $value, int $min, int $max): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return max($min, min($max, $value));
     }
 }

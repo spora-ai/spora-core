@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-55-gbaacec77"
+        "version": "0.30.0-8-gc08d71f1"
     },
     "servers": [
         {
@@ -3290,6 +3290,636 @@
                 ]
             }
         },
+        "/api/v1/agents/{agentId}/api-keys": {
+            "get": {
+                "tags": [
+                    "Agents"
+                ],
+                "summary": "List an agent's API keys",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Key metadata. Secrets are never returned."
+                    },
+                    "403": {
+                        "description": "The caller cannot manage this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Agents"
+                ],
+                "summary": "Mint an API key",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "maxLength": 100
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The key, with its plaintext secret. Shown once."
+                    },
+                    "422": {
+                        "description": "The name was missing or too long."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agents/{agentId}/api-keys/{keyId}": {
+            "delete": {
+                "tags": [
+                    "Agents"
+                ],
+                "summary": "Revoke an API key",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "keyId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Revoked. Idempotent — the same body whether or not the key existed."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "List this agent's chats",
+                "parameters": [
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "description": "ISO-8601 timestamp; only chats updated after it.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "One page of chats, newest first. 25 per page by default."
+                    },
+                    "422": {
+                        "description": "`since` was not a parseable date."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Start a chat with this agent",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "text"
+                                ],
+                                "properties": {
+                                    "text": {
+                                        "description": "The user message.",
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "files": {
+                                        "description": "Inline attachments as data URLs.",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "callback_url": {
+                                        "type": "string",
+                                        "format": "uri"
+                                    },
+                                    "max_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The chat was queued."
+                    },
+                    "422": {
+                        "description": "The request body was not usable."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/status": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Status and final answer",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status, answer, and any block."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/messages": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "User messages and answers only",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The conversation, tool calls omitted."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Continue a chat",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "text"
+                                ],
+                                "properties": {
+                                    "text": {
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "additional_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The follow-up was queued."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not in a state that can be continued."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/transcript": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Everything the admin UI shows",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tool calls, thinking, usage totals."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/approve": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Approve pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "decisions"
+                                ],
+                                "properties": {
+                                    "decisions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Approval recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/reject": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Reject pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "reason": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Rejection recorded."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/chats/{chatId}/answer": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Answer the agent's question",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tool_call_id",
+                                    "content"
+                                ],
+                                "properties": {
+                                    "tool_call_id": {
+                                        "type": "string"
+                                    },
+                                    "content": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Answer recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not awaiting input."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/media": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Upload a file for this agent",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The asset was ingested."
+                    },
+                    "400": {
+                        "description": "No file was sent under \"file\"."
+                    },
+                    "415": {
+                        "description": "The file type is not in the agent's allowlist."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/media/{mediaId}": {
+            "get": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Fetch a media asset this agent produced",
+                "parameters": [
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The asset bytes."
+                    },
+                    "404": {
+                        "description": "No such asset, or not this agent's to read."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/agent-templates": {
             "get": {
                 "tags": [
@@ -5186,13 +5816,22 @@
                 "type": "apiKey",
                 "description": "Session cookie issued by `delight-im/auth`. Required by `AuthMiddleware`.",
                 "name": "PHPSESSID",
-                "in": "cookie"
+                "in": "cookie",
+                "scheme": null
             },
             "csrfToken": {
                 "type": "apiKey",
                 "description": "CSRF token issued alongside the session. Required by `CsrfMiddleware` on every write method.",
                 "name": "X-CSRF-Token",
-                "in": "header"
+                "in": "header",
+                "scheme": null
+            },
+            "bearerAuth": {
+                "type": "http",
+                "description": "Agent API key (`spk_<id>_<secret>`), scoped to one agent. Required by `AgentApiKeyMiddleware`; no session or CSRF token is accepted on that surface.",
+                "name": null,
+                "in": null,
+                "scheme": "bearer"
             }
         }
     }

@@ -49,10 +49,41 @@ final class DbRateLimiter
                 'key'    => $key,
                 'hit_at' => $nowString,
             ]))->save();
+
             return true;
         } catch (Throwable) {
             // Fail open — a DB hiccup shouldn't lock the operator out of /tick.
+            // Every hit owns its row, so this is only reachable on a genuine
+            // database failure, not on two requests inside one second.
             return true;
         }
+    }
+
+    /**
+     * Seconds until the bucket is below `$maxAttempts` again, for a
+     * `Retry-After` header.
+     *
+     * The oldest hit in the window is the one that frees the first slot, so
+     * the wait is the remainder of the window from that hit. Returns the
+     * whole window when the window is empty or the query fails, which is the
+     * safe direction: it over-waits rather than under-waits.
+     */
+    public function retryAfterSeconds(string $key, int $windowSeconds): int
+    {
+        try {
+            $oldest = RatelimitHit::query()
+                ->where('key', $key)
+                ->min('hit_at');
+        } catch (Throwable) {
+            return $windowSeconds;
+        }
+
+        if ($oldest === null) {
+            return $windowSeconds;
+        }
+
+        $wait = $windowSeconds - (time() - strtotime((string) $oldest . ' UTC'));
+
+        return max(1, min($wait, $windowSeconds));
     }
 }

@@ -1,0 +1,91 @@
+# Agent API
+
+A per-agent HTTP API for external tools, gated behind the **Agent API**
+setting. An agent that answers over this API is reachable from a script,
+a workflow runner, or another service, without a Spora session and without
+the caller having to reconstruct the admin UI's task model.
+
+The API contract lives in [`docs/04_api.md`](04_api.md#agent-api); this
+document is the operator's guide to turning it on and keeping it on.
+
+## Turning it on
+
+Two requirements, and the second is not optional:
+
+1. **Agent API** enabled in [Global Settings](04_api.md#agent-api), or
+   `SPORA_AGENT_API=1` in `.env`.
+2. **Worker runtime mode = Server.** In client-worker mode the browser
+   drives the agent loop, so nothing on the server executes a queued task
+   and the API answers `404` on every endpoint.
+
+> **The setting is database-backed.** Once you flip it in Global Settings,
+> `.env` stops winning — the stored value is the higher layer. Set it in
+> one place, not both.
+
+## What is in scope
+
+A key is scoped to **one agent**. Everything it can reach belongs to that
+agent: its chats, their transcripts, and the media those chats produced.
+It cannot see a sibling agent's chats, and it cannot read the rest of the
+account's media.
+
+An agent may have several keys. Mint one per integration, so revoking one
+does not take the others down. Deleting a key is permanent and its secret
+is unrecoverable — only a SHA-256 digest is stored, and the plaintext is
+shown exactly once at creation.
+
+## The API is not a worker
+
+`POST /api/v1/agent-api/chats` answers `202` and returns immediately. It
+queues the chat; a worker runs it. Nothing in the HTTP request path drives
+the agent loop, which is why a server-side worker is required.
+
+Callback latency therefore depends on your worker:
+
+| Worker | Latency |
+| --- | --- |
+| `worker:run --daemon` | seconds — the sweep re-checks an unsettled chat every 5s |
+| `worker:run --once` from cron | up to one cron interval |
+
+The 5s floor is deliberate. A callback row is armed when the chat is created and re-checked
+until the chat settles; deferring that re-check is what stops a long-running chat from occupying
+the sweep's batch — see `app/Services/AgentApi/AgentApiCallbackDispatcher.php` — but it also
+means a chat that settles just after a check waits out the remainder of the interval.
+
+A worker that is *configured* but not *alive* leaves chats `QUEUED` and
+callbacks undelivered. The API does not detect this; it is a deployment
+health question, and the usual signals apply.
+
+## Rate limiting
+
+Every `/api/v1/agent-api/*` request is counted per **key** in the database, not per IP, so a
+shared NAT does not throttle an integrator and one integration cannot exhaust another's budget.
+The ceiling is **Agent API rate limit** (`SPORA_AGENT_API_RATE_LIMIT_MAX`), 60 requests per
+rolling minute by default; exceeding it answers `429` with `Retry-After`.
+
+The counter is only consulted **after** the secret verifies. That ordering is deliberate: if the
+limiter ran first, a wrong secret against a real key id would eventually answer `429` while an
+unknown id always answered `401`, and the difference would tell a caller whether the id exists.
+
+## Callbacks
+
+A caller may pass `callback_url` when starting a chat. Spora POSTs to it
+once the chat settles — where "settles" means it reached a terminal state,
+was aborted, or parked on something only the caller can clear (an approval,
+or a question the agent asked).
+
+Delivery is retried with exponential backoff and signed, so the receiver
+can tell a genuine callback from a forged one. See
+[`docs/04_api.md`](04_api.md#agent-api) for the payload, the signature
+recipe, and the exact set of statuses that trigger a delivery.
+
+## Where to look next
+
+- [`docs/04_api.md`](04_api.md#agent-api) — every endpoint, with its
+  exhaustive error list.
+- `GET /api/v1/config` — the `agent_api_enabled` flag the admin SPA reads
+  to decide whether to show the API keys section in the agent's Settings.
+  The section itself renders either way, so keys stay revocable when the
+  feature is off; the flag only governs whether the nav pill points at it.
+- [`app/Core/AgentApiRouteDefinitions.php`](../app/Core/AgentApiRouteDefinitions.php) —
+  where the routes are mounted and where the feature gate lives.

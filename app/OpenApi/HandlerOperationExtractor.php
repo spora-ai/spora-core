@@ -211,6 +211,43 @@ final readonly class HandlerOperationExtractor
     }
 
     /**
+     * Standalone `#[OA\Response]` lookup — the responses counterpart to
+     * {@see self::parametersFromHandler()}.
+     *
+     * A handler declares its operation with `#[OA\Get]`, `#[OA\Post]` and so
+     * on, and its status codes as sibling `#[OA\Response]` attributes on the
+     * same method. Only the operation attribute is read by
+     * {@see self::operationFromHandler()}, so without this the declared codes
+     * were silently dropped and the spec fell back to a generic `default`
+     * response — the documented behaviour of the endpoint was absent from its
+     * own reference page.
+     *
+     * @param array{0:string, 1:string} $handler
+     * @return array<string, Response> keyed by status code
+     */
+    public function responsesFromHandler(array $handler): array
+    {
+        [$class, $method] = $handler;
+        if (!class_exists($class)) {
+            return [];
+        }
+
+        $attributes = (new ReflectionMethod($class, $method))->getAttributes(
+            Response::class,
+            ReflectionAttribute::IS_INSTANCEOF,
+        );
+
+        if ($attributes === []) {
+            return [];
+        }
+
+        return $this->normaliseResponses(array_map(
+            static fn(ReflectionAttribute $attribute): Response => $attribute->newInstance(),
+            $attributes,
+        ));
+    }
+
+    /**
      * Standalone `#[OA\RequestBody]` lookup — used by
      * {@see RouteToOpenApi::buildAndAttach()} as the fallback for
      * POST / PUT / PATCH handlers that haven't declared a full

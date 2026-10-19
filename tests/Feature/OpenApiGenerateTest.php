@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use OpenApi\Annotations\OpenApi;
+use OpenApi\Annotations\Operation;
+use OpenApi\Annotations\PathItem;
 use Spora\Console\Commands\OpenApiGenerateCommand;
 use Spora\Http\HealthController;
 use Spora\OpenApi\RouteSpecCollector;
@@ -27,6 +29,30 @@ function openApiTestSpec(): OpenApi
     return (new RouteToOpenApi())->build();
 }
 
+/**
+ * The HTTP operations on a path item.
+ *
+ * A `PathItem` is not iterable, so the methods are listed rather than
+ * discovered — and listing them is what keeps this from mistaking the
+ * path-level `parameters` entry for an operation.
+ *
+ * @return array<string, Operation>
+ */
+function openApiTestOperations(PathItem $pathItem): array
+{
+    $operations = [];
+
+    foreach (['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as $method) {
+        $operation = $pathItem->{$method} ?? null;
+
+        if ($operation instanceof Operation) {
+            $operations[$method] = $operation;
+        }
+    }
+
+    return $operations;
+}
+
 function openApiTestFindOperation(OpenApi $spec, string $method, string $path): ?object
 {
     $method = strtolower($method);
@@ -46,14 +72,119 @@ describe('OpenAPI specification generation', function (): void {
         expect($spec->servers[0]->url)->toBe('/');
     });
 
-    it('declares cookieAuth and csrfToken security schemes', function (): void {
+    it('declares a security scheme per auth mechanism Spora has', function (): void {
         $spec = openApiTestSpec();
 
-        expect($spec->components->securitySchemes)->toHaveCount(2);
+        // One per mechanism, so adding a new one is a deliberate edit here
+        // rather than a silent gap. `bearerAuth` is the Agent API's key; the
+        // other two are the admin SPA's cookie + CSRF pair.
+        expect($spec->components->securitySchemes)->toHaveCount(3);
 
         $names = array_map(static fn($s) => $s->securityScheme, $spec->components->securitySchemes);
         expect($names)->toContain('cookieAuth');
         expect($names)->toContain('csrfToken');
+        expect($names)->toContain('bearerAuth');
+
+        $bearer = $spec->components->securitySchemes[array_search('bearerAuth', $names, true)];
+        expect($bearer->type)->toBe('http');
+        expect($bearer->scheme)->toBe('bearer');
+    });
+
+    it('declares no scheme that no operation requires', function (): void {
+        $spec = openApiTestSpec();
+
+        $declared = array_map(
+            static fn($s) => $s->securityScheme,
+            $spec->components->securitySchemes,
+        );
+
+        $referenced = [];
+
+        foreach ($spec->paths as $path => $pathItem) {
+            foreach (openApiTestOperations($pathItem) as $operation) {
+                foreach ($operation->security as $requirement) {
+                    foreach (array_keys((array) $requirement) as $name) {
+                        $referenced[] = $name;
+                    }
+                }
+            }
+        }
+
+        // A scheme declared in `components` but referenced by nothing is
+        // decoration: generated clients ignore it, and the operations that
+        // should have required it read as `security: []` — which in OpenAPI
+        // means *no authentication required*. That is how a published spec can
+        // tell integrators an authenticated surface is open.
+        expect(array_values(array_diff($declared, $referenced)))
+            ->toBe([], 'every declared security scheme must be required by some operation');
+    });
+
+    it('gives every Agent API operation its declared status codes', function (): void {
+        // A handler declares its codes as sibling `#[OA\Response]` attributes
+        // next to the `#[OA\Get]`/`#[OA\Post]`. Only the operation attribute
+        // used to be read, so every one of these fell back to a generic
+        // `default` response and the documented behaviour of each endpoint
+        // was missing from its own reference page.
+        //
+        // Asserted on the serialised spec rather than the annotation objects:
+        // the in-memory `responses` is a list, while the emitted document keys
+        // by status code, and only the latter is what a reader sees.
+        $json = json_decode(
+            (string) json_encode(openApiTestSpec()),
+            true,
+        );
+        expect($json)->toBeArray();
+
+        $defaultOnly = [];
+
+        foreach ($json['paths'] as $path => $pathItem) {
+            if (!str_starts_with((string) $path, '/api/v1/agent-api/')) {
+                continue;
+            }
+
+            foreach (['get', 'put', 'post', 'delete', 'patch'] as $method) {
+                if (!isset($pathItem[$method]['responses'])) {
+                    continue;
+                }
+
+                if (array_keys($pathItem[$method]['responses']) === ['default']) {
+                    $defaultOnly[] = strtoupper($method) . ' ' . $path;
+                }
+            }
+        }
+
+        expect($defaultOnly)->toBe([]);
+    });
+
+    it('requires bearerAuth on every Agent API operation', function (): void {
+        $spec = openApiTestSpec();
+
+        $checked = 0;
+        $unsecured = [];
+
+        foreach ($spec->paths as $path => $pathItem) {
+            if (!str_starts_with((string) $path, '/api/v1/agent-api/')) {
+                continue;
+            }
+
+            foreach (openApiTestOperations($pathItem) as $method => $operation) {
+                $checked++;
+
+                $required = [];
+                foreach ($operation->security as $requirement) {
+                    foreach (array_keys((array) $requirement) as $name) {
+                        $required[] = $name;
+                    }
+                }
+
+                if (!in_array('bearerAuth', $required, true)) {
+                    $unsecured[] = strtoupper((string) $method) . ' ' . $path;
+                }
+            }
+        }
+
+        expect($checked)->toBeGreaterThan(0, 'the Agent API routes should be present in the spec');
+        expect($unsecured)->toBe([], 'every Agent API operation must require bearerAuth');
     });
 
     it('covers every route registered in RouteDefinitions', function (): void {

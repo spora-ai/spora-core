@@ -21,6 +21,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
+use Spora\Auth\AgentApiKeyIssuer;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
 use Spora\Console\Commands\AuditOperationOverridesCommand;
@@ -43,6 +44,10 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
+use Spora\Http\AgentApi\AgentApiChatActionController;
+use Spora\Http\AgentApi\AgentApiChatController;
+use Spora\Http\AgentApi\AgentApiKeyController;
+use Spora\Http\AgentApi\AgentApiMediaController;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
@@ -73,6 +78,7 @@ use Spora\Http\MediaDerivativeOptionsController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
+use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\NotificationController;
@@ -94,6 +100,13 @@ use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
+use Spora\Services\AgentApi\AgentApiCallbackRecorder;
+use Spora\Services\AgentApi\AgentApiChatProjection;
+use Spora\Services\AgentApi\AgentApiContext;
+use Spora\Services\AgentApi\AgentApiFileIngest;
+use Spora\Services\AgentApi\AgentApiScope;
+use Spora\Services\AgentApi\CallbackSecretResolver;
 use Spora\Services\AgentFavoriteService;
 use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentManifest;
@@ -104,6 +117,7 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\AssetStore;
+use Spora\Services\AssetStreamer;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
 use Spora\Services\AutoAssetStore;
@@ -152,6 +166,7 @@ use Spora\Services\ProfilePictures\GroupPictureService;
 use Spora\Services\PromptTemplateServiceInterface;
 use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SpeechProviderConfigPersistence;
+use Spora\Services\SsrfGuard;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
@@ -218,6 +233,7 @@ final class ContainerDefinitions
             self::apiResourceControllerDefinitions(),
             self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
+            self::agentApiDefinitions(),
             self::toolDefinitions(),
             self::extensionDefinitions(),
             self::orchestratorDefinitions(),
@@ -1285,6 +1301,107 @@ final class ContainerDefinitions
                 return new ScheduledRunController(
                     $c->get(AuthService::class),
                     $c->get(ScheduledRunServiceInterface::class),
+                );
+            },
+        ];
+    }
+
+    private static function agentApiDefinitions(): array
+    {
+        return [
+            AssetStreamer::class => static function (ContainerInterface $c): AssetStreamer {
+                return new AssetStreamer(
+                    $c->get(DatabaseAssetStore::class),
+                    $c->get(LocalAssetStore::class),
+                );
+            },
+
+            SsrfGuard::class => static function (): SsrfGuard {
+                return new SsrfGuard();
+            },
+
+            AgentApiKeyIssuer::class => static function (): AgentApiKeyIssuer {
+                return new AgentApiKeyIssuer();
+            },
+
+            CallbackSecretResolver::class => static function (): CallbackSecretResolver {
+                return new CallbackSecretResolver();
+            },
+
+            AgentApiChatProjection::class => static function (): AgentApiChatProjection {
+                return new AgentApiChatProjection();
+            },
+
+            AgentApiContext::class => \DI\autowire(),
+
+            AgentApiScope::class => static function (ContainerInterface $c): AgentApiScope {
+                return new AgentApiScope(
+                    $c->get(TaskServiceInterface::class),
+                    $c->get(MediaArchiveService::class),
+                    $c->get(ToolCallSerializer::class),
+                );
+            },
+
+            AgentApiCallbackRecorder::class => static fn(): AgentApiCallbackRecorder => new AgentApiCallbackRecorder(),
+
+            AgentApiFileIngest::class => static function (ContainerInterface $c): AgentApiFileIngest {
+                return new AgentApiFileIngest(
+                    $c->get(MediaArchiveService::class),
+                    $c->get(MediaAllowedTypesService::class),
+                    $c->get(MimeSniffer::class),
+                );
+            },
+
+            AgentApiCallbackDispatcher::class => static function (ContainerInterface $c): AgentApiCallbackDispatcher {
+                return new AgentApiCallbackDispatcher(
+                    $c->get(HttpClientInterface::class),
+                    $c->get(AgentApiChatProjection::class),
+                    $c->get(CallbackSecretResolver::class),
+                    $c->get(LoggerInterface::class),
+                );
+            },
+
+            AgentApiKeyMiddleware::class => static function (ContainerInterface $c): AgentApiKeyMiddleware {
+                return new AgentApiKeyMiddleware(
+                    $c->get(AgentApiKeyIssuer::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(DbRateLimiter::class),
+                    $c->get(Config::class),
+                );
+            },
+
+            AgentApiChatController::class => static function (ContainerInterface $c): AgentApiChatController {
+                return new AgentApiChatController(
+                    $c->get(AgentApiScope::class),
+                    $c->get(AgentApiChatProjection::class),
+                    $c->get(AgentApiFileIngest::class),
+                    $c->get(AgentApiCallbackRecorder::class),
+                    $c->get(SsrfGuard::class),
+                    $c->get(Config::class),
+                );
+            },
+
+            AgentApiChatActionController::class => static function (ContainerInterface $c): AgentApiChatActionController {
+                return new AgentApiChatActionController(
+                    $c->get(AgentApiScope::class),
+                    $c->get(AgentApiChatProjection::class),
+                );
+            },
+
+            AgentApiMediaController::class => static function (ContainerInterface $c): AgentApiMediaController {
+                return new AgentApiMediaController(
+                    $c->get(AgentApiScope::class),
+                    $c->get(AgentApiFileIngest::class),
+                    $c->get(AssetStreamer::class),
+                    $c->get(MediaAssetSerializer::class),
+                );
+            },
+
+            AgentApiKeyController::class => static function (ContainerInterface $c): AgentApiKeyController {
+                return new AgentApiKeyController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(AgentApiKeyIssuer::class),
                 );
             },
         ];

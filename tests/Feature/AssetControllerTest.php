@@ -17,6 +17,7 @@ use Spora\Core\SecurityManager;
 use Spora\Http\AssetController;
 use Spora\Models\Agent;
 use Spora\Models\GroupMembership;
+use Spora\Services\AssetStreamer;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\GroupService;
@@ -95,7 +96,7 @@ function assetTestSetup(bool $asAdmin = true, ?int $userId = null): array
     $auth->allows('isAdmin')->andReturn($asAdmin);
     $auth->allows('currentUserId')->andReturn($effectiveUserId);
 
-    $controller = new AssetController($archive, $database, $local, $auth);
+    $controller = new AssetController($archive, $local, new AssetStreamer($database, $local), $auth);
 
     $container = (new ContainerBuilder())->build();
     $container->set(LocalAssetStore::class, $local);
