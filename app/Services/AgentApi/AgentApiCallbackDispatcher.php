@@ -123,18 +123,16 @@ final class AgentApiCallbackDispatcher
         }
 
         if (!$this->projection->hasSettled($task)) {
-            // Nothing to report yet, so push the row out of the due window
-            // rather than leaving it due. Leaving it due looks harmless and
-            // is not: the sweep is `ORDER BY id LIMIT 25`, so 25 chats still
-            // running — all with lower ids — would occupy every batch and
-            // starve every settled chat behind them, for as long as they ran.
-            // Deferring is what lets a settled row reach the front.
-            $row->next_attempt_at = Carbon::now('UTC')->addSeconds(self::SETTLE_POLL_SECONDS);
-            $row->save();
+            $this->defer($row);
 
             return false;
         }
 
+        return $this->deliverSettled($row, $task);
+    }
+
+    private function deliverSettled(AgentApiCallback $row, Task $task): bool
+    {
         $status = (string) $task->status;
 
         if ($row->pending_status !== $status) {
@@ -152,6 +150,21 @@ final class AgentApiCallbackDispatcher
         }
 
         return $this->deliver($row, $task);
+    }
+
+    /**
+     * Push a row that has nothing to report yet out of the due window.
+     *
+     * Leaving it due looks harmless and is not: the sweep is
+     * `ORDER BY id LIMIT 25`, so 25 chats still running — all with lower
+     * ids — would occupy every batch and starve every settled chat behind
+     * them, for as long as they ran. Deferring is what lets a settled row
+     * reach the front.
+     */
+    private function defer(AgentApiCallback $row): void
+    {
+        $row->next_attempt_at = Carbon::now('UTC')->addSeconds(self::SETTLE_POLL_SECONDS);
+        $row->save();
     }
 
     /**
@@ -173,23 +186,48 @@ final class AgentApiCallbackDispatcher
 
     private function deliver(AgentApiCallback $row, Task $task): bool
     {
+        $response = $this->post($row, $task);
+
+        if (!$response instanceof ResponseInterface) {
+            // `post()` records the reason; there is nothing left to decide.
+            return false;
+        }
+
+        $statusCode = $response->getStatusCode();
+
+        if ($statusCode < 200 || $statusCode >= 300) {
+            $this->recordFailure($row, $statusCode, $this->bodyError($response));
+
+            return false;
+        }
+
+        $this->recordSuccess($row, $task, $statusCode);
+
+        return true;
+    }
+
+    /**
+     * Issue the POST, or null when it never landed — in which case the row
+     * has already been deleted or its failure recorded, because either way
+     * there is no status code for {@see self::deliver()} to judge.
+     */
+    private function post(AgentApiCallback $row, Task $task): ?ResponseInterface
+    {
         $secret = $this->secrets->for($row->key_id);
 
         if ($secret === null) {
             // The key was deleted; its callbacks go with it.
             $row->delete();
 
-            return false;
+            return null;
         }
 
         $payload = json_encode($this->projection->status($task), JSON_THROW_ON_ERROR);
         $timestamp = (string) time();
         $signature = $this->sign($timestamp . '.' . $payload, $secret);
 
-        $response = null;
-
         try {
-            $response = $this->httpClient->request('POST', $row->url, [
+            return $this->httpClient->request('POST', $row->url, [
                 'headers' => [
                     'Content-Type' => 'application/json',
                     self::KEY_HEADER => $row->key_id,
@@ -207,41 +245,29 @@ final class AgentApiCallbackDispatcher
                 // for a receiver that has no reason to redirect.
                 'max_redirects' => 0,
             ]);
-
-            $statusCode = $response->getStatusCode();
         } catch (Throwable $e) {
             $this->recordFailure($row, null, $e->getMessage());
 
-            return false;
+            return null;
         }
+    }
 
-        if ($statusCode >= 200 && $statusCode < 300) {
-            $row->delivered_status = $row->pending_status;
-            $this->armOrDisarm($row, (string) $task->status);
-            $row->attempts = (int) $row->attempts + 1;
-            $row->last_status_code = $statusCode;
-            $row->last_error = null;
-            $row->delivered_at = Carbon::now('UTC');
-            $row->save();
+    private function recordSuccess(AgentApiCallback $row, Task $task, int $statusCode): void
+    {
+        $row->delivered_status = $row->pending_status;
+        $this->armOrDisarm($row, (string) $task->status);
+        $row->attempts = (int) $row->attempts + 1;
+        $row->last_status_code = $statusCode;
+        $row->last_error = null;
+        $row->delivered_at = Carbon::now('UTC');
+        $row->save();
 
-            $this->logger->info('Agent API callback delivered', [
-                'callback_id' => $row->id,
-                'chat_id' => $row->chat_id,
-                'status' => $row->pending_status,
-                'http_status' => $statusCode,
-            ]);
-
-            return true;
-        }
-
-        // Symfony defers the transport error to a body read; a 4xx/5xx only
-        // surfaces here, so drain the body before logging to release the
-        // connection.
-        $detail = $this->bodyError($response);
-
-        $this->recordFailure($row, $statusCode, $detail);
-
-        return false;
+        $this->logger->info('Agent API callback delivered', [
+            'callback_id' => $row->id,
+            'chat_id' => $row->chat_id,
+            'status' => $row->pending_status,
+            'http_status' => $statusCode,
+        ]);
     }
 
     private function recordFailure(AgentApiCallback $row, ?int $statusCode, string $error): void

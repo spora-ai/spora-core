@@ -59,25 +59,14 @@ final class AgentApiMediaController
     #[OA\Response(response: 415, description: 'The file type is not in the agent\'s allowlist.')]
     public function store(Request $request): JsonResponse
     {
+        $bytes = $this->readUpload($request);
 
-        $file = $request->files->get('file');
-
-        if (!$file instanceof UploadedFile) {
-            return $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST);
-        }
-
-        if (!$file->isValid()) {
-            return $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST);
-        }
-
-        $bytes = file_get_contents($file->getPathname());
-
-        if ($bytes === false) {
-            return $this->error('READ_FAILED', 'Could not read uploaded file.', Response::HTTP_INTERNAL_SERVER_ERROR);
+        if ($bytes instanceof JsonResponse) {
+            return $bytes;
         }
 
         $context = AgentApiContext::fromRequest($request);
-        $mediaId = $this->ingest->ingestBytes($context, $bytes, $this->safeName($file));
+        $mediaId = $this->ingest->ingestBytes($context, $bytes['bytes'], $bytes['name']);
 
         if ($mediaId === null) {
             return $this->error(
@@ -137,4 +126,29 @@ final class AgentApiMediaController
         return $name === '' ? 'upload' : $name;
     }
 
+    /**
+     * @return JsonResponse|array{bytes: string, name: string}
+     */
+    private function readUpload(Request $request): JsonResponse|array
+    {
+        $file = $request->files->get('file');
+
+        $failure = match (true) {
+            !$file instanceof UploadedFile
+                => $this->error('BAD_REQUEST', 'No file uploaded under the "file" field.', Response::HTTP_BAD_REQUEST),
+            !$file->isValid()
+                => $this->error('BAD_REQUEST', 'Upload failed: ' . $file->getErrorMessage(), Response::HTTP_BAD_REQUEST),
+            default => null,
+        };
+
+        if ($failure !== null) {
+            return $failure;
+        }
+
+        $bytes = file_get_contents($file->getPathname());
+
+        return $bytes === false
+            ? $this->error('READ_FAILED', 'Could not read uploaded file.', Response::HTTP_INTERNAL_SERVER_ERROR)
+            : ['bytes' => $bytes, 'name' => $this->safeName($file)];
+    }
 }

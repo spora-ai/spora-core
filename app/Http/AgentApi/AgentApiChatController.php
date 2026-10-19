@@ -98,24 +98,58 @@ final class AgentApiChatController
     #[OA\Response(response: 422, description: 'The request body was not usable.')]
     public function store(Request $request): JsonResponse
     {
-
         $context = AgentApiContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
-        if ($body instanceof JsonResponse) {
-            return $body;
+        // `prepareStart` answers the error, so both rejections leave by the
+        // same door and the happy path below reads as the path.
+        $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($body, $context);
+
+        if ($prepared instanceof JsonResponse) {
+            return $prepared;
         }
 
-        $text = $this->requiredText($body);
+        $task = $this->scope->startChat(
+            $context->ownerUserId,
+            $context->agentId(),
+            $prepared['text'],
+            $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
+            $prepared['mediaIds'],
+        );
 
-        if ($text === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
-        }
+        // Recorded after the chat exists: a failed insert leaves a queued chat
+        // with no callback rather than rolling back work the agent has already
+        // been handed.
+        $this->callbacks->record($context, $task, $prepared['callbackUrl']);
 
-        $callbackUrl = $this->stringField($body, 'callback_url');
+        return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
+    }
 
-        if ($callbackUrl !== null && $this->ssrf->rejectReason($callbackUrl) !== null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'callback_url is not an acceptable https URL.');
+    /**
+     * Everything about a start request that can be refused, plus the values
+     * that survive the check.
+     *
+     * Inline files are ingested here rather than in {@see self::store()} so
+     * that the refusal paths and the ingestion sit in one place — an
+     * attachment is worth as much as the prompt, and a request that fails on
+     * its body should not have written anything first.
+     *
+     * @param array<string, mixed> $body
+     * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>}
+     */
+    private function prepareStart(array $body, AgentApiContext $context): JsonResponse|array
+    {
+        $problem = match (true) {
+            $this->requiredText($body) === null => 'text is required.',
+            $this->stringField($body, 'callback_url') !== null
+                && $this->ssrf->rejectReason((string) $this->stringField($body, 'callback_url')) !== null
+                => 'callback_url is not an acceptable https URL.',
+            isset($body['files']) && !is_array($body['files']) => 'files must be an array.',
+            default => null,
+        };
+
+        if ($problem !== null) {
+            return $this->unprocessable('VALIDATION_ERROR', $problem);
         }
 
         $mediaIds = $this->readableMediaIds($body, $context);
@@ -124,32 +158,17 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
         }
 
-        $files = $body['files'] ?? null;
+        $callbackUrl = $this->stringField($body, 'callback_url');
 
-        if ($files !== null && !is_array($files)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'files must be an array.');
+        foreach ($this->ingest->ingestInlineFiles($context, array_values($body['files'] ?? [])) as $id) {
+            $mediaIds[] = $id;
         }
 
-        if (is_array($files)) {
-            foreach ($this->ingest->ingestInlineFiles($context, array_values($files)) as $id) {
-                $mediaIds[] = $id;
-            }
-        }
-
-        $task = $this->scope->startChat(
-            $context->ownerUserId,
-            $context->agentId(),
-            $text,
-            $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
-            $mediaIds,
-        );
-
-        // Recorded after the chat exists: a failed insert leaves a queued chat
-        // with no callback rather than rolling back work the agent has already
-        // been handed.
-        $this->callbacks->record($context, $task, $callbackUrl);
-
-        return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
+        return [
+            'text' => (string) $this->requiredText($body),
+            'callbackUrl' => $callbackUrl,
+            'mediaIds' => $mediaIds,
+        ];
     }
 
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/status', summary: 'Status and final answer', tags: ['Agent-api'])]
@@ -227,14 +246,37 @@ final class AgentApiChatController
     #[OA\Response(response: 409, description: 'The chat is not in a state that can be continued.')]
     public function continueChat(Request $request, int $chatId): JsonResponse
     {
-
         $context = AgentApiContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
-        if ($body instanceof JsonResponse) {
-            return $body;
+        $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($body, $context);
+
+        if ($prepared instanceof JsonResponse) {
+            return $prepared;
         }
 
+        try {
+            $task = $this->scope->continueChat(
+                $chatId,
+                $context->agentId(),
+                $context->ownerUserId,
+                $prepared['text'],
+                $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
+                $prepared['mediaIds'],
+            );
+        } catch (InvalidArgumentException $e) {
+            return $this->chatConflict($chatId, $context, $e);
+        }
+
+        return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return JsonResponse|array{text: string, mediaIds: list<string>}
+     */
+    private function prepareContinue(array $body, AgentApiContext $context): JsonResponse|array
+    {
         $text = $this->requiredText($body);
 
         if ($text === null) {
@@ -247,28 +289,23 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
         }
 
-        try {
-            $task = $this->scope->continueChat(
-                $chatId,
-                $context->agentId(),
-                $context->ownerUserId,
-                $text,
-                $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
-                $mediaIds,
-            );
-        } catch (InvalidArgumentException $e) {
-            $status = $this->scope->chatMissing($chatId, $context->agentId())
-                ? Response::HTTP_NOT_FOUND
-                : Response::HTTP_CONFLICT;
+        return ['text' => $text, 'mediaIds' => $mediaIds];
+    }
 
-            return $this->error(
-                $status === 404 ? 'NOT_FOUND' : 'INVALID_STATE',
-                $status === 404 ? AgentApiScope::ERR_NOT_FOUND : $e->getMessage(),
-                $status,
-            );
-        }
+    /**
+     * A chat that is not this agent's is a 404; one that is, but is in a state
+     * it cannot be continued from, is a 409. Both are the same exception, so
+     * the distinction is made here rather than at each call site.
+     */
+    private function chatConflict(int $chatId, AgentApiContext $context, InvalidArgumentException $e): JsonResponse
+    {
+        $missing = $this->scope->chatMissing($chatId, $context->agentId());
 
-        return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
+        return $this->error(
+            $missing ? 'NOT_FOUND' : 'INVALID_STATE',
+            $missing ? AgentApiScope::ERR_NOT_FOUND : $e->getMessage(),
+            $missing ? Response::HTTP_NOT_FOUND : Response::HTTP_CONFLICT,
+        );
     }
 
     /**

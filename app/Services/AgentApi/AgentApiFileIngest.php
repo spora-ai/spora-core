@@ -129,16 +129,16 @@ final class AgentApiFileIngest
             ? $this->decodeDataUrl($source)
             : $this->decodeBase64($source);
 
-        if ($decoded === null || $decoded === '') {
-            return null;
-        }
+        return $decoded === null || $decoded === ''
+            ? null
+            : ['bytes' => $decoded, 'filename' => $this->filenameOf($entry)];
+    }
 
+    private function filenameOf(array $entry): ?string
+    {
         $filename = $entry['filename'] ?? null;
 
-        return [
-            'bytes' => $decoded,
-            'filename' => is_string($filename) && $filename !== '' ? $filename : null,
-        ];
+        return is_string($filename) && $filename !== '' ? $filename : null;
     }
 
     private function decodeDataUrl(string $dataUrl): ?string
@@ -153,15 +153,27 @@ final class AgentApiFileIngest
             return null;
         }
 
-        $meta = substr($dataUrl, 5, $comma - 5);
+        $payload = $this->payloadOfDataUrl($dataUrl, $comma);
 
-        if (!str_contains($meta, ';base64')) {
+        return $payload === null ? null : $this->acceptBytes($payload);
+    }
+
+    /**
+     * The base64 body of a `data:…;base64,` URL.
+     *
+     * `false` is what `base64_decode(…, true)` returns for a malformed
+     * payload, and {@see self::acceptBytes()} is what rejects it — so the
+     * false is passed through rather than folded into the null.
+     *
+     * @return string|false|null
+     */
+    private function payloadOfDataUrl(string $dataUrl, int $comma): string|false|null
+    {
+        if (!str_contains(substr($dataUrl, 5, $comma - 5), ';base64')) {
             return null;
         }
 
-        $bytes = base64_decode(substr($dataUrl, $comma + 1), true);
-
-        return $this->acceptBytes($bytes);
+        return base64_decode(substr($dataUrl, $comma + 1), true);
     }
 
     private function decodeBase64(string $raw): ?string

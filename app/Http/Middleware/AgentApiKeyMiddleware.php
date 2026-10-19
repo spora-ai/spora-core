@@ -49,8 +49,12 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
     public function handle(Request $request, Closure $next): Response
     {
         $key = $this->authenticate($request);
+        $agent = $key === null ? null : Agent::find($key->agent_id);
 
-        if ($key === null) {
+        if ($key === null || $agent === null) {
+            // A null agent means the key outlived its agent — it cascades on
+            // deletion, so this is a race rather than a reachable state, but a
+            // half-deleted agent must not authenticate.
             return $this->unauthorized();
         }
 
@@ -59,15 +63,6 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
 
         if (!$this->rateLimiter->attempt($bucket, max(1, $limit), self::RATE_LIMIT_WINDOW_SECONDS)) {
             return $this->rateLimited($this->rateLimiter->retryAfterSeconds($bucket, self::RATE_LIMIT_WINDOW_SECONDS));
-        }
-
-        $agent = Agent::find($key->agent_id);
-
-        if ($agent === null) {
-            // The key cascades on agent deletion, so this is a race rather
-            // than a reachable state — but a half-deleted agent must not
-            // authenticate.
-            return $this->unauthorized();
         }
 
         $request->attributes->set(
@@ -108,11 +103,7 @@ final class AgentApiKeyMiddleware implements MiddlewareInterface
 
         $key = AgentApiKey::find($id);
 
-        if ($key === null) {
-            return null;
-        }
-
-        return $this->issuer->verify($secret, $key)[0] ? $key : null;
+        return $key !== null && $this->issuer->verify($secret, $key)[0] ? $key : null;
     }
 
     /**

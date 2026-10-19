@@ -278,16 +278,15 @@ final class AgentApiScope
                 return true;
             }
 
-            if ($task->parent_task_id === null) {
-                return false;
-            }
+            $seen[$current] = true;
 
-            $current = (int) $task->parent_task_id;
+            // 0 is the end-of-chain sentinel: ids are auto-increment from 1,
+            // so the next `find()` misses and the climb stops.
+            $current = $task->parent_task_id === null ? 0 : (int) $task->parent_task_id;
         }
 
         return false;
     }
-
     /**
      * An upload ingested for a chat carries no `agent_id` and no `task_id`
      * on the media row — the linkage is the `task_history` attachment row —

@@ -260,10 +260,8 @@ final class AgentApiChatProjection
         try {
             $state = AgentState::fromJson($task->pending_state);
         } catch (Throwable) {
-            return [];
-        }
-
-        if ($state->pendingQuestions === []) {
+            // A pending_state this build cannot read is not a reason to fail
+            // the projection — the chat is still reportable without it.
             return [];
         }
 

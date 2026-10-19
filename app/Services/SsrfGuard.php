@@ -63,19 +63,15 @@ final class SsrfGuard
     /** Everything decidable without a host: length, well-formedness, scheme. */
     private function rejectReasonForShape(string $url): ?string
     {
-        if ($url === '' || strlen($url) > 2048) {
-            return 'Callback URL is empty or exceeds 2048 characters.';
-        }
-
-        if (filter_var($url, FILTER_VALIDATE_URL) === false) {
-            return 'Callback URL is not a valid absolute URL.';
-        }
-
-        if (!in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), self::ALLOWED_SCHEMES, true)) {
-            return 'Callback URL must use https.';
-        }
-
-        return null;
+        return match (true) {
+            $url === '' || strlen($url) > 2048
+                => 'Callback URL is empty or exceeds 2048 characters.',
+            filter_var($url, FILTER_VALIDATE_URL) === false
+                => 'Callback URL is not a valid absolute URL.',
+            !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), self::ALLOWED_SCHEMES, true)
+                => 'Callback URL must use https.',
+            default => null,
+        };
     }
 
     private function rejectReasonForHost(string $host): ?string
@@ -86,18 +82,35 @@ final class SsrfGuard
             return 'Callback URL has no host.';
         }
 
+        $literal = $this->rejectReasonForLiteral($host);
+
+        if ($literal !== null) {
+            return $literal;
+        }
+
+        return $this->rejectReasonForResolved($host);
+    }
+
+    /** Everything decidable from the host text itself, without a lookup. */
+    private function rejectReasonForLiteral(string $host): ?string
+    {
         if (in_array($host, self::DENY_HOSTS, true)) {
             return 'Callback URL resolves to a loopback or link-local address.';
         }
 
         $bare = trim($host, '[]');
 
-        if (filter_var($bare, FILTER_VALIDATE_IP) !== false) {
-            return $this->matchesDenyPrefix($bare)
-                ? 'Callback URL resolves to a private or reserved address.'
-                : null;
+        if (filter_var($bare, FILTER_VALIDATE_IP) === false) {
+            return null;
         }
 
+        return $this->matchesDenyPrefix($bare)
+            ? 'Callback URL resolves to a private or reserved address.'
+            : null;
+    }
+
+    private function rejectReasonForResolved(string $host): ?string
+    {
         // Both families. `gethostbynamel()` is A-only, so a name whose sole
         // record is `AAAA ::1` returned `false` and was treated as
         // acceptable — the guard's IPv6 branch was unreachable from this
@@ -150,19 +163,13 @@ final class SsrfGuard
             return false;
         }
 
-        if (strlen($packed) === 16) {
-            // IPv6, by prefix bits rather than by text prefix: unique-local
-            // (fc00::/7) and link-local (fe80::/10) have no leading text
-            // that can be matched safely, so a host written as `0:0:0:0:0:
-            // 0:0:1` or `fd12::1` would otherwise pass. `/7` covers both
-            // 0xFC and 0xFD — testing 0xFC alone misses half the range.
-            $first = ord($packed[0]);
+        return strlen($packed) === 16
+            ? $this->matchesDenyPrefixV6($packed)
+            : $this->matchesDenyPrefixV4($ip);
+    }
 
-            return $first === 0
-                || ($first & 0xFE) === 0xFC                                  // fc00::/7
-                || ($first === 0xFE && (ord($packed[1]) & 0xC0) === 0x80);    // fe80::/10
-        }
-
+    private function matchesDenyPrefixV4(string $ip): bool
+    {
         foreach (self::DENY_IPV4_PREFIXES as $prefix) {
             if (str_starts_with($ip, $prefix)) {
                 return true;
@@ -170,5 +177,21 @@ final class SsrfGuard
         }
 
         return false;
+    }
+
+    /**
+     * IPv6 by prefix bits rather than by text prefix: unique-local
+     * (fc00::/7) and link-local (fe80::/10) have no leading text that can be
+     * matched safely, so a host written as `0:0:0:0:0:0:0:1` or `fd12::1`
+     * would otherwise pass. `/7` covers both 0xFC and 0xFD — testing 0xFC
+     * alone misses half the range.
+     */
+    private function matchesDenyPrefixV6(string $packed): bool
+    {
+        $first = ord($packed[0]);
+
+        return $first === 0
+            || ($first & 0xFE) === 0xFC                                  // fc00::/7
+            || ($first === 0xFE && (ord($packed[1]) & 0xC0) === 0x80);    // fe80::/10
     }
 }

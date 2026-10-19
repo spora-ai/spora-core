@@ -90,21 +90,10 @@ final class AgentApiKeyController
 
         $agentId = (int) $request->attributes->get('agentId', 0);
         $body = $this->safeDecodeJson($request);
+        $name = $body instanceof JsonResponse ? $body : $this->checkedName($body);
 
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $name = $body['name'] ?? null;
-
-        if (!is_string($name) || trim($name) === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
-        }
-
-        $name = trim($name);
-
-        if (mb_strlen($name) > self::MAX_NAME_LENGTH) {
-            return $this->unprocessable('VALIDATION_ERROR', 'name must be 100 characters or fewer.');
+        if ($name instanceof JsonResponse) {
+            return $name;
         }
 
         [$key, $plaintext] = $this->issuer->issue($agentId, $name, $this->authService->currentUserId());
@@ -113,6 +102,25 @@ final class AgentApiKeyController
             ['data' => ['key' => $this->present($key), 'secret' => $plaintext]],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return JsonResponse|string the trimmed name, or the 422 envelope
+     */
+    private function checkedName(array $body): JsonResponse|string
+    {
+        $name = $body['name'] ?? null;
+
+        if (!is_string($name) || trim($name) === '') {
+            return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
+        }
+
+        $name = trim($name);
+
+        return mb_strlen($name) > self::MAX_NAME_LENGTH
+            ? $this->unprocessable('VALIDATION_ERROR', 'name must be 100 characters or fewer.')
+            : $name;
     }
 
     #[OA\Delete(
@@ -179,18 +187,14 @@ final class AgentApiKeyController
             return $this->unauthenticated();
         }
 
-        $agentId = (int) $request->attributes->get('agentId', 0);
-        $agent = Agent::find($agentId);
+        $agent = Agent::find((int) $request->attributes->get('agentId', 0));
 
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
-        }
-
-        if (!$this->canManage($agent, (int) $userId)) {
-            return $this->forbidden('FORBIDDEN', 'You cannot manage API keys for this agent.');
-        }
-
-        return null;
+        return match (true) {
+            $agent === null => $this->notFound('AGENT_NOT_FOUND', 'Agent not found.'),
+            !$this->canManage($agent, (int) $userId)
+                => $this->forbidden('FORBIDDEN', 'You cannot manage API keys for this agent.'),
+            default => null,
+        };
     }
 
     private function canManage(Agent $agent, int $userId): bool
