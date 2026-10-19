@@ -10,8 +10,8 @@ use Illuminate\Database\Schema\Blueprint;
  * Agent API callback outbox — one row per chat started with a
  * `callback_url`, holding the status the caller is still owed.
  *
- * Spora has no task-lifecycle event: the ~18 places that write a terminal
- * status are scattered with no chokepoint, and `BootingEvent` never fires
+ * Spora has no task-lifecycle event: the places that write a terminal status
+ * are scattered with no chokepoint, and `BootingEvent` never fires
  * in `worker:run`. Rather than add one, the row is inserted when the chat
  * is created — while the task is still `QUEUED` — and the worker sweep
  * delivers it once the task settles. That keeps the delivery trigger on
@@ -38,10 +38,15 @@ return new class extends Migration
             $table->unsignedBigInteger('chat_id')->unique();
             $table->string('key_id', 32);
             $table->unsignedBigInteger('agent_id');
+            // 2048 matches the ceiling `SsrfGuard` refuses a `callback_url` above.
             $table->string('url', 2048);
             $table->string('pending_status', 30)->nullable();
             $table->string('delivered_status', 30)->nullable();
             $table->unsignedTinyInteger('attempts')->default(0);
+            // NULL means "not owed right now": disarmed after a terminal
+            // delivery, or dead-lettered after MAX_ATTEMPTS. The sweep selects
+            // `next_attempt_at IS NOT NULL AND <= now`, so a NULL row is never
+            // read again — and the recorder arms it, never leaves it NULL.
             $table->dateTime('next_attempt_at')->nullable();
             $table->unsignedSmallInteger('last_status_code')->nullable();
             $table->string('last_error', 500)->nullable();

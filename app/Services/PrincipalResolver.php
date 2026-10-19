@@ -251,12 +251,13 @@ final class PrincipalResolver
     }
 
     /**
-     * Whether the user may configure a principal's resources — the gate on
-     * editing an agent, a tool binding, or an API key.
+     * Whether the user may manage a principal — currently the gate on minting
+     * an agent API key.
      *
-     * Mirrors `GroupAuthorizationTrait::callerCanManageGroup()` so the group
-     * rule has one definition: a user principal is manageable by its owner,
-     * a group principal by its owner and admins. Global admins bypass at the
+     * A user principal is manageable by its owner, a group principal by its
+     * owner and group admins. The group branch is deliberately the same rule
+     * as `GroupAuthorizationTrait::callerCanManageGroup()`, which still keeps
+     * its own copy; the two must move together. Global admins bypass at the
      * call site, not here.
      */
     public function canManagePrincipal(int $principalId, int $userId): bool

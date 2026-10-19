@@ -20,6 +20,10 @@ use Spora\Models\Task;
  */
 final class AgentApiCallbackRecorder
 {
+    /**
+     * Record the callback this chat owes, while it is still `QUEUED`. Returns
+     * null — and writes nothing — when no `callback_url` was supplied.
+     */
     public function record(AgentApiContext $context, Task $task, ?string $callbackUrl): ?AgentApiCallback
     {
         if ($callbackUrl === null || $callbackUrl === '') {

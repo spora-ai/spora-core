@@ -27,12 +27,8 @@ use Symfony\Component\HttpFoundation\Response;
  * session fallback: a bearer key is the only credential this surface accepts,
  * so holding a browser cookie cannot widen a key's reach.
  *
- * The feature gate lives in `AgentApiRouteDefinitions`, not here: the
- * routes are simply not registered when `SPORA_AGENT_API` is off or the
- * instance runs client-worker mode, so an instance without the feature
- * answers 404 from the router and the surface stays unenumerable. `SPORA_AGENT_API`
- * is database-backed and `Kernel::handle()` applies the settings overlay
- * before `buildRouter()`, so flipping it needs no restart.
+ * The feature gate is `AgentApiRouteDefinitions`; see there for why a disabled
+ * instance answers 404 from the router rather than 403.
  */
 #[OA\Tag(name: 'Agent-api', description: 'Per-agent API for external tools')]
 final class AgentApiChatController
@@ -104,7 +100,7 @@ final class AgentApiChatController
     {
 
         $context = AgentApiContext::fromRequest($request);
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;
@@ -233,7 +229,7 @@ final class AgentApiChatController
     {
 
         $context = AgentApiContext::fromRequest($request);
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;

@@ -26,8 +26,9 @@ use Symfony\Component\HttpFoundation\Response;
  * endpoint that can return it again, and the row stores only a SHA-256
  * digest, so a lost key is replaced rather than recovered.
  *
- * A caller needs the manage role on the agent's principal — the same gate as
- * editing the agent itself. Anyone who can see the agent may not mint a
+ * A caller needs the manage role on the agent's principal, which is
+ * *narrower* than editing the agent: `PATCH /agents/{id}` is gated on
+ * visibility, so a plain group member can edit the agent but may not mint a
  * credential that drives it.
  */
 #[OA\Tag(name: 'Agents', description: 'Agent administration')]
@@ -88,7 +89,7 @@ final class AgentApiKeyController
         }
 
         $agentId = (int) $request->attributes->get('agentId', 0);
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;
@@ -166,8 +167,8 @@ final class AgentApiKeyController
     /**
      * Authenticate, then require the manage role on the agent's principal.
      *
-     * A caller who can see an agent but not manage it is told 403, which is
-     * the same answer editing the agent would give — the agent itself is not
+     * A caller who can see an agent but not manage it is told 403, where
+     * editing the agent would have succeeded — the agent itself is not
      * hidden from them.
      */
     private function guard(Request $request): ?JsonResponse

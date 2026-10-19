@@ -49,7 +49,7 @@ Callback latency therefore depends on your worker:
 
 The 5s floor is deliberate. A callback row is armed when the chat is created and re-checked
 until the chat settles; deferring that re-check is what stops a long-running chat from occupying
-the sweep's batch — see {@see \Spora\Services\AgentApi\AgentApiCallbackDispatcher} — but it also
+the sweep's batch — see `app/Services/AgentApi/AgentApiCallbackDispatcher.php` — but it also
 means a chat that settles just after a check waits out the remainder of the interval.
 
 A worker that is *configured* but not *alive* leaves chats `QUEUED` and
@@ -84,6 +84,8 @@ recipe, and the exact set of statuses that trigger a delivery.
 - [`docs/04_api.md`](04_api.md#agent-api) — every endpoint, with its
   exhaustive error list.
 - `GET /api/v1/config` — the `agent_api_enabled` flag the admin SPA reads
-  to decide whether to show the agent's API keys tab.
+  to decide whether to show the API keys section in the agent's Settings.
+  The section itself renders either way, so keys stay revocable when the
+  feature is off; the flag only governs whether the nav pill points at it.
 - [`app/Core/AgentApiRouteDefinitions.php`](../app/Core/AgentApiRouteDefinitions.php) —
   where the routes are mounted and where the feature gate lives.

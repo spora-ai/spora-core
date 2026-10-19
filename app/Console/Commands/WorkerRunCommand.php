@@ -68,9 +68,9 @@ final class WorkerRunCommand extends Command
     ) {
         $this->reaper = $container->get(WorkerReaper::class);
         // Resolved from the container rather than injected, for the same
-        // reason the reaper is: the command's constructor is positional and
-        // eight arguments deep already. Optional, because a test container
-        // that does not know the class must still be able to build this.
+        // reason the reaper is: the command's constructor is already long and
+        // positional. Optional, because a test container that does not know
+        // the class must still be able to build this.
         $this->callbackDispatcher = $container->has(AgentApiCallbackDispatcher::class)
             ? $container->get(AgentApiCallbackDispatcher::class)
             : null;

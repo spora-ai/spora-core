@@ -208,11 +208,6 @@ final class AgentApiTestSupport
     }
 
     /**
-     * Make a callback row's backoff elapsed, the way the worker loop would
-     * eventually see it. There is no clock double in the suite, so this is the
-     * same fast-into-the-past UPDATE the retry tests use.
-     */
-    /**
      * Skip a retry backoff by making a deferred row due now.
      *
      * Only for rows the dispatcher has already deferred after a failed

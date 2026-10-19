@@ -61,10 +61,9 @@ use Spora\OpenApi\RouteSpecCollector;
  *   POST   /api/v1/agents/{agentId}/api-keys      — returns the plaintext key once
  *   DELETE /api/v1/agents/{agentId}/api-keys/{keyId}
  *
- * FastRoute matches in registration order, so every literal segment below is
- * registered before the `{chatId}` catch-alls that would otherwise swallow
- * it — `status`, `messages`, `transcript`, `approve`, `reject` and `answer`
- * are all literals.
+ * No route here is a `{chatId}` catch-all: every chat path ends in a
+ * distinct literal, so FastRoute — which hash-matches static routes ahead
+ * of variable ones — cannot read `status` as a `{chatId}`.
  */
 final class AgentApiRouteDefinitions
 {

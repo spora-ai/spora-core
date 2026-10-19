@@ -271,9 +271,12 @@ final class AgentApiChatProjection
     }
 
     /**
-     * Whether a chat has settled: terminal, or parked on something only
-     * the caller can clear. Drives both the callback trigger and the
-     * `blocked` payload, so the two cannot disagree.
+     * Whether a chat has settled: terminal, aborted, or parked on something
+     * only the caller can clear.
+     *
+     * The blocked-status half and {@see self::blocked()} read
+     * `BLOCKED_STATUSES` separately, so a status added to one and not the
+     * other is the drift to watch for.
      */
     public function hasSettled(Task $task): bool
     {

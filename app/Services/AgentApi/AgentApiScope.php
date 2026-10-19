@@ -50,7 +50,11 @@ final class AgentApiScope
     ) {}
 
     /**
-     * The `taskDetailResource` payload the transcript endpoint returns.
+     * The transcript payload: the `taskDetailResource` shape minus the retry
+     * and abort bookkeeping, with nulls where that resource omits a key.
+     * Kept separate rather than delegating, because this surface has no retry
+     * policy to report — and because it carries `pending_questions`, which is
+     * what a parked chat's questions arrive on.
      *
      * Throws rather than returning null when the chat is not this agent's —
      * every caller needs a 404 for that and only for that, and a nullable
@@ -82,6 +86,12 @@ final class AgentApiScope
         ];
     }
 
+    /**
+     * The chat, when it belongs to `$agentId`.
+     *
+     * @throws InvalidArgumentException when it does not — callers tell that
+     *     apart from a wrong-state 409 with {@see self::chatMissing()}.
+     */
     public function requireTask(int $chatId, int $agentId): Task
     {
         $task = Task::where('id', $chatId)->where('agent_id', $agentId)->first();
@@ -132,6 +142,10 @@ final class AgentApiScope
         return $query->get()->all();
     }
 
+    /**
+     * @param list<string> $mediaIds ids already checked by
+     *   {@see \Spora\Http\AgentApi\AgentApiChatController::readableMediaIds()}
+     */
     public function startChat(
         int $ownerUserId,
         int $agentId,
@@ -152,6 +166,10 @@ final class AgentApiScope
             ?? throw new InvalidArgumentException(self::ERR_NOT_FOUND);
     }
 
+    /**
+     * @param list<string> $mediaIds ids already checked by
+     *   {@see \Spora\Http\AgentApi\AgentApiChatController::readableMediaIds()}
+     */
     public function continueChat(
         int $chatId,
         int $agentId,

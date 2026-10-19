@@ -54,8 +54,7 @@ function bootAuthLayer(string $appUrl = '', string $appPrefix = '/spora'): Spora
  * Create a JSON Request with an optional body array.
  *
  * `$headers` exists for surfaces that authenticate with something other
- * than the session — the Agent API's bearer key, for instance, which cannot
- * be set after construction because the middleware reads it.
+ * than the session — the Agent API's bearer key, for instance.
  *
  * @param array<string, string> $headers
  */

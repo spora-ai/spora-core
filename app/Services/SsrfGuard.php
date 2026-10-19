@@ -29,8 +29,13 @@ final class SsrfGuard
     private const ALLOWED_SCHEMES = ['https'];
 
     /**
-     * RFC1918, loopback, link-local and carrier-grade NAT ranges, as
-     * leading prefixes of a resolved IPv4 address.
+     * Reserved IPv4 space as leading text prefixes: RFC1918, loopback,
+     * link-local, carrier-grade NAT, `192.0.0.0/24`, benchmarking
+     * (`198.18.0.0/15`), multicast and `240.0.0.0/4`.
+     *
+     * Not exhaustive — the broadcast address is not covered, and matching on
+     * text rather than on packed bits means an address written in an unusual
+     * numeric form is caught by `inet_pton()` failing to parse it, not here.
      */
     private const DENY_IPV4_PREFIXES = [
         '0.', '10.', '100.64.', '127.', '169.254.', '172.16.', '172.17.', '172.18.',

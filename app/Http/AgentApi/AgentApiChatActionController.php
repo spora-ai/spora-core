@@ -47,7 +47,7 @@ final class AgentApiChatActionController
     public function approve(Request $request, int $chatId): JsonResponse
     {
 
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;
@@ -78,7 +78,7 @@ final class AgentApiChatActionController
     public function reject(Request $request, int $chatId): JsonResponse
     {
 
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;
@@ -113,7 +113,7 @@ final class AgentApiChatActionController
     public function answer(Request $request, int $chatId): JsonResponse
     {
 
-        $body = $this->jsonBody($request);
+        $body = $this->safeDecodeJson($request);
 
         if ($body instanceof JsonResponse) {
             return $body;

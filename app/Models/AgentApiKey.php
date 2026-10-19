@@ -48,8 +48,8 @@ final class AgentApiKey extends Model
     ];
 
     /**
-     * `incrementing` and `$keyType` stay at Eloquent's defaults: the id
-     * is supplied by {@see \Spora\Auth\AgentApiKeyIssuer}, not the DB.
+     * Both are non-defaults for the same reason: the id is supplied by
+     * {@see \Spora\Auth\AgentApiKeyIssuer}, not the DB.
      */
     public $incrementing = false;
 

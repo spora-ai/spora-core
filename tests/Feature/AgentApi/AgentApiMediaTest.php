@@ -255,8 +255,9 @@ describe('Agent API media', function (): void {
         $container = mediaContainer();
         $ingest = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class);
 
-        // 16 MiB is the ceiling; past it the base64 payload is rejected
-        // before it can be materialised.
+        // 16 MiB is the ceiling on what is persisted. The bytes are decoded in
+        // full before the check, so this is not a memory bound — `post_max_size`
+        // is.
         $oversized = 'data:image/png;base64,' . base64_encode(str_repeat('a', 17 * 1024 * 1024));
 
         expect($ingest->ingestInlineFiles($context, [['filename' => 'big.bin', 'data_url' => $oversized]]))->toBe([]);

@@ -156,7 +156,7 @@ final class SettingDeclarations
                 section: 'access',
                 description: 'Mounts a per-agent HTTP API so external tools can start and continue chats with that agent. '
                     . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
-                    . 'Each agent has its own API keys, managed under the agent\'s API keys tab.',
+                    . 'Each agent has its own API keys, under the agent\'s Settings → API keys.',
             ),
             new SettingDefinition(
                 key: 'SPORA_AGENT_API_RATE_LIMIT_MAX',

@@ -90,6 +90,9 @@ final class AssetStreamer
             'Content-Disposition',
             sprintf('%s; filename="%s"', $disposition, $name === '' ? 'download' : addcslashes($name, '"\\')),
         );
+        // `nosniff` because this route can serve `inline`: without it the
+        // browser may re-type the bytes, and an inline response is rendered
+        // in the Spora origin.
         $response->headers->set('X-Content-Type-Options', 'nosniff');
     }
 }

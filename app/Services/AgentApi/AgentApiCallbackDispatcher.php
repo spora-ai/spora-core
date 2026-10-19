@@ -15,8 +15,8 @@ use Throwable;
 /**
  * Delivers Agent API callbacks from the worker loop.
  *
- * Spora has no task-lifecycle event — the terminal-status writes are
- * scattered across ~18 call sites with no chokepoint, and `BootingEvent`
+ * Spora has no task-lifecycle event — terminal statuses are written across
+ * the orchestrator and the worker with no chokepoint, and `BootingEvent`
  * never fires in `worker:run` — so delivery is driven from here instead:
  * the sweep looks for rows that still owe a status and posts it. Because
  * the row was created when the chat was, a crash between settle and

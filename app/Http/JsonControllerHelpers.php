@@ -96,18 +96,6 @@ trait JsonControllerHelpers
     }
 
     /**
-     * The decoded body, or an `INVALID_JSON` response when the body is not
-     * JSON. Returns `array<empty,array>` for an empty body, which every
-     * caller treats as "no fields supplied" rather than an error.
-     *
-     * @return array<string, mixed>|JsonResponse
-     */
-    private function jsonBody(Request $request): array|JsonResponse
-    {
-        return $this->safeDecodeJson($request);
-    }
-
-    /**
      * A query parameter as a trimmed string, or null when absent or blank.
      */
     private function queryString(Request $request, string $name): ?string
