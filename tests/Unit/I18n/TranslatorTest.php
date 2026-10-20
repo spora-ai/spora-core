@@ -33,6 +33,80 @@ test('an unknown locale renders English rather than an empty string', function (
         ->and($translator->getLocale())->toBe('xx');
 });
 
+/**
+ * A tool's `describeAction()` interpolates its arguments itself, so what
+ * reaches the lookup is the result, while the catalogue key is the template
+ * it came from. These cover the matching that bridges the two.
+ */
+describe('template matching', function (): void {
+    test('a rendered string is translated through the template it came from', function (): void {
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ["Create email folder '%s'" => "E-Mail-Ordner '%s' erstellen"],
+        ], 'template-hit')));
+        $translator->useLocale('de');
+
+        expect($translator->trans("Create email folder 'Archive'"))->toBe("E-Mail-Ordner 'Archive' erstellen");
+    });
+
+    test('a template with several placeholders substitutes every one of them', function (): void {
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ["Mark todo '%s' as %s." => "Todo '%s' als %s markieren."],
+        ], 'template-many')));
+        $translator->useLocale('de');
+
+        expect($translator->trans("Mark todo 'Buy milk' as done."))->toBe("Todo 'Buy milk' als done markieren.");
+    });
+
+    test('an exact catalogue entry still wins over a template', function (): void {
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['Save %s' => 'Speichern %s', 'Save now' => 'Jetzt speichern'],
+        ], 'template-exact')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('Save now'))->toBe('Jetzt speichern');
+    });
+
+    test('a rendered string matching no template is left alone', function (): void {
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ["Create email folder '%s'" => "E-Mail-Ordner '%s' erstellen"],
+        ], 'template-miss')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('Something else entirely'))->toBe('Something else entirely');
+    });
+
+    test('two templates matching equally well are not used', function (): void {
+        // A guess here would put the wrong sentence in front of an operator
+        // approving a tool call, so neither is used.
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['Item %s' => 'Element %s', 'Item %d' => 'Element %d'],
+        ], 'template-ambiguous')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('Item 7'))->toBe('Item 7');
+    });
+
+    test('the more specific template wins when both match', function (): void {
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['Item %s' => 'Element %s', 'Item %s of the list' => 'Element %s der Liste'],
+        ], 'template-specific')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('Item 7 of the list'))->toBe('Element 7 der Liste');
+    });
+
+    test('a template with an unknown percent sign is not matched', function (): void {
+        // A `%` that is not a known placeholder means the shape of the
+        // string is unknown, and guessing at it could mistranslate.
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['100% of %s' => '100 % von %s'],
+        ], 'template-percent')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('100% of the list'))->toBe('100% of the list');
+    });
+});
+
 test('the locale starts at English and follows useLocale()', function (): void {
     $translator = new Translator(new CatalogLoader([], makeLocaleDir([], 'default-locale')));
 

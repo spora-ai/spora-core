@@ -73,6 +73,26 @@ final class CatalogHarvester
     ];
 
     /**
+     * The method whose return value is the operator's approval prompt.
+     *
+     * `describeAction()` returns operator-facing copy: it is written to
+     * `tool_calls.human_description` and shipped to the frontend, and the
+     * model-facing history never reads it. So it translates — but the
+     * *stored* value stays English and the translation happens at
+     * serialization, in `ToolCallSerializer`.
+     */
+    private const OPERATOR_DESCRIPTION_METHOD = 'describeAction';
+
+    /**
+     * Directories whose `describeAction()` copy is operator-facing.
+     *
+     * `app/Tools` is where core's own tools live. A plugin's copy is
+     * harvested by the plugin's own extractor, and core reaches it through
+     * the catalogue scope chain.
+     */
+    private const OPERATOR_DESCRIPTION_DIRECTORIES = ['Tools'];
+
+    /**
      * Messages that are not operator-facing even though they are thrown.
      *
      * A hand-kept list is what this design refuses elsewhere, and rightly —
@@ -109,6 +129,7 @@ final class CatalogHarvester
         $this->harvestPluginManifests();
         $this->harvestErrorMessages();
         $this->harvestThrownMessages();
+        $this->harvestOperatorDescriptions();
 
         return $this->messages;
     }
@@ -389,6 +410,252 @@ final class CatalogHarvester
                     if (in_array($message, self::NOT_OPERATOR_FACING, true)) {
                         continue;
                     }
+                    $this->add($message, $this->relative($file) . ':' . $line);
+                }
+            }
+        }
+    }
+
+    /**
+     * The operator-facing copy a `describeAction()` implementation returns.
+     *
+     * Found by reading the method body and taking the literals that are
+     * *values* rather than keys:
+     *
+     *   - `match` arms: the value, not the arm's condition
+     *   - `sprintf('format %s', …)`: the format string, placeholders intact
+     *   - a plain `return 'text';`
+     *
+     * The method's own name, the operation names it switches on, and the
+     * fragments of interpolated values are not copy and are skipped.
+     *
+     * @return array<int, string> line => message
+     */
+    private function operatorDescriptionLiteralsIn(string $source): array
+    {
+        $tokens = token_get_all($source);
+        $found = [];
+
+        for ($i = 0, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token) || $token[0] !== T_FUNCTION) {
+                continue;
+            }
+
+            $name = $this->methodNameAfter($tokens, $i);
+            if ($name !== self::OPERATOR_DESCRIPTION_METHOD) {
+                continue;
+            }
+
+            $body = $this->methodBody($tokens, $i);
+            if ($body === null) {
+                continue;
+            }
+
+            $slice = array_slice($tokens, $body[0], $body[1] - $body[0] + 1);
+            foreach ($this->copyLiteralsIn($slice) as $line => $message) {
+                $found[$line] = $message;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The name of the method whose `function` keyword is at `$index`.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     */
+    private function methodNameAfter(array $tokens, int $index): ?string
+    {
+        for ($i = $index + 1, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token)) {
+                continue;
+            }
+            if ($token[0] === T_WHITESPACE || $token[0] === T_COMMENT || $token[0] === T_DOC_COMMENT) {
+                continue;
+            }
+            if ($token[0] === T_STRING) {
+                return $token[1];
+            }
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * The token range of a method body, from its opening brace.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     * @return array{0: int, 1: int}|null start and end index
+     */
+    private function methodBody(array $tokens, int $index): ?array
+    {
+        $depth = 0;
+        $start = null;
+
+        for ($i = $index + 1, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            $character = is_array($token) ? null : $token;
+
+            if ($character === '{') {
+                if ($start === null) {
+                    $start = $i;
+                }
+                $depth++;
+                continue;
+            }
+            if ($character === '}') {
+                $depth--;
+                if ($depth === 0 && $start !== null) {
+                    return [$start, $i];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The copy literals inside a token range.
+     *
+     * A literal is copy when it is the value of a `match` arm, the format
+     * string of a `sprintf`, or the whole of a `return`. A literal that is
+     * a `match` arm's *condition* is an operation name, not copy.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     * @return array<int, string> line => message
+     */
+    private function copyLiteralsIn(array $tokens): array
+    {
+        $found = [];
+        $count = count($tokens);
+
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token)) {
+                continue;
+            }
+
+            // `sprintf('format', …)`
+            if ($token[0] === T_STRING && strtolower($token[1]) === 'sprintf') {
+                $literal = $this->sprintfFormat($tokens, $i);
+                if ($literal !== null) {
+                    $found[$literal[2]] = $this->decode($literal[1]);
+                }
+                continue;
+            }
+
+            if ($token[0] !== T_CONSTANT_ENCAPSED_STRING) {
+                continue;
+            }
+
+            $decoded = $this->decode($token[1]);
+
+            // A concatenation — `'Format epoch ' . $x . ' as datetime'` —
+            // has no whole message to key on. Its first fragment is not
+            // copy on its own, so it is not harvested.
+            if ($this->isFollowedByConcatenation($tokens, $i)) {
+                continue;
+            }
+
+            // A `match` arm: `'condition' => 'copy'`. The condition is the
+            // arm's key and is not copy; the value is.
+            if ($this->isMatchArmValue($tokens, $i)) {
+                $found[$token[2]] = $decoded;
+                continue;
+            }
+
+            // A whole `return 'copy';`
+            if ($this->isReturnValue($tokens, $i)) {
+                $found[$token[2]] = $decoded;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Whether the literal at `$index` is the first part of a concatenation.
+     *
+     * `'Format epoch ' . $x . ' as datetime'` — the first fragment is not
+     * a message on its own, so it is not harvested.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     */
+    private function isFollowedByConcatenation(array $tokens, int $index): bool
+    {
+        for ($i = $index + 1, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+            return $token === '.';
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether the literal at `$index` is the *value* of a `match` arm.
+     *
+     * In `'condition' => 'copy'` the copy is the literal **after** the arrow;
+     * the condition is the one before it, and is an operation name rather
+     * than copy. So the test looks backwards for the arrow.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     */
+    private function isMatchArmValue(array $tokens, int $index): bool
+    {
+        for ($i = $index - 1; $i >= 0; $i--) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+            return is_array($token) && $token[0] === T_DOUBLE_ARROW;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     */
+    private function isReturnValue(array $tokens, int $index): bool
+    {
+        // Walk back over whitespace to the `return` keyword.
+        for ($i = $index - 1; $i >= 0; $i--) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+            return is_array($token) && $token[0] === T_RETURN;
+        }
+
+        return false;
+    }
+
+    private function harvestOperatorDescriptions(): void
+    {
+        foreach (self::OPERATOR_DESCRIPTION_DIRECTORIES as $directory) {
+            $path = $this->appDir() . '/' . $directory;
+            if (!is_dir($path)) {
+                continue;
+            }
+
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            );
+
+            foreach ($iterator as $entry) {
+                $file = $entry->getPathname();
+                if (!str_ends_with($file, '.php')) {
+                    continue;
+                }
+
+                foreach ($this->operatorDescriptionLiteralsIn((string) file_get_contents($file)) as $line => $message) {
                     $this->add($message, $this->relative($file) . ':' . $line);
                 }
             }
