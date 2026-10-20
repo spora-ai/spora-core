@@ -40,7 +40,6 @@
         "symfony/http-foundation": "^8.0",
         "symfony/mailer": "^8.0",
         "symfony/process": "^8.0",
-        "symfony/translation": "^8.1",
         "symfony/yaml": "^8.0",
         "vlucas/phpdotenv": "^5.6"
     },

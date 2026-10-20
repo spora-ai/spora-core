@@ -102,3 +102,16 @@ it('rejects a malformed body without writing anything', function (): void {
     expect($response->getStatusCode())->toBe(400)
         ->and(User::find($user->id)?->locale)->toBeNull();
 });
+
+it('rejects a body that is not an object', function (): void {
+    $user = localeUser('notobject@example.com');
+    $this->auth->login($user->email, 'Password1!');
+
+    // The bare string `"de"` decodes to a string, not to a request. Reading
+    // a locale out of it would store "auto" and answer 200 for a request
+    // that never carried one.
+    $response = $this->controller->update(new Request([], [], [], [], [], [], '"de"'));
+
+    expect($response->getStatusCode())->toBe(400)
+        ->and(User::find($user->id)?->locale)->toBeNull();
+});
