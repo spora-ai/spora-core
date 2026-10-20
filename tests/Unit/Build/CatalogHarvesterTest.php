@@ -99,6 +99,48 @@ test('the committed en.json matches the source', function (): void {
     expect($harvested)->toEqual($committed);
 });
 
+test('a message thrown as an exception argument is harvested', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // A service throws with the copy; a controller puts `$e->getMessage()`
+    // into the error envelope, and the router translates what lands there.
+    // The literal sits in `app/Services`, which the envelope harvest never
+    // reads, so only the thrown-message harvest can reach it.
+    expect($harvested)->toHaveKey('Hex payload has odd length.')
+        ->and(implode(' ', $harvested['Hex payload has odd length.']))
+            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:76');
+});
+
+test('a sprintf in an envelope position is harvested by its format string', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // The format string *is* the message: the placeholders stay in the
+    // translation, and the runtime fills them in.
+    expect($harvested)->toHaveKey('MIME type "%s" is not in the upload allowlist.')
+        ->and(implode(' ', $harvested['MIME type "%s" is not in the upload allowlist.']))
+            ->toContain('app/Http/MediaUploadController.php:118');
+});
+
+test('a thrown message built by concatenation is not harvested', function (): void {
+    $harvested = array_keys((new CatalogHarvester(dirname(__DIR__, 3)))->harvest());
+
+    // `'a' . $b` has no whole message to key on — only the part that is
+    // really there would be, and translating that would ship a fragment.
+    expect($harvested)->not->toContain(
+        'No secret key configured. Set SPORA_SECRET_KEY (base64 32 bytes) or SPORA_KEY_PATH, ',
+    );
+});
+
+test('the messages of a tool and of a CLI command are never harvested', function (): void {
+    $harvested = array_keys((new CatalogHarvester(dirname(__DIR__, 3)))->harvest());
+
+    // A tool's failure text becomes `ToolResult` content and is model
+    // input; CLI output is permanently English. Both are messages nobody
+    // outside the agent or the terminal ever reads.
+    expect($harvested)->not->toContain('list_schedules: agent not found.')
+        ->and($harvested)->not->toContain('No Spora plugins installed.');
+});
+
 test('vue-i18n compilation syntax in a message is reported as an error', function (string $message): void {
     expect(I18nCheckCommand::unsafeMessage($message))->toBeTrue();
 })->with([
