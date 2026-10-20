@@ -143,6 +143,31 @@ test('a sprintf in an envelope position is harvested by its format string', func
             ->toContain('app/Http/MediaUploadController.php:118');
 });
 
+test('an approval prompt is harvested as the format string it was built with', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // The approval prompt is what the operator reads before they approve a
+    // tool call, so it has to be in the catalogue. `sprintf` is the shape
+    // the harvest reads: the format string *is* the message, the
+    // placeholder stays in it, and the runtime fills the slot with the
+    // argument the operator sees.
+    expect($harvested)->toHaveKey('List scheduled runs for %s.')
+        ->and($harvested)->toHaveKey('Media get_media(%s)')
+        ->and($harvested)->toHaveKey('Ask the operator %d question');
+});
+
+test('every prompt of a describeAction is harvested, not only the first ones', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // A double-quoted interpolation ends the method body early for the
+    // harvest: the closing brace of `{$var}` is a character token, so the
+    // brace count that ends the body ends it there. Everything behind
+    // that point was invisible — including the prompts that were already
+    // `sprintf`.
+    expect($harvested)->toHaveKey('Trigger scheduled run now (%s, %s).')
+        ->and($harvested)->toHaveKey('Delete scheduled run (%s, %s, destructive).');
+});
+
 test('a thrown message built by concatenation is not harvested', function (): void {
     $harvested = array_keys((new CatalogHarvester(dirname(__DIR__, 3)))->harvest());
 
