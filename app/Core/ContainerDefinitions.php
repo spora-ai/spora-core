@@ -1460,6 +1460,7 @@ final class ContainerDefinitions
                 return new ToolCallSerializer(
                     toolInstances: $c->get('tool_instances'),
                     iconResolver: $c->get(ToolIconResolver::class),
+                    translator: $c->get(Translator::class),
                 );
             },
 

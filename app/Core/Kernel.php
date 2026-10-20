@@ -244,6 +244,9 @@ final class Kernel implements KernelInterface
                 // extend the core routes registered above.
                 $this->pluginLoader->registerRoutes($r);
             },
+            // The router localizes the operator-facing error message, which
+            // is the one place every response passes through.
+            $this->container->get(Translator::class),
         );
     }
 

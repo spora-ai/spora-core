@@ -55,6 +55,37 @@ final class CatalogHarvester
      */
     private const ERROR_MESSAGE_HELPERS = ['error', 'notFound', 'forbidden', 'unprocessable'];
 
+    /**
+     * Directories whose thrown exception messages can reach an operator.
+     *
+     * A service throws an exception with an English message; a controller
+     * catches it and puts `$e->getMessage()` into the error envelope. The
+     * literal therefore lives at the *throw* site, in a directory the
+     * envelope harvest never looks at — so without this the message is
+     * untranslatable and `i18n:check` would fail on it forever.
+     *
+     * `app/Tools` is excluded on purpose: a tool's failure text becomes
+     * `ToolResult` content and is model input. `app/Console` is excluded
+     * because CLI output is permanently English.
+     */
+    private const THROWN_MESSAGE_DIRECTORIES = [
+        'Services', 'Http', 'Core', 'Auth', 'Agents', 'Models', 'Plugins', 'Recipes',
+    ];
+
+    /**
+     * Messages that are not operator-facing even though they are thrown.
+     *
+     * A hand-kept list is what this design refuses elsewhere, and rightly —
+     * but these are exceptions to the rule rather than the rule itself: the
+     * string never reaches an envelope, so translating it would be
+     * translating a message nobody can see.
+     */
+    private const NOT_OPERATOR_FACING = [
+        'Access tool settings via ToolConfigService, not directly.',
+        'BASE_PATH is not defined. Add `define(\'BASE_PATH\', dirname(__FILE__, 2));` to your bin/spora before requiring this script.',
+        'PrincipalService not wired into AgentPrincipalService — cannot transfer.',
+    ];
+
     /** The only setting whose option labels are language names rather than copy. */
     private const LANGUAGE_SETTING = 'SPORA_DEFAULT_LANG';
 
@@ -77,6 +108,7 @@ final class CatalogHarvester
         $this->harvestApps();
         $this->harvestPluginManifests();
         $this->harvestErrorMessages();
+        $this->harvestThrownMessages();
 
         return $this->messages;
     }
@@ -215,7 +247,13 @@ final class CatalogHarvester
             new RecursiveDirectoryIterator($this->appDir(), FilesystemIterator::SKIP_DOTS),
         );
 
-        $files = [$this->basePath . '/app/Core/Kernel.php'];
+        $files = [
+            $this->basePath . '/app/Core/Kernel.php',
+            // The router builds the not-found and method-not-allowed
+            // envelopes itself, so its copy is in the catalogue like any
+            // other operator-facing message.
+            $this->basePath . '/app/Core/Router.php',
+        ];
         foreach ($iterator as $entry) {
             $path = $entry->getPathname();
             if (str_ends_with($path, '.php') && str_contains($path, '/Http/')) {
@@ -229,6 +267,130 @@ final class CatalogHarvester
             }
             foreach ($this->errorMessageLiteralsIn((string) file_get_contents($file)) as $line => $message) {
                 $this->add($message, $this->relative($file) . ':' . $line);
+            }
+        }
+    }
+
+    /**
+     * Messages thrown as exception arguments.
+     *
+     * Found syntactically — `throw new Something('…')` — so the locator is
+     * the real line. The message is operator-facing because the router
+     * localizes whatever ends up in the error envelope, and this literal is
+     * what a controller's `$e->getMessage()` puts there.
+     *
+     * @return array<int, string> line => message
+     */
+    private function thrownMessageLiteralsIn(string $source): array
+    {
+        $tokens = token_get_all($source);
+        $found = [];
+
+        for ($i = 0, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (!is_array($token) || $token[0] !== T_THROW) {
+                continue;
+            }
+
+            // `throw new` — a thrown object is built with `new`, so the
+            // literal follows the class name and its constructor argument.
+            $cursor = $i + 1;
+            while ($cursor < $count && (!is_array($tokens[$cursor]) || $tokens[$cursor][0] !== T_NEW)) {
+                $cursor++;
+            }
+            if ($cursor >= $count) {
+                continue;
+            }
+
+            $argument = $this->firstStringArgument($tokens, $cursor);
+            if ($argument !== null) {
+                $found[$argument[1]] = $argument[0];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The first constructor argument, when it is a single string literal.
+     *
+     * @return array{0: string, 1: int}|null the decoded literal and its line
+     */
+    private function firstStringArgument(array $tokens, int $from): ?array
+    {
+        $insignificant = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
+
+        // Find the opening paren of the constructor call.
+        $cursor = $from;
+        for ($count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (!is_array($token) && $token === '(') {
+                break;
+            }
+        }
+        if ($cursor >= count($tokens)) {
+            return null;
+        }
+
+        // Skip to the first significant token after it.
+        $cursor++;
+        for ($count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && in_array($token[0], $insignificant, true)) {
+                continue;
+            }
+            break;
+        }
+
+        $token = $tokens[$cursor] ?? null;
+        if (!is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING) {
+            return null;
+        }
+
+        // A concatenation (`'a' . $b`) is not a whole message — only a
+        // literal that ends the argument is one.
+        $next = $cursor + 1;
+        for ($count = count($tokens); $next < $count; $next++) {
+            $candidate = $tokens[$next];
+            if (is_array($candidate) && in_array($candidate[0], $insignificant, true)) {
+                continue;
+            }
+            break;
+        }
+        $after = $tokens[$next] ?? null;
+        // `)` and `,` are single-character tokens, not array tokens.
+        $endsArgument = $after === ')' || $after === ',';
+        if (!$endsArgument) {
+            return null;
+        }
+
+        return [$this->decode($token[1]), $token[2]];
+    }
+
+    private function harvestThrownMessages(): void
+    {
+        foreach (self::THROWN_MESSAGE_DIRECTORIES as $directory) {
+            $path = $this->appDir() . '/' . $directory;
+            if (!is_dir($path)) {
+                continue;
+            }
+
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            );
+
+            foreach ($iterator as $entry) {
+                $file = $entry->getPathname();
+                if (!str_ends_with($file, '.php')) {
+                    continue;
+                }
+
+                foreach ($this->thrownMessageLiteralsIn((string) file_get_contents($file)) as $line => $message) {
+                    if (in_array($message, self::NOT_OPERATOR_FACING, true)) {
+                        continue;
+                    }
+                    $this->add($message, $this->relative($file) . ':' . $line);
+                }
             }
         }
     }
@@ -261,17 +423,43 @@ final class CatalogHarvester
                 continue;
             }
 
-            if (($tokens[$i + 1][0] ?? null) !== T_DOUBLE_ARROW) {
+            // The arrow and the value are separated by whitespace, which
+            // `token_get_all` reports as its own token — so the arrow is
+            // not at a fixed offset from the key.
+            $arrowIndex = $this->nextSignificantIndex($tokens, $i + 1);
+            $arrow = $tokens[$arrowIndex] ?? null;
+            if (!is_array($arrow) || $arrow[0] !== T_DOUBLE_ARROW) {
                 continue;
             }
 
-            $literal = $this->stringAfterArrow($tokens, $i + 2, $constants);
+            $literal = $this->stringAfterArrow($tokens, $this->nextSignificantIndex($tokens, $arrowIndex + 1), $constants);
             if ($literal !== null) {
-                $found[$token[2]] = $literal;
+                // `line => message`, the same shape the helper path produces.
+                $found[$literal[1]] = $literal[0];
             }
         }
 
         return $found;
+    }
+
+    /**
+     * The index of the next token that is not whitespace or a comment.
+     *
+     * @param array<int, array{0: int, 1: string, 2: int}|string> $tokens
+     */
+    private function nextSignificantIndex(array $tokens, int $from): int
+    {
+        $insignificant = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
+
+        for ($i = $from, $count = count($tokens); $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], $insignificant, true)) {
+                continue;
+            }
+            return $i;
+        }
+
+        return $from;
     }
 
     /**
@@ -379,6 +567,15 @@ final class CatalogHarvester
             return [$this->decode($value[1]), $value[2]];
         }
 
+        // `sprintf('format', …)` in the envelope position: the format
+        // string is the message, with placeholders the translation keeps.
+        if (is_array($value) && $value[0] === T_STRING && strtolower($value[1]) === 'sprintf') {
+            $literal = $this->sprintfFormat($tokens, $index);
+            if ($literal !== null) {
+                return [$this->decode($literal[1]), $literal[2]];
+            }
+        }
+
         // `self::ERR_X` / `JsonControllerHelpers::MSG_X`, resolved in the
         // file that declares it.
         if (is_array($value) && $value[0] === T_STRING && ($tokens[$index + 1][0] ?? null) === T_DOUBLE_COLON) {
@@ -389,6 +586,45 @@ final class CatalogHarvester
         }
 
         return null;
+    }
+
+    /**
+     * The format string of a `sprintf(` call whose name is at `$index`.
+     *
+     * @return ?array{0: int, 1: string, 2: int}
+     */
+    private function sprintfFormat(array $tokens, int $index): ?array
+    {
+        $insignificant = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
+
+        $cursor = $index + 1;
+        for ($count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && in_array($token[0], $insignificant, true)) {
+                continue;
+            }
+            break;
+        }
+
+        if (($tokens[$cursor] ?? null) !== '(') {
+            return null;
+        }
+
+        $cursor++;
+        for ($count = count($tokens); $cursor < $count; $cursor++) {
+            $token = $tokens[$cursor];
+            if (is_array($token) && in_array($token[0], $insignificant, true)) {
+                continue;
+            }
+            break;
+        }
+
+        $literal = $tokens[$cursor] ?? null;
+        if (!is_array($literal) || $literal[0] !== T_CONSTANT_ENCAPSED_STRING) {
+            return null;
+        }
+
+        return $literal;
     }
 
     /**
@@ -535,16 +771,59 @@ final class CatalogHarvester
         }
 
         $argument = $arguments[$position] ?? null;
-        if ($argument === null || count($argument) !== 1) {
+        if ($argument === null) {
             return null;
         }
 
-        $literal = $argument[0];
-        if (!is_array($literal) || $literal[0] !== T_CONSTANT_ENCAPSED_STRING) {
+        $literal = $this->literalArgument($argument);
+        if ($literal === null) {
             return null;
         }
 
         return [$this->decode($literal[1]), $literal[2]];
+    }
+
+    /**
+     * The string literal an argument contributes, if it has one.
+     *
+     * A bare literal is one. So is `sprintf('format %s', …)` — the format
+     * string *is* the message, with placeholders the translation keeps. A
+     * concatenation is not: `'a' . $b` has no whole message to key on.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $argument
+     * @return ?array{0: int, 1: string, 2: int}
+     */
+    private function literalArgument(array $argument): ?array
+    {
+        $insignificant = [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT];
+
+        $significant = [];
+        foreach ($argument as $token) {
+            if (is_array($token) && in_array($token[0], $insignificant, true)) {
+                continue;
+            }
+            $significant[] = $token;
+        }
+
+        if ($significant === []) {
+            return null;
+        }
+
+        $first = $significant[0];
+        if (is_array($first) && $first[0] === T_CONSTANT_ENCAPSED_STRING) {
+            return $first;
+        }
+
+        // `sprintf('format', …)` — the format string is the first argument.
+        if (is_array($first) && $first[0] === T_STRING && strtolower($first[1]) === 'sprintf') {
+            $open = $significant[1] ?? null;
+            $format = $significant[2] ?? null;
+            if ($open === '(' && is_array($format) && $format[0] === T_CONSTANT_ENCAPSED_STRING) {
+                return $format;
+            }
+        }
+
+        return null;
     }
 
     private function decode(string $literal): string

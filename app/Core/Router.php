@@ -12,6 +12,7 @@ use LogicException;
 use Psr\Container\ContainerInterface;
 use ReflectionMethod;
 use ReflectionNamedType;
+use Spora\I18n\Translator;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -23,6 +24,7 @@ final class Router
     public function __construct(
         private readonly ContainerInterface $container,
         callable $routeDefinitions,
+        private readonly ?Translator $translator = null,
     ) {
         $collector = new MiddlewareRouteCollector(new Std(), new GroupCountBased());
         $routeDefinitions($collector);
@@ -36,7 +38,7 @@ final class Router
 
         $routeInfo = $this->dispatcher->dispatch($method, $path);
 
-        return match ($routeInfo[0]) {
+        $response = match ($routeInfo[0]) {
             Dispatcher::NOT_FOUND          => $this->notFound(),
             Dispatcher::METHOD_NOT_ALLOWED => $this->methodNotAllowed($routeInfo[1]),
             Dispatcher::FOUND              => $this->handleFound(
@@ -46,6 +48,47 @@ final class Router
             ),
             default                        => $this->notFound(),
         };
+
+        return $this->translateErrorMessage($response);
+    }
+
+    /**
+     * Translate the operator-facing message in an error envelope.
+     *
+     * The router is the one place every API response passes through —
+     * controllers, middleware and the router's own not-found replies alike —
+     * so it is the one place a message can be localized without every
+     * controller remembering to. The `error.code` is left alone: codes are
+     * stable identifiers that clients branch on, and translating one would
+     * break the contract.
+     *
+     * A message with no catalogue entry is returned unchanged, which is the
+     * English source — the fallback the whole design rests on.
+     */
+    private function translateErrorMessage(Response $response): Response
+    {
+        if ($this->translator === null || !$response instanceof JsonResponse) {
+            return $response;
+        }
+
+        $payload = json_decode((string) $response->getContent(), true);
+        if (!is_array($payload)) {
+            return $response;
+        }
+
+        $message = $payload['error']['message'] ?? null;
+        if (!is_string($message)) {
+            return $response;
+        }
+
+        $translated = $this->translator->trans($message);
+        if ($translated === $message) {
+            return $response;
+        }
+
+        $payload['error']['message'] = $translated;
+
+        return new JsonResponse($payload, $response->getStatusCode(), $response->headers->all());
     }
 
     private function handleFound(Request $request, mixed $routeHandler, array $vars): Response

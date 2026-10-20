@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use ReflectionClass;
+use Spora\I18n\Translator;
 use Spora\Models\ToolCall;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\ToolInterface;
@@ -32,7 +33,30 @@ final class ToolCallSerializer
     public function __construct(
         private readonly array $toolInstances = [],
         private readonly ?ToolIconResolver $iconResolver = null,
+        private readonly ?Translator $translator = null,
     ) {}
+
+    /**
+     * The tool call's human-readable description, in the operator's language.
+     *
+     * `describeAction()` is operator-facing copy: it is written to
+     * `tool_calls.human_description` and shipped to the frontend for the
+     * approval prompt, and the model-facing history never reads it. So it is
+     * translatable — but the **stored** value stays English, and the
+     * translation happens here, at serialization. A tool call viewed later by
+     * somebody reading a different language gets their own language, not
+     * whichever language was active when it was created.
+     *
+     * A message with no catalogue entry is returned unchanged.
+     */
+    private function translate(?string $message): ?string
+    {
+        if ($this->translator === null || $message === null) {
+            return $message;
+        }
+
+        return $this->translator->trans($message);
+    }
 
     /**
      * Convert a ToolCall model to its API/Mercure JSON shape.
@@ -49,7 +73,7 @@ final class ToolCallSerializer
             'status'                => $tc->status,
             'proposed_arguments'    => $tc->proposed_arguments,
             'approved_arguments'    => $tc->approved_arguments,
-            'human_description'     => $tc->human_description,
+            'human_description'     => $this->translate($tc->human_description),
             'operation'             => $tc->operation,
             'operation_description' => $tc->operation_description,
             'result_content'        => $tc->result_content,
