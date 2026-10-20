@@ -99,8 +99,6 @@ use Spora\Http\UserPictureAssetController;
 use Spora\Http\UserPictureController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
-use Spora\I18n\CatalogLoader;
-use Spora\I18n\LocaleResolver;
 use Spora\I18n\Translator;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
@@ -232,7 +230,7 @@ final class ContainerDefinitions
 
         return array_merge(
             self::configDefinition(),
-            self::i18nDefinition(),
+            I18nContainerBindings::all(),
             self::coreServiceDefinitions(),
             self::llmDefinitions(),
             self::apiAuthControllerDefinitions(),
@@ -264,33 +262,6 @@ final class ContainerDefinitions
                 $c->get(SettingsRegistry::class),
                 $c->get(Paths::class),
             ))->create(),
-        ];
-    }
-
-    /**
-     * The translation layer.
-     *
-     * {@see Translator} is request state — {@see \Spora\Core\Kernel} sets
-     * its locale once per request, before anything serialises a message —
-     * so PHP-DI has to hand out one shared instance, which its default
-     * definition scoping does.
-     */
-    private static function i18nDefinition(): array
-    {
-        return [
-            CatalogLoader::class => static fn(ContainerInterface $c): CatalogLoader => new CatalogLoader(
-                $c->has(PluginLoader::class) ? $c->get(PluginLoader::class)->translationsPaths() : [],
-                null,
-                $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
-            ),
-
-            Translator::class => static fn(ContainerInterface $c): Translator
-                => new Translator($c->get(CatalogLoader::class)),
-
-            LocaleResolver::class => static fn(ContainerInterface $c): LocaleResolver => new LocaleResolver(
-                $c->get(CatalogLoader::class),
-                (string) $c->get(Config::class)->getString('SPORA_DEFAULT_LANG', Translator::FALLBACK_LOCALE),
-            ),
         ];
     }
 

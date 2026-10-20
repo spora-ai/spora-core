@@ -37,7 +37,7 @@ final class CatalogLoader
     private array $cache = [];
 
     /**
-     * @param list<string>         $pluginLocaleDirs Absolute paths to plugin `locales/` directories, from {@see \Spora\Plugins\PluginLoader::translationsPaths()}.
+     * @param list<string>         $pluginLocaleDirs Absolute paths to plugin `locales/` directories, from {@see \Spora\I18n\PluginCatalogDirectories::from()}.
      * @param ?string              $coreLocaleDir    Overrides the framework's own `locales/` directory. Tests point this at a fixture tree; nothing else should.
      * @param ?LoggerInterface     $logger           Receives the collision warning. Null in a context with no logger, where the merge still succeeds silently.
      */
