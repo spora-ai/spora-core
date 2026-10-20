@@ -42,6 +42,12 @@ final class I18nCheckCommand extends Command
     private const TARGET_LOCALES = ['de'];
 
     /**
+     * The reason a word is allowed to keep its English spelling: German
+     * uses the same word, so a translation would be a different word.
+     */
+    private const DOMAIN_TERM = 'Domain term, identical in German.';
+
+    /**
      * The only English sources a catalogue may leave untranslated, because
      * German spells them identically. Anything not listed here must have a
      * German value that differs from its source.
@@ -56,16 +62,16 @@ final class I18nCheckCommand extends Command
      * is a better trade than a pattern that cannot tell `TLS` from `Save`.
      */
     private const IDENTICAL_ALLOWED = [
-        'Agent'     => 'Domain term, identical in German.',
+        'Agent'     => self::DOMAIN_TERM,
         'Debug'     => 'Identical; "Debug-Modus" would be over-translation.',
         'Info'      => 'Identical; "Information" changes the register.',
         'MySQL / MariaDB' => 'Product names.',
         'Plugins'   => 'Established loan in German usage.',
-        'Skill'     => 'Domain term, identical in German.',
+        'Skill'     => self::DOMAIN_TERM,
         'SQLite'    => 'Product name.',
         'SSL'       => 'Protocol acronym.',
         'TLS'       => 'Protocol acronym.',
-        'Worker'    => 'Domain term, identical in German.',
+        'Worker'    => self::DOMAIN_TERM,
     ];
 
     /**
