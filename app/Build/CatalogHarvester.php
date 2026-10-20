@@ -8,7 +8,6 @@ use ReflectionClass;
 use Spora\Apps\AppInterface;
 use Spora\Build\Catalog\EnvelopeLiteralHarvest;
 use Spora\Build\Catalog\Harvest;
-use Spora\Build\Catalog\ManifestDescriptionHarvest;
 use Spora\Build\Catalog\OperatorDescriptionHarvest;
 use Spora\Build\Catalog\SourceLocator;
 use Spora\Build\Catalog\ThrownLiteralHarvest;
@@ -42,6 +41,10 @@ use Throwable;
  *  - Plugin-supplied strings. Each plugin harvests its own catalogue from
  *    its own repo (`PluginInterface::translationsPaths()`), so a plugin
  *    cannot block an unrelated core PR with a string nobody here can see.
+ *    `plugin.json#description` is one of them: the host resolves it
+ *    through the scope chain — core's catalogue, then the plugin's own,
+ *    then the English literal — so the plugin ships the translation with
+ *    the plugin.
  *
  * `file:line` is exact for the syntactic sources and best-effort for the
  * reflection ones, which is all the failure output needs.
@@ -72,7 +75,6 @@ final class CatalogHarvester
         $this->tokens = new TokenStream();
 
         $this->harvests = [
-            new ManifestDescriptionHarvest($this->source),
             new EnvelopeLiteralHarvest($this->source, $this->tokens),
             new ThrownLiteralHarvest($this->source, $this->tokens),
             new OperatorDescriptionHarvest($this->source, $this->tokens),

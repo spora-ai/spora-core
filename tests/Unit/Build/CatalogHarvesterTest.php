@@ -86,6 +86,28 @@ test('the identity map maps every harvested message to itself', function (): voi
     }
 });
 
+test('a plugin manifest description is not harvested into core\'s catalogue', function (): void {
+    // The plugin ships the description in its own catalogue and the host
+    // resolves it through the scope chain. Harvesting it here would make
+    // core's catalogue depend on which plugins happen to be installed in
+    // the working copy.
+    $base = sys_get_temp_dir() . '/spora-harvest-' . bin2hex(random_bytes(6));
+    mkdir($base . '/plugins/demo', 0o777, true);
+    file_put_contents($base . '/plugins/demo/plugin.json', (string) json_encode([
+        'slug'        => 'demo',
+        'description' => 'A description that belongs to the plugin.',
+    ]));
+
+    $harvested = (new CatalogHarvester($base))->harvest();
+
+    expect($harvested)->not->toHaveKey('A description that belongs to the plugin.');
+
+    unlink($base . '/plugins/demo/plugin.json');
+    rmdir($base . '/plugins/demo');
+    rmdir($base . '/plugins');
+    rmdir($base);
+});
+
 test('the committed en.json matches the source', function (): void {
     $base = dirname(__DIR__, 3);
     $harvested = array_keys((new CatalogHarvester($base))->harvest());
