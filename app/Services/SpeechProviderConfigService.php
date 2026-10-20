@@ -42,6 +42,10 @@ use Spora\Speech\SpeechToTextRegistry;
  *   - {@see getPrincipalPreferredConfig()}
  *   - {@see resolvePreferredConfig()}
  *
+ * Read paths delegated to {@see SpeechProviderSchemaLocaliser}:
+ *   - the provider display name and the setting descriptions in
+ *     {@see getSchema()}
+ *
  * Write paths (create / update / delete / setDefault / setPreferred
  * / unsetPreferred / resolveGroupPrincipal) forward to
  * {@see SpeechProviderConfigMutator} so the controller's API is
@@ -66,7 +70,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     private readonly SpeechProviderConfigPreferences $preferences;
     private readonly PrincipalResolver $principalResolver;
     private readonly SpeechProviderConfigMutator $mutator;
-    private readonly Translator $translator;
+    private readonly SpeechProviderSchemaLocaliser $localiser;
 
     public function __construct(
         SpeechProviderConfigValidator $validator,
@@ -75,7 +79,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         PrincipalService $principalService,
         ?PrincipalResolver $principalResolver = null,
         ?SpeechProviderConfigMutator $mutator = null,
-        ?Translator $translator = null,
+        ?SpeechProviderSchemaLocaliser $localiser = null,
     ) {
         $this->validator = $validator;
         $this->persistence = $persistence;
@@ -86,7 +90,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             $preferences,
             $principalService,
         );
-        $this->translator = $translator ?? new Translator(new CatalogLoader());
+        $this->localiser = $localiser ?? new SpeechProviderSchemaLocaliser(new Translator(new CatalogLoader()));
     }
 
     /**
@@ -103,28 +107,11 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             }
             $rows[] = [
                 'class' => $class,
-                'display_name' => $this->translator->trans($provider->getDisplayName()),
-                'settings_schema' => $this->localiseSettingDescriptions($settings),
+                'display_name' => $this->localiser->displayName($provider->getDisplayName()),
+                'settings_schema' => $this->localiser->descriptions($settings),
             ];
         }
         return $rows;
-    }
-
-    /**
-     * Translate the operator-facing setting blurbs. `label` and
-     * `options[].label` stay English — see
-     * {@see \Spora\Plugins\PluginInterface::translationsPaths()} for why a
-     * setting label is never a catalogue key.
-     *
-     * @param list<array<string, mixed>> $settings
-     * @return list<array<string, mixed>>
-     */
-    private function localiseSettingDescriptions(array $settings): array
-    {
-        foreach ($settings as $index => $setting) {
-            $settings[$index]['description'] = $this->translator->trans((string) $setting['description']);
-        }
-        return $settings;
     }
 
     /**

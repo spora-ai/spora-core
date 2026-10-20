@@ -13,6 +13,7 @@ use Spora\Services\SpeechProviderConfigPersistence;
 use Spora\Services\SpeechProviderConfigPreferences;
 use Spora\Services\SpeechProviderConfigService;
 use Spora\Services\SpeechProviderConfigValidator;
+use Spora\Services\SpeechProviderSchemaLocaliser;
 use Spora\Speech\SpeechToTextRegistry;
 
 /**
@@ -62,6 +63,10 @@ final class SpeechProviderConfigContainerBindings
                 );
             },
 
+            SpeechProviderSchemaLocaliser::class => static function (ContainerInterface $c): SpeechProviderSchemaLocaliser {
+                return new SpeechProviderSchemaLocaliser($c->get(\Spora\I18n\Translator::class));
+            },
+
             SpeechProviderConfigService::class => static function (ContainerInterface $c): SpeechProviderConfigService {
                 return new SpeechProviderConfigService(
                     $c->get(SpeechProviderConfigValidator::class),
@@ -70,7 +75,7 @@ final class SpeechProviderConfigContainerBindings
                     $c->get(PrincipalService::class),
                     null,
                     $c->get(SpeechProviderConfigMutator::class),
-                    $c->get(\Spora\I18n\Translator::class),
+                    $c->get(SpeechProviderSchemaLocaliser::class),
                 );
             },
 
