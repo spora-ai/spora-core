@@ -105,6 +105,29 @@ describe('template matching', function (): void {
 
         expect($translator->trans('100% of the list'))->toBe('100% of the list');
     });
+
+    test('a translation with more placeholders than the English falls back to the English', function (): void {
+        // The captures are positional: there is nothing to fill the second
+        // placeholder with, so the English is rendered rather than a
+        // `ValueError` thrown out of `trans()`.
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ["Create email folder '%s'" => "E-Mail-Ordner '%s' '%s' erstellen"],
+        ], 'template-too-many')));
+        $translator->useLocale('de');
+
+        expect($translator->trans("Create email folder 'Archive'"))->toBe("Create email folder 'Archive'");
+    });
+
+    test('a literal percent sign in a translation is left as written', function (): void {
+        // "50 % davon" is correct German, and a percent sign that is not a
+        // placeholder is not a format specifier.
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['Saved %s items' => '50 % von %s Artikeln gespeichert'],
+        ], 'template-literal-percent')));
+        $translator->useLocale('de');
+
+        expect($translator->trans('Saved 3 items'))->toBe('50 % von 3 Artikeln gespeichert');
+    });
 });
 
 test('the locale starts at English and follows useLocale()', function (): void {

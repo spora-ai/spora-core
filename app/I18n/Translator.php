@@ -31,7 +31,7 @@ final class Translator
      * The frontend's `{name}` slots are substituted by the caller and arrive
      * already filled; these are the ones that come pre-filled in the string.
      */
-    private const TEMPLATE_PLACEHOLDERS = ['%s', '%d'];
+    private const TEMPLATE_PLACEHOLDERS = TemplatePlaceholders::SPECIFIERS;
 
     private string $locale = self::FALLBACK_LOCALE;
 
@@ -107,10 +107,10 @@ final class Translator
             // literal text around its placeholders.
             $score = strlen(str_replace(self::TEMPLATE_PLACEHOLDERS, '', $key));
             if ($score > $bestScore) {
-                $best = [$value, $matches];
+                $best = [$key, $value, $matches];
                 $bestScore = $score;
                 $ambiguous = false;
-            } elseif ($score === $bestScore && $best[0] !== $value) {
+            } elseif ($score === $bestScore && $best[1] !== $value) {
                 $ambiguous = true;
             }
         }
@@ -119,7 +119,44 @@ final class Translator
             return null;
         }
 
-        return vsprintf($best[0], array_slice($best[1], 1));
+        $captures = array_slice($best[2], 1);
+
+        $translated = $this->fillTemplate($best[1], $captures);
+        if ($translated !== null) {
+            return $translated;
+        }
+
+        // The translation does not have the placeholders the English has.
+        // The English is the fallback at every layer, and its placeholders
+        // are the ones the captures were taken from.
+        return $this->fillTemplate($best[0], $captures);
+    }
+
+    /**
+     * Fill a template's placeholders with the captured values, in order.
+     *
+     * Only `%s` and `%d` are placeholders, so a percent sign in the copy
+     * survives as written — "50 % davon" is not a format specifier.
+     *
+     * @param list<string> $captures
+     */
+    private function fillTemplate(string $template, array $captures): ?string
+    {
+        if (count(TemplatePlaceholders::in($template)) !== count($captures)) {
+            return null;
+        }
+
+        $parts = preg_split(TemplatePlaceholders::PATTERN, $template);
+        if ($parts === false) {
+            return null;
+        }
+
+        $filled = $parts[0] ?? '';
+        foreach ($captures as $index => $capture) {
+            $filled .= $capture . ($parts[$index + 1] ?? '');
+        }
+
+        return $filled;
     }
 
     /**

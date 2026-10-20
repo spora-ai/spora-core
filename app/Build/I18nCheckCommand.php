@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Build;
 
 use JsonException;
+use Spora\I18n\TemplatePlaceholders;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -14,19 +15,26 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * `bin/spora-build i18n:check` — the PHP half of the i18n CI contract.
  *
- * Four rules, in the order they are cheapest to explain:
+ * Six rules, in the order they are cheapest to explain:
  *
  *   1. `locales/en.json` drifted from the source — run
  *      `composer i18n:extract` and commit the result.
  *   2. A key in `en.json` has no entry in a target catalogue. Every
  *      harvested message is required: a half-translated error screen reads
  *      as a bug rather than as work in progress.
+ *   2b. A key in a target catalogue that the source no longer produces.
+ *      The key *is* the English text, so an orphan looks like a live
+ *      entry.
  *   3. A target value is empty or identical to its English source — an
  *      untranslated placeholder that would render as English in production
  *      while passing every other check.
  *   4. A message contains an unescaped `{`, `}` or `|`. vue-i18n compiles
  *      those as interpolation and plural syntax and throws at render, so a
  *      copy snippet containing braces is a runtime failure, not a typo.
+ *   5. A target value does not carry the `%s`/`%d` placeholders of its
+ *      English source, in the same order. The captures are substituted
+ *      positionally, so a missing placeholder leaves the English in place
+ *      and a reordered one fills the wrong slot.
  *
  * Rule "raw text outside `$t()`" from the workspace contract is a frontend
  * rule and has no PHP analogue: the harvest here is by construction, so a
@@ -119,6 +127,7 @@ final class I18nCheckCommand extends Command
             $problems = array_merge($problems, $this->gaps($locale, $harvested, $catalogue));
             $problems = array_merge($problems, $this->orphans($locale, $harvested, $catalogue));
             $problems = array_merge($problems, $this->placeholders($locale, $english, $catalogue));
+            $problems = array_merge($problems, $this->placeholderParity($locale, $catalogue));
         }
 
         if ($problems !== []) {
@@ -298,6 +307,60 @@ final class I18nCheckCommand extends Command
 
         return array_merge(
             ['', sprintf('%s has %d untranslated placeholder(s):', $locale, count($untranslated))],
+            $lines,
+        );
+    }
+
+    /**
+     * Rule 5 — a translation must carry the placeholders of its English
+     * source, in the same order.
+     *
+     * The captures are substituted positionally: the first `%s` or `%d` of
+     * the translation takes the first capture of the English template, and
+     * the next one takes the next. A translation that drops a placeholder
+     * therefore renders the English instead, and one that swaps two of
+     * them fills the wrong slot — both read as a broken screen rather
+     * than as a mistranslation, which is why the catalogue has to carry
+     * the placeholders unchanged.
+     *
+     * The comparison is on the ordered sequence and on the type of every
+     * placeholder: `%s` where the English had `%d` is wrong even though
+     * the counts match.
+     *
+     * @param array<string, string> $catalogue
+     * @return list<string>
+     */
+    private function placeholderParity(string $locale, array $catalogue): array
+    {
+        $mismatched = [];
+
+        foreach ($catalogue as $key => $value) {
+            $expected = TemplatePlaceholders::in($key);
+            $found = TemplatePlaceholders::in($value);
+
+            if ($expected === $found) {
+                continue;
+            }
+
+            $mismatched[$key] = [$expected, $found];
+        }
+
+        if ($mismatched === []) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($mismatched as $key => [$expected, $found]) {
+            $lines[] = sprintf(
+                '  "%s" — expected [%s], found [%s]',
+                $key,
+                implode(', ', $expected),
+                implode(', ', $found),
+            );
+        }
+
+        return array_merge(
+            ['', sprintf('%s has %d placeholder mismatch(es):', $locale, count($mismatched))],
             $lines,
         );
     }

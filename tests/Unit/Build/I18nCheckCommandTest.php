@@ -144,6 +144,59 @@ describe('i18n:check rules', function (): void {
             expect(i18nDrift(['Save' => ['f:1']], ['Save' => 'Save']))->toBe([]);
         });
     });
+
+    describe('rule 5 — placeholder parity', function (): void {
+        it('reports a translation that carries a placeholder the English does not', function (): void {
+            // The captures are positional, so a second placeholder has
+            // nothing to fill it with.
+            $problems = i18nParity([
+                "Create email folder '%s'" => "E-Mail-Ordner '%s' '%s' erstellen",
+            ]);
+
+            expect($problems)->toHaveCount(3);
+            expect(implode("\n", $problems))->toContain('expected [%s], found [%s, %s]');
+        });
+
+        it('reports a translation that drops a placeholder', function (): void {
+            $problems = i18nParity([
+                "Create email folder '%s'" => 'E-Mail-Ordner erstellen',
+            ]);
+
+            expect(implode("\n", $problems))->toContain('expected [%s], found []');
+        });
+
+        it('reports placeholders in the wrong order', function (): void {
+            // The counts match, so a count check would pass — but the
+            // captures are substituted positionally, so the first slot
+            // would take the second capture.
+            $problems = i18nParity([
+                'Expected %s answer(s), got %d.' => '%d Antwort(en) erwartet, %s erhalten.',
+                'Update agent fields (%s).' => 'Agentenfelder (%d) aktualisieren.',
+            ]);
+
+            expect($problems)->toHaveCount(4);
+            expect(implode("\n", $problems))->toContain('expected [%s, %d], found [%d, %s]');
+        });
+
+        it('accepts a literal percent sign', function (): void {
+            // "50 % davon" is correct German, and a percent sign that is
+            // not a placeholder is not part of the sequence.
+            $problems = i18nParity([
+                'Saved %s items' => '50 % von %s Artikeln gespeichert',
+            ]);
+
+            expect($problems)->toBe([]);
+        });
+
+        it('reports nothing when the placeholders match', function (): void {
+            $problems = i18nParity([
+                'Mark todo \'%s\' as %s.' => 'Todo \'%s\' als %s markieren.',
+                'No placeholders here.'   => 'Keine Platzhalter hier.',
+            ]);
+
+            expect($problems)->toBe([]);
+        });
+    });
 });
 
 /** Invoke one of the command's rule methods through reflection. */
@@ -166,6 +219,13 @@ function i18nDrift(array $harvested, array $english): array
     $instance = new I18nCheckCommand();
 
     return (new ReflectionMethod($instance, 'drift'))->invoke($instance, $harvested, $english);
+}
+
+function i18nParity(array $catalogue): array
+{
+    $instance = new I18nCheckCommand();
+
+    return (new ReflectionMethod($instance, 'placeholderParity'))->invoke($instance, 'de', $catalogue);
 }
 
 // Referenced so the import is meaningful to static analysis: the command
