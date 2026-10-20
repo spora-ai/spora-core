@@ -44,7 +44,7 @@ final class UserLocaleController
     {
         $userId = $this->authService->currentUserId();
         if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+            return $this->unauthenticated();
         }
 
         $stored = User::where('id', $userId)->value('locale');
@@ -63,11 +63,54 @@ final class UserLocaleController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = $this->authService->currentUserId();
-        if ($userId === null) {
-            return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
+        $user = $this->currentUser();
+        if ($user instanceof JsonResponse) {
+            return $user;
         }
 
+        $locale = $this->requestedLocale($request);
+        if ($locale instanceof JsonResponse) {
+            return $locale;
+        }
+
+        $user->locale = $locale;
+        $user->save();
+
+        return new JsonResponse(['data' => [
+            'locale'   => $locale,
+            'resolved' => $this->localeResolver->resolve($locale),
+        ]]);
+    }
+
+    /**
+     * The caller, or the error to return instead.
+     *
+     * Both failures are identity failures: a caller with no session and a
+     * caller whose row is gone are both "no such user" to this endpoint.
+     */
+    private function currentUser(): User|JsonResponse
+    {
+        $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+
+        $user = User::find($userId);
+        if ($user === null) {
+            return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
+        }
+
+        return $user;
+    }
+
+    /**
+     * The locale the request asks for, or the error to return instead.
+     *
+     * `null` is a legitimate answer — it means "auto" — so the error is
+     * signalled by its type, not by a null.
+     */
+    private function requestedLocale(Request $request): JsonResponse|string|null
+    {
         try {
             $body = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
@@ -84,18 +127,12 @@ final class UserLocaleController
             );
         }
 
-        $user = User::find($userId);
-        if ($user === null) {
-            return $this->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
-        }
+        return is_string($locale) ? $locale : null;
+    }
 
-        $user->locale = $locale;
-        $user->save();
-
-        return new JsonResponse(['data' => [
-            'locale'   => $locale,
-            'resolved' => $this->localeResolver->resolve($locale),
-        ]]);
+    private function unauthenticated(): JsonResponse
+    {
+        return $this->error('UNAUTHENTICATED', 'Authentication required.', Response::HTTP_UNAUTHORIZED);
     }
 
     private function error(string $code, string $message, int $status): JsonResponse

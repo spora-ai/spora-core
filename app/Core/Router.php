@@ -67,21 +67,14 @@ final class Router
      */
     private function translateErrorMessage(Response $response): Response
     {
-        if ($this->translator === null || !$response instanceof JsonResponse) {
+        $found = $this->translatableErrorPayload($response);
+        if ($found === null) {
             return $response;
         }
 
-        $payload = json_decode((string) $response->getContent(), true);
-        if (!is_array($payload)) {
-            return $response;
-        }
+        [$payload, $message] = $found;
 
-        $message = $payload['error']['message'] ?? null;
-        if (!is_string($message)) {
-            return $response;
-        }
-
-        $translated = $this->translator->trans($message);
+        $translated = $this->translator?->trans($message) ?? $message;
         if ($translated === $message) {
             return $response;
         }
@@ -89,6 +82,27 @@ final class Router
         $payload['error']['message'] = $translated;
 
         return new JsonResponse($payload, $response->getStatusCode(), $response->headers->all());
+    }
+
+    /**
+     * The payload of an error envelope and the message it carries.
+     *
+     * @return array{0: array, 1: string}|null
+     */
+    private function translatableErrorPayload(Response $response): ?array
+    {
+        if (!$response instanceof JsonResponse) {
+            return null;
+        }
+
+        $payload = json_decode((string) $response->getContent(), true);
+        if (!is_array($payload)) {
+            return null;
+        }
+
+        $message = $payload['error']['message'] ?? null;
+
+        return is_string($message) ? [$payload, $message] : null;
     }
 
     private function handleFound(Request $request, mixed $routeHandler, array $vars): Response
