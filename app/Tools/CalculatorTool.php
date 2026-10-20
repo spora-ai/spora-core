@@ -43,7 +43,7 @@ final class CalculatorTool extends AbstractTool
     public function describeAction(array $arguments): string
     {
         $expr = trim((string) ($arguments['expression'] ?? ''));
-        return "Evaluate mathematical expression: {$expr}";
+        return sprintf('Evaluate mathematical expression: %s', $expr);
     }
 
     public function calculate(array $arguments): ToolResult

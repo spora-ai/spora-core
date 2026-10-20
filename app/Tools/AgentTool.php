@@ -402,7 +402,7 @@ final class AgentTool extends AbstractTool
                     : 'calling agent',
             ),
             'list_agents'               => 'List every agent owned by the current user.',
-            default                     => "Agent tool: {$operation}",
+            default                     => sprintf('Agent tool: %s', $operation),
         };
     }
 
