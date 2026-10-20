@@ -144,10 +144,11 @@ final class ConfigurePlanOperationsParser
     /**
      * The operation names a tool class actually declares, keyed for lookup.
      *
-     * Empty when the class declares no operations or cannot be reflected
-     * against. Callers must then skip validation rather than refuse every
-     * name — a plugin tool that is not loaded is not grounds for a
-     * false refusal.
+     * Empty when the class declares no operations. Callers must then skip
+     * validation rather than refuse every name — a tool that legitimately
+     * declares none is not grounds for a false refusal. A class that does
+     * not exist at all is refused earlier, by the entry-level check in
+     * {@see ConfigurePlanParser}.
      *
      * @return array<string, true>
      */

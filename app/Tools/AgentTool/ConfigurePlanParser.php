@@ -23,6 +23,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  * The rules, in the order they are checked:
  *
  *  - **An entry's shape**, then its `enabled` flag, its operations, its settings.
+ *  - **A `tool_class` that names no class this install can load** is refused,
+ *    because a row keyed by a class nothing can resolve is invisible in the
+ *    manifest and would read as "nothing landed".
  *  - **An operation name** the tool does not declare is refused, because a dead
  *    override row is invisible in the manifest and would read as "nothing landed".
  *  - **An unknown setting key** is refused rather than dropped, for the same
@@ -89,6 +92,11 @@ final class ConfigurePlanParser
         }
         $toolClass = (string) ($entry['tool_class'] ?? '');
 
+        $unknownClass = $this->unknownToolClassFailure($toolClass, $i);
+        if ($unknownClass !== null) {
+            return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . $unknownClass);
+        }
+
         $parts = $this->parseEntryParts($entry, $toolClass, $i, $principalId);
 
         return $parts instanceof ToolResult
@@ -134,6 +142,35 @@ final class ConfigurePlanParser
         }
 
         return $out;
+    }
+
+    /**
+     * The refusal for a `tool_class` that names no class this install can load.
+     *
+     * The catalogue the model is told to read from lists *registered* tool
+     * classes, so anything else is either a guess or a typo. A row keyed by a
+     * class nothing can resolve is invisible in every manifest — the manifest
+     * enumerates the registered classes, not the rows — so the write would
+     * report success and land nothing the caller can see.
+     *
+     * A class that exists but is not a registered tool is not refused here:
+     * the settings half of an entry is legitimately keyed by any class that
+     * declares `#[ToolSetting]`, and a driver class is one.
+     *
+     * @return string|null The refusal, or null when the class resolves.
+     */
+    private function unknownToolClassFailure(string $toolClass, int $i): ?string
+    {
+        if (class_exists($toolClass)) {
+            return null;
+        }
+
+        return sprintf(
+            "tool entry #%d names '%s', which is not a class this install can load. "
+            . 'Get the FQCN from get_available_tools.',
+            $i,
+            $toolClass,
+        );
     }
 
     private function shapeEntryFailure(mixed $entry, int $i): ?string
