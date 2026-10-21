@@ -6,6 +6,8 @@ namespace Spora\Http;
 
 use JsonException;
 use Spora\Auth\AuthService;
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Services\ToolsRecommendsSkillsValidator;
@@ -22,6 +24,8 @@ final class ToolController
 
     private const ERR_TOOL_NOT_FOUND_CODE = 'NOT_FOUND';
 
+    private readonly Translator $translator;
+
     /**
      * @param string[] $toolClasses Registered tool class names (injected via container).
      * @param ?SharedSettingsResolver $sharedSettings Plugin-declared credential
@@ -35,7 +39,10 @@ final class ToolController
         private readonly ?ToolIconResolver $toolIconResolver = null,
         private readonly ?ToolsRecommendsSkillsValidator $recommendsSkillsValidator = null,
         private readonly ?SharedSettingsResolver $sharedSettings = null,
-    ) {}
+        ?Translator $translator = null,
+    ) {
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
+    }
 
     public function index(): JsonResponse
     {
@@ -242,11 +249,16 @@ final class ToolController
         // `scope` are the only fields the controller needs that the
         // inspectors don't produce.
         foreach (ToolSettingSchema::collect($toolClass) as $setting) {
+            // `label` and `options[].label` are deliberately English: the
+            // catalogue key is the English text, so a translated label would
+            // apply to every setting in every plugin that reuses the word,
+            // and six of them enter the model's prompt through
+            // `expose_to_llm`. See `app/Plugins/PluginInterface.php`.
             $schema[] = [
                 'key'           => $setting->key,
                 'label'         => $setting->label,
                 'type'          => $setting->type,
-                'description'   => $setting->description,
+                'description'   => $this->translator->trans($setting->description),
                 'default'       => $setting->default,
                 'required'      => $setting->required,
                 'options'       => $setting->options,
@@ -259,9 +271,12 @@ final class ToolController
         return [
             'tool_class'        => $summary['tool_class'],
             'tool_name'         => $summary['tool_name'],
-            'display_name'      => $summary['display_name'],
+            'display_name'      => $this->translator->trans($summary['display_name']),
+            // `description` and `operations` stay English: they are the
+            // function payload and the `AgentManifest` tool block, and the
+            // operator's view of them is the model's view.
             'description'       => $summary['description'],
-            'category'          => $summary['category'],
+            'category'          => $this->translator->trans($summary['category']),
             'icon'              => $summary['icon'],
             'settings_schema'   => $schema,
             'operations'        => $summary['operations'],

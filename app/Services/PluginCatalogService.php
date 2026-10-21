@@ -18,7 +18,8 @@ use Throwable;
 
 /**
  * Discovers Spora plugins on Packagist and serves a cached, filtered view
- * via `GET /api/v1/plugins/catalog`. See `docs/18_plugin_author_guide.md`.
+ * via `GET /api/v1/plugins/catalog`. See
+ * https://docs.spora-ai.com/develop/plugins/author-guide/distribution.html.
  */
 final class PluginCatalogService
 {

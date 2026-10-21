@@ -99,30 +99,19 @@ final class ToolSchemaPresenter
     /**
      * Pick the operator-facing description for an op.
      *
-     * Prefer the explicit `operatorDescription` attribute value when the
-     * tool author provided one. Otherwise fall back to the first sentence
-     * of `description` (split on `. `, kebab/casing irrelevant). The
-     * fallback keeps existing tools useful in the operator UI without
-     * forcing every tool author to add a second field — and the LLM
-     * still gets the full description for dispatch.
+     * The explicit `operatorDescription` when the tool author set one,
+     * otherwise the operation's own `description` verbatim.
      *
-     * Returns '' when both inputs are empty.
+     * There is deliberately no sentence splitting. The operator sees
+     * exactly what the model sees — the `AgentManifest` tool block carries
+     * `operator_description` too — so there is nothing to shorten for, and
+     * a `'. '` split would be a punctuation contract that breaks on the
+     * first description without one.
      */
     private static function resolveOperatorDescription(Attributes\ToolOperation $op): string
     {
         $explicit = trim((string) ($op->operatorDescription ?? ''));
-        if ($explicit !== '') {
-            return $explicit;
-        }
 
-        $llm = trim($op->description);
-        if ($llm === '') {
-            return '';
-        }
-
-        $sentence = strstr($llm, '. ', true);
-        // Trim a trailing period so the rendered sentence reads cleanly
-        // (the first sentence of `"Foo. Bar."` becomes `"Foo"`, not `"Foo."`).
-        return $sentence === false ? $llm : rtrim($sentence, '.');
+        return $explicit !== '' ? $explicit : $op->description;
     }
 }

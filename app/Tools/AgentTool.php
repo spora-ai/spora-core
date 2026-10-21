@@ -417,7 +417,7 @@ final class AgentTool extends AbstractTool
                     : 'calling agent',
             ),
             'list_agents'               => 'List every agent visible to the current user — their own, and their groups\'.',
-            default                     => "Agent tool: {$operation}",
+            default                     => sprintf('Agent tool: %s', $operation),
         };
     }
 

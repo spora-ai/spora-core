@@ -54,16 +54,19 @@ describe('ToolSchemaPresenter', function (): void {
         expect($summary['recommends_skills'])->toBe(['time-arithmetic']);
     });
 
-    test('falls back to the first sentence of description when operatorDescription is omitted', function (): void {
+    test('falls back to the whole description when operatorDescription is omitted', function (): void {
         // OperatorFixtureFallbackTool declares one op without operatorDescription.
-        // The presenter should split its description on `. ` and return the head.
+        // The operator view is the model's view: `AgentManifest` carries
+        // `operator_description` into the LLM-facing tool block, so there is
+        // nothing to shorten for, and a `. ` split would be a punctuation
+        // contract that breaks on the first description without one.
         $summary = ToolSchemaPresenter::summarize(OperatorFixtureFallbackTool::class);
         $ops = array_column($summary['operations'], null, 'name');
 
         expect($ops['has_fallback']['description'])
             ->toBe('Multi-sentence prose. The second sentence is for the LLM only.')
             ->and($ops['has_fallback']['operator_description'])
-            ->toBe('Multi-sentence prose');
+            ->toBe('Multi-sentence prose. The second sentence is for the LLM only.');
     });
 
     test('honours an explicit operatorDescription attribute', function (): void {
@@ -84,7 +87,7 @@ describe('ToolSchemaPresenter', function (): void {
             ->toBe('Standalone sentence without a terminator break');
     });
 
-    test('returns an empty operator_description when both inputs are blank', function (): void {
+    test('returns an empty operator_description when neither input has text', function (): void {
         $summary = ToolSchemaPresenter::summarize(OperatorFixtureBlankTool::class);
         $ops = array_column($summary['operations'], null, 'name');
 

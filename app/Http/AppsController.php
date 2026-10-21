@@ -7,6 +7,8 @@ namespace Spora\Http;
 use Spora\Apps\AppInterface;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\VueAppInterface;
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Plugins\PluginLoader;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -21,10 +23,15 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  */
 final class AppsController
 {
+    private readonly Translator $translator;
+
     public function __construct(
         private readonly AppRegistry $appRegistry,
         private readonly ?PluginLoader $pluginLoader = null,
-    ) {}
+        ?Translator $translator = null,
+    ) {
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
+    }
 
     public function index(): JsonResponse
     {
@@ -48,8 +55,8 @@ final class AppsController
 
         $payload = [
             'name'        => $app->name(),
-            'displayName' => $app->displayName(),
-            'description' => $app->description(),
+            'displayName' => $this->translator->trans($app->displayName()),
+            'description' => $this->translator->trans($app->description()),
             'icon'        => $app->icon(),
             'accent'      => $this->resolveAccent($app, $slug),
             'route'       => '/apps/' . $app->name(),

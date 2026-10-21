@@ -8,6 +8,7 @@ use DI\Container;
 use DI\ContainerBuilder;
 use Dotenv\Dotenv;
 use Psr\Log\LoggerInterface;
+use Spora\Auth\AuthService;
 use Spora\Core\Exceptions\BasePathNotDefinedException;
 use Spora\Core\Extension\Exceptions\PluginInstallFailedException;
 use Spora\Events\EventDispatcherFactory;
@@ -18,6 +19,9 @@ use Spora\Http\Exceptions\InvalidCsrfTokenException;
 use Spora\Http\Exceptions\PluginCatalogNotWiredException;
 use Spora\Http\Exceptions\TooManyRequestsException;
 use Spora\Http\Exceptions\UnauthenticatedException;
+use Spora\I18n\LocaleResolver;
+use Spora\I18n\Translator;
+use Spora\Models\User;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
 use Spora\Services\Exceptions\MalformedCatalogException;
@@ -139,6 +143,7 @@ final class Kernel implements KernelInterface
                 $this->container->get(SettingsRepository::class),
                 $this->container->get(SettingsRegistry::class),
             );
+            $this->bindRequestLocale();
             $router = $this->buildRouter();
             // BootingEvent is dispatched per request once the container is
             // live and the DB is up — services are safe to resolve inside
@@ -194,6 +199,32 @@ final class Kernel implements KernelInterface
         return ContainerDefinitions::all();
     }
 
+    /**
+     * Decide the language this request renders in, before the router runs.
+     *
+     * `users.locale` → `SPORA_DEFAULT_LANG` → `en`; see
+     * {@see \Spora\I18n\LocaleResolver}. Bound here rather than in a
+     * middleware because the middleware list is per-route and the boot
+     * config is public — a logged-out request still has to render in the
+     * instance language for the login screen to match the rest of the SPA.
+     *
+     * The row read is a primary-key lookup on a column that is NULL for
+     * every account that never chose a language, which is most of them.
+     */
+    private function bindRequestLocale(): void
+    {
+        $userId = $this->container->get(AuthService::class)->currentUserId();
+        $stored = $userId === null
+            ? null
+            : User::where('id', $userId)->value('locale');
+
+        $this->container->get(Translator::class)->useLocale(
+            $this->container->get(LocaleResolver::class)->resolve(
+                is_string($stored) ? $stored : null,
+            ),
+        );
+    }
+
     private function buildRouter(): Router
     {
         // Pass the resolved config down so {@see RouteDefinitions} can
@@ -213,6 +244,9 @@ final class Kernel implements KernelInterface
                 // extend the core routes registered above.
                 $this->pluginLoader->registerRoutes($r);
             },
+            // The router localizes the operator-facing error message, which
+            // is the one place every response passes through.
+            $this->container->get(Translator::class),
         );
     }
 
@@ -228,7 +262,10 @@ final class Kernel implements KernelInterface
             : 'production';
         $isDebug = $appEnv === 'development' || $appEnv === 'local';
 
-        $body = ['error' => ['code' => 'INTERNAL_SERVER_ERROR', 'message' => 'An unexpected error occurred.']];
+        $body = ['error' => [
+            'code'    => 'INTERNAL_SERVER_ERROR',
+            'message' => $this->trans('An unexpected error occurred.'),
+        ]];
 
         if ($isDebug) {
             $body['debug'] = [
@@ -262,48 +299,67 @@ final class Kernel implements KernelInterface
     {
         return match (true) {
             $e instanceof UnauthenticatedException => new JsonResponse(
-                ['error' => ['code' => 'UNAUTHENTICATED', 'message' => 'Authentication required.']],
+                ['error' => ['code' => 'UNAUTHENTICATED', 'message' => $this->trans('Authentication required.')]],
                 Response::HTTP_UNAUTHORIZED,
             ),
             $e instanceof ForbiddenException => new JsonResponse(
-                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'FORBIDDEN', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_FORBIDDEN,
             ),
             $e instanceof InvalidCsrfTokenException => new JsonResponse(
-                ['error' => ['code' => 'CSRF_INVALID', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'CSRF_INVALID', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_FORBIDDEN,
             ),
             $e instanceof TooManyRequestsException => new JsonResponse(
-                ['error' => ['code' => 'TOO_MANY_REQUESTS', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'TOO_MANY_REQUESTS', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_TOO_MANY_REQUESTS,
             ),
             $e instanceof CatalogUnavailableException => new JsonResponse(
-                ['error' => ['code' => 'CATALOG_UNAVAILABLE', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'CATALOG_UNAVAILABLE', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_SERVICE_UNAVAILABLE,
             ),
             $e instanceof MalformedCatalogException => new JsonResponse(
-                ['error' => ['code' => 'MALFORMED_CATALOG', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'MALFORMED_CATALOG', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_BAD_GATEWAY,
             ),
             $e instanceof PluginCatalogNotWiredException => new JsonResponse(
-                ['error' => ['code' => 'PLUGIN_CATALOG_NOT_WIRED', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'PLUGIN_CATALOG_NOT_WIRED', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_INTERNAL_SERVER_ERROR,
             ),
             $e instanceof FeatureDisabledException => new JsonResponse(
-                ['error' => ['code' => 'FEATURE_DISABLED', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'FEATURE_DISABLED', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_FORBIDDEN,
             ),
             $e instanceof PluginInstallFailedException => self::mapPluginInstallFailureToResponse($e),
             $e instanceof MediaCapabilityMismatchException => new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_BAD_REQUEST,
             ),
             $e instanceof MediaNotOwnedException => new JsonResponse(
-                ['error' => ['code' => 'FORBIDDEN', 'message' => $e->getMessage()]],
+                ['error' => ['code' => 'FORBIDDEN', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_FORBIDDEN,
             ),
             default => null,
         };
+    }
+
+    /**
+     * Localise at serialization, never before.
+     *
+     * The stored `error_message` and everything that classifies on it —
+     * {@see \Spora\Agents\ErrorClassifier} matches on the canonical English
+     * string — stay English for the life of the row. Only the copy that
+     * reaches the browser is translated, and only when a catalogue entry
+     * exists; a miss falls through to the English source, which is the
+     * right answer anyway.
+     */
+    private function trans(string $message): string
+    {
+        if (!$this->container->has(Translator::class)) {
+            return $message;
+        }
+
+        return $this->container->get(Translator::class)->trans($message);
     }
 
     /**

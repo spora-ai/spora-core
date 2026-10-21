@@ -242,7 +242,7 @@ For a complete list of what's implemented, see the [documentation index](https:/
 Key areas (all on [docs.spora-ai.com](https://docs.spora-ai.com/)):
 - **Orchestrator loop, config priority, plugin system, recipes** → [architecture](https://docs.spora-ai.com/reference/concepts/architecture.html)
 - **Database schema and migrations** → [schema](https://docs.spora-ai.com/reference/concepts/schema.html)
-- **REST API reference** → [docs/04_api.md](docs/04_api.md) (in-repo)
+- **REST API reference** → [REST API reference](https://docs.spora-ai.com/reference/api.html)
 - **LLM drivers** → [drivers](https://docs.spora-ai.com/reference/concepts/drivers.html)
 - **Tool system and settings** → [tools](https://docs.spora-ai.com/reference/concepts/tools.html)
 - **Plugin system** → [plugin system](https://docs.spora-ai.com/reference/concepts/plugins-system.html)
