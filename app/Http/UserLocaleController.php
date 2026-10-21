@@ -114,12 +114,13 @@ final class UserLocaleController
         try {
             $body = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            return $this->error('INVALID_JSON', self::ERR_INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
+            $body = null;
         }
 
-        // A body that decodes to something else — the bare string `"de"` —
-        // is not a request, and reading a locale out of it would store
-        // "auto" and answer 200 for a request that never carried one.
+        // A body that is not JSON at all, or one that decodes to something
+        // else — the bare string `"de"` — is not a request, and reading a
+        // locale out of it would store "auto" and answer 200 for a request
+        // that never carried one.
         if (!is_array($body)) {
             return $this->error('INVALID_JSON', self::ERR_INVALID_JSON_MESSAGE, Response::HTTP_BAD_REQUEST);
         }
