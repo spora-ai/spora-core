@@ -19,8 +19,9 @@ use Spora\Plugins\PluginLoader;
  *  - plugin.json manifest (description, slug)
  *  - schema_versions + Laravel `migrations` tables (applied migration state)
  *
- * Plugins are not sandboxed (see docs/07_plugins.md), so reading their metadata
- * is inherently trusted operator data — the controller gates this behind AuthMiddleware.
+ * Plugins are not sandboxed (see https://docs.spora-ai.com/reference/concepts/plugins-system.html),
+ * so reading their metadata is inherently trusted operator data — the controller
+ * gates this behind AuthMiddleware.
  */
 final class PluginsService
 {

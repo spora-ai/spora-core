@@ -64,7 +64,7 @@ function instantiateAllTools(): array
 it('every core tool extends AbstractTool', function (): void {
     foreach (instantiateAllTools() as $cls => $_) {
         expect(is_subclass_of($cls, AbstractTool::class))->toBeTrue(
-            "{$cls} must extend AbstractTool — see docs/06_tools.md.",
+            "{$cls} must extend AbstractTool — see https://docs.spora-ai.com/reference/concepts/tools.html.",
         );
     }
 });

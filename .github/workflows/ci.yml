@@ -305,10 +305,11 @@ jobs:
           fi
 
       # Markdown link check, scoped to the relative paths inside the files a
-      # change touches. `docs/` was pruned down to `04_api.md` + `14_speech.md` in
-      # 0fcdaf71, but AGENTS.md kept pointing at the deleted files for months
-      # and no gate noticed. Only in-repo links are resolvable here; the
-      # absolute docs.spora-ai.com URLs need network access and are skipped.
+      # change touches. The numbered `docs/0X_*.md` files were migrated to
+      # docs.spora-ai.com and then re-added once, and AGENTS.md kept pointing
+      # at the deleted ones for months with no gate noticing. Only in-repo
+      # links are resolvable here; the absolute docs.spora-ai.com URLs need
+      # network access and are skipped.
       - name: Check markdown links
         run: |
           if [ -z "$BASE_SHA" ]; then

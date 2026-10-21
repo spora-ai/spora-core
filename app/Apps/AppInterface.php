@@ -27,7 +27,8 @@ interface AppInterface
     /**
      * Bundled icon name (e.g. "puzzle"), raw SVG path, or full <svg> string.
      * Resolved by the shared <Icon> component. See plugin.schema.json and
-     * docs/07_plugins.md for the accepted forms.
+     * https://docs.spora-ai.com/develop/plugins/author-guide/foundations.html
+     * for the accepted forms.
      */
     public function icon(): string;
 
