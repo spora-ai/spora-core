@@ -31,7 +31,9 @@ Before driving the create-agent flow, run `agent(action: "list_agents")` if ther
 { "action": "list_agents" }
 ```
 
-Returns a slim list of `{agent_id, name, description, is_archived}` rows (`#4 Custom Agent — does X`, with ` (archived)` appended for an archived agent) owned by the current user, ordered newest-first. Empty list means "go ahead and create". If the agent you want already exists at row N, skip step 1 — call `update_agent(agent_id: N, agent: {…})` or `configure_tools(agent_id: N, tools: […])` directly. `update_agent` accepts an optional `agent_id`; omitting it edits the calling agent.
+Returns a slim list of `{agent_id, name, description, is_archived}` rows (`#4 Custom Agent — does X`, with ` (archived)` appended for an archived agent) visible to the current user — their own agents, plus the agents of every group they belong to — ordered newest-first. Empty list means "go ahead and create". If the agent you want already exists at row N, skip step 1 — call `update_agent(agent_id: N, agent: {…})` or `configure_tools(agent_id: N, tools: […])` directly. `update_agent` accepts an optional `agent_id`; omitting it edits the calling agent.
+
+A row being listed is not a guarantee you may act on it: a group agent the user merely belongs to is listed, but `update_agent` / `configure_tools` on it are refused unless they own or administer the group.
 
 ## Mandatory pre-flight
 
@@ -359,7 +361,7 @@ write:
 
 - `notes` — stripped by the tool before the DB write. Use `write_notes` (append/prepend) or `write_notes_overwrite` (destructive, requires approval) instead.
 - `is_favorite` — not part of this patch. The favourite is per-user; there is no such thing as favouriting an agent for everybody.
-- Any other key — dropped at the database layer against its allowlist.
+- Any other key — dropped before the DB write, against the service's allowlist.
 
 **Not writable through this tool, and refused rather than dropped:** `llm_driver_config_id`,
 `speech_driver_config_id` and `voice_message_retention_count` all sit in the service's
@@ -379,7 +381,7 @@ To verify a write took effect, call `read_agent(agent_id: <id>)` (or just `read_
 ## `read_agent` (read any agent by id; or read self)
 
 - `read_agent` with no `agent_id` reads the calling agent (same semantics as the legacy `read_agent_configuration`, which is a soft-redirect).
-- `read_agent(agent_id: N)` reads any agent owned by the user. Cross-user ids return "not found or not owned".
+- `read_agent(agent_id: N)` reads any agent whose principal you control — your own, or a group you own or administer. An id outside that scope returns "not found or not owned".
 - Result: canonical manifest (Markdown + result_data).
 
 ## Approval

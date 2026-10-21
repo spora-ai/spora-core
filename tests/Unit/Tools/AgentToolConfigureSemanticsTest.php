@@ -522,6 +522,64 @@ describe('configure_tools — operation names are validated', function (): void 
     });
 });
 
+describe('configure_tools — a tool_class that names no class is refused', function (): void {
+
+    it('refuses the call rather than writing a row no manifest will ever show', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Ghost Tool']);
+
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [[
+                'tool_class' => 'Spora\\Tools\\TotallyMadeUpTool',
+                'enabled'    => true,
+            ]],
+        ], $target->id, context: agentToolContext($userId));
+
+        // The reported shape: success, a junk row persisted, and a manifest
+        // that does not list it — the model reads that as "enabled" while
+        // nothing it can run exists.
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not a class this install can load')
+            ->and($result->content)->toContain('get_available_tools')
+            ->and(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('refuses the whole call, so an earlier valid entry is not written either', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Ghost Second']);
+
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [
+                ['tool_class' => TimeTool::class, 'enabled' => true],
+                ['tool_class' => 'Spora\\Tools\\TotallyMadeUpTool', 'enabled' => true],
+            ],
+        ], $target->id, context: agentToolContext($userId));
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not a class this install can load')
+            ->and(persistedToolsFor($target->id))->toBe([]);
+    });
+
+    it('refuses an operation override for a class that does not exist', function (): void {
+        [$tool, $agents, $settings, $userId] = makeAgentToolWithRealSettings();
+        $target = $agents->createAgent($userId, ['name' => 'Ghost Ops']);
+
+        $result = $tool->execute([
+            'action' => 'configure_tools', 'agent_id' => $target->id,
+            'tools'  => [[
+                'tool_class' => 'Spora\\Tools\\TotallyMadeUpTool',
+                'operations' => [['name' => 'now']],
+            ]],
+        ], $target->id, context: agentToolContext($userId));
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not a class this install can load')
+            ->and(Capsule::table('agent_tool_operation_overrides')->where('agent_id', $target->id)->count())->toBe(0);
+    });
+});
+
 describe('write_notes_overwrite — empty content', function (): void {
 
     it('refuses an empty replace instead of reporting "unchanged" as success', function (): void {

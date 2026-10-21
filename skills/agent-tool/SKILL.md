@@ -25,10 +25,10 @@ the `agent` tool — now what".
 
 | Operation | Enabled by default | Approval | What it may touch |
 |---|---|---|---|
-| `list_agents` | yes | no | Agents the calling principal can see |
+| `list_agents` | yes | no | Agents the calling user can see — their own, and their groups' |
 | `read_notes` | yes | no | The calling agent's own notes |
 | `write_notes` | yes | no | The calling agent's own notes (append/prepend) |
-| `read_agent` | **no** | no | Any agent the principal may read |
+| `read_agent` | **no** | no | Any agent whose principal the caller controls — their own, or a group they own or administer |
 | `get_available_tools` | **no** | no | The tool inventory. Read-only. |
 | `update_agent` | **no** | **yes** | Editable fields on a target agent |
 | `create_agent` | **no** | **yes** | A new agent |
@@ -152,6 +152,13 @@ unarchiving it and reported success while doing it.
 
 `list_agents` returns every agent you can see, newest first, as
 `{agent_id, name, description, is_archived}`.
+
+**You can see more than you can read.** The list is scoped to the *user*: their own
+agents, plus the agents of every group they belong to, whatever their role in it.
+Reading or reconfiguring one of those group agents needs you to **own or administer**
+the group. So a group agent can appear in this list and still be refused by
+`read_agent` with "agent not found or not owned by this user" — it is listed, not
+yours to touch. Do not treat every `agent_id` from this list as a valid target.
 
 **Archived agents are listed, flagged — not hidden.** `is_archived: true` on the row and
 `(archived)` in the rendered list. That is deliberate: `update_agent` can set

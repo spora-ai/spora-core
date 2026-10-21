@@ -30,11 +30,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  * new agents on behalf of the current user.
  *
  * Operations carrying an `agent_id` (`read_agent`, `configure_tools`,
- * `update_agent`) accept either the calling agent or any user-owned
- * agent by primary key. Ownership is always scoped to the authenticated
- * user — cross-user reads are refused, never silently substituted. The
- * LLM-facing agent-creation flow is the two-phase create → configure_tools
- * pattern documented in skills/agent-creation/SKILL.md.
+ * `update_agent`) accept either the calling agent or any agent owned by a
+ * principal the caller controls. Scope follows the principal, not the
+ * user: a group agent is in reach when the caller owns or administers the
+ * group, and a read outside that scope is refused, never silently
+ * substituted. The LLM-facing agent-creation flow is the two-phase
+ * create → configure_tools pattern documented in
+ * skills/agent-creation/SKILL.md.
  */
 #[Tool(
     name: 'agent',
@@ -74,8 +76,9 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'voice_message_retention_count are REFUSED along with the whole patch — they decide '
                . 'which model, credentials or retention window the agent runs on, and an operator sets '
                . 'them; there is no way to read the valid ids from here, so a guess would be consequential. '
-               . 'Any other key outside the allowlist is dropped at the database layer; call read_agent '
-               . 'afterwards to confirm the change took effect. For full allowlist and common pitfalls, read the '
+               . 'Any other key outside the allowlist is dropped — it never reaches the agent row — '
+               . 'so call read_agent afterwards to confirm the change took effect. For full allowlist '
+               . 'and common pitfalls, read the '
                . 'agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '. '
                . 'Pass `agent_id` (numeric pk returned by `create_agent` / `list_agents`) to target a '
                . 'specific agent; omit to patch the calling agent.',
@@ -117,9 +120,10 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'current enablement, missing required configuration, and per-operation '
                . 'enabled/requires_approval state). Tools that need configuration to '
                . 'become activatable are flagged via `ready_to_enable: false`. '
-               . 'The payload also carries a `skills` block: `allowed` is the agent\'s own '
-               . '`allowed_skills` list, and `visible` is every skill the current principal can '
-               . 'see (`{name, description, active}` each). Read `visible` to pick names, then '
+               . 'The payload also carries a `skills` block: `allowed` is the calling agent\'s '
+               . 'effective `allowed_skills` list after the whole settings cascade, and '
+               . '`visible` is every skill the current principal can see '
+               . '(`{name, description, active}` each). Read `visible` to pick names, then '
                . 'set them via `configure_tools` with a `settings.allowed_skills` array on the '
                . 'SkillTool entry — that write replaces the list wholesale. '
                . 'Use this to plan a sub-agent via `create_agent`. When planning a sub-agent, '
@@ -170,29 +174,36 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'read_agent',
-    description: 'Read the full configuration of a specific agent — `id`, `name`, `description`, '
-               . '`system_prompt`, enabled tools, and per-operation `enabled` / `requires_approval` state. '
+    description: 'Read the configuration of a specific agent — `agent_id`, `name`, `description`, '
+               . '`system_prompt`, `notes`, and every registered tool with its `enabled` flag and '
+               . 'per-operation `enabled` / `requires_approval` state. The manifest is slim: it '
+               . 'carries no setting values and no per-tool display metadata, so it is not a way to '
+               . 'read a tool\'s settings. '
                . 'Use this to verify what was actually committed by `create_agent` and `configure_tools` — '
                . 'silent drops do occur, so the read-back is the source of truth. '
                . 'Identify the target by `agent_id` (the numeric primary key returned by `create_agent`). '
                . 'Omit `agent_id` to read the calling agent (same as the deprecated '
                . '`read_agent_configuration` operation). For the slim two-phase agent-creation '
                . 'flow, see the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
-    operatorDescription: 'Read the full configuration of a specific agent.',
+    operatorDescription: 'Read the configuration of a specific agent.',
     enabledByDefault: false,
     requiresApprovalByDefault: false,
 )]
 #[ToolOperation(
     name: 'list_agents',
-    description: 'List every agent owned by the current user as a slim payload '
-               . '(`agent_id`, `name`, `description`). Useful as a discovery surface '
+    description: 'List every agent visible to the current user — their own agents, plus the '
+               . 'agents of every group they belong to — as a slim payload '
+               . '(`agent_id`, `name`, `description`, `is_archived`). Useful as a discovery surface '
                . 'before `read_agent(agent_id: N)` or `configure_tools(agent_id: N, '
                . 'tools: [...])` — `create_agent` returns an `agent_id` you need for '
                . 'follow-up operations, and this is the cheapest way to recover it after '
-               . 'a turn boundary. Archived and pinned state is preserved (call '
-               . '`read_agent` for the full manifest). Empty when the user has no agents. '
+               . 'a turn boundary. Archived agents are listed and flagged, not hidden. '
+               . 'Being listed is not the same as being reachable: a group agent you are only a '
+               . 'member of appears here, but reading or reconfiguring it needs you to own or '
+               . 'administer the group. '
+               . 'Empty when the user has no agents. '
                . 'See the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
-    operatorDescription: 'List every agent owned by the current user (slim payload).',
+    operatorDescription: 'List every agent visible to the current user — their own, and their groups\' (slim payload).',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -211,8 +222,8 @@ use Spora\Tools\ValueObjects\ToolResult;
                . 'llm_driver_config_id, speech_driver_config_id and voice_message_retention_count are '
                . 'refused, and the whole patch is refused with them. '
                . '`notes` is intentionally not accepted here — use write_notes. '
-               . 'Plan A: `is_favorite` was removed from this list because the toggle '
-               . 'is now per-user (POST/DELETE /api/v1/agents/{id}/favorite). '
+               . '`is_favorite` is not accepted either — the favourite toggle is per-user '
+               . '(POST/DELETE /api/v1/agents/{id}/favorite). '
                . 'Ignored by every other operation; omit this key entirely when calling '
                . 'read_notes, write_notes, write_notes_overwrite, get_available_tools, '
                . 'configure_tools, read_agent, list_agents, or create_agent.',
@@ -224,7 +235,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'ONLY for write_notes and write_notes_overwrite: the markdown segment to '
               . 'write. Combined with `mode` against the current notes. Ignored by every '
               . 'other operation; omit this key entirely when calling read_notes, '
-              . 'update_agent, get_available_tools, or create_agent.',
+              . 'update_agent, get_available_tools, configure_tools, create_agent, '
+              . 'read_agent, or list_agents.',
     required: ['write_notes', 'write_notes_overwrite'],
 )]
 #[ToolParameter(
@@ -261,6 +273,8 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'tools',
     type: 'array',
     description: 'ONLY for configure_tools: a list of `{ tool_class, enabled, settings, operations: [...] }` entries. '
+              . '`tool_class` is the FQCN of a tool this install has — take it from `get_available_tools`, '
+              . 'since a name that resolves to no class is refused. '
               . 'Each operation entry may set `enabled` (default true) and `auto_approve` (default false). '
               . 'A tool with `enabled: false` removes it from the agent; OMITTING `enabled` leaves the tool '
               . 'as it is, so an entry carrying only `settings` or `operations` never grants the tool by accident. '
@@ -288,9 +302,10 @@ use Spora\Tools\ValueObjects\ToolResult;
               . 'For read_agent: numeric primary key returned by `create_agent`; omit to read the calling agent. '
               . 'For configure_tools: numeric primary key of the agent to configure (default: the calling agent). '
               . 'For update_agent: numeric primary key of the agent to patch (default: the calling agent); '
-              . 'use this to edit the name / description / system_prompt of any agent you own. '
+              . 'use this to edit the name / description / system_prompt of any agent whose principal '
+              . 'you control — your own, or a group you own or administer. '
               . 'Pass the value from `create_agent` (or `list_agents`) to target a freshly-created agent. '
-              . 'Cross-user agent ids return "agent not found or not owned by this user". '
+              . 'An agent id outside that scope returns "agent not found or not owned by this user". '
               . 'Ignored by every other operation.',
     required: false,
 )]
@@ -390,7 +405,7 @@ final class AgentTool extends AbstractTool
             ),
             'write_notes_overwrite'     => 'Replace the agent\'s notes wholesale (destructive).',
             'get_available_tools'       => 'List available tools with configuration status.',
-            'create_agent'              => 'Create a new agent from the provided template payload.',
+            'create_agent'              => 'Create a new agent from the provided slim payload.',
             'configure_tools'           => sprintf(
                 'Configure this agent\'s toolset (%d entries).',
                 is_array($arguments['tools'] ?? null) ? count($arguments['tools']) : 0,
@@ -401,7 +416,7 @@ final class AgentTool extends AbstractTool
                     ? 'agent_id: ' . (int) $arguments['agent_id']
                     : 'calling agent',
             ),
-            'list_agents'               => 'List every agent owned by the current user.',
+            'list_agents'               => 'List every agent visible to the current user — their own, and their groups\'.',
             default                     => sprintf('Agent tool: %s', $operation),
         };
     }
