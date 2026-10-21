@@ -20,6 +20,10 @@ use Spora\Models\Task;
  *   - On terminal completion of every child, the parent is resumed —
  *     child outputs are appended as `role:'tool'` rows so the next LLM
  *     tick correlates them with the originating tool call.
+ *
+ * The `sub_agent_continue` op reuses the same machinery on an existing
+ * child: the parent suspends again, the child runs once more, and the
+ * parent's next tool row carries the child's second answer.
  */
 interface SubAgentServiceInterface
 {
@@ -36,6 +40,18 @@ interface SubAgentServiceInterface
      * @return Task The newly created child task.
      */
     public function spawn(int $parentTaskId, int $targetAgentId, string $prompt, int $userId): Task;
+
+    /**
+     * Continue an existing child task's conversation and wait for its next
+     * answer. The child must have been started by `$parentTaskId` and must
+     * have reached a terminal state — a running child cannot be continued.
+     *
+     * The child's earlier conversation is intact, so the follow-up prompt
+     * does not need to be self-contained.
+     *
+     * @return Task The continued child task.
+     */
+    public function continueChild(int $parentTaskId, int $childTaskId, string $prompt, int $userId): Task;
 
     /**
      * Hook called by `TickPhaseRunner` whenever a child task transitions

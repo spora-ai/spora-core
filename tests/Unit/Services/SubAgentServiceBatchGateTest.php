@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services;
 
+use InvalidArgumentException;
 use Mockery;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
@@ -236,5 +237,138 @@ describe('SubAgentService::maybeResumeParentForParent batch-boundary hook', func
         $parent->refresh();
         $data = (array) $parent->data;
         expect($data['sub_agent_batch_open'] ?? false)->toBeFalse();
+    });
+});
+
+/**
+ * A parent task plus one settled child it started, for the
+ * `continueChild` scenarios.
+ *
+ * @return array{parent: Task, child: Task, ownerId: int}
+ */
+function continueChildFixture(string $childStatus = 'COMPLETED', ?int $childParentId = null): array
+{
+    $seed = planDSeedAgents();
+    $ownerPrincipalId = createUserPrincipalPublic($seed['ownerId']);
+
+    $parent = Task::create([
+        'agent_id'        => $seed['parentAgentId'],
+        'principal_id'    => $ownerPrincipalId,
+        'trigger_user_id' => $seed['ownerId'],
+        'status'          => 'RUNNING',
+        'user_prompt'     => 'parent prompt',
+        'max_steps'       => 5,
+        'step_count'      => 1,
+    ]);
+
+    $child = Task::create([
+        'agent_id'        => $seed['childAgentId'],
+        'principal_id'    => $ownerPrincipalId,
+        'trigger_user_id' => $seed['ownerId'],
+        'status'          => $childStatus,
+        'user_prompt'     => 'child prompt',
+        'max_steps'       => 5,
+        'step_count'      => 1,
+        'parent_task_id'  => $childParentId ?? $parent->id,
+    ]);
+
+    return ['parent' => $parent, 'child' => $child, 'ownerId' => $seed['ownerId']];
+}
+
+describe('SubAgentService::continueChild', function (): void {
+    afterEach(function (): void {
+        Mockery::close();
+        \Spora\Core\Database::resetBootState();
+    });
+
+    it('refuses a task this conversation did not start', function (): void {
+        $seed = planDSeedAgents();
+        $ownerPrincipalId = createUserPrincipalPublic($seed['ownerId']);
+
+        $parent = Task::create([
+            'agent_id'        => $seed['parentAgentId'],
+            'principal_id'    => $ownerPrincipalId,
+            'trigger_user_id' => $seed['ownerId'],
+            'status'          => 'RUNNING',
+            'user_prompt'     => 'parent prompt',
+            'max_steps'       => 5,
+        ]);
+
+        $foreignChild = Task::create([
+            'agent_id'        => $seed['childAgentId'],
+            'principal_id'    => $ownerPrincipalId,
+            'trigger_user_id' => $seed['ownerId'],
+            'status'          => 'COMPLETED',
+            'user_prompt'     => 'child prompt',
+            'max_steps'       => 5,
+        ]);
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('continue');
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        expect(fn() => $service->continueChild(
+            parentTaskId: $parent->id,
+            childTaskId: $foreignChild->id,
+            prompt: 'more',
+            userId: $seed['ownerId'],
+        ))->toThrow(
+            InvalidArgumentException::class,
+            "Task #{$foreignChild->id} was not started by this conversation.",
+        );
+    });
+
+    it('refuses a task that is still running', function (): void {
+        $fixture = continueChildFixture(childStatus: 'RUNNING');
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('continue');
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        expect(fn() => $service->continueChild(
+            parentTaskId: $fixture['parent']->id,
+            childTaskId: $fixture['child']->id,
+            prompt: 'more',
+            userId: $fixture['ownerId'],
+        ))->toThrow(
+            InvalidArgumentException::class,
+            "Task #{$fixture['child']->id} is still running (status RUNNING).",
+        );
+    });
+
+    it('records one expected child and one spawned id for the continue round', function (): void {
+        // The continue round reuses the spawn bookkeeping: the parent
+        // suspends again and the resume gate compares the spawned ids
+        // against the expected count.
+        $fixture = continueChildFixture();
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->allows('continue')
+            ->with($fixture['child']->id, 'more')
+            ->andReturn($fixture['child']);
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        $service->continueChild(
+            parentTaskId: $fixture['parent']->id,
+            childTaskId: $fixture['child']->id,
+            prompt: 'more',
+            userId: $fixture['ownerId'],
+        );
+
+        $fixture['parent']->refresh();
+        $data = (array) $fixture['parent']->data;
+
+        expect($fixture['parent']->status)->toBe('AWAITING_SUB_AGENTS')
+            ->and($data['spawned_sub_task_ids'])->toBe([$fixture['child']->id])
+            ->and($data['sub_agent_expected_count'])->toBe(1);
     });
 });

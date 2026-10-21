@@ -10,9 +10,11 @@ use Spora\Models\Task;
 /**
  * Hands the chat from one user-owned task over to another user-owned agent.
  *
- * The source task is marked COMPLETED with a handover note; a new Task is
- * created via {@see OrchestratorInterface::start()} with `parent_task_id`
- * set to the source, so the new chat inherits the conversation lineage.
+ * The source task is left running and keeps a `data.handover` breadcrumb
+ * pointing at the new task; a new Task is created via
+ * {@see OrchestratorInterface::start()} with `parent_task_id` set to the
+ * source, so the new chat inherits the conversation lineage. The target
+ * works in the background — the source never sees its answer.
  *
  * Authorization: the calling user must own both the source task and the
  * target agent. Cross-user handovers are out of scope for v1.

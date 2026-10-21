@@ -138,6 +138,58 @@ final class SubAgentService implements SubAgentServiceInterface
         return $child;
     }
 
+    /**
+     * Continue an existing child task's conversation and wait for its next
+     * answer.
+     *
+     * The child must have been started by `$parentTaskId` and must have
+     * settled — continuing a running task would abort it mid-flight
+     * ({@see \Spora\Agents\Orchestrator::continue()} auto-aborts a RUNNING
+     * source).
+     */
+    public function continueChild(int $parentTaskId, int $childTaskId, string $prompt, int $userId): Task
+    {
+        $visiblePrincipalIds = $this->principalResolver->visiblePrincipalIds($userId);
+        $parent = Task::where('id', $parentTaskId)
+            ->whereIn('principal_id', $visiblePrincipalIds)
+            ->first();
+        $child = Task::find($childTaskId);
+
+        if ($parent === null || $child === null) {
+            throw new InvalidArgumentException('Parent task or sub-agent task not found.');
+        }
+
+        // Only a child this conversation started may be continued. A
+        // handover child qualifies too — it carries the same parent_task_id.
+        if ((int) $child->parent_task_id !== (int) $parent->id) {
+            throw new InvalidArgumentException(
+                "Task #{$childTaskId} was not started by this conversation.",
+            );
+        }
+
+        if (!in_array($child->status, ['COMPLETED', 'FAILED', 'ABORTED'], true)) {
+            throw new InvalidArgumentException(
+                "Task #{$childTaskId} is still running (status {$child->status}).",
+            );
+        }
+
+        // Flip to AWAITING_SUB_AGENTS before the child runs, so the child's
+        // completion hook finds the parent in the state the resume gate
+        // requires.
+        $this->markParentAwaitingSubAgents($parent);
+
+        // The child's earlier conversation is intact, so the follow-up does
+        // not need to be self-contained — the inverse of the `sub_agent`
+        // prompt rule.
+        $child = ($this->orchestratorFactory)()->continue($child->id, $prompt);
+
+        $this->recordSpawnedChild($parent, $child->id);
+        $this->incrementExpectedCount($parent->id);
+        $this->publishParentState($parent->id, $userId);
+
+        return $child;
+    }
+
     public function maybeResumeParent(int $childTaskId): void
     {
         $ready = $this->loadReadyParent($childTaskId);
@@ -437,10 +489,17 @@ final class SubAgentService implements SubAgentServiceInterface
      * its `provider_call_id` so the next LLM round-trip sees the tool
      * result correlated with the originating call.
      *
+     * Newest match wins: a continued child has two rows — the original
+     * spawn and the continuation — and each carries its own answer, so
+     * the resume must replace the latest row's history entry and leave
+     * the earlier answer in place. A `handover` row is excluded by the
+     * `spawned_sub_task_ids` check rather than by an operation filter:
+     * it has no such key.
+     *
      * Decoded in PHP rather than via SQL JSON functions so the rows
      * scope stays portable across SQLite and MySQL/MariaDB. The
      * `result_data` cast on the model decodes the JSON column on
-     * read. The result set is bounded by the task's handover tool
+     * read. The result set is bounded by the task's sub_agent tool
      * calls — at most one row per tool call in the originating
      * turn — so the linear scan is cheap.
      */
@@ -448,7 +507,7 @@ final class SubAgentService implements SubAgentServiceInterface
     {
         $rows = ToolCallModel::where('task_id', $parentTaskId)
             ->where('tool_name', 'sub_agent')
-            ->where('operation', 'sub_agent')
+            ->orderByDesc('id')
             ->get();
 
         foreach ($rows as $row) {

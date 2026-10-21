@@ -15,8 +15,12 @@ use Spora\Models\Task;
  *
  * Validates that the user owns the source task and the target agent,
  * spawns the new task via the orchestrator (which seeds the first
- * `task_history` row from `$summary`), then closes the source task
- * with a `data.handover` breadcrumb so the UI can render the link.
+ * `task_history` row from `$summary`), then records a `data.handover`
+ * breadcrumb on the source task so the UI can render the link.
+ *
+ * The source task is deliberately left running: the target works in the
+ * background and the source takes its own next LLM turn, so it ends on
+ * its own closing message rather than a canned hand-off note.
  */
 final class HandoverService implements HandoverServiceInterface
 {
@@ -76,10 +80,11 @@ final class HandoverService implements HandoverServiceInterface
             userId: $userId,
         );
 
+        // The source keeps running — the target's task is a background
+        // delegation. The breadcrumb is the only thing written back, so
+        // the source's own agent loop decides how the chat ends.
         $source->update([
-            'status'         => 'COMPLETED',
-            'final_response' => "Handed off to {$targetAgent->name}.",
-            'data'           => array_merge($source->data ?? [], [
+            'data' => array_merge($source->data ?? [], [
                 'handover' => [
                     'target_task_id'   => $newTask->id,
                     'target_agent_id'  => $targetAgent->id,

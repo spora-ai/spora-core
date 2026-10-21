@@ -101,7 +101,7 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     );
 
     expect($result->success)->toBeTrue("Tool rejected valid target: {$result->content}");
-    expect($result->content)->toContain("Task delegated to agent #{$targetAgent->id}");
+    expect($result->content)->toContain("Delegated to agent #{$targetAgent->id}");
 });
 
 it('still rejects a target NOT in the allowlist when the value is stored as a JSON string', function (): void {

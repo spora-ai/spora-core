@@ -14,6 +14,7 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
+use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -95,13 +96,40 @@ function handoverE2eSeedAgents(): array
 }
 
 /**
+ * Enable the SubAgentTool on the source agent, with the `handover`
+ * operation switched on.
+ *
+ * `handover` is opt-in (`enabledByDefault: false`) — an agent without an
+ * explicit override never sees it. The override also pins the approval
+ * default to auto-approve, which is the shipped default for the op.
+ */
+function handoverE2eEnableTool(int $sourceAgentId): void
+{
+    AgentTool::insert([
+        'agent_id'   => $sourceAgentId,
+        'tool_class' => SubAgentTool::class,
+        'tool_name'  => 'sub_agent',
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $sourceAgentId,
+        'tool_class'                => SubAgentTool::class,
+        'operation'                 => 'handover',
+        'enabled'                   => 1,
+        'default_requires_approval' => 0,
+    ]);
+}
+
+/**
  * Build an Orchestrator configured with:
  *   - the SubAgentTool (real, with allowlist set to [$targetAgentId])
  *   - a StubInputTool (so tool-class resolution works)
  *   - scripted LLM drivers (real implementations, not Mockery, so PHPStan is happy)
  * The SubAgentTool is backed by a real HandoverService, which is in turn
- * backed by an INNER Orchestrator that drives the new task created on
- * the target agent.
+ * backed by an INNER Orchestrator that drives the new task created on the
+ * target agent.
  *
  * @param  list<LLMResponse>  $llmResponses       Sequence of responses for the outer driver (defaults to one text).
  * @param  list<LLMResponse>  $llmInnerResponses  Sequence for the inner driver (default one text).
@@ -162,25 +190,18 @@ function handoverE2eBuildOrchestrator(
 
 describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): void {
 
-    it('full happy-path: handover tool call creates a new task, source is closed with breadcrumb', function (): void {
+    it('full happy-path: the handover delegates in the background and the source ends on its own words', function (): void {
         $seed   = handoverE2eSeedAgents();
         $userId = $seed['userId'];
         $sourceAgentId = $seed['sourceAgentId'];
         $targetAgentId = $seed['targetAgentId'];
 
-        // Enable the SubAgentTool on the source agent.
-        AgentTool::insert([
-            'agent_id'   => $sourceAgentId,
-            'tool_class' => SubAgentTool::class,
-            'tool_name'  => 'sub_agent',
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        handoverE2eEnableTool($sourceAgentId);
 
         $built    = handoverE2eBuildOrchestrator(
             $targetAgentId,
             llmResponses: [
-                // tick 1: emit handover tool call (PENDING_APPROVAL)
+                // tick 1: emit the handover tool call
                 new LLMResponse(
                     content: null,
                     toolCalls: [new DriverToolCall(
@@ -196,7 +217,7 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
                     outputTokens: 5,
                     completionId: 'cmp_source_1',
                 ),
-                // tick 2 (after resume): text response, source task completed
+                // tick 2: the source takes its own next turn.
                 new LLMResponse(
                     content: 'All wrapped up.',
                     toolCalls: [],
@@ -208,34 +229,16 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         );
         $orch = $built['outer'];
 
-        // Step 3: Start the chat with Source agent. Tick 1 should pause for approval.
+        // Step 3: Start the chat with Source agent. The handover op is
+        // auto-approved, so the call runs inline and the source keeps
+        // going — it takes one more LLM turn and ends on its own words.
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
         claimAndTick($orch, $source->id);
         $source->refresh();
 
-        // Step 4: SubAgentTool requires approval, so the task is paused.
-        expect($source->status)->toBe('PENDING_APPROVAL');
-        $pendingToolCall = ToolCallModel::where('task_id', $source->id)
-            ->where('status', 'PENDING_APPROVAL')
-            ->first();
-        expect($pendingToolCall)->not->toBeNull();
-        expect($pendingToolCall->tool_name)->toBe('sub_agent');
-
-        // Step 4 (cont'd): Approve the tool call.
-        $orch->resume($source->id, [[
-            'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
-            'decision' => 'approve',
-            'arguments' => [
-                'op' => 'handover',
-                'target_agent_id' => $targetAgentId,
-                'prompt' => HANDOVER_E2E_SUMMARY,
-            ],
-        ]]);
-        claimAndTick($orch, $source->id);
-
-        // Step 5: A new task is owned by the target agent, with
-        // parent_task_id = source.
-        $source->refresh();
+        // Step 4: A new task is owned by the target agent, with
+        // parent_task_id = source. It is a background delegation: the
+        // source never waits for it, so it is still queued.
         $newTask = Task::where('agent_id', $targetAgentId)
             ->where('principal_id', createUserPrincipalPublic($userId))
             ->where('parent_task_id', $source->id)
@@ -243,16 +246,18 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         expect($newTask)->not->toBeNull();
         expect($newTask->parent_task_id)->toBe($source->id);
         expect($newTask->user_prompt)->toBe(HANDOVER_E2E_SUMMARY);
+        expect($newTask->status)->toBe('QUEUED');
 
-        // Step 6: Source task final state.
-        // After resume, `completeResume` re-queues the source; the next tick
-        // runs the approved handover and then takes a second LLM turn whose
-        // text the orchestrator writes via `completeTaskWithResponse` —
-        // overwriting the HandoverService's
-        // `final_response="Handed off to Target Agent."`. This is a real
-        // interaction between the HandoverService and the resume flow;
-        // recorded here for the verifier.
+        // Step 5: The source is NOT closed by the handover. It took its own
+        // next LLM turn and ended with the LLM's text — not with a canned
+        // "Handed off to …" note.
         expect($source->status)->toBe('COMPLETED');
+        expect($source->final_response)->toBe('All wrapped up.');
+
+        // Step 6: The breadcrumb records the delegation.
+        expect($source->data['handover']['target_task_id'])->toBe($newTask->id);
+        expect($source->data['handover']['target_agent_id'])->toBe($targetAgentId);
+        expect($source->data['handover']['target_agent_name'])->toBe('Target Agent');
 
         // Step 7: The tool_call row's result_data flows through the task
         // detail API and includes new_task_id + handover=>true.
@@ -276,13 +281,7 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         $sourceAgentId = $seed['sourceAgentId'];
         $targetAgentId = $seed['targetAgentId'];
 
-        AgentTool::insert([
-            'agent_id'   => $sourceAgentId,
-            'tool_class' => SubAgentTool::class,
-            'tool_name'  => 'sub_agent',
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        handoverE2eEnableTool($sourceAgentId);
 
         // Build with an EMPTY allowlist so any target_agent_id is rejected.
         $built = handoverE2eBuildOrchestrator(
@@ -314,18 +313,6 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
         claimAndTick($orch, $source->id);
         $source->refresh();
-        expect($source->status)->toBe('PENDING_APPROVAL');
-
-        $orch->resume($source->id, [[
-            'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
-            'decision' => 'approve',
-            'arguments' => [
-                'op' => 'handover',
-                'target_agent_id' => $targetAgentId,
-                'prompt' => HANDOVER_E2E_SUMMARY,
-            ],
-        ]]);
-        claimAndTick($orch, $source->id);
 
         // No new task for the target agent.
         $newTaskCount = Task::where('agent_id', $targetAgentId)->count();
@@ -343,13 +330,7 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         $sourceAgentId = $seed['sourceAgentId'];
         $targetAgentId = $seed['targetAgentId'];
 
-        AgentTool::insert([
-            'agent_id'   => $sourceAgentId,
-            'tool_class' => SubAgentTool::class,
-            'tool_name'  => 'sub_agent',
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+        handoverE2eEnableTool($sourceAgentId);
 
         $built = handoverE2eBuildOrchestrator(
             $targetAgentId,
@@ -375,17 +356,6 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         $orch = $built['outer'];
 
         $source = $orch->start($sourceAgentId, HANDOVER_E2E_HAPPY_PROMPT, maxSteps: 10);
-        claimAndTick($orch, $source->id);
-
-        $orch->resume($source->id, [[
-            'provider_call_id' => HANDOVER_E2E_PROVIDER_CALL_ID,
-            'decision' => 'approve',
-            'arguments' => [
-                'op' => 'handover',
-                'target_agent_id' => $targetAgentId,
-                'prompt' => HANDOVER_E2E_SUMMARY,
-            ],
-        ]]);
         claimAndTick($orch, $source->id);
 
         $newTask = Task::where('parent_task_id', $source->id)->first();

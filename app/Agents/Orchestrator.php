@@ -59,6 +59,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly AgentDecisionProcessor $agentDecisionProcessor;
     public readonly AgentStateResolver $agentStateResolver;
     public readonly TaskStatusWriter $statusWriter;
+    public readonly ToolOperationResolver $toolOperations;
 
     /** Lease config threaded through recursive ticks within the same
      *  HTTP request (or worker daemon). Set by the outermost `tick()`
@@ -138,7 +139,8 @@ final class Orchestrator implements OrchestratorInterface
             $config->subAgent,
             $principalResolver ?? new PrincipalResolver(),
         );
-        $this->toolCallExecutor      = new ToolCallExecutor($this);
+        $this->toolOperations         = new ToolOperationResolver();
+        $this->toolCallExecutor      = new ToolCallExecutor($this, $this->toolOperations);
         $this->agentDecisionProcessor = new AgentDecisionProcessor($this);
         $this->agentStateResolver     = new AgentStateResolver($this);
         $this->statusWriter           = new TaskStatusWriter();
@@ -541,7 +543,12 @@ final class Orchestrator implements OrchestratorInterface
         ]);
 
         try {
-            $result = $toolInstance->execute($arguments, $agentId, $taskId, $context);
+            $result = $toolInstance->execute(
+                $this->toolOperations->withResolvedDiscriminator($toolInstance, $arguments, $agentId),
+                $agentId,
+                $taskId,
+                $context,
+            );
 
             if (!$result->success) {
                 $this->logger?->error('Tool returned failure', [
@@ -595,7 +602,7 @@ final class Orchestrator implements OrchestratorInterface
         $usesOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
 
         if ($usesOperations) {
-            $operationName = $toolInstance->getOperationName($arguments);
+            $operationName = $this->toolOperations->resolveOperationName($toolInstance, $arguments, $agentId);
 
             // Approval resolution is per-operation only. The UI exposes a
             // per-operation auto-approve toggle (no agent-wide toggle for
@@ -635,22 +642,7 @@ final class Orchestrator implements OrchestratorInterface
      */
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
-        $toolClass = get_class($toolInstance);
-
-        /** @var AgentToolOperationOverride|null $override */
-        $override = AgentToolOperationOverride::where('agent_id', $agentId)
-            ->where('tool_class', $toolClass)
-            ->where('operation', $operationName)
-            ->first();
-
-        if ($override !== null) {
-            $raw = $override->getRawOriginal('enabled');
-            if ($raw !== null) {
-                return (bool) $raw;
-            }
-        }
-
-        return $toolInstance->isEnabledByDefault($operationName);
+        return $this->toolOperations->isEnabled($toolInstance, $operationName, $agentId);
     }
 
     /**

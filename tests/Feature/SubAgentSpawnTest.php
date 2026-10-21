@@ -102,18 +102,20 @@ function subAgentSeedAgents(): array
  * child too, which is intentional for the test).
  *
  * @param  list<LLMResponse> $llmResponses
- * @return array{outer: Orchestrator, llm: SubAgentE2eScriptedDriver}
+ * @param  \Spora\Drivers\LLMDriverInterface|null $driver  A driver to use instead of the scripted one.
+ * @return array{outer: Orchestrator, llm: \Spora\Drivers\LLMDriverInterface}
  */
 function subAgentBuildOrchestrator(
     int $childAgentId,
     ?array $allowlistOverride = null,
     array $llmResponses = [],
+    ?\Spora\Drivers\LLMDriverInterface $driver = null,
 ): array {
     $llmResponses = $llmResponses !== []
         ? $llmResponses
         : [new LLMResponse('All wrapped up.', [], 5, 3, 'cmp_default')];
 
-    $llm = new SubAgentE2eScriptedDriver(...$llmResponses);
+    $llm = $driver ?? new SubAgentE2eScriptedDriver(...$llmResponses);
     $driverFactory = Mockery::mock(DriverFactory::class);
     $driverFactory->allows('makeFromAgent')->andReturn($llm);
 
@@ -182,6 +184,40 @@ function subAgentDrainQueue(OrchestratorInterface $orchestrator, int $maxTicks =
     }
 }
 
+/**
+ * Pin the `sub_agent` op to "requires approval" for the parent agent.
+ *
+ * The op's class default is auto-approve, so the tests that exercise the
+ * approval path have to say so explicitly.
+ */
+function subAgentRequireApproval(int $agentId): void
+{
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agentId,
+        'tool_class'                => SubAgentTool::class,
+        'operation'                 => 'sub_agent',
+        'enabled'                   => 1,
+        'default_requires_approval' => 1,
+    ]);
+}
+
+/**
+ * Switch the `sub_agent_continue` op on for the parent agent.
+ *
+ * The op is opt-in (`enabledByDefault: false`) — an agent without an
+ * explicit override never sees it.
+ */
+function subAgentEnableContinue(int $agentId): void
+{
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agentId,
+        'tool_class'                => SubAgentTool::class,
+        'operation'                 => 'sub_agent_continue',
+        'enabled'                   => 1,
+        'default_requires_approval' => 0,
+    ]);
+}
+
 describe('SubAgentService::spawn', function (): void {
 
     it('creates a child task, waits for its completion, then resumes the parent', function (): void {
@@ -197,6 +233,8 @@ describe('SubAgentService::spawn', function (): void {
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
+        subAgentRequireApproval($parentAgentId);
 
         $built = subAgentBuildOrchestrator(
             $childAgentId,
@@ -377,6 +415,8 @@ describe('SubAgentService::spawn', function (): void {
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
+        subAgentRequireApproval($parentAgentId);
+
         $built = subAgentBuildOrchestrator(
             $childAgentId,
             allowlistOverride: [],
@@ -437,6 +477,8 @@ describe('SubAgentService::spawn', function (): void {
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
+        subAgentRequireApproval($parentAgentId);
 
         // The driver scripts the parent's first response (the sub_agent tool
         // call) and then explodes on every subsequent call. The parent's
@@ -592,6 +634,8 @@ describe('SubAgentService::spawn', function (): void {
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
+        subAgentRequireApproval($parentAgentId);
 
         $built = subAgentBuildOrchestrator(
             $childAgentId,
@@ -1016,6 +1060,8 @@ describe('SubAgentService::spawn', function (): void {
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
+        subAgentRequireApproval($parentAgentId);
+
         $built = subAgentBuildOrchestrator(
             $childAgentId,
             llmResponses: [
@@ -1169,6 +1215,8 @@ describe('SubAgentService::spawn', function (): void {
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
+
+        subAgentRequireApproval($parentAgentId);
 
         $built = subAgentBuildOrchestrator(
             $childAgentId,
@@ -1353,5 +1401,78 @@ describe('SubAgentService::spawn', function (): void {
         expect($toolRows->count())->toBe(1);
         expect($toolRows[0]->content)->toContain('Sub-agent task #' . $child->id . ' completed');
         expect($toolRows[0]->content)->toContain('final answer');
+    });
+
+    it('continues a sub-agent task: the child runs again and the parent keeps both answers', function (): void {
+        // The full loop: spawn → the child answers → the parent resumes →
+        // continue → the child answers again → the parent resumes with the
+        // SECOND answer while the first one is still in its context. The
+        // second resume must land on the continuation's tool row, not on
+        // the spawn's — otherwise the first answer is overwritten.
+        $seed = subAgentSeedAgents();
+        $parentAgentId = $seed['parentAgentId'];
+        $childAgentId = $seed['childAgentId'];
+
+        AgentTool::insert([
+            'agent_id'   => $parentAgentId,
+            'tool_class' => SubAgentTool::class,
+            'tool_name'  => 'sub_agent',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        subAgentEnableContinue($parentAgentId);
+
+        $built = subAgentBuildOrchestrator(
+            $childAgentId,
+            driver: new SubAgentContinueE2eScriptedDriver($parentAgentId, $childAgentId),
+        );
+        $orch = $built['outer'];
+
+        $parent = $orch->start($parentAgentId, SUB_AGENT_PARENT_PROMPT, maxSteps: 10);
+        subAgentDrainQueue($orch);
+
+        $parent->refresh();
+        expect($parent->status)->toBe('COMPLETED');
+        expect($parent->final_response)->toBe('All done.');
+
+        // The child ran twice: the original prompt and the follow-up.
+        $child = Task::where('parent_task_id', $parent->id)->first();
+        expect($child)->not->toBeNull();
+        expect($child->status)->toBe('COMPLETED');
+
+        $childPrompts = TaskHistory::where('task_id', $child->id)
+            ->where('role', 'user')
+            ->orderBy('sequence')
+            ->pluck('content')
+            ->all();
+        expect($childPrompts)->toHaveCount(2);
+        expect($childPrompts[1])->toContain('change the heading');
+
+        // The parent's context carries BOTH answers, each on its own tool
+        // row, correlated with the call that produced it.
+        $toolRows = TaskHistory::where('task_id', $parent->id)
+            ->where('role', 'tool')
+            ->orderBy('id')
+            ->get();
+        expect($toolRows)->toHaveCount(2);
+
+        $byCallId = [];
+        foreach ($toolRows as $row) {
+            $byCallId[(string) $row->tool_call_id] = (string) $row->content;
+        }
+
+        expect($byCallId)->toHaveKey('pc_spawn');
+        expect($byCallId['pc_spawn'])->toContain('first child answer');
+        expect($byCallId)->toHaveKey('pc_continue');
+        expect($byCallId['pc_continue'])->toContain('second child answer');
+
+        // The serialized LLM message list mirrors the rows: one tool
+        // message per provider_call_id, each with its own answer.
+        $messages = $orch->buildMessages($parent->id);
+        $toolMessages = array_values(array_filter(
+            $messages,
+            static fn(array $m): bool => ($m['role'] ?? null) === 'tool',
+        ));
+        expect($toolMessages)->toHaveCount(2);
     });
 });

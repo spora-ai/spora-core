@@ -296,11 +296,11 @@ final class OperationSchemaFilter
     /**
      * Rewrite the synthesized discriminator's description so its prose op
      * list matches the narrowed enum — otherwise the LLM reads "you can
-     * perform handover or sub_agent" against an enum that only has
-     * `sub_agent` and burns a tool call on a bad op. The runtime
-     * SchemaValidator still rejects as defence in depth. Only rewrites
-     * the auto-generated `"The operation to perform: …"` format; user-
-     * supplied discriminator descriptions are left alone.
+     * perform sub_agent, sub_agent_continue or handover" against an enum
+     * that only has `sub_agent` and burns a tool call on a bad op. The
+     * runtime SchemaValidator still rejects as defence in depth. Only
+     * rewrites the auto-generated `"The operation to perform: …"` format;
+     * user-supplied discriminator descriptions are left alone.
      *
      * @param  array<string, mixed>   $properties
      * @param  list<string>           $narrowedEnum  Already-filtered enum values
