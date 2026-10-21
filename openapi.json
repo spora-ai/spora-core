@@ -4422,6 +4422,45 @@
                 ]
             }
         },
+        "/api/v1/user-preferences/locale": {
+            "get": {
+                "tags": [
+                    "User-preferences"
+                ],
+                "summary": "Show UserLocale",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "User-preferences"
+                ],
+                "summary": "Update UserLocale",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
         "/api/v1/notifications": {
             "get": {
                 "tags": [

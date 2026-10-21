@@ -154,9 +154,15 @@ final class TodoTool extends AbstractTool
     public function describeAction(array $arguments): string
     {
         $op = $this->getOperationName($arguments);
+        $todos = $arguments['todos'] ?? [];
+        $count = is_array($todos) ? count($todos) : 0;
 
         return match ($op) {
-            'write'      => $this->describeWrite($arguments),
+            'write'      => match ($count) {
+                0       => 'Clear the todo list',
+                1       => sprintf('Update the todo list (%d item)', $count),
+                default => sprintf('Update the todo list (%d items)', $count),
+            },
             'add'        => 'Append a todo item',
             'set_status' => sprintf(
                 "Mark todo '%s' as %s.",
@@ -166,17 +172,6 @@ final class TodoTool extends AbstractTool
             'read'       => 'Read the todo list',
             default      => 'Use the todo tool',
         };
-    }
-
-    private function describeWrite(array $arguments): string
-    {
-        $todos = $arguments['todos'] ?? [];
-        $count = is_array($todos) ? count($todos) : 0;
-        if ($count === 0) {
-            return 'Clear the todo list';
-        }
-        $suffix = $count === 1 ? '' : 's';
-        return "Update the todo list ({$count} item{$suffix})";
     }
 
     /**

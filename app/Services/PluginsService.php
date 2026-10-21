@@ -6,6 +6,8 @@ namespace Spora\Services;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Core\Extension\PluginPackageName;
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Plugins\PluginInterface;
 use Spora\Plugins\PluginLoader;
 
@@ -17,15 +19,21 @@ use Spora\Plugins\PluginLoader;
  *  - plugin.json manifest (description, slug)
  *  - schema_versions + Laravel `migrations` tables (applied migration state)
  *
- * Plugins are not sandboxed (see docs/07_plugins.md), so reading their metadata
- * is inherently trusted operator data — the controller gates this behind AuthMiddleware.
+ * Plugins are not sandboxed (see https://docs.spora-ai.com/reference/concepts/plugins-system.html),
+ * so reading their metadata is inherently trusted operator data — the controller
+ * gates this behind AuthMiddleware.
  */
 final class PluginsService
 {
+    private readonly Translator $translator;
+
     public function __construct(
         private readonly PluginLoader $pluginLoader,
         private readonly PluginMetadataExtractor $metadataExtractor,
-    ) {}
+        ?Translator $translator = null,
+    ) {
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
+    }
 
     /**
      * @return list<array<string, mixed>>
@@ -63,7 +71,9 @@ final class PluginsService
             'slug'             => $slug,
             'name'             => $plugin->getName(),
             'package'          => $this->readComposerPackageName($directory),
-            'description'      => is_string($manifest['description'] ?? null) ? (string) $manifest['description'] : '',
+            'description'      => $this->translator->trans(
+                is_string($manifest['description'] ?? null) ? (string) $manifest['description'] : '',
+            ),
             'icon'             => $this->resolveIcon($manifest),
             'version'          => $schemaVersion,
             'path'             => $directory,

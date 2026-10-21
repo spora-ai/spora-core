@@ -87,6 +87,18 @@ abstract class AbstractPlugin implements PluginInterface
     }
 
     /**
+     * Absolute paths to this plugin's translation catalogues, one directory
+     * per set of `<locale>.json` files. See
+     * {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
+     *
+     * @return string[]
+     */
+    public function translationsPaths(): array
+    {
+        return [];
+    }
+
+    /**
      * Bump whenever new migration files are added under {@see migrationsPath()}.
      * Return 0 (the default) if the plugin has no database schema.
      */

@@ -144,9 +144,9 @@ final class SkillTool extends AbstractTool
         $operation = $this->getOperationName($arguments);
 
         return match ($operation) {
-            'read'  => "Read a file from skill '{$name}'.",
-            'files' => "List the files in skill '{$name}'.",
-            default => "Use the skill tool on '{$name}'.",
+            'read'  => sprintf("Read a file from skill '%s'.", $name),
+            'files' => sprintf("List the files in skill '%s'.", $name),
+            default => sprintf("Use the skill tool on '%s'.", $name),
         };
     }
 

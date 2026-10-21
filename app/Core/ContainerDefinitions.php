@@ -94,10 +94,12 @@ use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
 use Spora\Http\UserController;
+use Spora\Http\UserLocaleController;
 use Spora\Http\UserPictureAssetController;
 use Spora\Http\UserPictureController;
 use Spora\Http\UserPreferenceController;
 use Spora\Http\UserProfileController;
+use Spora\I18n\Translator;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
@@ -129,6 +131,7 @@ use Spora\Services\GroupService;
 use Spora\Services\HandoverService;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\LLMConfigPreferences;
+use Spora\Services\LLMConfigSchemaInspector;
 use Spora\Services\LlmConfigSchemaValidator;
 use Spora\Services\LLMConfigService;
 use Spora\Services\LLMConfigServiceInterface;
@@ -227,6 +230,7 @@ final class ContainerDefinitions
 
         return array_merge(
             self::configDefinition(),
+            I18nContainerBindings::all(),
             self::coreServiceDefinitions(),
             self::llmDefinitions(),
             self::apiAuthControllerDefinitions(),
@@ -715,7 +719,7 @@ final class ContainerDefinitions
                 return new LLMConfigService(
                     $c->get(SecurityManagerInterface::class),
                     $c->get('llm_driver_classes_merged'),
-                    null,
+                    new LLMConfigSchemaInspector($c->get('llm_driver_classes_merged'), $c->get(Translator::class)),
                     null,
                     null,
                     $c->get(PrincipalResolver::class),
@@ -905,6 +909,7 @@ final class ContainerDefinitions
                 return new AppsController(
                     $c->get(AppRegistry::class),
                     $c->get(PluginLoader::class),
+                    $c->get(Translator::class),
                 );
             },
             PluginMetadataExtractor::class => static fn(): PluginMetadataExtractor => new PluginMetadataExtractor(),
@@ -913,6 +918,7 @@ final class ContainerDefinitions
                 return new PluginsService(
                     $c->get(PluginLoader::class),
                     $c->get(PluginMetadataExtractor::class),
+                    $c->get(Translator::class),
                 );
             },
 
@@ -1054,6 +1060,7 @@ final class ContainerDefinitions
                     $c->get(ToolIconResolver::class),
                     $c->get(ToolsRecommendsSkillsValidator::class),
                     $c->get(SharedSettingsResolver::class),
+                    $c->get(Translator::class),
                 );
             },
         ];
@@ -1281,6 +1288,8 @@ final class ContainerDefinitions
 
             GlobalSettingsController::class => \DI\autowire(),
 
+            UserLocaleController::class => \DI\autowire(),
+
             MailConfigController::class => static function (ContainerInterface $c): MailConfigController {
                 return new MailConfigController(
                     $c->get(AuthService::class),
@@ -1422,6 +1431,7 @@ final class ContainerDefinitions
                 return new ToolCallSerializer(
                     toolInstances: $c->get('tool_instances'),
                     iconResolver: $c->get(ToolIconResolver::class),
+                    translator: $c->get(Translator::class),
                 );
             },
 

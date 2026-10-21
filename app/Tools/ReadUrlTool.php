@@ -112,7 +112,7 @@ final class ReadUrlTool extends AbstractTool
     {
         $url = trim((string) ($arguments['url'] ?? ''));
         $op  = (string) ($arguments['op'] ?? 'fetch');
-        return "{$op} URL: {$url}";
+        return sprintf('%s URL: %s', $op, $url);
     }
 
     private function dispatch(array $arguments, int $agentId, ?int $userId): ToolResult

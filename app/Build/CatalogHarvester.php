@@ -1,0 +1,254 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Spora\Build;
+
+use ReflectionClass;
+use Spora\Apps\AppInterface;
+use Spora\Build\Catalog\EnvelopeLiteralHarvest;
+use Spora\Build\Catalog\Harvest;
+use Spora\Build\Catalog\OperatorDescriptionHarvest;
+use Spora\Build\Catalog\SourceLocator;
+use Spora\Build\Catalog\ThrownLiteralHarvest;
+use Spora\Build\Catalog\TokenStream;
+use Spora\Core\Paths;
+use Spora\Settings\SettingDeclarations;
+use Spora\Settings\SettingsRegistry;
+use Spora\Tools\Attributes\Tool;
+use Spora\Tools\ToolSettingSchema;
+use Throwable;
+
+/**
+ * Collects every operator-facing English literal in the framework, keyed by
+ * the literal itself — `en.json` is that map, and `i18n:check` compares
+ * every other catalogue against it.
+ *
+ * Harvest is by construction rather than by convention: a string is in the
+ * catalogue because it came out of a place that renders to an operator, not
+ * because someone remembered to mark it. That is also what makes the
+ * never-translated list checkable — `#[ToolSetting].label` is absent here
+ * because no code path below reads it, not because a flag says so.
+ *
+ * What is deliberately absent:
+ *
+ *  - `#[Tool].name` / `.description`, `#[ToolOperation].*`,
+ *    `#[ToolParameter].description` — model input.
+ *  - `#[ToolSetting].label` and its option labels — six labels enter the
+ *    model's prompt, and the key *is* the English text, so a translated
+ *    label would apply to every setting reusing the word.
+ *  - `app/Console/**` — CLI output is permanently English.
+ *  - Plugin-supplied strings. Each plugin harvests its own catalogue from
+ *    its own repo (`PluginInterface::translationsPaths()`), so a plugin
+ *    cannot block an unrelated core PR with a string nobody here can see.
+ *    `plugin.json#description` is one of them: the host resolves it
+ *    through the scope chain — core's catalogue, then the plugin's own,
+ *    then the English literal — so the plugin ships the translation with
+ *    the plugin.
+ *
+ * `file:line` is exact for the syntactic sources and best-effort for the
+ * reflection ones, which is all the failure output needs.
+ *
+ * The harvest is split by kind — one collaborator per kind of source — so
+ * that each one has a single job and the token-level work they share lives
+ * in {@see \Spora\Build\Catalog\TokenStream} rather than in each of them.
+ */
+final class CatalogHarvester
+{
+    /** The only setting whose option labels are language names rather than copy. */
+    private const LANGUAGE_SETTING = 'SPORA_DEFAULT_LANG';
+
+    /** @var array<string, list<string>> */
+    private array $messages = [];
+
+    private readonly SourceLocator $source;
+
+    private readonly TokenStream $tokens;
+
+    /** @var list<Harvest> */
+    private array $harvests;
+
+    public function __construct(
+        private readonly string $basePath,
+    ) {
+        $this->source = new SourceLocator($basePath);
+        $this->tokens = new TokenStream();
+
+        $this->harvests = [
+            new EnvelopeLiteralHarvest($this->source, $this->tokens),
+            new ThrownLiteralHarvest($this->source, $this->tokens),
+            new OperatorDescriptionHarvest($this->source, $this->tokens),
+        ];
+    }
+
+    /**
+     * @return array<string, list<string>> message => `file:line` locators, in discovery order
+     */
+    public function harvest(): array
+    {
+        $this->messages = [];
+
+        $this->harvestAttributes();
+        $this->harvestDeclaredSettings();
+        $this->harvestApps();
+
+        foreach ($this->harvests as $harvest) {
+            foreach ($harvest->harvest() as $found) {
+                $this->add($found['message'], $found['locator']);
+            }
+        }
+
+        return $this->messages;
+    }
+
+    /**
+     * `en.json` as a flat identity map — key and value are the same English
+     * string. That is what makes a catalogue miss render as the source text
+     * with no separate fallback table, and it is why this file is generated
+     * rather than translated.
+     *
+     * @param array<string, list<string>> $harvested
+     * @return array<string, string>
+     */
+    public static function identityMap(array $harvested): array
+    {
+        return array_combine(array_keys($harvested), array_keys($harvested));
+    }
+
+    private function add(string $message, string $locator): void
+    {
+        if (trim($message) === '') {
+            return;
+        }
+
+        $this->messages[$message][] = $locator;
+    }
+
+    /**
+     * `#[Tool].displayName` / `.category` and `#[ToolSetting].description`,
+     * read off every class in `app/` so a new tool is covered without
+     * touching a list here.
+     */
+    private function harvestAttributes(): void
+    {
+        foreach ($this->classesIn($this->source->appDir()) as $class) {
+            $reflection = new ReflectionClass($class);
+            $absolute = $reflection->getFileName() ?: '';
+            $relative = $this->source->relative($absolute);
+
+            foreach ($reflection->getAttributes(Tool::class) as $attribute) {
+                $tool = $attribute->newInstance();
+                $this->add((string) $tool->displayName, $this->locate($absolute, (string) $tool->displayName, $relative));
+                $this->add($tool->category, $this->locate($absolute, $tool->category, $relative));
+            }
+
+            foreach (ToolSettingSchema::collect($class) as $setting) {
+                $this->add($setting->description, $this->locate($absolute, $setting->description, $relative));
+            }
+        }
+    }
+
+    /**
+     * Every `SettingDefinition`'s operator copy, plus the section headings
+     * the admin UI groups by. This surface is neither an attribute nor a
+     * controller, which is exactly how it gets missed.
+     */
+    private function harvestDeclaredSettings(): void
+    {
+        $declarations = new SettingDeclarations(new Paths($this->basePath, $this->basePath));
+        $locator = 'app/Settings/SettingDeclarations.php';
+
+        // The admin UI groups by these, so they render as operator copy on
+        // the same screen as the settings themselves.
+        foreach (SettingsRegistry::SECTION_LABELS as $sectionLabel) {
+            $this->add($sectionLabel, 'app/Settings/SettingsRegistry.php');
+        }
+
+        foreach ($declarations->build() as $definition) {
+            $this->add($definition->label, $locator);
+            $this->add($definition->description, $locator);
+
+            // The language picker's options are endonyms: a user finds
+            // their own language by reading it in that language, so
+            // `Deutsch` must read `Deutsch` in the German catalogue too —
+            // which rule 3 would otherwise reject as an untranslated
+            // placeholder. Same rule as a `#[ToolSetting]` option label.
+            if ($definition->key === self::LANGUAGE_SETTING) {
+                continue;
+            }
+
+            foreach ($definition->options as $option) {
+                $this->add($option['label'], $locator);
+            }
+        }
+    }
+
+    /**
+     * Core's own apps. A plugin's apps are harvested by that plugin's own
+     * extractor — same split as every other plugin-supplied string.
+     */
+    private function harvestApps(): void
+    {
+        $appsDir = $this->source->appDir() . '/Apps';
+        foreach ((array) glob($appsDir . '/*.php') as $file) {
+            $class = 'Spora\\Apps\\' . basename((string) $file, '.php');
+            if (!class_exists($class) || !is_subclass_of($class, AppInterface::class)) {
+                continue;
+            }
+
+            try {
+                $app = new $class();
+            } catch (Throwable) {
+                continue;
+            }
+
+            $locator = $this->source->relative((string) $file);
+            $this->add($app->displayName(), $locator);
+            $this->add($app->description(), $locator);
+        }
+    }
+
+    /**
+     * Every class the `Spora\` PSR-4 mapping can reach under a directory,
+     * loaded so the attributes on it are readable.
+     *
+     * @return list<class-string>
+     */
+    private function classesIn(string $dir): array
+    {
+        $classes = [];
+        $appDir = $this->source->appDir();
+
+        foreach ($this->source->phpFilesIn($dir) as $path) {
+            $relative = substr($path, strlen($appDir) + 1, -4);
+            $class = 'Spora\\' . str_replace('/', '\\', $relative);
+            if (class_exists($class)) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
+     * The line a harvested string is written on, for the sources reflection
+     * read but the token pass did not already locate. Returns the file
+     * alone when the string was built by concatenation rather than written
+     * as one literal — better than a line number that points at a
+     * neighbour.
+     */
+    private function locate(string $absolute, string $message, string $relative): string
+    {
+        if ($absolute === '' || !is_file($absolute)) {
+            return $relative;
+        }
+
+        foreach (token_get_all((string) file_get_contents($absolute)) as $token) {
+            if (is_array($token) && $token[0] === T_CONSTANT_ENCAPSED_STRING && $this->tokens->decode($token[1]) === $message) {
+                return $relative . ':' . $token[2];
+            }
+        }
+
+        return $relative;
+    }
+}

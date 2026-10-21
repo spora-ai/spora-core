@@ -82,11 +82,10 @@ final class AskUserQuestionTool extends AbstractTool
     {
         $questions = is_array($arguments['questions'] ?? null) ? $arguments['questions'] : [];
         $count = count($questions);
-        if ($count === 2) {
-            return 'Ask the operator 2 questions';
-        }
-        $suffix = $count === 1 ? '' : 's';
-        return "Ask the operator {$count} question{$suffix}";
+
+        return $count === 1
+            ? sprintf('Ask the operator %d question', $count)
+            : sprintf('Ask the operator %d questions', $count);
     }
 
     public function ask(array $arguments): ToolResult // NOSONAR php:S1172 — required by HasOperations dispatch trait

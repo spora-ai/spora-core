@@ -335,8 +335,8 @@ final class ScheduleTool extends AbstractTool
         $agentLabel = $this->summary->targetAgentLabel($arguments);
 
         return match ($operation) {
-            'list_schedules'           => "List scheduled runs for {$agentLabel}.",
-            'list_prompt_templates'    => "List prompt templates for {$agentLabel}.",
+            'list_schedules'           => sprintf('List scheduled runs for %s.', $agentLabel),
+            'list_prompt_templates'    => sprintf('List prompt templates for %s.', $agentLabel),
             'read_schedule'            => sprintf(
                 'Read scheduled run (%s, %s).',
                 $this->summary->scheduleIdLabel($arguments),
@@ -374,7 +374,7 @@ final class ScheduleTool extends AbstractTool
                 $this->summary->scheduleIdLabel($arguments),
                 $agentLabel,
             ),
-            default                    => "Schedule tool: {$operation}",
+            default                    => sprintf('Schedule tool: %s', $operation),
         };
     }
 

@@ -311,14 +311,16 @@ final class MediaTool extends AbstractTool
 
         return match ($op) {
             'search'            => 'Media library search',
-            'get_media'         => "Media get_media({$assetId})",
-            'get_public_url'    => "Media get_public_url({$assetId})",
-            'get_embed_code'    => "Media get_embed_code({$assetId})",
-            'get_source'        => "Media get_source({$assetId})",
-            'list_derivatives'  => "Media list_derivatives({$assetId}" . ($format !== '' ? ", format={$format}" : '') . ')',
-            'create_derivative' => "Media create_derivative({$assetId}, format={$format})",
-            'create_media'      => "Media create_media({$filename}, mime={$mime})",
-            default             => "Media {$op}",
+            'get_media'         => sprintf('Media get_media(%s)', $assetId),
+            'get_public_url'    => sprintf('Media get_public_url(%s)', $assetId),
+            'get_embed_code'    => sprintf('Media get_embed_code(%s)', $assetId),
+            'get_source'        => sprintf('Media get_source(%s)', $assetId),
+            'list_derivatives'  => $format === ''
+                ? sprintf('Media list_derivatives(%s)', $assetId)
+                : sprintf('Media list_derivatives(%s, format=%s)', $assetId, $format),
+            'create_derivative' => sprintf('Media create_derivative(%s, format=%s)', $assetId, $format),
+            'create_media'      => sprintf('Media create_media(%s, mime=%s)', $filename, $mime),
+            default             => sprintf('Media %s', $op),
         };
     }
 

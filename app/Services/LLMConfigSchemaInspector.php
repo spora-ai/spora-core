@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Drivers\LLMDriverConfigInterface;
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Tools\ToolSettingSchema;
 
 /**
@@ -17,12 +19,17 @@ use Spora\Tools\ToolSettingSchema;
  */
 final class LLMConfigSchemaInspector
 {
+    private readonly Translator $translator;
+
     /**
      * @param list<class-string<LLMDriverConfigInterface>> $driverClasses
      */
     public function __construct(
         private readonly array $driverClasses = [],
-    ) {}
+        ?Translator $translator = null,
+    ) {
+        $this->translator = $translator ?? new Translator(new CatalogLoader());
+    }
 
     /**
      * Returns all registered driver classes with their resolved schemas.
@@ -40,7 +47,7 @@ final class LLMConfigSchemaInspector
 
             $drivers[] = [
                 'name' => $class::getName(),
-                'display_name' => $class::getDisplayName(),
+                'display_name' => $this->translator->trans($class::getDisplayName()),
                 'driver_class' => $class,
                 'settings_schema' => $this->buildSchemaFromClass($class),
             ];
@@ -56,11 +63,15 @@ final class LLMConfigSchemaInspector
     {
         $schema = [];
         foreach (ToolSettingSchema::collect($class) as $setting) {
+            // `label` and `options[].label` stay English; the config block
+            // that reaches the model carries them, and a translated label
+            // would apply to every setting reusing the same word. See
+            // {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
             $schema[] = [
                 'key' => $setting->key,
                 'label' => $setting->label,
                 'type' => $setting->type,
-                'description' => $setting->description,
+                'description' => $this->translator->trans($setting->description),
                 'default' => $setting->default,
                 'required' => $setting->required,
                 'options' => $setting->options,

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Spora\I18n\CatalogLoader;
+use Spora\I18n\Translator;
 use Spora\Models\Agent;
 use Spora\Models\Principal;
 use Spora\Models\SpeechProviderConfiguration;
@@ -40,6 +42,10 @@ use Spora\Speech\SpeechToTextRegistry;
  *   - {@see getPrincipalPreferredConfig()}
  *   - {@see resolvePreferredConfig()}
  *
+ * Read paths delegated to {@see SpeechProviderSchemaLocaliser}:
+ *   - the provider display name and the setting descriptions in
+ *     {@see getSchema()}
+ *
  * Write paths (create / update / delete / setDefault / setPreferred
  * / unsetPreferred / resolveGroupPrincipal) forward to
  * {@see SpeechProviderConfigMutator} so the controller's API is
@@ -64,6 +70,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
     private readonly SpeechProviderConfigPreferences $preferences;
     private readonly PrincipalResolver $principalResolver;
     private readonly SpeechProviderConfigMutator $mutator;
+    private readonly SpeechProviderSchemaLocaliser $localiser;
 
     public function __construct(
         SpeechProviderConfigValidator $validator,
@@ -72,6 +79,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
         PrincipalService $principalService,
         ?PrincipalResolver $principalResolver = null,
         ?SpeechProviderConfigMutator $mutator = null,
+        ?SpeechProviderSchemaLocaliser $localiser = null,
     ) {
         $this->validator = $validator;
         $this->persistence = $persistence;
@@ -82,6 +90,7 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             $preferences,
             $principalService,
         );
+        $this->localiser = $localiser ?? new SpeechProviderSchemaLocaliser(new Translator(new CatalogLoader()));
     }
 
     /**
@@ -98,8 +107,8 @@ final class SpeechProviderConfigService implements SpeechProviderConfigServiceIn
             }
             $rows[] = [
                 'class' => $class,
-                'display_name' => $provider->getDisplayName(),
-                'settings_schema' => $settings,
+                'display_name' => $this->localiser->displayName($provider->getDisplayName()),
+                'settings_schema' => $this->localiser->descriptions($settings),
             ];
         }
         return $rows;

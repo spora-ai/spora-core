@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string|null $about_me
  * @property float|null  $height_cm
  * @property float|null  $weight_kg
+ * @property string|null $locale        Catalogue code, or null for "auto" — see {@see \Spora\I18n\LocaleResolver}. Written only by {@see \Spora\Http\UserLocaleController}.
  * @method static User|null find(mixed $id, array $columns = ['*'])
  * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
