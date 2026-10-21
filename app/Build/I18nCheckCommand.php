@@ -15,30 +15,15 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * `bin/spora-build i18n:check` — the PHP half of the i18n CI contract.
  *
- * Six rules, in the order they are cheapest to explain:
+ * The rules the gate enforces:
  *
- *   1. `locales/en.json` drifted from the source — run
- *      `composer i18n:extract` and commit the result.
- *   2. A key in `en.json` has no entry in a target catalogue. Every
- *      harvested message is required: a half-translated error screen reads
- *      as a bug rather than as work in progress.
- *   2b. A key in a target catalogue that the source no longer produces.
- *      The key *is* the English text, so an orphan looks like a live
- *      entry.
- *   3. A target value is empty or identical to its English source — an
- *      untranslated placeholder that would render as English in production
- *      while passing every other check.
- *   4. A message contains an unescaped `{`, `}` or `|`. vue-i18n compiles
- *      those as interpolation and plural syntax and throws at render, so a
- *      copy snippet containing braces is a runtime failure, not a typo.
+ *   1. `locales/en.json` drifted from the harvest.
+ *   2. A harvested message has no entry in a target catalogue.
+ *   2b. A key in a target catalogue that the harvest no longer produces.
+ *   3. A target value is empty or identical to its English source.
+ *   4. A message contains an unescaped `{`, `}` or `|`.
  *   5. A target value does not carry the `%s`/`%d` placeholders of its
- *      English source, in the same order. The captures are substituted
- *      positionally, so a missing placeholder leaves the English in place
- *      and a reordered one fills the wrong slot.
- *
- * Rule "raw text outside `$t()`" from the workspace contract is a frontend
- * rule and has no PHP analogue: the harvest here is by construction, so a
- * string that reaches the Translator is a catalogue key by definition.
+ *      English source, in the same order.
  */
 #[AsCommand(
     name: 'i18n:check',
@@ -63,7 +48,7 @@ final class I18nCheckCommand extends Command
      * An earlier version of this rule used a shape heuristic — "fail only if
      * the source contains a lowercase word of three or more letters" — to
      * avoid an allow-list. It was strictly worse. Every entry below is
-     * capitalised or an acronym, so the heuristic let all ten of them
+     * capitalised or an acronym, so the heuristic let every one of them
      * through, along with exactly the failures the rule exists to catch:
      * a `Save` or `Dashboard` copied across verbatim would have shipped to a
      * German install. The set is small, closed, and grows in one place, which
@@ -198,7 +183,8 @@ final class I18nCheckCommand extends Command
     }
 
     /**
-     * Rule 2.
+     * Rule 2 — every harvested message is required: a half-translated error
+     * screen reads as a bug rather than as work in progress.
      *
      * @param array<string, list<string>> $harvested
      * @param array<string, string>       $catalogue
@@ -233,12 +219,12 @@ final class I18nCheckCommand extends Command
     /**
      * Rule 2b — a key in the catalogue that the source no longer produces.
      *
-     * Rule 2 covers `en \ <lang>`, so a copy edit is caught the moment the
-     * new English is missing. It says nothing about the *old* entry, which
-     * then sits in `de.json` with nothing referencing it — and because the
-     * key is the English text, nothing looks wrong. Without this rule a
-     * typo'd or hand-added key is indistinguishable from a real one, and
-     * the catalogue grows without bound across a migration.
+     * Rule 2 catches the new English the moment it is missing; nothing
+     * else would notice the *old* entry, which then sits in `de.json` with
+     * nothing referencing it — and because the key is the English text,
+     * nothing looks wrong. Without this rule a typo'd or hand-added key is
+     * indistinguishable from a real one, and the catalogue grows without
+     * bound across a migration.
      *
      * @param array<string, string> $catalogue
      * @param array<string, list<string>> $harvested
@@ -268,7 +254,7 @@ final class I18nCheckCommand extends Command
     }
 
     /**
-     * Rule 3. An English-identical value is a placeholder, not a
+     * Rule 3 — an English-identical value is a placeholder, not a
      * translation, and the reason it matters is that it satisfies rule 2
      * while rendering as English in production.
      *

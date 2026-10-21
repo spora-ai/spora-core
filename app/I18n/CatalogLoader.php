@@ -15,8 +15,7 @@ use Spora\Core\Paths;
  * The catalogue key is the English source string, so a plugin and core
  * collide as soon as both say "API key". Core wins and the plugin entry is
  * dropped: a third-party package must not be able to reword a core string,
- * and a duplicate must never fail the boot. The dropped key is logged
- * rather than swallowed, because the only way to see it is the log.
+ * and a duplicate must never fail the boot.
  *
  * Missing files are not an error. A plugin that ships no catalogue falls
  * through to core's, and core's identity map falls through to the English
@@ -47,9 +46,6 @@ final class CatalogLoader
         private readonly ?LoggerInterface $logger = null,
     ) {}
 
-    /**
-     * Whether any directory holds a catalogue for this locale.
-     */
     public function has(string $locale): bool
     {
         $locale = trim($locale);
@@ -69,7 +65,8 @@ final class CatalogLoader
     /**
      * The merged catalogue for one locale. Core entries win over plugin
      * entries with the same key, and the first plugin wins over the ones
-     * after it.
+     * after it. A dropped key is logged rather than swallowed, because the
+     * only way to see it is the log.
      *
      * @return array<string, string>
      */
@@ -99,9 +96,6 @@ final class CatalogLoader
     }
 
     /**
-     * Every locale with a catalogue in any directory, sorted, so the admin
-     * UI and the workspace-level check can compare the sets.
-     *
      * @return list<string>
      */
     public function locales(): array

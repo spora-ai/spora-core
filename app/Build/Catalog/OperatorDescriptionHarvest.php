@@ -5,17 +5,8 @@ declare(strict_types=1);
 namespace Spora\Build\Catalog;
 
 /**
- * The operator-facing copy a `describeAction()` implementation returns.
- *
- * Found by reading the method body and taking the literals that are
- * *values* rather than keys:
- *
- *   - `match` arms: the value, not the arm's condition
- *   - `sprintf('format %s', …)`: the format string, placeholders intact
- *   - a plain `return 'text';`
- *
- * The method's own name, the operation names it switches on, and the
- * fragments of interpolated values are not copy and are skipped.
+ * The operator-facing copy a `describeAction()` implementation returns —
+ * the *values* it returns, not the operation names it switches on.
  */
 final class OperatorDescriptionHarvest implements Harvest
 {
@@ -34,8 +25,7 @@ final class OperatorDescriptionHarvest implements Harvest
      * Directories whose `describeAction()` copy is operator-facing.
      *
      * `app/Tools` is where core's own tools live. A plugin's copy is
-     * harvested by the plugin's own extractor, and core reaches it through
-     * the catalogue scope chain.
+     * harvested by the plugin's own extractor.
      *
      * @var list<string>
      */
@@ -67,8 +57,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The copy literals of one file, by the line they are written on.
-     *
      * @return array<int, string> line => message
      */
     private function operatorDescriptionLiteralsIn(string $source): array
@@ -102,8 +90,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The name of the method whose `function` keyword is at `$index`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function methodNameAfter(array $tokens, int $index): ?string
@@ -126,8 +112,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The token range of a method body, from its opening brace.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return array{0: int, 1: int}|null start and end index
      */
@@ -159,8 +143,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The copy literals inside a token range.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return array<int, string> line => message
      */
@@ -185,8 +167,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The copy literal at `$index`, if it is one.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array{0: int, 1: string, 2: int}               $token
      * @return ?array{0: string, 1: int} message, line
@@ -205,8 +185,6 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * The format string of a `sprintf(` call, when the call is one.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array{0: int, 1: string, 2: int}               $token
      * @return ?array{0: string, 1: int} message, line
@@ -230,8 +208,7 @@ final class OperatorDescriptionHarvest implements Harvest
      *
      * A `match` arm's *value* is copy; its condition is an operation name.
      * A whole `return 'copy';` is copy. The first fragment of a
-     * concatenation is neither — `'Format epoch ' . $x` has no whole
-     * message to key on.
+     * concatenation is neither.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
@@ -288,13 +265,10 @@ final class OperatorDescriptionHarvest implements Harvest
     }
 
     /**
-     * Whether the literal at `$index` is the value of a `return`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function isReturnValue(array $tokens, int $index): bool
     {
-        // Walk back over whitespace to the `return` keyword.
         for ($i = $index - 1; $i >= 0; $i--) {
             $token = $tokens[$i];
             if ($this->tokens->isInsignificant($token)) {

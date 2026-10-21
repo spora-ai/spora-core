@@ -21,8 +21,6 @@ final class ClassConstantReader
     ) {}
 
     /**
-     * Every `const NAME = 'literal';` in one file, by constant name.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return array<string, string>
      */
@@ -45,8 +43,6 @@ final class ClassConstantReader
     }
 
     /**
-     * The name and the literal of one `const` declaration.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return array{0: string, 1: string}|null
      */
@@ -66,8 +62,6 @@ final class ClassConstantReader
     }
 
     /**
-     * The name of one `const` declaration.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function name(array $tokens, int $index): ?string
@@ -84,8 +78,6 @@ final class ClassConstantReader
     }
 
     /**
-     * The literal one `const` declaration holds.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function literal(array $tokens, int $index): ?string

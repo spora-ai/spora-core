@@ -9,12 +9,12 @@ use Spora\Extensions\SporaExtensionInterface;
 /**
  * Contract for Composer-distributed Spora plugins.
  *
- * PluginInterface carries the two hooks that are plugin-shaped rather than
- * extension-shaped — the tool and app contribution lists plus
- * `translationsPaths()`. The rest of the surface (`skillPaths()`,
- * `agentTemplatePaths()`, `schemaVersion()`, `migrationsPath()`, …) lives on
- * the parent {@see SporaExtensionInterface}, so an App and a Plugin share
- * that contract and the same wiring.
+ * PluginInterface adds one hook to the parent contract —
+ * `translationsPaths()`. The rest of the surface (`tools()`, `apps()`,
+ * `skillPaths()`, `agentTemplatePaths()`, `schemaVersion()`,
+ * `migrationsPath()`, …) lives on the parent
+ * {@see SporaExtensionInterface}, so an App and a Plugin share that contract
+ * and the same wiring.
  *
  * To get empty defaults for every hook for free, extend
  * {@see AbstractPlugin} or {@see \Spora\Extensions\AbstractExtension}
@@ -24,12 +24,11 @@ interface PluginInterface extends SporaExtensionInterface
 {
     /**
      * Absolute paths to this plugin's translation catalogues — one directory
-     * per locale-file, holding `<locale>.json`.
+     * per set of `<locale>.json` files.
      *
      * The catalogue key *is* the English source string, so the same plain
-     * word lands in several plugins' catalogues at once. That is why the
-     * resolver uses a scope chain instead of key prefixes: core wins a
-     * collision and the plugin's entry is dropped with a logged warning, so
+     * word lands in several plugins' catalogues at once. Core wins a
+     * collision: the plugin's entry is dropped with a logged warning, so
      * shipping a duplicate can never break an install.
      *
      * A PHP hook rather than a `plugin.json` key — that schema is

@@ -207,9 +207,6 @@ final class Kernel implements KernelInterface
      * middleware because the middleware list is per-route and the boot
      * config is public — a logged-out request still has to render in the
      * instance language for the login screen to match the rest of the SPA.
-     *
-     * The row read is a primary-key lookup on a column that is NULL for
-     * every account that never chose a language, which is most of them.
      */
     private function bindRequestLocale(): void
     {
@@ -244,8 +241,8 @@ final class Kernel implements KernelInterface
                 // extend the core routes registered above.
                 $this->pluginLoader->registerRoutes($r);
             },
-            // The router localizes the operator-facing error message, which
-            // is the one place every response passes through.
+            // The router localizes the operator-facing error message; it is
+            // the one place every response passes through.
             $this->container->get(Translator::class),
         );
     }
@@ -346,7 +343,7 @@ final class Kernel implements KernelInterface
     /**
      * Localise at serialization, never before.
      *
-     * The stored `error_message` and everything that classifies on it —
+     * An exception message and everything that classifies on it —
      * {@see \Spora\Agents\ErrorClassifier} matches on the canonical English
      * string — stay English for the life of the row. Only the copy that
      * reaches the browser is translated, and only when a catalogue entry
@@ -364,7 +361,8 @@ final class Kernel implements KernelInterface
 
     /**
      * Map {@see PluginInstallFailedException} to the JSON envelope documented
-     * in docs/20_plugin_install_api.md § "Composer-failure body (500)".
+     * in https://docs.spora-ai.com/develop/plugins/install-api.html
+     * § "Composer-failure body (500)".
      *
      * Stderr is truncated to a hard 8 KiB ceiling (suffix included) so a
      * runaway Composer error doesn't blow up the response. The full output
