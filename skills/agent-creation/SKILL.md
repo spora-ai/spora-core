@@ -31,7 +31,9 @@ Before driving the create-agent flow, run `agent(action: "list_agents")` if ther
 { "action": "list_agents" }
 ```
 
-Returns a slim list of `{agent_id, name, description, is_archived}` rows (`#4 Custom Agent — does X`, with ` (archived)` appended for an archived agent) visible to the current user, ordered newest-first. Empty list means "go ahead and create". If the agent you want already exists at row N, skip step 1 — call `update_agent(agent_id: N, agent: {…})` or `configure_tools(agent_id: N, tools: […])` directly. `update_agent` accepts an optional `agent_id`; omitting it edits the calling agent.
+Returns a slim list of `{agent_id, name, description, is_archived}` rows (`#4 Custom Agent — does X`, with ` (archived)` appended for an archived agent) visible to the current user — their own agents, plus the agents of every group they belong to — ordered newest-first. Empty list means "go ahead and create". If the agent you want already exists at row N, skip step 1 — call `update_agent(agent_id: N, agent: {…})` or `configure_tools(agent_id: N, tools: […])` directly. `update_agent` accepts an optional `agent_id`; omitting it edits the calling agent.
+
+A row being listed is not a guarantee you may act on it: a group agent the user merely belongs to is listed, but `update_agent` / `configure_tools` on it are refused unless they own or administer the group.
 
 ## Mandatory pre-flight
 

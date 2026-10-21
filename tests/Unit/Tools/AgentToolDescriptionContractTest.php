@@ -2,8 +2,20 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Psr\Log\NullLogger;
+use Spora\Core\SecurityManager;
+use Spora\Services\AgentManifest;
+use Spora\Services\AgentService;
+use Spora\Services\AgentToolSettingsService;
+use Spora\Services\LLMConfigService;
+use Spora\Services\PrincipalContext;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\ToolConfigService;
 use Spora\Tools\AgentTool;
 use Spora\Tools\Attributes\ToolOperation;
+use Spora\Tools\CalculatorTool;
+use Spora\Tools\TimeTool;
 
 /**
  * The contract between `AgentTool`'s own LLM-facing descriptions and the
@@ -104,5 +116,101 @@ describe('the get_available_tools description matches the skills block it promis
 
         expect($byName['get_available_tools'])->toContain('effective')
             ->and($byName['get_available_tools'])->not->toContain("own `allowed_skills`");
+    });
+});
+
+describe('the list_agents description matches the principal scope it promises', function (): void {
+
+    it('names the groups whose agents the list also carries', function (): void {
+        // The list is scoped to the *user's* principals — their own
+        // user-principal plus the group-principals of every group they
+        // belong to. "Visible to the current user" said nothing about the
+        // groups, so a model met a group agent in the list with no way to
+        // have predicted it.
+        $byName = agentToolOperationDescriptions();
+
+        expect($byName['list_agents'])->toContain('every group they belong to');
+    });
+
+    it('warns that being listed is not the same as being reachable', function (): void {
+        // `list_agents` filters on `visiblePrincipalIds` (any group
+        // membership, any role); `read_agent` filters on
+        // `callerControlsPrincipal` (group requires owner or admin). A group
+        // agent the caller merely belongs to is listed and then refused, and
+        // the refusal reads "not owned by this user" — which reads as a
+        // contradiction unless the description says visibility ≠ access.
+        $byName = agentToolOperationDescriptions();
+
+        expect($byName['list_agents'])->toContain('own or administer the group');
+    });
+});
+
+describe('the group scope the list_agents description promises', function (): void {
+
+    it('lists a group agent the user only belongs to, and refuses to read it', function (): void {
+        // The behavioural half of the two description claims above, and the
+        // guard that keeps the wording from being "corrected" the wrong way.
+        // A group agent the user is a plain member of IS in the list — so
+        // the description has to say so — and reading it IS refused — so
+        // the description has to say that too. Narrow the visibility to the
+        // user's own principal and this fails, which is what stops a
+        // future edit from replacing one wrong description with another.
+        // It passes on the pre-fix code too, because the behaviour it
+        // anchors was never wrong — only the description of it was.
+        $key        = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $toolConfig = new ToolConfigService(new SecurityManager($key), new NullLogger(), [CalculatorTool::class, TimeTool::class]);
+        $settings   = new AgentToolSettingsService($toolConfig, new LLMConfigService(new SecurityManager($key), []));
+        // The resolver is what widens the query past the caller's own
+        // principal to the group-principals of their groups. Production
+        // wires it (ContainerDefinitions); a bare `new AgentService()` falls
+        // back to the legacy user-principal-only query.
+        $resolver = new PrincipalResolver();
+        $agents   = new AgentService(null, null, $resolver);
+        $tool     = new AgentTool($agents, $settings, new AgentManifest($settings, null));
+
+        static $seq = 0;
+        $seq++;
+        $userId = (int) Capsule::table('users')->insertGetId([
+            'email'      => "agent-tool-scope-{$seq}@example.com",
+            'username'   => "agent_tool_scope_{$seq}",
+            'password'   => str_repeat("\0", 60),
+            'status'     => 1,
+            'verified'   => 1,
+            'resettable' => 1,
+            'roles_mask' => 0,
+            'registered' => time(),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $ownAgent = $agents->createAgent($userId, ['name' => 'Own Agent']);
+
+        // The user is a plain `member` of this group — not owner, not admin.
+        $groupPrincipalId = $this->makeGroupPrincipal($userId, 'Scope Group');
+        $groupAgent       = $agents->createAgent($userId, ['name' => 'Group Agent'], $groupPrincipalId);
+
+        $context = new PrincipalContext(
+            principalId: $this->createUserPrincipal($userId),
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $userId,
+            runnerUserId: $userId,
+        );
+
+        $listed = $tool->execute(['action' => 'list_agents'], $ownAgent->id, null, $context);
+        $ids    = array_column($listed->data['agents'] ?? [], 'agent_id');
+
+        expect($listed->success)->toBeTrue()
+            ->and($ids)->toContain($groupAgent->id)
+            ->and($ids)->toContain($ownAgent->id);
+
+        $read = $tool->execute(
+            ['action' => 'read_agent', 'agent_id' => $groupAgent->id],
+            $ownAgent->id,
+            null,
+            $context,
+        );
+
+        expect($read->success)->toBeFalse()
+            ->and($read->content)->toContain('not found or not owned by this user');
     });
 });

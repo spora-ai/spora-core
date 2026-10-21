@@ -191,15 +191,19 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'list_agents',
-    description: 'List every agent visible to the current user as a slim payload '
+    description: 'List every agent visible to the current user — their own agents, plus the '
+               . 'agents of every group they belong to — as a slim payload '
                . '(`agent_id`, `name`, `description`, `is_archived`). Useful as a discovery surface '
                . 'before `read_agent(agent_id: N)` or `configure_tools(agent_id: N, '
                . 'tools: [...])` — `create_agent` returns an `agent_id` you need for '
                . 'follow-up operations, and this is the cheapest way to recover it after '
                . 'a turn boundary. Archived agents are listed and flagged, not hidden. '
+               . 'Being listed is not the same as being reachable: a group agent you are only a '
+               . 'member of appears here, but reading or reconfiguring it needs you to own or '
+               . 'administer the group. '
                . 'Empty when the user has no agents. '
                . 'See the agent-creation skill ' . self::AGENT_CREATION_SKILL_HINT . '.',
-    operatorDescription: 'List every agent visible to the current user (slim payload).',
+    operatorDescription: 'List every agent visible to the current user — their own, and their groups\' (slim payload).',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -412,7 +416,7 @@ final class AgentTool extends AbstractTool
                     ? 'agent_id: ' . (int) $arguments['agent_id']
                     : 'calling agent',
             ),
-            'list_agents'               => 'List every agent visible to the current user.',
+            'list_agents'               => 'List every agent visible to the current user — their own, and their groups\'.',
             default                     => "Agent tool: {$operation}",
         };
     }
