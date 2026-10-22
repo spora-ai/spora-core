@@ -58,7 +58,7 @@ function makeHandoverFixture(): array
 
 describe('HandoverService::handover', function (): void {
 
-    it('creates a new task with parent_task_id, completes the source, and merges data.handover', function (): void {
+    it('creates a new task with parent_task_id, leaves the source running, and merges data.handover', function (): void {
         [$service, $orchestrator] = makeHandoverService();
         [$userId, $sourceAgentId, $targetAgentId] = makeHandoverFixture();
 
@@ -94,9 +94,11 @@ describe('HandoverService::handover', function (): void {
         expect($returned->id)->toBe(12345);
         expect($returned->parent_task_id)->toBe($source->id);
 
+        // The source is not closed: the delegation is a background handoff,
+        // so the source keeps running and ends on its own next LLM turn.
         $source->refresh();
-        expect($source->status)->toBe('COMPLETED');
-        expect($source->final_response)->toBe('Handed off to Target Agent.');
+        expect($source->status)->toBe('RUNNING');
+        expect($source->final_response)->toBeNull();
         expect($source->data['handover']['target_task_id'])->toBe(12345);
         expect($source->data['handover']['target_agent_id'])->toBe($targetAgentId);
         expect($source->data['handover']['target_agent_name'])->toBe('Target Agent');

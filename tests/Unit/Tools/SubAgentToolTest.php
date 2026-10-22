@@ -83,6 +83,48 @@ function subAgentUserContext(int $userId = SUB_AGENT_USER_ID): Spora\Services\Pr
 }
 
 /**
+ * Seed a real child task for the `sub_agent_continue` op.
+ *
+ * The tool resolves the child's `agent_id` and re-checks it against the
+ * allowlist before continuing, so the child has to exist as a row — not
+ * just as an id the LLM could name.
+ */
+function seedSubAgentChildTask(
+    int $agentId = SUB_AGENT_TARGET_AGENT,
+    int $parentTaskId = SUB_AGENT_TASK_ID,
+    string $status = 'COMPLETED',
+): Task {
+    $now = date('Y-m-d H:i:s');
+    $principalId = createUserPrincipalPublic(SUB_AGENT_USER_ID);
+
+    // `tasks.parent_task_id` is a foreign key, so the parent row has to
+    // exist before the child can point at it.
+    Illuminate\Database\Capsule\Manager::table('tasks')->updateOrInsert(
+        ['id' => $parentTaskId],
+        [
+            'agent_id'        => SUB_AGENT_AGENT_ID,
+            'principal_id'    => $principalId,
+            'trigger_user_id' => SUB_AGENT_USER_ID,
+            'status'          => 'RUNNING',
+            'user_prompt'     => 'parent prompt',
+            'max_steps'       => 10,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ],
+    );
+
+    return Task::create([
+        'agent_id'        => $agentId,
+        'principal_id'    => $principalId,
+        'trigger_user_id' => SUB_AGENT_USER_ID,
+        'status'          => $status,
+        'user_prompt'     => 'child prompt',
+        'max_steps'       => 5,
+        'parent_task_id'  => $parentTaskId,
+    ]);
+}
+
+/**
  * The group-principal counterpart of {@see subAgentUserContext()}, for
  * the scenarios where the source agent sits on a group. `ownerUserId` is
  * the group's `owner` member, which is what `PrincipalResolver::ownerUserId()`
@@ -229,8 +271,12 @@ describe('SubAgentTool::execute (handover op)', function (): void {
             ->and($result->data['target_agent_id'])->toBe(SUB_AGENT_TARGET_AGENT)
             // The content is rendered as markdown in the chat UI, so the
             // "New task #N" reference is a clickable link to the new task.
-            ->and($result->content)->toContain("Task delegated to agent #" . SUB_AGENT_TARGET_AGENT)
-            ->and($result->content)->toContain("[New task #" . SUB_AGENT_NEW_TASK_ID . "](/tasks/" . SUB_AGENT_NEW_TASK_ID . ")");
+            // The source chat keeps running, so the result tells the LLM
+            // what to do next instead of reporting a hand-off.
+            ->and($result->content)->toContain('Delegated to agent #' . SUB_AGENT_TARGET_AGENT)
+            ->and($result->content)->toContain('continues in the background')
+            ->and($result->content)->toContain("[New task #" . SUB_AGENT_NEW_TASK_ID . "](/tasks/" . SUB_AGENT_NEW_TASK_ID . ")")
+            ->and($result->content)->toContain('Tell the user who is handling it and end your turn.');
     });
 });
 
@@ -357,13 +403,212 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
     });
 });
 
+describe('SubAgentTool operation defaults', function (): void {
+
+    test('sub_agent is enabled and auto-approved', function (): void {
+        [$tool] = makeSubAgentTool();
+
+        expect($tool->isEnabledByDefault('sub_agent'))->toBeTrue()
+            ->and($tool->requiresApprovalByDefault('sub_agent'))->toBeFalse();
+    });
+
+    test('sub_agent_continue is opt-in and auto-approved', function (): void {
+        [$tool] = makeSubAgentTool();
+
+        expect($tool->isEnabledByDefault('sub_agent_continue'))->toBeFalse()
+            ->and($tool->requiresApprovalByDefault('sub_agent_continue'))->toBeFalse();
+    });
+
+    test('handover is opt-in and auto-approved', function (): void {
+        [$tool] = makeSubAgentTool();
+
+        expect($tool->isEnabledByDefault('handover'))->toBeFalse()
+            ->and($tool->requiresApprovalByDefault('handover'))->toBeFalse();
+    });
+});
+
+describe('SubAgentTool::execute (sub_agent_continue op)', function (): void {
+
+    test('routes to SubAgentService::continueChild with the parsed task id', function (): void {
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $child = seedSubAgentChildTask();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+
+        $subAgent->allows('continueChild')
+            ->with(SUB_AGENT_TASK_ID, $child->id, 'change the heading', SUB_AGENT_USER_ID)
+            ->andReturn($child);
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => $child->id, 'prompt' => 'change the heading'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['op'])->toBe('sub_agent_continue')
+            // The spawned-ids array is what lets SubAgentService correlate
+            // the resume with THIS tool call rather than the original spawn.
+            ->and($result->data['spawned_sub_task_ids'])->toBe([$child->id])
+            ->and($result->data['continued_task_id'])->toBe($child->id)
+            ->and($result->data['target_agent_id'])->toBe(SUB_AGENT_TARGET_AGENT)
+            ->and($result->content)->toContain('Sub-agent task #' . $child->id . ' continues on agent #' . SUB_AGENT_TARGET_AGENT)
+            ->and($result->content)->toContain('[Task #' . $child->id . '](/tasks/' . $child->id . ')');
+    });
+
+    test('accepts a numeric string task id', function (): void {
+        // LLM drivers emit numerics as strings, which is why the schema
+        // declares `task_id` as a string.
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $child = seedSubAgentChildTask();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+
+        $subAgent->allows('continueChild')
+            ->with(SUB_AGENT_TASK_ID, $child->id, 'more', SUB_AGENT_USER_ID)
+            ->andReturn($child);
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => (string) $child->id, 'prompt' => 'more'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeTrue()
+            ->and($result->data['continued_task_id'])->toBe($child->id);
+    });
+
+    test('rejects a garbage task id as missing', function (): void {
+        [$tool, , $subAgent] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => 'not a task', 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe('task_id is required.');
+        $subAgent->shouldNotHaveReceived('continueChild');
+    });
+
+    test('returns failure when the prompt is missing', function (): void {
+        [$tool, , $subAgent] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => SUB_AGENT_SUB_CHILD_ID],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe('prompt is required.');
+        $subAgent->shouldNotHaveReceived('continueChild');
+    });
+
+    test('returns failure when the principal context carries no owner user id', function (): void {
+        [$tool, , $subAgent] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => SUB_AGENT_SUB_CHILD_ID, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('authenticated user');
+        $subAgent->shouldNotHaveReceived('continueChild');
+    });
+
+    test('returns failure when taskId is null', function (): void {
+        [$tool, , $subAgent] = makeSubAgentTool();
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => SUB_AGENT_SUB_CHILD_ID, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            taskId: null,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('current task context');
+        $subAgent->shouldNotHaveReceived('continueChild');
+    });
+
+    test("returns failure when the child's agent is not in the allowlist", function (): void {
+        // The operator's trust boundary applies to a continuation too.
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $child = seedSubAgentChildTask();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [2, 3]]);
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => $child->id, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toContain('not in the allowed_target_agents list');
+        $subAgent->shouldNotHaveReceived('continueChild');
+    });
+
+    test('returns failure when the service refuses a task this conversation did not start', function (): void {
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $child = seedSubAgentChildTask();
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+        $subAgent->allows('continueChild')
+            ->andThrow(new InvalidArgumentException("Task #{$child->id} was not started by this conversation."));
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => $child->id, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe("Task #{$child->id} was not started by this conversation.");
+    });
+
+    test('returns failure when the service refuses a task that is still running', function (): void {
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $child = seedSubAgentChildTask(status: 'RUNNING');
+        $config->allows('getEffectiveSettings')
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+        $subAgent->allows('continueChild')
+            ->andThrow(new InvalidArgumentException("Task #{$child->id} is still running (status RUNNING)."));
+
+        $result = $tool->execute(
+            ['op' => 'sub_agent_continue', 'task_id' => $child->id, 'prompt' => 'ctx'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: subAgentUserContext(),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->content)->toBe("Task #{$child->id} is still running (status RUNNING).");
+    });
+});
+
 describe('SubAgentTool::describeAction', function (): void {
 
     test('renders the target agent id for the handover op', function (): void {
         [$tool] = makeSubAgentTool();
 
         expect($tool->describeAction(['op' => 'handover', 'target_agent_id' => SUB_AGENT_TARGET_AGENT]))
-            ->toBe('Hand over the task to agent #' . SUB_AGENT_TARGET_AGENT . '.');
+            ->toBe('Delegate to agent #' . SUB_AGENT_TARGET_AGENT . ' in the background.');
     });
 
     test('renders the agent id for the sub_agent op', function (): void {
@@ -371,6 +616,13 @@ describe('SubAgentTool::describeAction', function (): void {
 
         expect($tool->describeAction(['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT]))
             ->toBe('Spawn a sub-agent on agent #' . SUB_AGENT_TARGET_AGENT . ' and wait for its result.');
+    });
+
+    test('renders the task id for the sub_agent_continue op', function (): void {
+        [$tool] = makeSubAgentTool();
+
+        expect($tool->describeAction(['op' => 'sub_agent_continue', 'task_id' => SUB_AGENT_SUB_CHILD_ID]))
+            ->toBe('Continue sub-agent task #' . SUB_AGENT_SUB_CHILD_ID . '.');
     });
 });
 
@@ -383,8 +635,12 @@ describe('SubAgentTool::getParametersSchema', function (): void {
 
         expect($schema['required'])->toContain('op')
             ->and($schema['required'])->toContain('prompt')
-            ->and($schema['properties']['op']['enum'])->toBe(['sub_agent', 'handover'])
+            // Declaration order is load-bearing: `sub_agent` must stay
+            // first, because the runtime fallback when the LLM omits `op`
+            // is the first declared operation.
+            ->and($schema['properties']['op']['enum'])->toBe(['sub_agent', 'sub_agent_continue', 'handover'])
             ->and($schema['properties']['target_agent_id'])->toBeArray()
+            ->and($schema['properties']['task_id'])->toBeArray()
             ->and($schema['properties']['prompt'])->toBeArray();
     });
 

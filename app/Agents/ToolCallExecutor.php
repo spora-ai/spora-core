@@ -32,9 +32,14 @@ use Throwable;
  */
 final class ToolCallExecutor
 {
+    private readonly ToolOperationResolver $toolOperations;
+
     public function __construct(
         private readonly Orchestrator $orchestrator,
-    ) {}
+        ?ToolOperationResolver $toolOperations = null,
+    ) {
+        $this->toolOperations = $toolOperations ?? new ToolOperationResolver();
+    }
 
     public function executeOrQueue(
         DriverToolCall $toolCall,
@@ -62,16 +67,17 @@ final class ToolCallExecutor
         $operationName        = 'default';
         $operationDescription = null;
         if (in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
-            // The orchestrator previously wrapped the [$object, $method] callable
-            // in a `callTraitMethod` helper, but the body was a literal one-liner
-            // — the indirection just kept the variadic-spread call away from
-            // ToolCallExecutor. Inlining keeps the call site adjacent to the
-            // `HasOperations` trait it dispatches into.
-            /** @var callable */
-            $nameGetter = [$toolInstance, 'getOperationName'];
-            $descGetter = [$toolInstance, 'getOperationDescription'];
-            $operationName        = $nameGetter($toolCall->arguments);
-            $operationDescription = $descGetter($operationName);
+            // The op is resolved the same way the orchestrator resolves it
+            // for the approval default, so the op that is validated, the op
+            // that is enablement-checked and the op whose approval default
+            // is read are always the same one.
+            $operationName = $this->toolOperations->resolveOperationName($toolInstance, $toolCall->arguments, $agent->id);
+
+            // `getOperationDescription()` lives on the HasOperations trait,
+            // not on ToolInterface, so it goes through a callable.
+            /** @var callable(string): string $describeOperation */
+            $describeOperation = [$toolInstance, 'getOperationDescription'];
+            $operationDescription = $describeOperation($operationName);
 
             if (!$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $agent->id)) {
                 $this->persistDisabledOperation($task, $agent, $toolCall, $toolClass, $operationName, $operationDescription);

@@ -6,6 +6,7 @@ namespace Spora\Tools;
 
 use InvalidArgumentException;
 use Spora\Models\Agent;
+use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigServiceInterface;
@@ -16,32 +17,36 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\ValueObjects\ToolResult;
 
 /**
- * Two operations on the same `sub_agent` tool:
- *   - `sub_agent`  — Spawn a child task on the target agent while the
- *                    parent task suspends (`status = AWAITING_SUB_AGENTS`).
- *                    When every child has terminated, the parent resumes
- *                    with each child's output appended as a `role:'tool'`
- *                    history row so the next LLM tick sees the results.
- *                    Declared first so the runtime fallback when the
- *                    `op` discriminator is omitted lands here.
- *   - `handover`   — Close the source task and start a new task on the
- *                    target agent. Source `final_response` becomes
- *                    "Handed off to …" and the source chat ends.
+ * Three operations on the same `sub_agent` tool:
+ *   - `sub_agent`         — Spawn a child task on the target agent while the
+ *                           parent task suspends (`status = AWAITING_SUB_AGENTS`).
+ *                           When every child has terminated, the parent resumes
+ *                           with each child's output appended as a `role:'tool'`
+ *                           history row so the next LLM tick sees the results.
+ *                           Declared first so the runtime fallback when the
+ *                           `op` discriminator is omitted lands here.
+ *   - `sub_agent_continue` — Continue an existing child task with a follow-up
+ *                           message and wait for its next answer. The child
+ *                           keeps its earlier conversation, so the follow-up
+ *                           does not have to be self-contained.
+ *   - `handover`          — Delegate to the target agent, which continues in
+ *                           the background. The source chat stays open and
+ *                           ends on its own terms; the target's answer never
+ *                           comes back.
  *
- * Both ops share a single `target_agent_id` parameter. The schema's
- * `enum` is populated from `allowed_target_agents` using "Name (#id)"
- * labels so the LLM picks agents by name; the tool parses the label
- * back to an int at execute time. `allowed_target_agents` is intra-
- * principal — the picker surfaces only same-principal agents, the
- * tool re-validates the principal match at runtime
- * (`isTargetAllowed()`), and the service layer enforces a final
- * `callerControlsPrincipal` check.
+ * `sub_agent` and `handover` share a single `target_agent_id` parameter. The
+ * schema's `enum` is populated from `allowed_target_agents` using "Name (#id)"
+ * labels so the LLM picks agents by name; the tool parses the label back to
+ * an int at execute time. `allowed_target_agents` is intra-principal — the
+ * picker surfaces only same-principal agents, the tool re-validates the
+ * principal match at runtime (`isTargetAllowed()`), and the service layer
+ * enforces a final `callerControlsPrincipal` check.
  */
 #[Tool(
     name: 'sub_agent',
     displayName: 'Sub-Agent',
     category: 'agent',
-    description: 'Delegate to another agent (`sub_agent`, default, waits and returns) or close the source chat and hand off (handover). See the sub-agent skill — the prompt is the ENTIRETY of what the target sees.',
+    description: 'Delegate to another agent: `sub_agent` (default — spawns a child task and waits for the answer), `sub_agent_continue` (follows up on a sub-agent task you already started, and waits for the new answer), or `handover` (the target works in the background and you get no answer back). See the sub-agent skill — for `sub_agent` the prompt is the ENTIRETY of what the target sees.',
     icon: 'arrow-right',
     recommendsSkills: ['sub-agent'],
 )]
@@ -62,15 +67,21 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'sub_agent',
     description: 'Spawn a child task on the target agent and wait for its result. Default go-to for delegation.',
     enabledByDefault: true,
-    requiresApprovalByDefault: true,
+    requiresApprovalByDefault: false,
+    discriminatorKey: 'op',
+)]
+#[ToolOperation(
+    name: 'sub_agent_continue',
+    description: 'Continue an existing sub-agent task with a follow-up message and wait for the new answer. The target keeps its earlier context.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: false,
     discriminatorKey: 'op',
 )]
 #[ToolOperation(
     name: 'handover',
-    description: 'Hand over the source task to the target — source chat closes. Use ONLY when the parent does not need to hear back.',
-    enabledByDefault: true,
-    // Source task is closed as a side-effect, hence the approval gate.
-    requiresApprovalByDefault: true,
+    description: 'Delegate to the target agent, which continues in the background. This chat stays open — you get no answer back.',
+    enabledByDefault: false,
+    requiresApprovalByDefault: false,
     discriminatorKey: 'op',
 )]
 #[ToolParameter(
@@ -82,16 +93,28 @@ use Spora\Tools\ValueObjects\ToolResult;
     enumSource: 'allowed_target_agents',
 )]
 #[ToolParameter(
+    name: 'task_id',
+    type: 'string',
+    description: 'Task id of the sub-agent task to continue — the number from the earlier sub_agent result ("Sub-agent task #777", also the /tasks/777 link). Only sub-agent tasks started by this conversation can be continued.',
+    required: ['sub_agent_continue'],
+)]
+#[ToolParameter(
     name: 'prompt',
     type: 'string',
-    description: 'Self-contained first user message for the new task. The target has NO access to '
+    description: 'For `sub_agent` and `handover`: a self-contained first user message for the new task. The target has NO access to '
                . 'source history, so include the goal, key facts, decisions, pending items, and any '
                . 'verbatim quotes to preserve. Anything not in this message is lost. '
-               . 'No follow-up is possible from the target; the prompt must include every fact, decision, and verbatim quote the target needs.',
+               . 'For `sub_agent_continue`: a follow-up message for a task that already has the earlier conversation — say only what the target cannot see.',
     required: true,
 )]
 final class SubAgentTool extends AbstractTool
 {
+    /** The model's failure text when it sends no usable prompt. */
+    private const PROMPT_REQUIRED = 'prompt is required.';
+
+    /** The model's failure text when the target is outside the allowlist. */
+    private const TARGET_NOT_ALLOWED = 'Target agent is not in the allowed_target_agents list.';
+
     public function __construct(
         private readonly HandoverServiceInterface $handover,
         private readonly SubAgentServiceInterface $subAgent,
@@ -113,8 +136,9 @@ final class SubAgentTool extends AbstractTool
         // order so the runtime default matches the skill's "default
         // go-to" claim.
         return match ($op) {
-            'handover' => $this->executeHandover($arguments, $agentId, $userId, $taskId),
-            default    => $this->executeSubAgent($arguments, $agentId, $userId, $taskId),
+            'handover'           => $this->executeHandover($arguments, $agentId, $userId, $taskId),
+            'sub_agent_continue' => $this->executeContinue($arguments, $agentId, $userId, $taskId),
+            default              => $this->executeSubAgent($arguments, $agentId, $userId, $taskId),
         };
     }
 
@@ -145,7 +169,9 @@ final class SubAgentTool extends AbstractTool
             // "[New task #N](/tasks/N)" link becomes a clickable link to the
             // new task. The data payload also carries new_task_id for any
             // consumer that wants to render its own link.
-            content: "Task delegated to agent #{$targetAgentId}. [New task #{$newTask->id}](/tasks/{$newTask->id}).",
+            content: "Delegated to agent #{$targetAgentId}, which continues in the background. "
+                . "[New task #{$newTask->id}](/tasks/{$newTask->id}). "
+                . 'Tell the user who is handling it and end your turn.',
             data: [
                 'handover'        => true,
                 'op'              => 'handover',
@@ -194,15 +220,65 @@ final class SubAgentTool extends AbstractTool
         );
     }
 
+    private function executeContinue(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
+    {
+        $childTaskId = $this->resolveChildTaskId($arguments['task_id'] ?? null);
+        $prompt      = trim((string) ($arguments['prompt'] ?? ''));
+
+        $error = $this->validateContinueInputs($childTaskId, $prompt, $userId, $taskId);
+        $child = $error === null ? Task::find($childTaskId) : null;
+
+        if ($error === null && $child === null) {
+            $error = "Sub-agent task #{$childTaskId} not found.";
+        }
+
+        // Past that branch `$error === null` implies the child was found,
+        // so the allowlist check below always has an agent to check.
+        //
+        // The operator's trust boundary applies to a continuation too: the
+        // child's agent has to be on the allowlist, and the LLM cannot
+        // name a task that lives on an agent the operator never approved.
+        if ($error === null && !$this->isTargetAllowed((int) $child->agent_id, $agentId, $userId)) {
+            $error = self::TARGET_NOT_ALLOWED;
+        }
+
+        if ($error !== null) {
+            return new ToolResult(false, $error);
+        }
+
+        try {
+            $continued = $this->subAgent->continueChild(
+                parentTaskId: (int) $taskId,
+                childTaskId: $childTaskId,
+                prompt: $prompt,
+                userId: (int) $userId,
+            );
+        } catch (InvalidArgumentException $e) {
+            return new ToolResult(false, $e->getMessage());
+        }
+
+        return new ToolResult(
+            success: true,
+            content: "Sub-agent task #{$continued->id} continues on agent #{$continued->agent_id}. [Task #{$continued->id}](/tasks/{$continued->id}).",
+            data: [
+                'op'                   => 'sub_agent_continue',
+                // Keeps the frontend widget and the resume correlation working.
+                'spawned_sub_task_ids' => [$continued->id],
+                'continued_task_id'    => $continued->id,
+                'target_agent_id'      => (int) $continued->agent_id,
+            ],
+        );
+    }
+
     private function validateHandoverInputs(int $targetAgentId, string $prompt, int $agentId, ?int $userId, ?int $taskId): ?string
     {
         return match (true) {
             $targetAgentId <= 0 => 'target_agent_id is required.',
-            $prompt === ''      => 'prompt is required.',
+            $prompt === ''      => self::PROMPT_REQUIRED,
             $userId === null    => 'Handover requires an authenticated user.',
             $taskId === null    => 'Handover requires a current task context.',
             !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
-                => 'Target agent is not in the allowed_target_agents list.',
+                => self::TARGET_NOT_ALLOWED,
             default => null,
         };
     }
@@ -211,11 +287,22 @@ final class SubAgentTool extends AbstractTool
     {
         return match (true) {
             $targetAgentId <= 0 => 'target_agent_id is required.',
-            $prompt === ''      => 'prompt is required.',
+            $prompt === ''      => self::PROMPT_REQUIRED,
             $userId === null    => 'Sub-agent requires an authenticated user.',
             $taskId === null    => 'Sub-agent requires a current task context.',
             !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
-                => 'Target agent is not in the allowed_target_agents list.',
+                => self::TARGET_NOT_ALLOWED,
+            default => null,
+        };
+    }
+
+    private function validateContinueInputs(int $childTaskId, string $prompt, ?int $userId, ?int $taskId): ?string
+    {
+        return match (true) {
+            $childTaskId <= 0 => 'task_id is required.',
+            $prompt === ''    => self::PROMPT_REQUIRED,
+            $userId === null  => 'Sub-agent continuation requires an authenticated user.',
+            $taskId === null  => 'Sub-agent continuation requires a current task context.',
             default => null,
         };
     }
@@ -239,6 +326,25 @@ final class SubAgentTool extends AbstractTool
                 || ctype_digit($raw))
         ) {
             return (int) ($m[1] ?? $raw);
+        }
+        return 0;
+    }
+
+    /**
+     * Parse the LLM-facing `task_id` value back to an int.
+     *
+     * The schema declares it as a string because LLM drivers emit numerics
+     * as strings, and `SchemaValidator` only accepts an int for an
+     * `integer` type. Unparseable input returns `0`, which the validator
+     * reports as `task_id is required.`
+     */
+    private function resolveChildTaskId(mixed $raw): int
+    {
+        if (is_int($raw)) {
+            return $raw;
+        }
+        if (is_string($raw) && ctype_digit(trim($raw))) {
+            return (int) trim($raw);
         }
         return 0;
     }
@@ -290,8 +396,12 @@ final class SubAgentTool extends AbstractTool
 
         return match ($op) {
             'handover' => sprintf(
-                'Hand over the task to agent #%s.',
+                'Delegate to agent #%s in the background.',
                 $arguments['target_agent_id'] ?? '?',
+            ),
+            'sub_agent_continue' => sprintf(
+                'Continue sub-agent task #%s.',
+                $arguments['task_id'] ?? '?',
             ),
             default => sprintf(
                 'Spawn a sub-agent on agent #%s and wait for its result.',
