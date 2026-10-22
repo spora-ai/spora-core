@@ -21,33 +21,22 @@ final class SourceLocator
         private readonly string $basePath,
     ) {}
 
-    /**
-     * The framework's own `app/` directory.
-     */
     public function appDir(): string
     {
         return $this->basePath . '/app';
     }
 
-    /**
-     * The framework root.
-     */
     public function basePath(): string
     {
         return $this->basePath;
     }
 
-    /**
-     * A path as the operator knows it: relative to the framework root.
-     */
     public function relative(string $path): string
     {
         return str_starts_with($path, $this->basePath . '/') ? substr($path, strlen($this->basePath) + 1) : $path;
     }
 
     /**
-     * Every PHP file under a directory, recursively.
-     *
      * @return list<string>
      */
     public function phpFilesIn(string $dir): array

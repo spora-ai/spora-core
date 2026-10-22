@@ -37,9 +37,6 @@ final class Translator
 
     public function __construct(private readonly CatalogLoader $catalogs) {}
 
-    /**
-     * The locale every later `trans()` resolves against.
-     */
     public function useLocale(string $locale): void
     {
         $this->locale = trim($locale);
@@ -81,9 +78,9 @@ final class Translator
      *
      * Only templates are considered, and only after an exact match has
      * failed — a plain string is never at risk of being matched by a
-     * template. When two templates match equally well, neither is used:
-     * a guess here would put the wrong sentence in front of an operator
-     * approving a tool call.
+     * template. When two templates match equally well *and translate
+     * differently*, neither is used: a guess here would put the wrong
+     * sentence in front of an operator approving a tool call.
      *
      * @param array<string, string> $catalogue
      */

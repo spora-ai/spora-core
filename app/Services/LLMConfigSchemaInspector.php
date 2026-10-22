@@ -63,10 +63,9 @@ final class LLMConfigSchemaInspector
     {
         $schema = [];
         foreach (ToolSettingSchema::collect($class) as $setting) {
-            // `label` and `options[].label` stay English; the config block
-            // that reaches the model carries them, and a translated label
-            // would apply to every setting reusing the same word. See
-            // {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
+            // `label` and `options[].label` are never translated — see
+            // {@see \Spora\Build\CatalogHarvester} — and the config block
+            // that reaches the model carries them.
             $schema[] = [
                 'key' => $setting->key,
                 'label' => $setting->label,

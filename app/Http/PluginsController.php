@@ -32,7 +32,8 @@ use Symfony\Component\HttpFoundation\Response;
  * `php bin/spora plugin:install|uninstall|update` is not gated — it's
  * always available as the operator recovery path.
  *
- * Wire contract is locked in docs/20_plugin_install_api.md.
+ * Wire contract is locked in
+   * https://docs.spora-ai.com/develop/plugins/install-api.html.
  */
 final class PluginsController
 {

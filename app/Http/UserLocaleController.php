@@ -21,8 +21,8 @@ use Symfony\Component\HttpFoundation\Response;
  * override it. See migration 0096 for why the column is on `users`.
  *
  * `null` is a real value — it means "auto", and clears the choice so
- * `SPORA_DEFAULT_LANG` applies again. The available set is whatever
- * `locales/` holds, so adding a language is a file, not a release.
+ * `SPORA_DEFAULT_LANG` applies again. The available set is whatever the
+ * installed catalogues hold, so adding a language is a file, not a release.
  */
 final class UserLocaleController
 {

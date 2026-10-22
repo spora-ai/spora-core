@@ -249,11 +249,9 @@ final class ToolController
         // `scope` are the only fields the controller needs that the
         // inspectors don't produce.
         foreach (ToolSettingSchema::collect($toolClass) as $setting) {
-            // `label` and `options[].label` are deliberately English: the
-            // catalogue key is the English text, so a translated label would
-            // apply to every setting in every plugin that reuses the word,
-            // and six of them enter the model's prompt through
-            // `expose_to_llm`. See `app/Plugins/PluginInterface.php`.
+            // `label` and `options[].label` are never translated — see
+            // {@see \Spora\Build\CatalogHarvester} — and some of them enter
+            // the model's prompt through `expose_to_llm`.
             $schema[] = [
                 'key'           => $setting->key,
                 'label'         => $setting->label,

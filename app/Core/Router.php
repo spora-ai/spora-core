@@ -85,8 +85,6 @@ final class Router
     }
 
     /**
-     * The payload of an error envelope and the message it carries.
-     *
      * @return array{0: array, 1: string}|null
      */
     private function translatableErrorPayload(Response $response): ?array

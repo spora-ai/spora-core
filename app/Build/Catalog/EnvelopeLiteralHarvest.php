@@ -7,30 +7,23 @@ namespace Spora\Build\Catalog;
 /**
  * Every string literal that reaches an HTTP error envelope.
  *
- * Found syntactically so the locator is the real line rather than a
- * reconstructed one.
- *
- * Error-message positions this harvest recognises:
- *
- *  - `'message' => '…'` is the envelope itself.
- *  - The four helper names build the same envelope one frame up, which is
- *    where most of core's copy actually lives. Harvesting only the literal
- *    envelope would leave the majority of the operator's error text out of
- *    the catalogue and, since `i18n:check` fails on any gap, permanently
- *    untranslatable.
+ * Two positions count: the envelope itself, and the four helper names that
+ * build the same envelope one frame up. The helpers carry most of core's
+ * error copy — harvesting only the envelope would leave the majority of the
+ * operator's error text out of the catalogue, and since `i18n:check` fails
+ * on any gap, permanently untranslatable.
  */
 final class EnvelopeLiteralHarvest implements Harvest
 {
     /**
-     * The helper names that build an error envelope.
-     *
      * @var list<string>
      */
     private const ERROR_MESSAGE_HELPERS = ['error', 'notFound', 'forbidden', 'unprocessable'];
 
     /**
-     * Where each helper's `$message` parameter sits when the helper is
-     * the trait's own.
+     * Where each helper's `$message` parameter sits when the helper is the
+     * trait's own — these mirror {@see \Spora\Http\JsonControllerHelpers}'s
+     * signatures and have to change with them.
      *
      * @var array<string, int>
      */
@@ -97,8 +90,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The envelope messages of one file, by the line they are written on.
-     *
      * @return array<int, string> line => message
      */
     private function errorMessageLiteralsIn(string $source): array
@@ -125,8 +116,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The envelope message at `$index`, whichever of the two shapes it has.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array{0: int, 1: string, 2: int}               $token
      * @param array<string, string>                           $constants
@@ -147,8 +136,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The message on the right of a `'message' =>` key.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array<string, string>                           $constants
      * @return ?array{0: string, 1: int} message, line
@@ -168,9 +155,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * True when token `$i` is the method name of `$this->error(` /
-     * `->notFound(` / `->forbidden(` / `->unprocessable(`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function startsHelperCall(array $tokens, int $index): bool
@@ -188,8 +172,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * Whether the call at `$index` is `$this->helper(`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function isThisCall(array $tokens, int $index): bool
@@ -213,8 +195,6 @@ final class EnvelopeLiteralHarvest implements Harvest
      * bare string literal or a `sprintf(...)` whose format string is the
      * message.
      *
-     * A concatenation is not: `'a' . $b` has no whole message to key on.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return ?array{0: string, 1: int} message, line
      */
@@ -233,8 +213,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The arguments of the call whose opening paren is at `$index + 1`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return list<list<array{0: int, 1: string, 2: int}|string>>
      */
@@ -272,8 +250,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * How much a token changes the bracket nesting.
-     *
      * @param array{0: int, 1: string, 2: int}|string $token
      */
     private function depthChange(array|string $token): int
@@ -314,8 +290,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The tokens of one argument that are not whitespace or comments.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $argument
      * @return list<array{0: int, 1: string, 2: int}|string>
      */
@@ -334,8 +308,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The format string of a `sprintf(` argument, if the argument is one.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $significant
      * @return ?array{0: int, 1: string, 2: int}
      */
@@ -356,8 +328,9 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The literal on the right of a `'message' =>`, whether it is written
-     * inline or reached through a class constant in the same file.
+     * The literal on the right of a `'message' =>` — written inline,
+     * reached through a `sprintf(`, or a class constant declared in the
+     * same file.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array<string, string>                           $constants
@@ -379,10 +352,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The format string of a `sprintf(` in the envelope position: the
-     * format string is the message, with placeholders the translation
-     * keeps.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @param array{0: int, 1: string, 2: int}               $value
      * @return ?array{0: string, 1: int} message, line
@@ -460,9 +429,6 @@ final class EnvelopeLiteralHarvest implements Harvest
     }
 
     /**
-     * The parameter names of the function whose `function` keyword is at
-     * `$functionIndex`.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return list<string>
      */

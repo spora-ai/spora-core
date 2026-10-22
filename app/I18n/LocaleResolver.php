@@ -15,7 +15,7 @@ namespace Spora\I18n;
  * `Accept-Language` is deliberately absent. The instance owner sets one
  * default in the admin UI, and a browser header overriding it would make
  * the rendered language depend on the machine rather than the install, and
- * the same user see two languages on two machines.
+ * the same user sees two languages on two machines.
  */
 final readonly class LocaleResolver
 {

@@ -625,7 +625,8 @@ final class ContainerDefinitions
         ];
     }
 
-    // Gates the Web UI plugin install endpoints (docs/20_plugin_install_api.md).
+    // Gates the Web UI plugin install endpoints
+    // (https://docs.spora-ai.com/develop/plugins/install-api.html).
     // CLI plugin commands are not gated — leave this off if `composer` isn't on $PATH.
     private static function resolvePluginInstallEnabled(ContainerInterface $c): bool
     {

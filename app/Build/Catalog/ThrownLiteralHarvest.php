@@ -7,10 +7,9 @@ namespace Spora\Build\Catalog;
 /**
  * Messages thrown as exception arguments.
  *
- * Found syntactically — `throw new Something('…')` — so the locator is
- * the real line. The message is operator-facing because the router
- * localizes whatever ends up in the error envelope, and this literal is
- * what a controller's `$e->getMessage()` puts there.
+ * The message is operator-facing because the router localizes whatever ends
+ * up in the error envelope, and this literal is what a controller's
+ * `$e->getMessage()` puts there.
  */
 final class ThrownLiteralHarvest implements Harvest
 {
@@ -78,8 +77,6 @@ final class ThrownLiteralHarvest implements Harvest
     }
 
     /**
-     * The thrown messages of one file, by the line they are written on.
-     *
      * @return array<int, string> line => message
      */
     private function thrownMessageLiteralsIn(string $source): array
@@ -110,8 +107,6 @@ final class ThrownLiteralHarvest implements Harvest
     }
 
     /**
-     * The index of the `new` that builds the thrown object.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function newExpressionAt(array $tokens, int $index): ?int
@@ -127,8 +122,6 @@ final class ThrownLiteralHarvest implements Harvest
     }
 
     /**
-     * The first constructor argument, when it is a single string literal.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return array{0: string, 1: int}|null the decoded literal and its line
      */
@@ -148,8 +141,6 @@ final class ThrownLiteralHarvest implements Harvest
     }
 
     /**
-     * The index of the opening paren of the call, if it has one.
-     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      */
     private function openingParen(array $tokens, int $from): ?int

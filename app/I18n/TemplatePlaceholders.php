@@ -19,10 +19,10 @@ namespace Spora\I18n;
  */
 final class TemplatePlaceholders
 {
-    /** The two sequences a `sprintf`-style template uses. */
+    /** The sequences a `sprintf`-style template uses. */
     public const SPECIFIERS = ['%s', '%d'];
 
-    /** The same two sequences, as one pattern. */
+    /** The same sequences, as one pattern. */
     public const PATTERN = '/%[sd]/';
 
     /**

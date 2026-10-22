@@ -39,13 +39,11 @@ final class ToolCallSerializer
     /**
      * The tool call's human-readable description, in the operator's language.
      *
-     * `describeAction()` is operator-facing copy: it is written to
-     * `tool_calls.human_description` and shipped to the frontend for the
-     * approval prompt, and the model-facing history never reads it. So it is
-     * translatable — but the **stored** value stays English, and the
-     * translation happens here, at serialization. A tool call viewed later by
-     * somebody reading a different language gets their own language, not
-     * whichever language was active when it was created.
+     * The **stored** value stays English and the translation happens here,
+     * at serialization — the other end of that rule is
+     * {@see \Spora\Build\Catalog\OperatorDescriptionHarvest}. A tool call
+     * viewed later by somebody reading a different language gets their own
+     * language, not whichever language was active when it was created.
      *
      * A message with no catalogue entry is returned unchanged.
      */

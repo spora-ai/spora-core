@@ -9,9 +9,8 @@ use Spora\I18n\Translator;
 /**
  * The operator-facing copy of a speech provider's schema.
  *
- * `label` and `options[].label` stay English — see
- * {@see \Spora\Plugins\PluginInterface::translationsPaths()} for why a
- * setting label is never a catalogue key. The description is the blurb the
+ * `label` and `options[].label` are never translated — see
+ * {@see \Spora\Build\CatalogHarvester}. The description is the blurb the
  * operator reads under the setting, so it does translate.
  */
 final class SpeechProviderSchemaLocaliser
