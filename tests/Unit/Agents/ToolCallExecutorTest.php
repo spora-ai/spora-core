@@ -323,3 +323,60 @@ it('time(action: "format") without epoch still fails validation (epoch is requir
         ->and($record->operation)->toBe('format')
         ->and($record->result_content)->toContain("Required argument 'epoch' is missing");
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+// ---------------------------------------------------------------------------
+// A missing per-op argument must read like something the model can act on
+// ---------------------------------------------------------------------------
+//
+// The `sub_agent_continue` op takes `task_id` and no `target_agent_id`; the
+// `sub_agent` op takes the reverse. A model that mixes them up sends the
+// parameter it has context for and omits the one it has to recall. The
+// executor rejects the call before it runs and hands the error back to the
+// model — so the message has to say what is missing AND which operation wants
+// it. "from the approved arguments" was wrong here: nothing was approved.
+
+it('a sub_agent_continue call without task_id tells the model what to add', function (): void {
+    $handover = Mockery::mock(Spora\Services\HandoverServiceInterface::class);
+    $subAgent = Mockery::mock(Spora\Services\SubAgentServiceInterface::class);
+    $subAgent->shouldNotReceive('continueChild');
+    $config = Mockery::mock(Spora\Services\ToolConfigServiceInterface::class);
+    $tool = new Spora\Tools\SubAgentTool($handover, $subAgent, $config);
+
+    [$agentId, $task] = seedAgentAndTask([$tool]);
+    $agent = Agent::find($agentId);
+
+    // `sub_agent_continue` is opt-in; without the override the call would be
+    // refused as a disabled operation before validation ever ran.
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agentId,
+        'tool_class'                => Spora\Tools\SubAgentTool::class,
+        'operation'                 => 'sub_agent_continue',
+        'enabled'                   => 1,
+        'default_requires_approval' => 0,
+    ]);
+
+    $orch = makeExecutorHost([$tool]);
+    $executor = new ToolCallExecutor($orch);
+
+    // What the model actually sent: the target agent it had context for, and
+    // no `task_id` at all.
+    $toolCall = new DriverToolCall('call_continue', 'sub_agent', [
+        'op'              => 'sub_agent_continue',
+        'target_agent_id' => 'Image Agent (#4)',
+        'prompt'          => 'change the heading',
+    ]);
+
+    $disposition = $executor->executeOrQueue($toolCall, $agent, $task);
+
+    expect($disposition)->toBe(ToolCallDisposition::ValidationFailed);
+
+    $record = ToolCallModel::where('task_id', $task->id)->first();
+    expect($record)->not->toBeNull()
+        ->and($record->operation)->toBe('sub_agent_continue')
+        ->and($record->result_content)->toContain("Required argument 'task_id' is missing.")
+        // The operation and its required arguments are named, so the model
+        // can re-issue without guessing.
+        ->and($record->result_content)->toContain("Operation 'sub_agent_continue' requires: task_id, prompt.")
+        // Nothing was approved — the call never reached an operator.
+        ->and($record->result_content)->not->toContain('approved arguments');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
