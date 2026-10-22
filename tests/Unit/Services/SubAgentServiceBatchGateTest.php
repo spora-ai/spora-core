@@ -371,4 +371,49 @@ describe('SubAgentService::continueChild', function (): void {
             ->and($data['spawned_sub_task_ids'])->toBe([$fixture['child']->id])
             ->and($data['sub_agent_expected_count'])->toBe(1);
     });
+
+    it('does not inflate the expected count when the parent already lists the child', function (): void {
+        // The gate compares `count(spawned_sub_task_ids)` against
+        // `sub_agent_expected_count`, so the two must agree. A continuation
+        // RE-USES the child id, so the list does not grow — an incrementing
+        // count would drift one ahead of the list and the parent could never
+        // resume: `1 !== 2` fails the gate forever and the task sits in
+        // AWAITING_SUB_AGENTS with the child's answer undelivered.
+        //
+        // The stale bookkeeping here is what a parent carries when a
+        // previous batch never closed — a user message to a finished
+        // conversation left the ids and the count behind.
+        $fixture = continueChildFixture();
+
+        $fixture['parent']->update([
+            'data' => [
+                'spawned_sub_task_ids'   => [$fixture['child']->id],
+                'sub_agent_expected_count' => 1,
+            ],
+        ]);
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->allows('continue')
+            ->with($fixture['child']->id, 'more')
+            ->andReturn($fixture['child']);
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        $service->continueChild(
+            parentTaskId: $fixture['parent']->id,
+            childTaskId: $fixture['child']->id,
+            prompt: 'more',
+            userId: $fixture['ownerId'],
+        );
+
+        $fixture['parent']->refresh();
+        $data = (array) $fixture['parent']->data;
+
+        expect($data['spawned_sub_task_ids'])->toBe([$fixture['child']->id])
+            ->and($data['sub_agent_expected_count'])->toBe(1)
+            // The invariant the resume gate measures.
+            ->and(count($data['spawned_sub_task_ids']))->toBe($data['sub_agent_expected_count']);
+    });
 });
