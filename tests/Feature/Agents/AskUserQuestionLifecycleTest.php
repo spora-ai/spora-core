@@ -11,7 +11,13 @@ use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
 use Spora\Tools\Attributes\Tool;
 
-function harnessTaskInRunningState(string $toolName, string $toolClass): Task
+/**
+ * No `agent_tool_operation_overrides` row: the `ask` operation ships
+ * `enabledByDefault: true` and `requiresApprovalByDefault: false`, so the
+ * bare `agent_tools` row is enough. A test that pinned the override row
+ * would pass with the default flipped back off.
+ */
+function harnessTaskInRunningState(string $toolClass): Task
 {
     $userId = bootAuthLayer()->register('ask-life@example.com', 'Password1!', 'Ask Lifecycle');
     simulateLoggedInSession($userId, 'ask-life@example.com');
@@ -28,17 +34,6 @@ function harnessTaskInRunningState(string $toolName, string $toolClass): Task
         'agent_id'  => $agent->id,
         'tool_class' => $toolClass,
         'tool_name' => $attribute->name,
-    ]);
-
-    // ask_user_question is `enabledByDefault: false` (operators opt in).
-    // Tests need the override row so the executor doesn't short-circuit
-    // to OperationDisabled before reaching the parking branch.
-    Spora\Models\AgentToolOperationOverride::create([
-        'agent_id'    => $agent->id,
-        'tool_class'  => $toolClass,
-        'operation'   => $attribute->name === 'ask_user_question' ? 'ask' : 'write',
-        'enabled'     => 1,
-        'default_requires_approval' => 0,
     ]);
 
     return Task::create([
@@ -92,7 +87,7 @@ it('round-trips a PendingQuestionBatch through AgentState JSON', function (): vo
 });
 
 it('persists a PendingQuestionBatch on a Task via the executor path', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
 
     // Drive the same executor path the orchestrator uses so we test the
     // real database write. We hand-build the ask_user_question call.
@@ -151,7 +146,7 @@ it('persists a PendingQuestionBatch on a Task via the executor path', function (
 });
 
 it('answerTask flips AWAITING_INPUT → QUEUED when no batches remain', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,
@@ -204,7 +199,7 @@ it('answerTask flips AWAITING_INPUT → QUEUED when no batches remain', function
 });
 
 it('answerTask keeps AWAITING_INPUT when other batches remain pending', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,
@@ -257,7 +252,7 @@ it('answerTask keeps AWAITING_INPUT when other batches remain pending', function
 });
 
 it('rejects an answer that targets a tool_call_id not in pending_state', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,
@@ -294,7 +289,7 @@ it('rejects an answer that targets a tool_call_id not in pending_state', functio
 });
 
 it('rejects when answers count != questions count', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,
@@ -331,7 +326,7 @@ it('rejects when answers count != questions count', function (): void {
 });
 
 it('rejects free-text answer when allowFreeText=false', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,
@@ -369,7 +364,7 @@ it('rejects free-text answer when allowFreeText=false', function (): void {
 });
 
 it('rejects an unknown option label', function (): void {
-    $task = harnessTaskInRunningState('ask_user_question', Spora\Tools\AskUserQuestionTool::class);
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';
     $task->pending_state = json_encode([
         'task_id' => $task->id,

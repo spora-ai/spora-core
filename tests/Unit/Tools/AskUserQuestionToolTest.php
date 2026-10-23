@@ -147,6 +147,12 @@ it('emits a single-operation schema with the ask op', function (): void {
         ->and($schema['properties'])->toHaveKey('questions');
 });
 
+it('ships the ask op enabled and approval-free', function (): void {
+    $tool = askUserQuestionTool();
+    expect($tool->isEnabledByDefault('ask'))->toBeTrue()
+        ->and($tool->requiresApprovalByDefault('ask'))->toBeFalse();
+});
+
 function validQuestion(string $header, string $question): array
 {
     return [
