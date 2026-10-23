@@ -220,3 +220,35 @@ it('the compacted history keeps every turn and names the range the summary repla
         ->and($history[8]['role'])->toBe('summary')
         ->and($history[8]['summarized_sequence_range'])->toBe('0-2');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('POST /compact reports a failed summary and leaves the history alone', function (): void {
+    [$userId, $agent] = seedCompactEndpointFixtures();
+    $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'agent_id'  => $agent->id,
+        'status'    => 'COMPLETED',
+        'user_prompt' => 'done',
+        'max_steps' => 5,
+    ]);
+
+    $orch = Mockery::mock(OrchestratorInterface::class);
+    $orch->shouldReceive('compactHistory')
+        ->once()
+        ->andThrow(new Spora\Agents\Exceptions\CompactionFailedException(
+            'The model returned no summary for the conversation, so the history was left unchanged.',
+        ));
+
+    [$service] = compactEndpointService($orch);
+    $controller = compactEndpointController($service);
+
+    $req = new Request();
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->compact($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_INTERNAL_SERVER_ERROR);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPACTION_FAILED')
+        ->and($body['error']['message'])->toContain('left unchanged');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

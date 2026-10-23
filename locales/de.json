@@ -297,6 +297,7 @@
   "The field \"role\" is required.": "Das Feld \"role\" ist erforderlich.",
   "The fields \"email\" and \"password\" are required.": "Die Felder \"email\" und \"password\" sind erforderlich.",
   "The fields \"name\" and \"subject\" are required.": "Die Felder \"name\" und \"subject\" sind erforderlich.",
+  "The model returned no summary for the conversation, so the history was left unchanged.": "Das Modell hat keine Zusammenfassung der Unterhaltung geliefert, daher wurde der Verlauf unverändert beibehalten.",
   "The prompt template assigned to this scheduled run no longer exists.": "Die diesem geplanten Lauf zugeordnete Prompt-Vorlage existiert nicht mehr.",
   "The provided email address is invalid.": "Die angegebene E-Mail-Adresse ist ungültig.",
   "The provided password does not meet the minimum requirements.": "Das angegebene Passwort erfüllt die Mindestanforderungen nicht.",

@@ -254,6 +254,119 @@ describe('ConversationCompactor', function (): void {
             ->and(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(0);
     });
 
+    it('writes no summary row when the model returns no text', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        for ($i = 0; $i < 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        // A reasoning model can spend its whole output budget thinking and
+        // return no text. Writing that as the summary would replace the
+        // summarized turns with nothing.
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturn(new LLMResponse('', [], 10, 1024, 'cmp_summary'));
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        expect(fn() => (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2))
+            ->toThrow(Spora\Agents\Exceptions\CompactionFailedException::class);
+
+        expect(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(0)
+            ->and(TaskHistory::where('task_id', $task->id)->count())->toBe(8);
+    });
+
+    it('gives the summary request room to think', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        for ($i = 0; $i < 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $captured = null;
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturnUsing(static function (LLMRequest $req) use (&$captured): LLMResponse {
+            $captured = $req;
+            return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
+        });
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+
+        // A cap of 1024 tokens left a reasoning model with nothing to write
+        // the summary with.
+        expect($captured->maxTokens)->toBeGreaterThan(1024);
+    });
+
+    it('truncates a long tool result for the summarizer', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        TaskHistory::create([
+            'task_id'      => $task->id,
+            'sequence'     => 0,
+            'role'         => 'tool',
+            'tool_name'    => 'staan_search',
+            'tool_call_id' => 'call_1',
+            // Multi-byte characters on purpose: a byte-wise cut would split
+            // one in half and leave the request body invalid UTF-8.
+            'content'      => str_repeat('Honigbienen-Bestand äöüß ', 4000),
+        ]);
+        for ($i = 1; $i < 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 1 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $captured = null;
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturnUsing(static function (LLMRequest $req) use (&$captured): LLMResponse {
+            $captured = $req;
+            return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
+        });
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+
+        // An unbounded tool dump makes the model think for tens of thousands
+        // of tokens and exhaust its budget before it writes anything.
+        $toolMessage = null;
+        foreach ($captured->messages as $message) {
+            if (str_starts_with((string) $message['content'], '[tool:staan_search]')) {
+                $toolMessage = $message;
+            }
+        }
+
+        expect($toolMessage)->not->toBeNull()
+            ->and(mb_strlen((string) $toolMessage['content']))->toBeLessThan(2000)
+            ->and((string) $toolMessage['content'])->toContain('…[truncated]')
+            // The cut has to leave valid UTF-8 behind.
+            ->and(mb_check_encoding((string) $toolMessage['content'], 'UTF-8'))->toBeTrue();
+    });
+
     it('leaves the replayed history pairable when the summarised range splits an assistant/tool pair', function (): void {
         [$agent, $task] = seedCompactionTask();
 

@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
+use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Auth\AuthService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -54,6 +55,10 @@ final class TaskCompactController
                 description: 'INVALID_STATE — the task is not in a state that can be compacted.',
             ),
             new OA\Response(
+                response: 500,
+                description: 'COMPACTION_FAILED — the model returned no summary. The history is left unchanged.',
+            ),
+            new OA\Response(
                 response: 404,
                 description: 'NOT_FOUND — task is not owned by the calling user.',
             ),
@@ -68,6 +73,11 @@ final class TaskCompactController
             $result = $this->taskService->compactTask($taskId, $userId);
         } catch (InvalidArgumentException $e) {
             return $this->errorForException($e);
+        } catch (CompactionFailedException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'COMPACTION_FAILED', 'message' => $e->getMessage()]],
+                Response::HTTP_INTERNAL_SERVER_ERROR,
+            );
         }
 
         return new JsonResponse(['data' => $result]);

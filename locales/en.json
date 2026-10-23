@@ -297,6 +297,7 @@
     "The field \"role\" is required.": "The field \"role\" is required.",
     "The fields \"email\" and \"password\" are required.": "The fields \"email\" and \"password\" are required.",
     "The fields \"name\" and \"subject\" are required.": "The fields \"name\" and \"subject\" are required.",
+    "The model returned no summary for the conversation, so the history was left unchanged.": "The model returned no summary for the conversation, so the history was left unchanged.",
     "The prompt template assigned to this scheduled run no longer exists.": "The prompt template assigned to this scheduled run no longer exists.",
     "The provided email address is invalid.": "The provided email address is invalid.",
     "The provided password does not meet the minimum requirements.": "The provided password does not meet the minimum requirements.",

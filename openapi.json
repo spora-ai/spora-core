@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-8-g438a0be2"
+        "version": "0.30.0-9-g321fecba"
     },
     "servers": [
         {
@@ -2331,6 +2331,9 @@
                     },
                     "409": {
                         "description": "INVALID_STATE — the task is not in a state that can be compacted."
+                    },
+                    "500": {
+                        "description": "COMPACTION_FAILED — the model returned no summary. The history is left unchanged."
                     },
                     "404": {
                         "description": "NOT_FOUND — task is not owned by the calling user."

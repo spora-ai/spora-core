@@ -7,6 +7,7 @@ namespace Spora\Agents;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Support\Collection;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Agents\ValueObjects\ActiveCompactions;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\ValueObjects\LLMRequest;
@@ -36,6 +37,31 @@ final class ConversationCompactor
      * everything before them.
      */
     public const KEEP_ROWS = 5;
+
+    /**
+     * The ceiling on the summary request's output budget.
+     *
+     * The summary is a model turn, and a reasoning model spends its output
+     * budget on thinking before it writes anything. A tight cap starves it:
+     * it burns the whole cap thinking and returns no text at all, which
+     * would replace the summarized turns with nothing. The agent's own
+     * output budget is the ceiling, and this keeps a runaway summary from
+     * growing past the point where it is still a summary.
+     */
+    private const MAX_SUMMARY_TOKENS = 8192;
+
+    /**
+     * How much of a tool result the summariser sees.
+     *
+     * Tool results are the bulk of a long conversation — one research turn
+     * can carry tens of thousands of tokens of search output. The
+     * summariser needs the gist of that evidence, not every byte: an
+     * unbounded dump makes a reasoning model think for tens of thousands of
+     * tokens, exhaust its budget before it writes anything, and take
+     * minutes. The tool's name and query are at the head of the result, so
+     * the head is what carries the signal.
+     */
+    private const TOOL_RESULT_CHARS = 1000;
 
     public function __construct(
         private readonly DriverFactory $driverFactory,
@@ -123,7 +149,7 @@ final class ConversationCompactor
             if ($row->role === 'tool') {
                 $messages[] = [
                     'role'    => 'user',
-                    'content' => '[tool:' . ($row->tool_name ?? '?') . '] ' . $content,
+                    'content' => '[tool:' . ($row->tool_name ?? '?') . '] ' . $this->truncateToolResult($content),
                 ];
                 continue;
             }
@@ -142,13 +168,30 @@ final class ConversationCompactor
     }
 
     /**
+     * The head of a tool result, with a marker for the part that was cut.
+     *
+     * Cut on a character boundary: a byte-wise cut can split a multi-byte
+     * character in half, and the request body would then be invalid UTF-8 —
+     * which the HTTP client refuses to encode.
+     */
+    private function truncateToolResult(string $content): string
+    {
+        if (mb_strlen($content) <= self::TOOL_RESULT_CHARS) {
+            return $content;
+        }
+
+        return mb_substr($content, 0, self::TOOL_RESULT_CHARS) . ' …[truncated]';
+    }
+
+    /**
      * @param  list<array{role: string, content: string}>  $summaryMessages
      */
     private function summarize(Agent $agent, array $summaryMessages, int $maxTokensOutput, float $temperature): string
     {
-        $systemPrompt = ($agent->system_prompt !== null && $agent->system_prompt !== '')
-            ? $agent->system_prompt
-            : 'You are a helpful AI assistant.';
+        // The summariser is not the agent. Handing it the agent's persona
+        // makes it answer like the agent — a long report instead of a
+        // summary — which is the opposite of what a compaction needs.
+        $systemPrompt = 'You are a helpful assistant that summarises conversations.';
 
         $summaryInstruction = 'Summarize the conversation below concisely, preserving key facts, decisions, and any pending tasks. Output only the summary.';
 
@@ -156,14 +199,25 @@ final class ConversationCompactor
             systemPrompt: $systemPrompt,
             messages: array_merge($summaryMessages, [['role' => 'user', 'content' => $summaryInstruction]]),
             tools: [],
-            maxTokens: min($maxTokensOutput, 1024),
+            maxTokens: min($maxTokensOutput, self::MAX_SUMMARY_TOKENS),
             temperature: $temperature,
         );
 
         $driver   = $this->driverFactory->makeFromAgent($agent);
         $response = $driver->complete($summaryRequest);
 
-        return $response->content ?? 'Conversation summarized.';
+        $summary = trim((string) ($response->content ?? ''));
+        if ($summary === '') {
+            // The model returned nothing. Writing the row would replace the
+            // summarized turns with an empty summary, which is worse than
+            // not compacting at all — the model would lose that context
+            // without anything taking its place.
+            throw new CompactionFailedException(
+                'The model returned no summary for the conversation, so the history was left unchanged.',
+            );
+        }
+
+        return $summary;
     }
 
     /**
