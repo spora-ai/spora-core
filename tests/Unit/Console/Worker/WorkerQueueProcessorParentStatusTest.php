@@ -197,10 +197,11 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
 
         $processor->spawnChild(404);
 
-        // Give the child a moment to actually exit before we tear the
-        // DB down — a still-running child would mask the catch branch
-        // because the reap would bail at feof() == false.
-        usleep(100_000);
+        // Tear the DB down before the reap, so the status lookup fails
+        // whatever the child's exit timing turns out to be. The reap only
+        // reaches the lookup once the child has exited, and a child that
+        // takes longer than a fixed sleep to start would otherwise bail at
+        // feof() == false and leave the catch branch unexercised.
         $connection = Capsule::connection();
         $connection->setReconnector(static function (): void {
             throw new Illuminate\Database\QueryException(
@@ -213,14 +214,13 @@ describe('WorkerQueueProcessor — parent-side task completion echo', function (
         $connection->disconnect();
 
         try {
-            $processor->reapChildren($output);
+            $rendered = drainUntilChildExit($processor, $output, $handler);
         } finally {
             // Restore the default reconnect behaviour so the rest of
             // the worker can talk to the DB.
             $connection->setReconnector(static fn(): true => true);
             $connection->reconnect();
         }
-        $rendered = $output->fetch();
 
         expect($rendered)
             ->toContain('Task 404 finished with status: ')

@@ -52,6 +52,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
     public readonly LlmConfigResolver $llmConfigResolver;
     public readonly RetryScheduler $retryScheduler;
+    public readonly ConversationCompactor $conversationCompactor;
     public readonly ContextWindowRecovery $contextWindowRecovery;
     public readonly ApprovedBatchExecutor $approvedBatchExecutor;
     public readonly TickPhaseRunner $tickPhaseRunner;
@@ -126,7 +127,8 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
-        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
+        $this->conversationCompactor = new ConversationCompactor($driverFactory, $config->logger);
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->conversationCompactor, $config->logger, $config->notificationService);
         $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
             $this,
@@ -309,6 +311,39 @@ final class Orchestrator implements OrchestratorInterface
         $history = TaskHistory::create($row);
 
         HistoryRowWriter::insertUsageIfPresent($history->id, $context->usage);
+    }
+
+    /**
+     * Compact the task's history: everything but the last few rows is
+     * replaced by a summary for the model.
+     *
+     * The summarised rows stay in the history — the operator can still read
+     * them — so this changes what the model is sent, not what the transcript
+     * holds. See {@see ConversationCompactor}.
+     *
+     * @return bool True when a summary was written. A history too short to
+     *              summarise leaves the task untouched.
+     */
+    public function compactHistory(int $taskId): bool
+    {
+        $task = Task::find($taskId);
+        if ($task === null) {
+            return false;
+        }
+
+        $agent = Agent::find($task->agent_id);
+        if ($agent === null) {
+            return false;
+        }
+
+        $llmConfig = $this->llmConfigResolver->resolveLlmConfig($agent);
+
+        return $this->conversationCompactor->compact(
+            $taskId,
+            $agent,
+            $llmConfig['max_tokens_output'],
+            $llmConfig['temperature'],
+        );
     }
 
     /**

@@ -224,6 +224,42 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
+     * Compact the task's history: everything but the last few rows is
+     * replaced by a summary for the model.
+     *
+     * The summarised rows stay in the history — the operator can still read
+     * them — so this changes what the model is sent, not what the transcript
+     * holds. See {@see \Spora\Agents\ConversationCompactor}.
+     *
+     * @return array{task: array<string, mixed>, compacted: bool}  The task
+     *         resource, and whether a summary was written. A history too
+     *         short to summarise leaves the task untouched and reports
+     *         `compacted: false`.
+     */
+    public function compactTask(int $taskId, int $userId): array
+    {
+        $visiblePrincipalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
+        $task = Task::where('id', $taskId)->whereIn('principal_id', $visiblePrincipalIds)->first();
+        if ($task === null) {
+            throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND);
+        }
+
+        // A running task is mid-turn: the tick writes rows as it goes, and a
+        // compaction would race it.
+        if (!in_array($task->status, ['COMPLETED', 'FAILED', 'ABORTED'], true)) {
+            throw new InvalidArgumentException('Can only compact completed, failed, or aborted tasks.');
+        }
+
+        $compacted = $this->orchestrator->compactHistory($task->id);
+
+        $fresh = $task->fresh();
+        $resource = $this->taskDetailResource($fresh);
+        $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
+
+        return ['task' => $resource, 'compacted' => $compacted];
+    }
+
+    /**
      * @inheritDoc
      */
     /**

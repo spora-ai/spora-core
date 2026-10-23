@@ -646,10 +646,11 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
             ->and($messages[1])->toBe(['role' => 'user', 'content' => 'Q3']);
     });
 
-    it('preserves every compaction row across a second compaction round', function (): void {
+    it('preserves every compaction row whose range another one does not cover', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // Exempt from eviction via the `_compaction` sentinel, not by role.
+        // Disjoint ranges: neither summary says anything about the rows the
+        // other one replaces, so dropping either would lose context.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             ['role' => 'summary', 'content' => 'First summary', 'summarized_sequence_range' => '0-0'],
@@ -666,10 +667,13 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
             ->and($messages[2])->toBe(['role' => 'user', 'content' => 'Recent']);
     });
 
-    it('keeps a compaction row alive when a later range covers its sequence', function (): void {
+    it('drops a compaction row a later and wider range supersedes', function (): void {
         [$agentId] = seedHistoryAgent();
 
-        // Range 0-3 covers the summary's own row, yet it survives eviction.
+        // A compaction re-summarises what the previous one replaced plus the
+        // rows that followed it, so the newer range covers the older one and
+        // the older summary — which the newer one was written from — says
+        // the same thing about the same rows.
         $messages = buildTranscript($agentId, [
             historyUser('First'),
             historyUser('Second'),
@@ -678,9 +682,26 @@ describe('MessageHistoryBuilder compaction row role', function (): void {
             historyUser('Recent'),
         ]);
 
-        expect($messages)->toHaveCount(3)
-            ->and($messages[0]['content'])->toBe('Old summary')
-            ->and($messages[1]['content'])->toBe('New summary')
-            ->and($messages[2]['content'])->toBe('Recent');
+        expect($messages)->toHaveCount(2)
+            ->and($messages[0]['content'])->toBe('New summary')
+            ->and($messages[1]['content'])->toBe('Recent');
+    });
+
+    it('sends the summary where the range it replaces starts, not where its own row sits', function (): void {
+        [$agentId] = seedHistoryAgent();
+
+        // The shape a compaction writes today: the summarised rows stay in
+        // the history and the summary row is appended after them.
+        $messages = buildTranscript($agentId, [
+            historyUser('Q1'),
+            historyAssistant('A1'),
+            historyUser('Q2'),
+            ['role' => 'summary', 'content' => 'Compacted turns.', 'summarized_sequence_range' => '0-2'],
+            historyUser('Q3'),
+        ]);
+
+        expect($messages)->toHaveCount(2)
+            ->and($messages[0])->toBe(['role' => 'user', 'content' => 'Compacted turns.'])
+            ->and($messages[1])->toBe(['role' => 'user', 'content' => 'Q3']);
     });
 });

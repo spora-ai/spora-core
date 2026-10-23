@@ -160,6 +160,21 @@ interface TaskServiceInterface
     public function approveTask(int $taskId, int $userId, array $decisions): array;
 
     /**
+     * Compact the task's history: everything but the last few rows is
+     * replaced by a summary for the model.
+     *
+     * The summarised rows stay in the history — the operator can still read
+     * them — so this changes what the model is sent, not what the transcript
+     * holds.
+     *
+     * @return array{task: array<string, mixed>, compacted: bool}  The task
+     *         resource, and whether a summary was written. A history too
+     *         short to summarise leaves the task untouched and reports
+     *         `compacted: false`.
+     */
+    public function compactTask(int $taskId, int $userId): array;
+
+    /**
      * @return array{
      *     id: int,
      *     agent_id: int,

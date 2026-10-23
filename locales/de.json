@@ -56,6 +56,7 @@
   "Caller must be owner or admin to add a member.": "Zum Hinzufügen eines Mitglieds muss der Aufrufer Eigentümer oder Administrator sein.",
   "Caller must be owner or admin to change roles.": "Zum Ändern von Rollen muss der Aufrufer Eigentümer oder Administrator sein.",
   "Caller must be owner or admin to remove members.": "Zum Entfernen von Mitgliedern muss der Aufrufer Eigentümer oder Administrator sein.",
+  "Can only compact completed, failed, or aborted tasks.": "Nur abgeschlossene, fehlgeschlagene oder abgebrochene Aufgaben können komprimiert werden.",
   "Can only continue completed, failed, aborted, or running tasks.": "Nur abgeschlossene, fehlgeschlagene, abgebrochene oder laufende Aufgaben können fortgesetzt werden.",
   "Can only retry failed tasks.": "Nur fehlgeschlagene Aufgaben können erneut versucht werden.",
   "Cannot demote the last owner of the group.": "Der letzte Eigentümer der Gruppe kann nicht herabgestuft werden.",

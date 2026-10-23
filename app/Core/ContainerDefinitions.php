@@ -90,6 +90,7 @@ use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
+use Spora\Http\TaskCompactController;
 use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
@@ -1181,6 +1182,13 @@ final class ContainerDefinitions
                     $c->get(LoggerInterface::class),
                     $c->get(Config::class)->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
                     $c->get(PrincipalResolver::class),
+                );
+            },
+
+            TaskCompactController::class => static function (ContainerInterface $c): TaskCompactController {
+                return new TaskCompactController(
+                    $c->get(AuthService::class),
+                    $c->get(TaskServiceInterface::class),
                 );
             },
 
