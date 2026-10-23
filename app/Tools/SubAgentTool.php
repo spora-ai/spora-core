@@ -87,15 +87,17 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'target_agent_id',
     type: 'string',
-    description: 'Label of the target agent. Must be in the configured allowed_target_agents list. '
-               . 'Format: "Name (#id)" — e.g. "Legal Agent (#11)".',
+    description: 'For `sub_agent` and `handover`: label of the target agent. Must be in the configured allowed_target_agents list. '
+               . 'Format: "Name (#id)" — e.g. "Legal Agent (#11)". '
+               . 'Not used by `sub_agent_continue`, which targets the agent the child already runs on.',
     required: ['handover', 'sub_agent'],
     enumSource: 'allowed_target_agents',
 )]
 #[ToolParameter(
     name: 'task_id',
     type: 'string',
-    description: 'Task id of the sub-agent task to continue — the number from the earlier sub_agent result ("Sub-agent task #777", also the /tasks/777 link). Only sub-agent tasks started by this conversation can be continued.',
+    description: 'For `sub_agent_continue` only: task id of the sub-agent task to continue — the number from the earlier sub_agent result ("Sub-agent task #777", also the /tasks/777 link). '
+               . 'Only sub-agent tasks started by this conversation can be continued.',
     required: ['sub_agent_continue'],
 )]
 #[ToolParameter(

@@ -42,10 +42,20 @@ final class SchemaValidator
         $required   = $schema['required']   ?? [];
         $properties = $schema['properties'] ?? [];
 
+        // The wording must fit all three callers: the executor's pre-flight
+        // check on the arguments the MODEL sent, the approval path on the
+        // arguments the OPERATOR approved, and the HTTP approve endpoint.
+        // "the approved arguments" was true of one of them and misleading in
+        // the other two. Naming the operation and its required arguments
+        // makes the message actionable for whoever has to fix the call.
+        $operationClause = $operationName !== null
+            ? sprintf(" Operation '%s' requires: %s.", $operationName, implode(', ', $required))
+            : '';
+
         foreach ($required as $field) {
             if (!array_key_exists($field, $arguments)) {
                 throw new InvalidArgumentException(
-                    "Required argument '{$field}' is missing from the approved arguments.",
+                    sprintf("Required argument '%s' is missing.%s", $field, $operationClause),
                 );
             }
         }

@@ -77,6 +77,49 @@ final class SchemaValidatorTest extends TestCase
         SchemaValidator::validate(['action' => 'now'], $schema, 'now');
     }
 
+    public function test_missing_argument_message_does_not_claim_approval(): void
+    {
+        // The validator serves three callers: the executor's pre-flight check
+        // on the arguments the MODEL sent, the approval path on the arguments
+        // the OPERATOR approved, and the HTTP approve endpoint. The message
+        // used to say "from the approved arguments" in all three, which was
+        // wrong for the pre-flight path — nothing had been approved, and the
+        // model's own call was what was missing the field.
+        $schema = $this->makeSchema(
+            required: ['op', 'task_id'],
+            requiredWhen: ['task_id' => ['continue']],
+            properties: [
+                'op'      => ['type' => 'string', 'enum' => ['spawn', 'continue']],
+                'task_id' => ['type' => 'string'],
+            ],
+        );
+
+        try {
+            SchemaValidator::validate(['op' => 'continue'], $schema, 'continue');
+            $this->fail('Expected a missing-argument failure.');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringNotContainsString('approved', $e->getMessage());
+            // The operation and its required arguments are named, so whoever
+            // fixes the call — model or operator — knows what to add.
+            $this->assertStringContainsString("Required argument 'task_id' is missing.", $e->getMessage());
+            $this->assertStringContainsString("Operation 'continue' requires: task_id.", $e->getMessage());
+        }
+    }
+
+    public function test_missing_argument_message_without_an_operation_names_no_operation(): void
+    {
+        // A tool without operations has no operation to name; the message
+        // must not invent one.
+        $schema = $this->makeSchema(required: ['name']);
+
+        try {
+            SchemaValidator::validate([], $schema);
+            $this->fail('Expected a missing-argument failure.');
+        } catch (InvalidArgumentException $e) {
+            $this->assertSame("Required argument 'name' is missing.", $e->getMessage());
+        }
+    }
+
     public function test_required_false_is_never_required(): void
     {
         $schema = $this->makeSchema(
