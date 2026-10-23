@@ -533,6 +533,42 @@ it('continuing an auto-aborted task clears the max_steps_reached flag', function
         ->and($data['aborted_at'] ?? null)->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('continuing a task clears the previous batch\'s sub-agent bookkeeping', function (): void {
+    // A continued task starts a fresh batch. The previous batch's
+    // sub-agent bookkeeping describes children the new turn is not waiting
+    // for, and the resume gate measures the spawned-id list against the
+    // expected count — so a count left over from the old batch can keep
+    // the gate from ever opening again.
+    [$agentId] = seedAgent();
+
+    $mock = Mockery::mock(LLMDriverInterface::class);
+    $mock->allows('complete')->andReturn(new LLMResponse('done', [], 5, 3, 'cmp_1'));
+
+    $tools = [new StubInputTool()];
+    enableToolsForAgent($agentId, $tools);
+    $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
+    $task = $orch->start($agentId, 'first prompt');
+    claimAndTick($orch, $task->id);
+
+    $task->refresh();
+    $task->update([
+        'data' => [
+            'spawned_sub_task_ids'   => [777],
+            'sub_agent_expected_count' => 1,
+            'sub_agent_batch_open'   => true,
+        ],
+    ]);
+
+    $orch->continue($task->id, 'second prompt');
+
+    $task->refresh();
+    $data = is_array($task->data) ? $task->data : [];
+
+    expect($data)->not->toHaveKey('spawned_sub_task_ids')
+        ->and($data)->not->toHaveKey('sub_agent_expected_count')
+        ->and($data)->not->toHaveKey('sub_agent_batch_open');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 // ---------------------------------------------------------------------------
 // Fix #5 — tool exception recovery
 // ---------------------------------------------------------------------------

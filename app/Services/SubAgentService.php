@@ -132,7 +132,7 @@ final class SubAgentService implements SubAgentServiceInterface
 
         // Increment AFTER the post-tick re-check so any mid-batch check
         // sees expected from the PREVIOUS spawn, not this one.
-        $this->incrementExpectedCount($parent->id);
+        $this->syncExpectedCount($parent->id);
         $this->publishParentState($parent->id, $userId);
 
         return $child;
@@ -184,7 +184,7 @@ final class SubAgentService implements SubAgentServiceInterface
         $child = ($this->orchestratorFactory)()->continue($child->id, $prompt);
 
         $this->recordSpawnedChild($parent, $child->id);
-        $this->incrementExpectedCount($parent->id);
+        $this->syncExpectedCount($parent->id);
         $this->publishParentState($parent->id, $userId);
 
         return $child;
@@ -319,11 +319,20 @@ final class SubAgentService implements SubAgentServiceInterface
     }
 
     /**
-     * Read-modify-write (not a raw `+1` SQL update) so the increment and
-     * `data.spawned_sub_task_ids` stay in lockstep if a concurrent writer
-     * touched the row between {@see recordSpawnedChild()} and this call.
+     * Derive `data.sub_agent_expected_count` from the spawned-id list.
+     *
+     * The resume gate compares `count(spawned_sub_task_ids)` against
+     * `sub_agent_expected_count`, so the two must always agree. Counting the
+     * list is what makes that true by construction: a spawn adds a new id and
+     * a continuation re-uses one, so an increment would drift the count away
+     * from the list the gate measures — and a parent whose count has drifted
+     * can never resume, because `1 !== 2` fails the gate forever.
+     *
+     * Read-modify-write rather than a raw update, so a concurrent writer
+     * that added an id between {@see recordSpawnedChild()} and this call is
+     * counted rather than overwritten.
      */
-    private function incrementExpectedCount(int $parentId): void
+    private function syncExpectedCount(int $parentId): void
     {
         $row = Capsule::table('tasks')->where('id', $parentId)->value('data');
         $data = is_string($row) ? json_decode($row, true) : null;
@@ -331,7 +340,8 @@ final class SubAgentService implements SubAgentServiceInterface
             $data = [];
         }
 
-        $data['sub_agent_expected_count'] = (int) ($data['sub_agent_expected_count'] ?? 0) + 1;
+        $spawned = $data['spawned_sub_task_ids'] ?? [];
+        $data['sub_agent_expected_count'] = is_array($spawned) ? count($spawned) : 0;
 
         Capsule::table('tasks')
             ->where('id', $parentId)
@@ -382,7 +392,7 @@ final class SubAgentService implements SubAgentServiceInterface
      * Idempotent — the unset fires only when `sub_agent_batch_open` is
      * currently set, so a no-op re-entry on the same parent row does not
      * generate a redundant DB write. The shared race with
-     * {@see recordSpawnedChild()} / {@see incrementExpectedCount()} is
+     * {@see recordSpawnedChild()} / {@see syncExpectedCount()} is
      * still mitigated only by the {@see LeaseGuard} on
      * `AWAITING_SUB_AGENTS` (no row lock here) — the only invariant this
      * read-modify-write enforces is that the flag ends up unset by the

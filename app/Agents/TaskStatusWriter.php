@@ -63,6 +63,17 @@ final class TaskStatusWriter
         // the flag and mislabel itself in the chat banner.
         unset($data['max_steps_reached']);
 
+        // A continued task starts a fresh batch. The previous batch's
+        // sub-agent bookkeeping — the spawned-child ids, the expected count
+        // and the batch-open flag — describes children this turn is not
+        // waiting for. A stale expected count is not merely untidy: the
+        // resume gate compares it against the spawned-id list, and a count
+        // that no longer matches the list can never open, so the task sits
+        // in AWAITING_SUB_AGENTS forever.
+        unset($data['spawned_sub_task_ids']);
+        unset($data['sub_agent_expected_count']);
+        unset($data['sub_agent_batch_open']);
+
         // Drop the auto-retry chain markers and the failure columns —
         // mirrors Orchestrator::retry() so an aborted → continued task
         // is claimable by the main worker loop (`retry_of_task_id IS
