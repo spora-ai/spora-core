@@ -86,8 +86,8 @@ final class ConversationCompactor
 
         $compactions = ActiveCompactions::find($rows);
 
-        // The rows the model still sees verbatim: everything the summaries
-        // already replaced is gone from the model's point of view.
+        // A summary already replaced its range, so those rows are gone from
+        // the model's point of view.
         $verbatim = $rows->filter(
             static fn(TaskHistory $row): bool => $row->role !== 'summary'
                 && !$compactions->covers($row->sequence),

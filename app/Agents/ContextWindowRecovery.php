@@ -29,8 +29,7 @@ final class ContextWindowRecovery
     public function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
     {
         if ($task === null || $agent === null) {
-            // Nothing to compact: the tick could not resolve the task or
-            // the agent it runs for.
+            // The tick could not resolve the task or the agent it runs for.
             throw $originalError;
         }
 
@@ -65,8 +64,7 @@ final class ContextWindowRecovery
 
         if (! $compacted) {
             // Nothing was summarised, so the history is unchanged and the
-            // retry would fail with the same context-window error. Failing
-            // the turn is the only outcome left.
+            // retry would fail with the same context-window error.
             $this->logger?->warning('Compaction wrote no summary, so the history is unchanged', ['task_id' => $taskId]);
             throw $originalError;
         }

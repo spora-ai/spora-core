@@ -168,7 +168,7 @@ interface TaskServiceInterface
      *
      * The summarised rows stay in the history — the operator can still read
      * them — so this changes what the model is sent, not what the transcript
-     * holds.
+     * holds. See {@see \Spora\Agents\ConversationCompactor}.
      *
      * @return array{task: array<string, mixed>, compacted: bool}  The task
      *         resource, and whether a summary was written. A history too

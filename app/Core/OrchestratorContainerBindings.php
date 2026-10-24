@@ -128,9 +128,6 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            // One compaction service for the manual endpoint and the
-            // context-window recovery, so both resolve the agent and its
-            // LLM budget the same way.
             TaskCompactionServiceInterface::class => static function (ContainerInterface $c): TaskCompactionServiceInterface {
                 return new TaskCompactionService(
                     $c->get(ConversationCompactor::class),

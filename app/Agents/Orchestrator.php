@@ -130,10 +130,8 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
-        // The container hands over the shared compaction service so the
-        // manual endpoint and the context-window recovery compact a task
-        // through one instance; a self-built one keeps the orchestrator
-        // usable on its own.
+        // A self-built service keeps the orchestrator usable on its own;
+        // the container hands over the shared one.
         $this->taskCompactionService = $taskCompactionService ?? new TaskCompactionService(
             new ConversationCompactor($driverFactory, $config->logger),
             $this->llmConfigResolver,

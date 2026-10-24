@@ -8,7 +8,6 @@ use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
-use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
@@ -226,22 +225,7 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
-     * Compact the task's history: everything but the last few rows is
-     * replaced by a summary for the model.
-     *
-     * The summarised rows stay in the history — the operator can still read
-     * them — so this changes what the model is sent, not what the transcript
-     * holds. See {@see \Spora\Agents\ConversationCompactor}.
-     *
-     * @return array{task: array<string, mixed>, compacted: bool}  The task
-     *         resource, and whether a summary was written. A history too
-     *         short to summarise leaves the task untouched and reports
-     *         `compacted: false`.
-     *
-     * @throws InvalidArgumentException  When the task is missing, not owned
-     *                                   by the caller, or still running.
-     * @throws CompactionFailedException  When the model returned no summary;
-     *                                    the history is left unchanged.
+     * @inheritDoc
      */
     public function compactTask(int $taskId, int $userId): array
     {
