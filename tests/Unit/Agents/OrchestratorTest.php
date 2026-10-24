@@ -2214,7 +2214,7 @@ it('tick compacts history and retries successfully when context window error hap
         'step_count'  => 0,
         'max_steps'   => 10,
     ]);
-    // Need more than 5 history rows so compactHistory has work to do.
+    // Need more than 5 history rows so the compaction has work to do.
     for ($i = 0; $i < 8; $i++) {
         TaskHistory::create([
             'task_id'  => $task->id,

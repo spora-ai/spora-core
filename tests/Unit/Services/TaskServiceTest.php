@@ -7,6 +7,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 
 function makeTaskService(): TaskService
@@ -17,7 +18,7 @@ function makeTaskService(): TaskService
     $mercure->allows('publish')->andReturn(true);
     $mercure->allows('publishToUser')->andReturn(true);
 
-    return new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+    return new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
 }
 
 function ensureAgentsHasPrincipalId(int $agentId, int $userId): void
@@ -450,7 +451,7 @@ describe('TaskService — startTask', function (): void {
                 ]);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->startTask($userId, $agent->id, 'do the thing');
 
         expect($result['agent_id'])->toBe($agent->id);
@@ -485,7 +486,7 @@ describe('TaskService — startTask', function (): void {
                 'user_prompt' => $p, 'max_steps' => $m, 'step_count' => 0,
             ]));
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $service->startTask($userId, $agent->id, 'p', null);
     });
 
@@ -562,7 +563,7 @@ describe('TaskService — startTask', function (): void {
                 ]);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $service->startTask($plainMemberId, $agent->id, 'plain member chat');
 
         // The task row must be attributed to the caller, not the owner.
@@ -909,7 +910,7 @@ describe('TaskService — approveTask', function (): void {
                 Task::where('id', $task->id)->update(['status' => 'RUNNING']);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->approveTask($task->id, $userId, [
             ['provider_call_id' => 'c1', 'decision' => 'approve', 'arguments' => ['x' => 1]],
         ]);
@@ -972,7 +973,7 @@ describe('TaskService — rejectTask', function (): void {
                 Task::where('id', $task->id)->update(['status' => 'FAILED']);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->rejectTask($task->id, $userId, 'unsafe');
 
         expect($result['status'])->toBe('FAILED');
@@ -1046,7 +1047,7 @@ describe('TaskService — retryTask', function (): void {
                 return $original->fresh();
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->retryTask($original->id, $userId);
 
         expect($result['user_prompt'])->toBe('please try again');
@@ -1138,7 +1139,7 @@ describe('TaskService — continueTask', function (): void {
                 ]);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->continueTask($task->id, $userId, 'more please', 10);
 
         expect($result['user_prompt'])->toBe('more please');
@@ -1592,7 +1593,7 @@ describe('TaskService — per-task actions widen to group-member (post-0071)', f
                 Task::where('id', $task->id)->update(['status' => 'RUNNING']);
             });
 
-        $service = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
         $result  = $service->approveTask($task->id, $ownerId, [
             ['provider_call_id' => 'c1', 'decision' => 'approve'],
         ]);

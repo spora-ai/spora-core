@@ -46,6 +46,7 @@ use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SkillController;
 use Spora\Http\SseController;
+use Spora\Http\TaskCompactController;
 use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
@@ -292,6 +293,7 @@ final class RouteDefinitions
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/reject', [TaskController::class, 'reject'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/retry', [TaskController::class, 'retry'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/continue', [TaskController::class, 'continue'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/tasks/{taskId}/compact', [TaskCompactController::class, 'compact'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/answer', [TaskController::class, 'answer'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort', [TaskController::class, 'abort'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/tasks/{taskId}/abort-sub-agent', [TaskController::class, 'abortSubAgent'], [AuthMiddleware::class, CsrfMiddleware::class]);

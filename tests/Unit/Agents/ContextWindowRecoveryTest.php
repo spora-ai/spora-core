@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Spora\Agents\ContextWindowRecovery;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Drivers\DriverFactory;
@@ -16,17 +15,19 @@ use Spora\Models\TaskHistory;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
+const RECOVERY_SUMMARY_PROMPT = 'You are a helpful assistant that summarises conversations.';
+
 /**
- * Boot an agent/user/task pair for compaction tests.
+ * An agent, a running task and the history a context-window error arrives on.
  *
  * @return array{0: Agent, 1: Task}
  */
-function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assistant.'): array
+function seedContextWindowRecoveryTask(): array
 {
-    $userId = bootAuthLayer()->register('cwr@example.com', TEST_PASSWORD, 'CWR');
+    $userId = bootAuthLayer()->register('cwr-recovery@example.com', TEST_PASSWORD, 'CWR');
     $config = LLMDriverConfiguration::create([
         'principal_id' => null,
-        'name'              => 'CWR Test Config',
+        'name'              => 'CWR Recovery Test Config',
         'driver_class'      => Spora\Drivers\OpenAICompatibleDriver::class,
         'settings'          => json_encode(['api_key' => 'test']),
         'is_global'         => true,
@@ -36,9 +37,9 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
     ]);
     $agent = Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
-        'name'                 => 'CWR Test Agent',
+        'name'                 => 'CWR Recovery Test Agent',
         'llm_driver_config_id' => $config->id,
-        'system_prompt'        => $systemPrompt,
+        'system_prompt'        => 'You are a helpful AI assistant.',
         'max_steps'            => 10,
         'is_active'            => true,
     ]);
@@ -56,204 +57,146 @@ function seedCompactionTask(string $systemPrompt = 'You are a helpful AI assista
     return [$agent, $task];
 }
 
-describe('ContextWindowRecovery::compactHistory', function (): void {
-    it('rephrases role:tool rows to role:user with [tool:<name>] prefix and scrubs data: URIs', function (): void {
-        [$agent, $task] = seedCompactionTask();
+/**
+ * A driver that answers the summariser with `$summary` and the agent's own
+ * turn with a plain response, counting the calls it received.
+ *
+ * @param  int  $calls  Filled with the number of LLM calls.
+ */
+function recoveryDriver(int &$calls, string $summary = 'Earlier summary.'): LLMDriverInterface
+{
+    $driver = Mockery::mock(LLMDriverInterface::class);
+    $driver->allows('complete')->andReturnUsing(static function (LLMRequest $request) use (&$calls, $summary): LLMResponse {
+        $calls++;
 
-        // Eight history rows; keepCount = 5, so sequences 0-2 are
-        // summarized and 3-7 are kept. We seed sequence 0 with a tool
-        // row (with a `data:` URI so we can also test scrubbing) and
-        // sequence 1 with a user row that carries a `data:image/png`
-        // URI. Both must be visible in the captured summary request.
-        for ($i = 0; $i < 8; $i++) {
-            TaskHistory::create([
-                'task_id'  => $task->id,
-                'sequence' => $i,
-                'role'     => $i % 2 === 0 ? 'user' : 'assistant',
-                'content'  => "Plain message {$i}",
-            ]);
-        }
-        TaskHistory::where('task_id', $task->id)
-            ->where('sequence', 0)
-            ->update([
-                'role'        => 'tool',
-                'content'     => 'payload: data:image/png;base64,iVBORw0KGgo= end',
-                'tool_name'   => 'image_tool',
-                'tool_call_id' => 'call_abc',
-            ]);
-        TaskHistory::where('task_id', $task->id)
-            ->where('sequence', 1)
-            ->update([
-                'role'    => 'user',
-                'content' => 'Clean message: data:image/png;base64,iVBORw0KGgo= end',
-            ]);
-
-        $capturedRef = null;
-        $driver = Mockery::mock(LLMDriverInterface::class);
-        $driver->allows('complete')
-            ->andReturnUsing(static function (LLMRequest $req) use (&$capturedRef): LLMResponse {
-                $capturedRef = $req;
-                return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
-            });
-        $driver->allows('getProviderName')->andReturn('mock');
-        $driver->allows('getModelName')->andReturn('mock-model');
-
-        $factory = Mockery::mock(DriverFactory::class);
-        $factory->allows('makeFromAgent')->andReturn($driver);
-
-        $orch = new Orchestrator(
-            $factory,
-            new OrchestratorConfig(toolInstances: []),
-        );
-
-        $recovery = new ContextWindowRecovery($orch, $factory);
-        $method = (new ReflectionClass($recovery))->getMethod('compactHistory');
-        $method->invoke($recovery, $task->id, 4096, 0.2, $agent);
-
-        expect($capturedRef)->not->toBeNull();
-        $messages = $capturedRef->messages;
-
-        // compactHistory rephrases `role:'tool'` to `role:'user'`
-        // with `[tool:<name>]` prefix and runs ScrubDataUrls over the
-        // content before sending to the summarizer.
-        $toolRephrased   = null;
-        $scrubbedMessage = null;
-        foreach ($messages as $msg) {
-            $role    = $msg['role'];
-            $content = $msg['content'];
-            if (!is_string($content)) {
-                continue;
-            }
-            if ($role === 'user' && str_starts_with($content, '[tool:image_tool] ')) {
-                $toolRephrased = $msg;
-            }
-            if ($role === 'user' && str_contains($content, '[data-omitted]')) {
-                $scrubbedMessage = $msg;
-            }
+        if ($request->systemPrompt === RECOVERY_SUMMARY_PROMPT) {
+            return new LLMResponse($summary, [], 10, 5, 'cmp_summary');
         }
 
-        expect($toolRephrased)->not->toBeNull()
-            ->and($toolRephrased['role'])->toBe('user')
-            ->and($toolRephrased['content'])->toStartWith('[tool:image_tool] ')
-            ->and($toolRephrased['content'])->not->toContain('data:image/png;base64');
-
-        expect($scrubbedMessage)->not->toBeNull()
-            ->and($scrubbedMessage['content'])->toContain('[data-omitted]')
-            ->and($scrubbedMessage['content'])->not->toContain('data:image/png;base64');
-
-        // compactHistory is also expected to write a `summary` row that
-        // replaces the summarized range — verify the side effect.
-        $summaryRow = TaskHistory::where('task_id', $task->id)
-            ->where('role', 'summary')
-            ->first();
-        expect($summaryRow)->not->toBeNull()
-            ->and($summaryRow->content)->toBe('compacted.')
-            ->and($summaryRow->summarized_sequence_range)->toBe('0-2');
+        return new LLMResponse('Recovered after compaction.', [], 10, 5, 'cmp_done');
     });
+    $driver->allows('getProviderName')->andReturn('mock');
+    $driver->allows('getModelName')->andReturn('mock-model');
+    $driver->allows('supportsImageInput')->andReturn(false);
 
-    it('leaves the replayed history pairable when the summarised range splits an assistant/tool pair', function (): void {
-        [$agent, $task] = seedCompactionTask();
+    return $driver;
+}
 
-        // The range boundary splits an assistant from its result, leaving a
-        // bare `tool` row that providers reject with 2013.
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Q0']);
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'A1']);
+function recoveryOrchestrator(DriverFactory $factory): Orchestrator
+{
+    return new Orchestrator($factory, new OrchestratorConfig(toolInstances: []));
+}
+
+it('re-throws the original error and does not re-tick when the compaction writes nothing', function (): void {
+    [$agent, $task] = seedContextWindowRecoveryTask();
+
+    // A compaction has already happened: the history holds the five rows
+    // after the summarised range plus the summary row itself. There is
+    // nothing left to summarise, so the compaction writes nothing and the
+    // history stays as it is.
+    for ($i = 0; $i < 8; $i++) {
         TaskHistory::create([
-            'task_id'           => $task->id,
-            'sequence'          => 2,
-            'role'              => 'assistant',
-            'content'           => null,
-            'tool_call_payload' => json_encode([
-                ['id' => 'call_split', 'type' => 'function', 'function' => ['name' => 'read_url', 'arguments' => ['url' => 'https://example.test']]],
-            ]),
+            'task_id'  => $task->id,
+            'sequence' => $i,
+            'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+            'content'  => "Message {$i}",
         ]);
+    }
+    TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 8,
+        'role'                      => 'summary',
+        'content'                   => 'Earlier summary.',
+        'summarized_sequence_range' => '0-2',
+    ]);
+
+    $calls  = 0;
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn(recoveryDriver($calls));
+
+    $orch     = recoveryOrchestrator($factory);
+    $original = new RuntimeException('Context window exceeded');
+
+    $thrown = null;
+    try {
+        $orch->contextWindowRecovery->tryCompactionAndRetry($task, $agent, $original);
+    } catch (Throwable $e) {
+        $thrown = $e;
+    }
+
+    // The original error, not a compaction error: the turn has to fail.
+    expect($thrown)->toBe($original);
+
+    // Neither the summariser nor a re-tick reached the model — a retry
+    // would hit the same context-window error.
+    expect($calls)->toBe(0)
+        ->and(TaskHistory::where('task_id', $task->id)->count())->toBe(9)
+        ->and(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(1);
+});
+
+it('re-throws the original error when the compaction itself fails', function (): void {
+    [$agent, $task] = seedContextWindowRecoveryTask();
+
+    for ($i = 0; $i < 8; $i++) {
         TaskHistory::create([
-            'task_id'       => $task->id,
-            'sequence'      => 3,
-            'role'          => 'tool',
-            'tool_call_id'  => 'call_split',
-            'tool_name'     => 'read_url',
-            'content'       => 'fetched page',
+            'task_id'  => $task->id,
+            'sequence' => $i,
+            'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+            'content'  => "Message {$i}",
         ]);
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Q4']);
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 5, 'role' => 'assistant', 'content' => 'A5']);
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 6, 'role' => 'user', 'content' => 'Q6']);
-        TaskHistory::create(['task_id' => $task->id, 'sequence' => 7, 'role' => 'assistant', 'content' => 'A7']);
+    }
 
-        $driver = Mockery::mock(LLMDriverInterface::class);
-        $driver->allows('complete')
-            ->andReturn(new LLMResponse('compacted.', [], 10, 5, 'cmp_summary'));
-        $driver->allows('getProviderName')->andReturn('mock');
-        $driver->allows('getModelName')->andReturn('mock-model');
+    // A reasoning model can spend its whole budget thinking and return no
+    // text, which the compactor reports as a failed compaction.
+    $calls  = 0;
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn(recoveryDriver($calls, ''));
 
-        $factory = Mockery::mock(DriverFactory::class);
-        $factory->allows('makeFromAgent')->andReturn($driver);
+    $orch     = recoveryOrchestrator($factory);
+    $original = new RuntimeException('Context window exceeded');
 
-        $recovery = new ContextWindowRecovery(
-            new Orchestrator($factory, new OrchestratorConfig(toolInstances: [])),
-            $factory,
-        );
-        (new ReflectionClass($recovery))->getMethod('compactHistory')
-            ->invoke($recovery, $task->id, 4096, 0.2, $agent);
+    $thrown = null;
+    try {
+        $orch->contextWindowRecovery->tryCompactionAndRetry($task, $agent, $original);
+    } catch (Throwable $e) {
+        $thrown = $e;
+    }
 
-        $messages = (new Spora\Agents\MessageHistoryBuilder())->build($task->id);
+    expect($thrown)->toBe($original)
+        // The summary request is the only call: the failed compaction ends
+        // the turn, it does not start a new one.
+        ->and($calls)->toBe(1)
+        ->and(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(0);
+});
 
-        expect(toolCallPairingFaults($messages))->toBe([]);
+it('re-ticks when the compaction wrote a summary', function (): void {
+    [$agent, $task] = seedContextWindowRecoveryTask();
 
-        // The declaration is gone, so the result becomes user text.
-        $roles = array_column($messages, 'role');
-        expect($roles)->not->toContain('tool')
-            ->and(implode("\n", array_map(
-                static fn(array $m): string => (string) ($m['content'] ?? ''),
-                $messages,
-            )))->toContain('read_url');
-    });
-
-    it('never sends role:summary to the summarizer on a second compaction round', function (): void {
-        [$agent, $task] = seedCompactionTask();
-
-        // Must sit at the lowest sequence to fall inside the summarized range.
+    for ($i = 0; $i < 8; $i++) {
         TaskHistory::create([
-            'task_id'                   => $task->id,
-            'sequence'                  => 0,
-            'role'                      => 'summary',
-            'content'                   => 'First round summary.',
-            'summarized_sequence_range' => '0-0',
+            'task_id'  => $task->id,
+            'sequence' => $i,
+            'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+            'content'  => "Message {$i}",
         ]);
-        for ($i = 1; $i <= 8; $i++) {
-            TaskHistory::create([
-                'task_id'  => $task->id,
-                'sequence' => $i,
-                'role'     => $i % 2 === 1 ? 'user' : 'assistant',
-                'content'  => "Message {$i}",
-            ]);
-        }
+    }
 
-        $capturedRef = null;
-        $driver = Mockery::mock(LLMDriverInterface::class);
-        $driver->allows('complete')->andReturnUsing(static function (LLMRequest $req) use (&$capturedRef): LLMResponse {
-            $capturedRef = $req;
-            return new LLMResponse('compacted.', [], 10, 5, 'cmp_summary');
-        });
-        $driver->allows('getProviderName')->andReturn('mock');
-        $driver->allows('getModelName')->andReturn('mock-model');
+    $calls  = 0;
+    $factory = Mockery::mock(DriverFactory::class);
+    $factory->allows('makeFromAgent')->andReturn(recoveryDriver($calls));
 
-        $factory = Mockery::mock(DriverFactory::class);
-        $factory->allows('makeFromAgent')->andReturn($driver);
+    $orch = recoveryOrchestrator($factory);
 
-        $recovery = new ContextWindowRecovery(
-            new Orchestrator($factory, new OrchestratorConfig(toolInstances: [])),
-            $factory,
-        );
-        (new ReflectionClass($recovery))->getMethod('compactHistory')
-            ->invoke($recovery, $task->id, 4096, 0.2, $agent);
+    $orch->contextWindowRecovery->tryCompactionAndRetry($task, $agent, new RuntimeException('Context window exceeded'));
 
-        expect($capturedRef)->not->toBeNull();
-        $sent = $capturedRef->messages;
-        expect($sent)->not->toBeEmpty();
+    // One call for the summary, one for the re-ticked turn.
+    expect($calls)->toBe(2);
 
-        foreach ($sent as $msg) {
-            expect($msg['role'])->toBeIn(['user', 'assistant', 'system']);
-        }
-    });
+    $summary = TaskHistory::where('task_id', $task->id)->where('role', 'summary')->first();
+    expect($summary)->not->toBeNull()
+        ->and($summary->content)->toBe('Earlier summary.');
+
+    $task->refresh();
+    expect($task->status)->toBe('COMPLETED')
+        ->and($task->final_response)->toBe('Recovered after compaction.');
 });

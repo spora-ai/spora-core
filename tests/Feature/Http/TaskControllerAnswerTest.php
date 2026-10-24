@@ -19,6 +19,7 @@ use Spora\Models\TaskHistory;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Tools\AskUserQuestionTool;
@@ -131,6 +132,7 @@ function answerControllerHarness(?Closure $mercureConfigure = null): array
     $taskService = new TaskService(
         $orchestrator,
         $mercure,
+        Mockery::mock(TaskCompactionServiceInterface::class),
         new ToolCallSerializer([$askTool]),
         new PrincipalResolver(),
     );

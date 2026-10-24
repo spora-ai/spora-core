@@ -18,6 +18,7 @@ use Spora\Models\Task;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolCallSerializer;
 use Symfony\Component\HttpFoundation\Request;
@@ -56,7 +57,7 @@ function makeTickGroupController(): array
     $mercure->allows('publish')->andReturn(true);
 
     $resolver = new PrincipalResolver();
-    $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), $resolver);
+    $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]), $resolver);
     $controller = new TaskTickController(
         $authService,
         $service,

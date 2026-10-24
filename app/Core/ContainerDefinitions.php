@@ -90,6 +90,7 @@ use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
 use Spora\Http\SseController;
+use Spora\Http\TaskCompactController;
 use Spora\Http\TaskController;
 use Spora\Http\TaskTickController;
 use Spora\Http\ToolController;
@@ -173,6 +174,7 @@ use Spora\Services\SsrfGuard;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
@@ -1184,6 +1186,13 @@ final class ContainerDefinitions
                 );
             },
 
+            TaskCompactController::class => static function (ContainerInterface $c): TaskCompactController {
+                return new TaskCompactController(
+                    $c->get(AuthService::class),
+                    $c->get(TaskServiceInterface::class),
+                );
+            },
+
             RetryChainController::class => static function (ContainerInterface $c): RetryChainController {
                 return new RetryChainController(
                     $c->get(AuthService::class),
@@ -1214,6 +1223,7 @@ final class ContainerDefinitions
                 return new TaskService(
                     $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(TaskCompactionServiceInterface::class),
                     $c->get(ToolCallSerializer::class),
                     $c->get(PrincipalResolver::class),
                 );

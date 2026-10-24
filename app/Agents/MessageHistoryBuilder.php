@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Agents;
 
+use Spora\Agents\ValueObjects\ActiveCompactions;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
@@ -19,7 +20,12 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
  * case, both producing a synthetic row whose `sequence` is the later of the
- * pair so summary-compaction `_seq` filtering still drops the right range.
+ * pair, so a compaction that covers the pair drops both halves or neither.
+ *
+ * A compaction replaces the rows it covers with a summary. The rows
+ * themselves stay in `task_history` — the operator can still read them — so
+ * what the provider receives is decided here: the rows a summary covers are
+ * dropped, and the summary is sent in their place.
  *
  * Assistant rows with stored `content_blocks` (Anthropic thinking, redacted
  * thinking, images) are rendered through the block list so the provider
@@ -52,91 +58,67 @@ final class MessageHistoryBuilder
         // Must run after compaction, which orphans tool results itself.
         $messages = (new ToolCallPairingReconciler())->reconcile($messages);
 
-        $this->stripScaffoldingKeys($messages);
-
         return $messages;
     }
 
     /**
-     * Walks the rows in `sequence` order, applying summary compaction and
-     * converting each surviving row into an LLM-shaped message. Attachment
-     * rows fold into the adjacent `user` row in either order; the merged
-     * row's `sequence` is the later of the pair so `_seq`-based eviction
-     * (see {@see evictCompactedRows()}) still drops the right range.
+     * Walks the rows in `sequence` order and converts each surviving row into
+     * an LLM-shaped message.
      *
-     * `_seq` is set on every emitted message so {@see stripScaffoldingKeys()}
-     * can target the key without altering the user-visible structure.
+     * A summary stands in for the rows it covers: those rows are dropped and
+     * the summary is sent in their place, at the position the range starts.
+     * A summary whose range a later, wider one covers is redundant and is
+     * dropped without being sent — `role: summary` is not a wire role any
+     * provider accepts.
+     *
+     * Attachment rows fold into the adjacent `user` row in either order; the
+     * merged row's `sequence` is the later of the pair, so the range check
+     * reads the pair as one row and drops both halves or neither.
      *
      * @param  \Illuminate\Support\Collection<int, TaskHistory>  $rows
      * @return list<array<string, mixed>>
      */
     private function applySummaryCompaction(\Illuminate\Support\Collection $rows): array
     {
-        $messages          = [];
-        $lastSummarySeqEnd = -1;
-        $rowsArray         = $rows->values()->all();
+        $compactions = ActiveCompactions::find($rows);
+
+        $messages  = [];
+        $pending   = $compactions->summaries();
+        $rowsArray = $rows->values()->all();
 
         $i = 0;
         while ($i < count($rowsArray)) {
             $row = $rowsArray[$i];
 
-            if ($this->isSummaryRow($row)) {
-                $lastSummarySeqEnd = $this->applySummaryRow($row, $messages, $lastSummarySeqEnd);
+            if ($row->role === 'summary') {
                 $i++;
                 continue;
             }
 
-            if ($row->sequence <= $lastSummarySeqEnd) {
-                $i++;
-                continue;
+            $pair      = $this->consumeAdjacentPair($row, $rowsArray, $i);
+            $effective = $pair !== null ? $pair['row'] : $row;
+
+            // A summary stands in for the rows its range starts at, so it is
+            // sent at that position rather than at its own row's position.
+            while ($pending !== [] && $pending[0]['first'] <= $effective->sequence) {
+                $messages[] = $this->summaryMessage($pending[0]['row']);
+                array_shift($pending);
             }
 
-            $i = $this->dispatchRow($row, $rowsArray, $i, $messages, $lastSummarySeqEnd);
+            if (!$compactions->covers($effective->sequence)) {
+                $messages[] = $this->messageFromHistoryRow($effective);
+            }
+
+            $i = $pair !== null ? $pair['nextIndex'] : $i + 1;
+        }
+
+        // A summary whose range starts after every row still belongs in the
+        // conversation — dropping it would lose what it replaced.
+        foreach ($pending as $summary) {
+            $messages[] = $this->summaryMessage($summary['row']);
         }
 
         return $messages;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $messages
-     */
-    private function applySummaryRow(
-        TaskHistory $row,
-        array &$messages,
-        int $lastSummarySeqEnd,
-    ): int {
-        $rangeEnd          = $this->parseSummaryRange($row->summarized_sequence_range);
-        $lastSummarySeqEnd = $this->evictCompactedRows($messages, $rangeEnd, $lastSummarySeqEnd);
-        $messages[]        = $this->summaryMessage($row);
-        return $lastSummarySeqEnd;
-    }
-
-    /**
-     * @param list<TaskHistory>          $rowsArray
-     * @param list<array<string, mixed>> $messages
-     * @return int  The new index to resume iteration at.
-     */
-    private function dispatchRow(
-        TaskHistory $row,
-        array $rowsArray,
-        int $i,
-        array &$messages,
-        int $lastSummarySeqEnd,
-    ): int {
-        $pair = $this->consumeAdjacentPair($row, $rowsArray, $i);
-        if ($pair !== null) {
-            if ($pair['row']->sequence > $lastSummarySeqEnd) {
-                $message         = $this->messageFromHistoryRow($pair['row']);
-                $message['_seq'] = $pair['row']->sequence;
-                $messages[]      = $message;
-            }
-            return $pair['nextIndex'];
-        }
-
-        $message         = $this->messageFromHistoryRow($row);
-        $message['_seq'] = $row->sequence;
-        $messages[]      = $message;
-        return $i + 1;
     }
 
     /**
@@ -176,8 +158,8 @@ final class MessageHistoryBuilder
     /**
      * Production-order merge: row at `$i` is `user`, next is `attachment`.
      * The synthetic row reuses {@see attachmentMessage()} expansion; its
-     * `sequence` is the later of the pair so `_seq`-filter eviction
-     * still drops the right range. Companion: {@see consumeAttachmentPair()}.
+     * `sequence` is the later of the pair, so the compaction's range check
+     * reads the pair as one row. Companion: {@see consumeAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null
@@ -193,51 +175,17 @@ final class MessageHistoryBuilder
         $merged->sequence = $next->sequence;
         return ['row' => $merged, 'nextIndex' => $i + 2];
     }
-    private function isSummaryRow(TaskHistory $row): bool
-    {
-        return $row->role === 'summary' && $row->summarized_sequence_range !== null;
-    }
-
-    private function parseSummaryRange(string $range): int
-    {
-        if (preg_match('/^(\d+)-(\d+)$/', $range, $m) !== 1) {
-            return -1;
-        }
-
-        return (int) $m[2];
-    }
-
     /**
-     * @param  list<array<string, mixed>>  $messages
-     * @return int  The largest range end seen.
-     */
-    private function evictCompactedRows(array &$messages, int $rangeEnd, int $lastSummarySeqEnd): int
-    {
-        if ($rangeEnd < 0) {
-            return $lastSummarySeqEnd;
-        }
-
-        $messages = array_values(array_filter(
-            $messages,
-            static fn(array $msg): bool => ($msg['_seq'] ?? -1) > $rangeEnd || ($msg['_compaction'] ?? false) === true,
-        ));
-
-        return max($lastSummarySeqEnd, $rangeEnd);
-    }
-
-    /**
-     * `summary` is internal bookkeeping that every provider rejects on the wire;
-     * `_compaction` carries the eviction exemption that the role used to.
+     * `summary` is internal bookkeeping that every provider rejects on the
+     * wire, so it is sent as a plain user message.
      *
-     * @return array{role: string, content: string|null, _compaction: true, _seq: int}
+     * @return array{role: string, content: string|null}
      */
     private function summaryMessage(TaskHistory $row): array
     {
         return [
-            'role'        => 'user',
-            'content'     => $row->content,
-            '_compaction' => true,
-            '_seq'        => $row->sequence,
+            'role'    => 'user',
+            'content' => $row->content,
         ];
     }
 
@@ -346,19 +294,6 @@ final class MessageHistoryBuilder
         }
 
         return $calls;
-    }
-
-    /**
-     * Scaffolding keys — stripped before the wire payload is built.
-     *
-     * @param  list<array<string, mixed>>  $messages
-     */
-    private function stripScaffoldingKeys(array &$messages): void
-    {
-        foreach ($messages as &$msg) {
-            unset($msg['_seq'], $msg['_compaction']);
-        }
-        unset($msg);
     }
 }
 

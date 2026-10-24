@@ -12,6 +12,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 
 /**
@@ -86,6 +87,7 @@ test('task detail resource exposes content_blocks, sanitized usage, and aggregat
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
         $mercure_mock,
+        Mockery::mock(TaskCompactionServiceInterface::class),
         null,
         new \Spora\Services\PrincipalResolver(),
     );
@@ -164,6 +166,7 @@ test('task detail resource strips redacted_thinking data payload', function (): 
     $service = new TaskService(
         Mockery::mock(OrchestratorInterface::class),
         $mercure_mock,
+        Mockery::mock(TaskCompactionServiceInterface::class),
         null,
         new \Spora\Services\PrincipalResolver(),
     );

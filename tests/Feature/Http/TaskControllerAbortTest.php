@@ -6,6 +6,7 @@ use Spora\Http\TaskController;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -60,7 +61,7 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
     $mercure->shouldReceive('publishToUser')->andReturn(true);
 
-    $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
+    $service = new TaskService($orch, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new Spora\Services\PrincipalResolver());
     $controller = new TaskController(
         bootAuthLayer(),
         $service,
@@ -170,7 +171,7 @@ it('POST /abort with no body works (no-body call)', function (): void {
     $mercure->shouldReceive('publish')->andReturn(true);
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
 
-    $service = new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
+    $service = new TaskService($orch, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new Spora\Services\PrincipalResolver());
     $controller = new TaskController(
         bootAuthLayer(),
         $service,

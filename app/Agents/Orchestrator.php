@@ -29,6 +29,8 @@ use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
+use Spora\Services\TaskCompactionService;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
@@ -52,6 +54,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
     public readonly LlmConfigResolver $llmConfigResolver;
     public readonly RetryScheduler $retryScheduler;
+    public readonly TaskCompactionServiceInterface $taskCompactionService;
     public readonly ContextWindowRecovery $contextWindowRecovery;
     public readonly ApprovedBatchExecutor $approvedBatchExecutor;
     public readonly TickPhaseRunner $tickPhaseRunner;
@@ -97,6 +100,7 @@ final class Orchestrator implements OrchestratorInterface
         ?OrchestratorConfig $config = null,
         ?PrincipalResolver $principalResolver = null,
         ?AuthService $authService = null,
+        ?TaskCompactionServiceInterface $taskCompactionService = null,
     ) {
         $config ??= new OrchestratorConfig();
 
@@ -126,7 +130,13 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
-        $this->contextWindowRecovery = new ContextWindowRecovery($this, $driverFactory, $config->logger, $config->notificationService);
+        // A self-built service keeps the orchestrator usable on its own;
+        // the container hands over the shared one.
+        $this->taskCompactionService = $taskCompactionService ?? new TaskCompactionService(
+            new ConversationCompactor($driverFactory, $config->logger),
+            $this->llmConfigResolver,
+        );
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->taskCompactionService, $config->logger, $config->notificationService);
         $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
             $this,
