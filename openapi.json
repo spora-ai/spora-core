@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-8-gc08d71f1"
+        "version": "0.30.0-10-g4ed1e5a1"
     },
     "servers": [
         {
@@ -2289,6 +2289,54 @@
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/compact": {
+            "post": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Compact Task History",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JSON envelope: `{data: {task: ..., compacted: bool}}`. `compacted` is false when the history was too short to summarise."
+                    },
+                    "409": {
+                        "description": "INVALID_STATE — the task is not in a state that can be compacted."
+                    },
+                    "500": {
+                        "description": "COMPACTION_FAILED — the model returned no summary. The history is left unchanged."
+                    },
+                    "404": {
+                        "description": "NOT_FOUND — task is not owned by the calling user."
                     }
                 },
                 "security": [

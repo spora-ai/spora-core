@@ -100,6 +100,11 @@ final class TaskHistorySerializer
      * favour of structured content blocks; clients that need reasoning must
      * filter the blocks list.
      *
+     * `summarized_sequence_range` is set on the `summary` rows a compaction
+     * writes and names the rows that summary stands in for. The chat UI
+     * needs it to tell the compacted rows apart from the ones the model
+     * still sees.
+     *
      * @return array{
      *     sequence: int,
      *     role: string,
@@ -108,6 +113,7 @@ final class TaskHistorySerializer
      *     attachments: list<array{media_id: string, kind: string}>|null,
      *     tool_call_id: string|null,
      *     tool_name: string|null,
+     *     summarized_sequence_range: string|null,
      *     usage?: array<string, mixed>
      * }
      */
@@ -115,13 +121,14 @@ final class TaskHistorySerializer
     {
         $blocks = is_array($history->content_blocks) ? $history->content_blocks : [];
         $message = [
-            'sequence' => $history->sequence,
-            'role' => $history->role,
-            'content' => $history->content,
-            'content_blocks' => self::sanitizeContentBlocksForApi($blocks),
-            'attachments' => self::sanitizeAttachmentsForApi($history->attachments),
-            'tool_call_id' => $history->tool_call_id,
-            'tool_name' => $history->tool_name,
+            'sequence'                  => $history->sequence,
+            'role'                      => $history->role,
+            'content'                   => $history->content,
+            'content_blocks'            => self::sanitizeContentBlocksForApi($blocks),
+            'attachments'               => self::sanitizeAttachmentsForApi($history->attachments),
+            'tool_call_id'              => $history->tool_call_id,
+            'tool_name'                 => $history->tool_name,
+            'summarized_sequence_range' => $history->summarized_sequence_range,
         ];
 
         if ($usage !== null) {

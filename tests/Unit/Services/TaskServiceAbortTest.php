@@ -7,6 +7,7 @@ use Spora\Agents\OrchestratorInterface;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
@@ -76,7 +77,7 @@ final class CapturingMercure implements MercurePublisherInterface
 function makeCapturingService(OrchestratorInterface $orchestrator): array
 {
     $mercure = new CapturingMercure();
-    return [new TaskService($orchestrator, $mercure, null, new Spora\Services\PrincipalResolver()), $mercure];
+    return [new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new Spora\Services\PrincipalResolver()), $mercure];
 }
 
 it('abortTask throws when the task is missing', function (): void {

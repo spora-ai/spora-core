@@ -1167,3 +1167,29 @@ describe('MediaAssetReader DI wiring', function (): void {
         expect($reader)->toBeInstanceOf(Spora\Services\MediaArchive\MediaAssetReader::class);
     });
 });
+
+describe('compaction DI wiring', function (): void {
+    /**
+     * The compaction service is resolved from the container and handed to
+     * both consumers: the task service behind the manual endpoint and the
+     * orchestrator behind the context-window recovery. A missing binding
+     * would only surface as a runtime container error on the first
+     * compaction request.
+     */
+    it('resolves one compaction service for the task service and the orchestrator', function (): void {
+        $kernel = new Kernel();
+        $c = $kernel->getContainer();
+
+        $compaction = $c->get(Spora\Services\TaskCompactionServiceInterface::class);
+        expect($compaction)->toBeInstanceOf(Spora\Services\TaskCompactionService::class);
+
+        $taskService = $c->get(Spora\Services\TaskServiceInterface::class);
+        expect($taskService)->toBeInstanceOf(Spora\Services\TaskService::class);
+
+        $orchestrator = $c->get(Spora\Agents\OrchestratorInterface::class);
+        expect($orchestrator)->toBeInstanceOf(Spora\Agents\Orchestrator::class);
+
+        $property = new ReflectionProperty(Spora\Agents\Orchestrator::class, 'taskCompactionService');
+        expect($property->getValue($orchestrator))->toBeInstanceOf(Spora\Services\TaskCompactionService::class);
+    });
+});
