@@ -15,6 +15,7 @@ use Spora\Models\Task;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Tools\PendingQuestion;
 use Spora\Tools\PendingQuestionBatch;
@@ -56,7 +57,7 @@ function showTaskControllerForQuestionsHarness(): array
         new OrchestratorConfig(toolInstances: []),
     );
 
-    $taskService = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+    $taskService = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
 
     $controller = new TaskController(
         $authService,

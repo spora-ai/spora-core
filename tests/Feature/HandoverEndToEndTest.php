@@ -22,6 +22,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\AgentService;
 use Spora\Services\HandoverService;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\SubAgentTool;
@@ -263,7 +264,7 @@ describe('SubAgentTool end-to-end (orchestrator + service + DB)', function (): v
         // detail API and includes new_task_id + handover=>true.
         $mercure_mock = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure_mock */
-        $taskService = new TaskService($orch, $mercure_mock, null, new \Spora\Services\PrincipalResolver());
+        $taskService = new TaskService($orch, $mercure_mock, Mockery::mock(TaskCompactionServiceInterface::class), null, new \Spora\Services\PrincipalResolver());
         $detail = $taskService->getTaskWithHistory($source->id, $userId);
         expect($detail)->not->toBeNull();
 

@@ -174,6 +174,7 @@ use Spora\Services\SsrfGuard;
 use Spora\Services\SubAgentService;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
@@ -1222,6 +1223,7 @@ final class ContainerDefinitions
                 return new TaskService(
                     $c->get(OrchestratorInterface::class),
                     $c->get(MercurePublisherInterface::class),
+                    $c->get(TaskCompactionServiceInterface::class),
                     $c->get(ToolCallSerializer::class),
                     $c->get(PrincipalResolver::class),
                 );

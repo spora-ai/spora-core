@@ -103,19 +103,6 @@ interface OrchestratorInterface
     public function retry(int $taskId): Task;
 
     /**
-     * Compact the task's history: everything but the last few rows is
-     * replaced by a summary for the model.
-     *
-     * The summarised rows stay in the history — the operator can still read
-     * them — so this changes what the model is sent, not what the transcript
-     * holds. See {@see ConversationCompactor}.
-     *
-     * @return bool True when a summary was written. A history too short to
-     *              summarise leaves the task untouched.
-     */
-    public function compactHistory(int $taskId): bool;
-
-    /**
      * Abort the running agent loop for `$taskId`. Flips status to
      * `ABORTED`, persists `data.aborted_at`, and records the new state in
      * the task's history by leaving the most recent tool/assistant row

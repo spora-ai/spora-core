@@ -14,6 +14,7 @@ use Spora\Models\Task;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Todo\TodoStoreRegistry;
 use Spora\Tools\TodoTool;
@@ -55,7 +56,7 @@ function showTaskControllerHarness(): array
         new OrchestratorConfig(toolInstances: [new TodoTool(new TodoStoreRegistry())]),
     );
 
-    $taskService = new TaskService($orchestrator, $mercure, null, new PrincipalResolver());
+    $taskService = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), null, new PrincipalResolver());
 
     $controller = new TaskController(
         $authService,

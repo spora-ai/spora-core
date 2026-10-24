@@ -18,6 +18,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolCallSerializer;
 use Symfony\Component\HttpFoundation\Request;
@@ -70,7 +71,7 @@ function makeTickController(WorkerRuntimeMode $runtimeMode, ?LLMDriverInterface 
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish')->andReturn(true);
 
-    $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]));
+    $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]));
 
     $controller = new TaskTickController(
         $authService,
@@ -128,7 +129,7 @@ function makeRawTickController(
     Orchestrator $orchestrator,
     MercurePublisherInterface $mercure,
 ): array {
-    $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
+    $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
 
     $controller = new TaskTickController(
         $authService,
@@ -187,7 +188,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $otherId = $otherAuth->register('tick-other@example.com', TICK_TEST_PASSWORD, 'Other');
         simulateLoggedInSession($otherId, 'tick-other@example.com');
 
-        $otherService = new TaskService($harness['orchestrator'], $harness['mercure'], new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
+        $otherService = new TaskService($harness['orchestrator'], $harness['mercure'], Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $otherAuth,
             $otherService,
@@ -268,7 +269,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
             ->andReturn(true);
         $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
 
-        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $authService,
             $service,
@@ -329,7 +330,7 @@ describe('TaskController::tick (client-worker mode)', function (): void {
         $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
         $mercure->allows('publish')->andReturn(true);
 
-        $service = new TaskService($orchestrator, $mercure, new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
+        $service = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([]), new Spora\Services\PrincipalResolver());
         $controller = new TaskTickController(
             $authService,
             $service,

@@ -187,7 +187,7 @@ it('answerTask flips AWAITING_INPUT → QUEUED when no batches remain', function
     $mercure = Mockery::mock(Spora\Services\MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
 
-    $service = new Spora\Services\TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
+    $service = new Spora\Services\TaskService($orch, $mercure, Mockery::mock(Spora\Services\TaskCompactionServiceInterface::class), null, new Spora\Services\PrincipalResolver());
 
     $service->answerTask($task->id, $task->trigger_user_id, 'pc_ask_2', '[ask_user_question selections: ["SQLite"]]');
 
@@ -244,7 +244,7 @@ it('answerTask keeps AWAITING_INPUT when other batches remain pending', function
     $mercure = Mockery::mock(Spora\Services\MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
 
-    $service = new Spora\Services\TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver());
+    $service = new Spora\Services\TaskService($orch, $mercure, Mockery::mock(Spora\Services\TaskCompactionServiceInterface::class), null, new Spora\Services\PrincipalResolver());
 
     $service->answerTask($task->id, $task->trigger_user_id, 'pc_ask_a', '[ask_user_question selections: ["a1"]]');
 

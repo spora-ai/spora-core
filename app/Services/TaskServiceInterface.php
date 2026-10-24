@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use InvalidArgumentException;
+use Spora\Agents\Exceptions\CompactionFailedException;
+
 interface TaskServiceInterface
 {
     /**
@@ -171,6 +174,11 @@ interface TaskServiceInterface
      *         resource, and whether a summary was written. A history too
      *         short to summarise leaves the task untouched and reports
      *         `compacted: false`.
+     *
+     * @throws InvalidArgumentException  When the task is missing, not owned
+     *                                   by the caller, or still running.
+     * @throws CompactionFailedException  When the model returned no summary;
+     *                                   the history is left unchanged.
      */
     public function compactTask(int $taskId, int $userId): array;
 

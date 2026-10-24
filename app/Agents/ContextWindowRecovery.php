@@ -9,6 +9,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Services\NotificationService;
+use Spora\Services\TaskCompactionServiceInterface;
 use Throwable;
 
 /**
@@ -20,7 +21,7 @@ final class ContextWindowRecovery
 {
     public function __construct(
         private readonly Orchestrator $orchestrator,
-        private readonly ConversationCompactor $compactor,
+        private readonly TaskCompactionServiceInterface $compactionService,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?NotificationService $notificationService = null,
     ) {}
@@ -28,6 +29,8 @@ final class ContextWindowRecovery
     public function tryCompactionAndRetry(?Task $task, ?Agent $agent, Throwable $originalError): void
     {
         if ($task === null || $agent === null) {
+            // Nothing to compact: the tick could not resolve the task or
+            // the agent it runs for.
             throw $originalError;
         }
 
@@ -51,16 +54,20 @@ final class ContextWindowRecovery
             throw $originalError;
         }
 
-        $llmConfig = $this->orchestrator->llmConfigResolver->resolveLlmConfig($agent);
-        $maxTokensOutput = $llmConfig['max_tokens_output'];
-        $temperature = $llmConfig['temperature'];
-
         $this->logger?->info('Context window error, compacting history and retrying', ['task_id' => $taskId]);
 
         try {
-            $this->compactor->compact($taskId, $agent, $maxTokensOutput, $temperature);
+            $compacted = $this->compactionService->compact($taskId);
         } catch (Throwable $e) {
             $this->logger?->warning('Compaction failed', ['task_id' => $taskId, 'exception' => $e->getMessage()]);
+            throw $originalError;
+        }
+
+        if (! $compacted) {
+            // Nothing was summarised, so the history is unchanged and the
+            // retry would fail with the same context-window error. Failing
+            // the turn is the only outcome left.
+            $this->logger?->warning('Compaction wrote no summary, so the history is unchanged', ['task_id' => $taskId]);
             throw $originalError;
         }
 

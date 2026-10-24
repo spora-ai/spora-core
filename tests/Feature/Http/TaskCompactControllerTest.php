@@ -8,6 +8,7 @@ use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -40,9 +41,10 @@ function compactEndpointController(TaskServiceInterface $service): TaskCompactCo
 }
 
 /**
+ * @param  TaskCompactionServiceInterface  $compaction  The compaction the endpoint drives.
  * @return array{0: TaskService, 1: Mockery\MockInterface}
  */
-function compactEndpointService(OrchestratorInterface $orch): array
+function compactEndpointService(TaskCompactionServiceInterface $compaction): array
 {
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
@@ -50,7 +52,12 @@ function compactEndpointService(OrchestratorInterface $orch): array
     $mercure->shouldReceive('publishForPrincipal')->andReturn(true);
     $mercure->shouldReceive('publishToUser')->andReturn(true);
 
-    return [new TaskService($orch, $mercure, null, new Spora\Services\PrincipalResolver()), $mercure];
+    $orch = Mockery::mock(OrchestratorInterface::class);
+
+    return [
+        new TaskService($orch, $mercure, $compaction, null, new Spora\Services\PrincipalResolver()),
+        $mercure,
+    ];
 }
 
 it('POST /compact returns 200 and reports whether a summary was written', function (): void {
@@ -64,13 +71,13 @@ it('POST /compact returns 200 and reports whether a summary was written', functi
         'max_steps' => 5,
     ]);
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldReceive('compactHistory')
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')
         ->once()
         ->with($task->id)
         ->andReturn(true);
 
-    [$service] = compactEndpointService($orch);
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();
@@ -95,13 +102,13 @@ it('POST /compact reports a history too short to summarize', function (): void {
         'max_steps' => 5,
     ]);
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldReceive('compactHistory')
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')
         ->once()
         ->with($task->id)
         ->andReturn(false);
 
-    [$service] = compactEndpointService($orch);
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();
@@ -125,10 +132,10 @@ it('POST /compact returns 409 when the task is still running', function (): void
         'max_steps' => 5,
     ]);
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldNotReceive('compactHistory');
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldNotReceive('compact');
 
-    [$service] = compactEndpointService($orch);
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();
@@ -152,10 +159,55 @@ it('POST /compact returns 404 for a task the caller does not own', function (): 
         'max_steps' => 5,
     ]);
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldNotReceive('compactHistory');
+    // A task that exists but belongs to somebody else: the ownership
+    // filter has to hide it, not just fail to find a row.
+    $otherUserId = bootAuthLayer()->register('compact-other@example.com', TEST_PASSWORD, 'Compact Other');
+    $otherAgent  = Agent::create([
+        'principal_id' => createUserPrincipalPublic($otherUserId),
+        'name'         => 'Other Agent',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    $otherTask = Task::create([
+        'principal_id'   => createUserPrincipalPublic($otherUserId),
+        'trigger_user_id' => $otherUserId,
+        'agent_id'       => $otherAgent->id,
+        'status'         => 'COMPLETED',
+        'user_prompt'    => 'not yours',
+        'max_steps'      => 5,
+    ]);
 
-    [$service] = compactEndpointService($orch);
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldNotReceive('compact');
+
+    [$service] = compactEndpointService($compaction);
+    $controller = compactEndpointController($service);
+
+    $req = new Request();
+    $req->attributes->set('taskId', $otherTask->id);
+
+    $resp = $controller->compact($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['error']['code'])->toBe('NOT_FOUND');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('POST /compact returns 404 for a task that does not exist', function (): void {
+    [$userId, $agent] = seedCompactEndpointFixtures();
+    $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'agent_id'  => $agent->id,
+        'status'    => 'COMPLETED',
+        'user_prompt' => 'done',
+        'max_steps' => 5,
+    ]);
+
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldNotReceive('compact');
+
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();
@@ -188,8 +240,8 @@ it('the compacted history keeps every turn and names the range the summary repla
         ]);
     }
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldReceive('compactHistory')
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')
         ->once()
         ->andReturnUsing(static function (int $taskId): bool {
             TaskHistory::create([
@@ -202,7 +254,7 @@ it('the compacted history keeps every turn and names the range the summary repla
             return true;
         });
 
-    [$service] = compactEndpointService($orch);
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();
@@ -232,14 +284,14 @@ it('POST /compact reports a failed summary and leaves the history alone', functi
         'max_steps' => 5,
     ]);
 
-    $orch = Mockery::mock(OrchestratorInterface::class);
-    $orch->shouldReceive('compactHistory')
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')
         ->once()
         ->andThrow(new Spora\Agents\Exceptions\CompactionFailedException(
             'The model returned no summary for the conversation, so the history was left unchanged.',
         ));
 
-    [$service] = compactEndpointService($orch);
+    [$service] = compactEndpointService($compaction);
     $controller = compactEndpointController($service);
 
     $req = new Request();

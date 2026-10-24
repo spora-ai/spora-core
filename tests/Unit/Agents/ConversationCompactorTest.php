@@ -315,6 +315,30 @@ describe('ConversationCompactor', function (): void {
         expect($captured->maxTokens)->toBeGreaterThan(1024);
     });
 
+    it('caps the summary request at the summary ceiling', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        for ($i = 0; $i < 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $captured = null;
+        $factory  = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn(compactionDriver($captured));
+
+        // An agent with a huge output budget must not hand that budget to
+        // the summariser: the summary would grow past the point where it
+        // is still a summary.
+        (new ConversationCompactor($factory))->compact($task->id, $agent, 100000, 0.2);
+
+        expect($captured->maxTokens)->toBe(8192);
+    });
+
     it('truncates a long tool result for the summarizer', function (): void {
         [$agent, $task] = seedCompactionTask();
 
@@ -361,7 +385,10 @@ describe('ConversationCompactor', function (): void {
         }
 
         expect($toolMessage)->not->toBeNull()
-            ->and(mb_strlen((string) $toolMessage['content']))->toBeLessThan(2000)
+            // 1000 characters of the tool result, the 13-character
+            // ' …[truncated]' marker and the 20-character
+            // '[tool:<name>] ' prefix — no slack in the cap.
+            ->and(mb_strlen((string) $toolMessage['content']))->toBe(1033)
             ->and((string) $toolMessage['content'])->toContain('…[truncated]')
             // The cut has to leave valid UTF-8 behind.
             ->and(mb_check_encoding((string) $toolMessage['content'], 'UTF-8'))->toBeTrue();

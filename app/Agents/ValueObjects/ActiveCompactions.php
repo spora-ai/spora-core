@@ -110,11 +110,6 @@ final class ActiveCompactions
         return $this->summaries;
     }
 
-    public function isEmpty(): bool
-    {
-        return $this->summaries === [];
-    }
-
     /**
      * Whether the row at `$sequence` is one the summaries stand in for.
      */

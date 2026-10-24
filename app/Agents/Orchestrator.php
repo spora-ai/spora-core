@@ -29,6 +29,8 @@ use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
+use Spora\Services\TaskCompactionService;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigService;
@@ -52,7 +54,7 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ToolDefinitionBuilder $toolDefinitionBuilder;
     public readonly LlmConfigResolver $llmConfigResolver;
     public readonly RetryScheduler $retryScheduler;
-    public readonly ConversationCompactor $conversationCompactor;
+    public readonly TaskCompactionServiceInterface $taskCompactionService;
     public readonly ContextWindowRecovery $contextWindowRecovery;
     public readonly ApprovedBatchExecutor $approvedBatchExecutor;
     public readonly TickPhaseRunner $tickPhaseRunner;
@@ -98,6 +100,7 @@ final class Orchestrator implements OrchestratorInterface
         ?OrchestratorConfig $config = null,
         ?PrincipalResolver $principalResolver = null,
         ?AuthService $authService = null,
+        ?TaskCompactionServiceInterface $taskCompactionService = null,
     ) {
         $config ??= new OrchestratorConfig();
 
@@ -127,8 +130,15 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
-        $this->conversationCompactor = new ConversationCompactor($driverFactory, $config->logger);
-        $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->conversationCompactor, $config->logger, $config->notificationService);
+        // The container hands over the shared compaction service so the
+        // manual endpoint and the context-window recovery compact a task
+        // through one instance; a self-built one keeps the orchestrator
+        // usable on its own.
+        $this->taskCompactionService = $taskCompactionService ?? new TaskCompactionService(
+            new ConversationCompactor($driverFactory, $config->logger),
+            $this->llmConfigResolver,
+        );
+        $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->taskCompactionService, $config->logger, $config->notificationService);
         $this->approvedBatchExecutor = new ApprovedBatchExecutor($this, $config->logger);
         $this->tickPhaseRunner       = new TickPhaseRunner(
             $this,
@@ -311,39 +321,6 @@ final class Orchestrator implements OrchestratorInterface
         $history = TaskHistory::create($row);
 
         HistoryRowWriter::insertUsageIfPresent($history->id, $context->usage);
-    }
-
-    /**
-     * Compact the task's history: everything but the last few rows is
-     * replaced by a summary for the model.
-     *
-     * The summarised rows stay in the history — the operator can still read
-     * them — so this changes what the model is sent, not what the transcript
-     * holds. See {@see ConversationCompactor}.
-     *
-     * @return bool True when a summary was written. A history too short to
-     *              summarise leaves the task untouched.
-     */
-    public function compactHistory(int $taskId): bool
-    {
-        $task = Task::find($taskId);
-        if ($task === null) {
-            return false;
-        }
-
-        $agent = Agent::find($task->agent_id);
-        if ($agent === null) {
-            return false;
-        }
-
-        $llmConfig = $this->llmConfigResolver->resolveLlmConfig($agent);
-
-        return $this->conversationCompactor->compact(
-            $taskId,
-            $agent,
-            $llmConfig['max_tokens_output'],
-            $llmConfig['temperature'],
-        );
     }
 
     /**

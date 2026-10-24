@@ -19,6 +19,7 @@ use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\MercurePublisherInterface;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\TaskService;
 use Spora\Services\ToolCallSerializer;
 use Spora\Tools\Attributes\Tool;
@@ -134,7 +135,7 @@ function approvalFeatureHarness(
     /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
     $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
     $mercure->allows('publish');
-    $taskService = new TaskService($orchestrator, $mercure, new ToolCallSerializer([$tool]), new Spora\Services\PrincipalResolver());
+    $taskService = new TaskService($orchestrator, $mercure, Mockery::mock(TaskCompactionServiceInterface::class), new ToolCallSerializer([$tool]), new Spora\Services\PrincipalResolver());
     $mediaCapability = new TaskMediaCapabilityService();
     $controller = new TaskController(
         $authService,

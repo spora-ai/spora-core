@@ -8,14 +8,13 @@ use Carbon\Carbon;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use InvalidArgumentException;
+use Spora\Agents\Exceptions\CompactionFailedException;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\OrchestratorInterface;
-use Spora\Agents\ValueObjects\AgentState;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
-use Spora\Tools\PendingQuestionBatch;
 use Throwable;
 
 /**
@@ -25,16 +24,19 @@ final class TaskService implements TaskServiceInterface
 {
     private const ERR_TASK_NOT_FOUND = 'Task not found.';
 
+    private AnswerTaskRecorder $answerRecorder;
+    private TaskResourceBuilder $resources;
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly MercurePublisherInterface $mercure,
-        private readonly ?ToolCallSerializer $toolCallSerializer = null,
+        private readonly TaskCompactionServiceInterface $compactionService,
+        ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?PrincipalResolver $principalResolver = null,
     ) {
         $this->answerRecorder = new AnswerTaskRecorder($this->orchestrator, $this->principalResolver);
+        $this->resources = new TaskResourceBuilder($toolCallSerializer);
     }
-
-    private AnswerTaskRecorder $answerRecorder;
 
     /**
      * @inheritDoc
@@ -73,7 +75,7 @@ final class TaskService implements TaskServiceInterface
             $perPage = $perPage ?? 20;
             $paginator = $query->paginate($perPage, ['*'], 'page', $page);
             return [
-                'tasks' => $paginator->getCollection()->map(fn(Task $t) => $this->taskListResource($t))->all(),
+                'tasks' => $paginator->getCollection()->map(fn(Task $t) => $this->resources->taskListResource($t))->all(),
                 'meta' => [
                     'current_page' => $paginator->currentPage(),
                     'last_page' => $paginator->lastPage(),
@@ -83,7 +85,7 @@ final class TaskService implements TaskServiceInterface
             ];
         }
 
-        return $query->get()->map(fn(Task $t) => $this->taskListResource($t))->all();
+        return $query->get()->map(fn(Task $t) => $this->resources->taskListResource($t))->all();
     }
 
     /**
@@ -120,7 +122,7 @@ final class TaskService implements TaskServiceInterface
         $steps = $maxSteps ?? $agent->max_steps;
         $task = $this->orchestrator->start($agentId, $prompt, $steps, $parentTaskId, null, $mediaIds, $userId);
 
-        $resource = $this->taskResource($task);
+        $resource = $this->resources->taskResource($task);
         $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $resource);
 
         return $resource;
@@ -136,7 +138,7 @@ final class TaskService implements TaskServiceInterface
         if ($task === null) {
             return null;
         }
-        return $this->taskResource($task);
+        return $this->resources->taskResource($task);
     }
 
     /**
@@ -149,7 +151,7 @@ final class TaskService implements TaskServiceInterface
         if ($task === null) {
             return null;
         }
-        return $this->taskDetailResource($task, $sinceSequence);
+        return $this->resources->taskDetailResource($task, $sinceSequence);
     }
 
     /**
@@ -170,7 +172,7 @@ final class TaskService implements TaskServiceInterface
         $this->orchestrator->resume($task->id, $decisions);
         $fresh = $task->fresh();
 
-        $resource = $this->taskResource($fresh);
+        $resource = $this->resources->taskResource($fresh);
         $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
@@ -194,7 +196,7 @@ final class TaskService implements TaskServiceInterface
         $this->orchestrator->reject($task->id, $reason);
         $fresh = $task->fresh();
 
-        $resource = $this->taskResource($fresh);
+        $resource = $this->resources->taskResource($fresh);
         $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
@@ -217,7 +219,7 @@ final class TaskService implements TaskServiceInterface
 
         $retried = $this->orchestrator->retry($task->id);
 
-        $resource = $this->taskResource($retried);
+        $resource = $this->resources->taskResource($retried);
         $this->mercure->publishForPrincipal($retried->id, $retried->principalOwnerId(), $resource);
 
         return $resource;
@@ -235,6 +237,11 @@ final class TaskService implements TaskServiceInterface
      *         resource, and whether a summary was written. A history too
      *         short to summarise leaves the task untouched and reports
      *         `compacted: false`.
+     *
+     * @throws InvalidArgumentException  When the task is missing, not owned
+     *                                   by the caller, or still running.
+     * @throws CompactionFailedException  When the model returned no summary;
+     *                                    the history is left unchanged.
      */
     public function compactTask(int $taskId, int $userId): array
     {
@@ -250,10 +257,10 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException('Can only compact completed, failed, or aborted tasks.');
         }
 
-        $compacted = $this->orchestrator->compactHistory($task->id);
+        $compacted = $this->compactionService->compact($task->id);
 
         $fresh = $task->fresh();
-        $resource = $this->taskDetailResource($fresh);
+        $resource = $this->resources->taskDetailResource($fresh);
         $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return ['task' => $resource, 'compacted' => $compacted];
@@ -289,7 +296,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }
 
-        $resource = $this->taskResource($continuedTask);
+        $resource = $this->resources->taskResource($continuedTask);
         $this->mercure->publishForPrincipal($continuedTask->id, $continuedTask->principalOwnerId(), $resource);
 
         return $resource;
@@ -320,7 +327,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND, 0, $e);
         }
 
-        $resource = $this->taskResource($aborted);
+        $resource = $this->resources->taskResource($aborted);
         $this->mercure->publishForPrincipal($aborted->id, $aborted->principalOwnerId(), $resource);
 
         return $resource;
@@ -355,7 +362,7 @@ final class TaskService implements TaskServiceInterface
         $this->cascadeAbortToAncestors((int) $child->parent_task_id);
 
         $fresh = $abortedChild->fresh();
-        $resource = $this->taskResource($fresh);
+        $resource = $this->resources->taskResource($fresh);
         $this->mercure->publishForPrincipal($fresh->id, $fresh->principalOwnerId(), $resource);
 
         return $resource;
@@ -386,7 +393,7 @@ final class TaskService implements TaskServiceInterface
     public function answerTask(int $taskId, int $userId, string $toolCallId, string $formattedContent): array
     {
         $result = $this->answerRecorder->record($taskId, $userId, $toolCallId, $formattedContent);
-        $resource = $this->taskResource($result['task']);
+        $resource = $this->resources->taskResource($result['task']);
         $this->publishAnsweredTaskBestEffort($taskId, $resource, $result['principal_id']);
         return $resource;
     }
@@ -448,7 +455,7 @@ final class TaskService implements TaskServiceInterface
         foreach ($cascadeTargets as $target) {
             try {
                 $aborted = $this->orchestrator->abort((int) $target->id);
-                $resource = $this->taskResource($aborted);
+                $resource = $this->resources->taskResource($aborted);
                 $this->mercure->publishForPrincipal($aborted->id, $aborted->principalOwnerId(), $resource);
             } catch (InvalidTaskTransitionException $e) {
                 // Ancestor transitioned between the cascade scan and the
@@ -521,196 +528,4 @@ final class TaskService implements TaskServiceInterface
 
         return true;
     }
-
-    /**
-     * @return array{
-     *     id: int,
-     *     agent_id: int,
-     *     status: string,
-     *     user_prompt: string,
-     *     final_response: string|null,
-     *     step_count: int,
-     *     max_steps: int,
-     *     created_at: string|null,
-     *     updated_at: string|null,
-     *     parent_task_id?: int,
-     *     error_code?: string,
-     *     error_message?: string,
-     *     retry_of_task_id?: int,
-     *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
-     *     retry_after?: string,
-     *     tool_calls: list<array<string, mixed>>,
-     *     history: list<array<string, mixed>>,
-     *     totals: array<string, int>
-     * }
-     */
-    private function taskResource(Task $task, ?int $sinceSequence = null): array
-    {
-        $resource = $this->buildBaseTaskResource($task);
-
-        $serializer = $this->toolCallSerializer ?? new ToolCallSerializer();
-        $resource['tool_calls'] = $task->toolCalls->map(fn(ToolCall $tc) => $serializer->toArray($tc))->all();
-
-        $historyQuery = $task->taskHistory()->orderBy('sequence');
-        if ($sinceSequence !== null) {
-            $historyQuery->where('sequence', '>', $sinceSequence);
-        }
-
-        $historyPayload = TaskHistorySerializer::buildHistoryPayload($historyQuery->get());
-        $resource['history'] = $historyPayload['history'];
-        $resource['totals'] = TaskHistorySerializer::aggregateUsage($historyPayload['usages']);
-
-        return $resource;
-    }
-
-    /**
-     * Build the common task fields used by both the detail and list resource views.
-     *
-     * @return array<string, mixed>
-     */
-    private function buildBaseTaskResource(Task $task): array
-    {
-        $resource = [
-            'id'             => $task->id,
-            'agent_id'       => $task->agent_id,
-            'status'         => $task->status,
-            'user_prompt'    => $task->user_prompt,
-            'final_response' => $task->final_response,
-            'step_count'     => $task->step_count,
-            'max_steps'      => $task->max_steps,
-            'created_at'     => $task->created_at?->toIso8601String(),
-            'updated_at'     => $task->updated_at?->toIso8601String(),
-        ];
-
-        if ($task->parent_task_id !== null) {
-            $resource['parent_task_id'] = $task->parent_task_id;
-        }
-
-        if ($task->error_code !== null) {
-            $resource['error_code'] = $task->error_code;
-            $resource['error_message'] = $task->error_message;
-        }
-
-        if ($task->retry_of_task_id !== null) {
-            $resource['retry_of_task_id'] = $task->retry_of_task_id;
-            $resource['retry_count'] = $task->retry_count;
-        } else {
-            $resource['max_retries'] = $task->agent->max_retries ?? 0;
-            $resource['retry_after_minutes'] = $task->agent->retry_after_minutes ?? 0;
-        }
-
-        if ($task->retry_after !== null) {
-            $resource['retry_after'] = $task->retry_after->toIso8601String();
-        }
-
-        $abortedAt = is_array($task->data) ? ($task->data['aborted_at'] ?? null) : null;
-        if ($abortedAt !== null) {
-            try {
-                $resource['aborted_at'] = Carbon::parse($abortedAt)->utc()->toIso8601String();
-            } catch (Throwable) {
-                $resource['aborted_at'] = null;
-            }
-        }
-
-        return $resource;
-    }
-
-    /**
-     * Lightweight task representation for list views.
-     * Excludes tool_calls and history to minimise payload size and avoid N+1 queries.
-     *
-     * @return array{
-     *     id: int,
-     *     agent_id: int,
-     *     status: string,
-     *     user_prompt: string,
-     *     final_response: string|null,
-     *     step_count: int,
-     *     max_steps: int,
-     *     created_at: string|null,
-     *     updated_at: string|null,
-     *     parent_task_id?: int,
-     *     error_code?: string,
-     *     error_message?: string,
-     *     retry_of_task_id?: int,
-     *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
-     *     retry_after?: string
-     * }
-     */
-    private function taskListResource(Task $task): array
-    {
-        return $this->buildBaseTaskResource($task);
-    }
-
-    /**
-     * @return array{
-     *     id: int,
-     *     agent_id: int,
-     *     status: string,
-     *     user_prompt: string,
-     *     final_response: string|null,
-     *     step_count: int,
-     *     max_steps: int,
-     *     created_at: string|null,
-     *     updated_at: string|null,
-     *     parent_task_id?: int,
-     *     error_code?: string,
-     *     error_message?: string,
-     *     retry_of_task_id?: int,
-     *     retry_count?: int,
-     *     max_retries?: int,
-     *     retry_after_minutes?: int,
-     *     retry_after?: string,
-     *     tool_calls: list<array<string, mixed>>,
-     *     history: list<array<string, mixed>>,
-     *     totals: array<string, int>,
-     *     data: array<string, mixed>|null,
-     *     pending_questions: list<array<string, mixed>>|null
-     * }
-     */
-    private function taskDetailResource(Task $task, ?int $sinceSequence = null): array
-    {
-        // Single source of truth: taskResource now honours sinceSequence and
-        // serialises tool_calls via ToolCallSerializer (Shape A parity with
-        // the Mercure live stream — operation, operation_description, and
-        // parameter_schema all flow through). Re-running the queries here
-        // would duplicate work and re-introduce the Shape A/B divergence.
-        $resource = $this->taskResource($task, $sinceSequence);
-
-        // Surface `tasks.data` (TodoTool writes `data.todos`,
-        // SubAgentTool writes `data.spawned_sub_task_ids`, etc.) and any
-        // pending ask_user_question batches alongside the tool-call
-        // history so the REST poll mirrors the Mercure `data` /
-        // `pending_questions` fields — keeps Mercure-less deployments
-        // (php -S dev server, no hub) on par with the live stream.
-        // Scoped to the detail endpoint only: action responses
-        // (start/approve/reject/retry/continue/abort/answer) and
-        // Mercure payloads go through `taskResource()` directly and
-        // must NOT carry these fields, so the list view stays minimal
-        // and the action-level wire shapes don't drift.
-        $resource['data'] = $task->data;
-
-        $resource['pending_questions'] = null;
-        if (is_string($task->pending_state) && $task->pending_state !== '') {
-            try {
-                $state = AgentState::fromJson($task->pending_state);
-                if ($state->pendingQuestions !== []) {
-                    $resource['pending_questions'] = array_map(
-                        static fn(PendingQuestionBatch $b): array => $b->toArray(),
-                        $state->pendingQuestions,
-                    );
-                }
-            } catch (Throwable) {
-                // Bad JSON or shape drift — fall through with null (defensive,
-                // mirrors TickPhaseRunner::publishIntermediateState).
-            }
-        }
-
-        return $resource;
-    }
-
 }

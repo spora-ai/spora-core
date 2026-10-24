@@ -20,7 +20,7 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
  * case, both producing a synthetic row whose `sequence` is the later of the
- * pair so a compaction that splits the pair still drops the right row.
+ * pair, so a compaction that covers the pair drops both halves or neither.
  *
  * A compaction replaces the rows it covers with a summary. The rows
  * themselves stay in `task_history` — the operator can still read them — so
@@ -72,8 +72,8 @@ final class MessageHistoryBuilder
      * provider accepts.
      *
      * Attachment rows fold into the adjacent `user` row in either order; the
-     * merged row's `sequence` is the later of the pair, so a compaction that
-     * splits the pair keeps the attachment half and drops the prompt half.
+     * merged row's `sequence` is the later of the pair, so the range check
+     * reads the pair as one row and drops both halves or neither.
      *
      * @param  \Illuminate\Support\Collection<int, TaskHistory>  $rows
      * @return list<array<string, mixed>>
@@ -158,8 +158,8 @@ final class MessageHistoryBuilder
     /**
      * Production-order merge: row at `$i` is `user`, next is `attachment`.
      * The synthetic row reuses {@see attachmentMessage()} expansion; its
-     * `sequence` is the later of the pair so `_seq`-filter eviction
-     * still drops the right range. Companion: {@see consumeAttachmentPair()}.
+     * `sequence` is the later of the pair, so the compaction's range check
+     * reads the pair as one row. Companion: {@see consumeAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
      * @return array{row: TaskHistory, nextIndex: int}|null

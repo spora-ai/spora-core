@@ -70,9 +70,13 @@ final class ConversationCompactor
 
     /**
      * @param  int    $maxTokensOutput  The agent's output budget. The summary
-     *                                  request is capped well below it.
+     *                                  request asks for the smaller of this
+     *                                  and {@see self::MAX_SUMMARY_TOKENS}.
      * @param  float  $temperature
      * @return bool   True when a summary row was written.
+     *
+     * @throws CompactionFailedException  When the model returned no summary;
+     *                                    the history is left unchanged.
      */
     public function compact(int $taskId, Agent $agent, int $maxTokensOutput, float $temperature): bool
     {
@@ -223,9 +227,12 @@ final class ConversationCompactor
     /**
      * Appends the summary row at the end of the history.
      *
-     * The sequence is read under a row lock inside the transaction because
-     * `task_history` carries a unique index on `(task_id, sequence)` — two
-     * compactions racing on the same task would otherwise collide on it.
+     * `task_history` carries a unique index on `(task_id, sequence)`, so the
+     * next sequence is read inside the transaction. `lockForUpdate()`
+     * serialises that read on the engines that implement row locks; SQLite
+     * compiles it away and serialises writers with a database-level lock
+     * instead, so a compaction racing another there fails on the write
+     * rather than claiming a sequence that is already taken.
      */
     private function appendSummaryRow(int $taskId, string $summaryText, int $firstSequence, int $lastSequence): void
     {

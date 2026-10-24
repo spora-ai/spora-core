@@ -10,6 +10,8 @@ use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
 use League\CommonMark\MarkdownConverter;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Spora\Agents\ConversationCompactor;
+use Spora\Agents\LlmConfigResolver;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
@@ -54,6 +56,8 @@ use Spora\Services\ScheduledRunServiceInterface;
 use Spora\Services\SkillListProjector;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\SystemMailer;
+use Spora\Services\TaskCompactionService;
+use Spora\Services\TaskCompactionServiceInterface;
 use Spora\Services\ToolCallSerializer;
 use Spora\Services\ToolConfigNameResolver;
 use Spora\Services\ToolConfigSchemaInspector;
@@ -106,6 +110,31 @@ final class OrchestratorContainerBindings
                     ),
                     $c->get(PrincipalResolver::class),
                     $c->get(AuthService::class),
+                    $c->get(TaskCompactionServiceInterface::class),
+                );
+            },
+
+            ConversationCompactor::class => static function (ContainerInterface $c): ConversationCompactor {
+                return new ConversationCompactor(
+                    $c->get(DriverFactory::class),
+                    $c->get(LoggerInterface::class),
+                );
+            },
+
+            LlmConfigResolver::class => static function (ContainerInterface $c): LlmConfigResolver {
+                return new LlmConfigResolver(
+                    $c->get(LLMConfigPreferences::class),
+                    $c->get(LLMConfigService::class),
+                );
+            },
+
+            // One compaction service for the manual endpoint and the
+            // context-window recovery, so both resolve the agent and its
+            // LLM budget the same way.
+            TaskCompactionServiceInterface::class => static function (ContainerInterface $c): TaskCompactionServiceInterface {
+                return new TaskCompactionService(
+                    $c->get(ConversationCompactor::class),
+                    $c->get(LlmConfigResolver::class),
                 );
             },
         ];
