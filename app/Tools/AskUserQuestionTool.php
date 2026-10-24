@@ -12,8 +12,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 
 /**
  * Pause the tick and surface one to four structured multiple-choice
- * questions to the operator. Disabled by default — operators must opt
- * the agent in on the Tools tab before the model can use it.
+ * questions to the operator.
  *
  * Wire shape (opencode-compatible): each question has 2-4 options
  * (`label`, `description`) and per-question `multiple` / `allowFreeText`
@@ -58,7 +57,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolOperation(
     name: 'ask',
     description: 'Pose 1-4 structured multiple-choice questions to the operator and park the task until they answer.',
-    enabledByDefault: false,
+    enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
