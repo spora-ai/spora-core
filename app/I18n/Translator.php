@@ -22,7 +22,14 @@ final class Translator
     /** Rendered in until {@see useLocale()} says otherwise. */
     public const FALLBACK_LOCALE = LocaleResolver::FALLBACK_LOCALE;
 
-    /** vue-i18n's named-parameter syntax, so a PHP and a Vue catalogue read the same. */
+    /**
+     * vue-i18n's named-parameter syntax, so a PHP and a Vue catalogue read the same.
+     *
+     * The pattern matches the placeholder *name* and nothing else — an
+     * identifier, never the value — so the value is inserted verbatim and a
+     * value carrying a line break survives the substitution. Only the
+     * template matcher has to care about line breaks.
+     */
     private const PLACEHOLDER_PATTERN = '/\{([A-Za-z_][A-Za-z0-9_]*)\}/';
 
     /**
@@ -177,7 +184,12 @@ final class Translator
             $quoted,
         );
 
-        return '/^' . $pattern . '$/u';
+        // `s` (DOTALL) because a rendered argument can carry a line break —
+        // an image prompt, a mail subject, a pasted block of text. Without
+        // it `(.+?)` stops at the newline, the template never matches, and
+        // `trans()` falls back to the English source: the operator reads an
+        // English prompt in a German session and approves it.
+        return '/^' . $pattern . '$/us';
     }
 
     /**

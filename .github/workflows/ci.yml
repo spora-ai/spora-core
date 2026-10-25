@@ -378,6 +378,31 @@ jobs:
           done
           exit $status
 
+  code-style:
+    # The style gate. PHP-CS-Fixer runs in dry-run mode: it prints the files
+    # it would change and exits non-zero, so a formatting slip blocks the
+    # merge instead of waiting for someone to run `composer format` and push
+    # the result. The dry-run is the whole point — a fixer that rewrites
+    # files in CI would leave the commit and the check disagreeing.
+    name: php-cs-fixer (dry-run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, zip
+          coverage: none
+          tools: composer
+
+      - name: Composer install
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Check code style
+        run: ./vendor/bin/php-cs-fixer fix --dry-run --diff --no-interaction
+
   sonar:
     name: SonarCloud scan
     needs: test

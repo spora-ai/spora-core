@@ -240,9 +240,10 @@ it('maps no two legacy config.php paths to the same key, except the mail aliases
         static fn(int $occurrences): bool => $occurrences > 1,
     ));
 
-    // The mail keys are the one deliberate exception: `SystemMailer` read the
-    // flat `mail_driver`, `install.php` writes the nested `mail` block, and
-    // accepting only one of them silently drops whichever a deployment has.
+    // The mail keys are the one deliberate exception: `SystemMailer` reads the
+    // flat `mail_driver`, an older deployment carries the nested `mail`
+    // block, and accepting only one of them silently drops whichever a
+    // deployment has.
     expect(array_values(array_diff($collisions, ConfigFactory::MAIL_ALIAS_TARGETS)))->toBe([])
         ->and($collisions)->toEqualCanonicalizing(ConfigFactory::MAIL_ALIAS_TARGETS);
 });
