@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Mockery;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Config;
 use Spora\Services\MediaArchive\PdfMarkdownExtractor;
@@ -12,7 +11,6 @@ use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\ReadUrlTool;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
-use Throwable;
 
 function makeReadUrlToolConfig(): ToolConfigService
 {
