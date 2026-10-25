@@ -6,6 +6,7 @@ use Mockery;
 use Psr\Log\LoggerInterface;
 use Spora\Core\Config;
 use Spora\Services\MediaArchive\PdfMarkdownExtractor;
+use Spora\Services\SsrfGuard;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\ReadUrlTool;
@@ -331,6 +332,98 @@ it('refuses to fetch a PDF from a private RFC1918 IP', function () {
 
     expect($result->success)->toBeFalse()
         ->and($result->content)->toContain('private or loopback IP');
+});
+
+it('refuses to fetch the cloud metadata endpoint on the default fetch operation', function () {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $client->shouldNotReceive('request');
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $result = $tool->execute(['url' => 'http://169.254.169.254/latest/meta-data/'], 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('private or loopback IP');
+});
+
+it('refuses a loopback or RFC1918 address on the default fetch operation', function (string $url) {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $client->shouldNotReceive('request');
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $result = $tool->execute(['url' => $url], 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('private or loopback IP');
+})->with([
+    'loopback' => 'http://127.0.0.1/',
+    'rfc1918 ten' => 'http://10.0.0.1/',
+    'rfc1918 192' => 'http://192.168.1.1/',
+]);
+
+it('refuses the bracketed IPv6 loopback', function () {
+    // `parse_url()` hands back the bracketed form, so a comparison against
+    // `::1` alone would miss it.
+    $client = Mockery::mock(HttpClientInterface::class);
+    $client->shouldNotReceive('request');
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $result = $tool->execute(['url' => 'http://[::1]/'], 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('loopback or link-local hostname');
+});
+
+it('refuses a hostname that resolves into the private range', function () {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $client->shouldNotReceive('request');
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $result = $tool->execute(['url' => 'http://localhost:8080/'], 1);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->content)->toContain('loopback or link-local hostname');
+});
+
+it('does not follow a redirect into the private range', function () {
+    $captured = null;
+
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
+    $response->allows('getStatusCode')->andReturn(302);
+    $response->allows('getHeaders')->andReturn(['content-type' => ['text/plain']]);
+    $response->allows('getContent')->andReturn('');
+
+    $client->expects('request')->andReturnUsing(
+        static function (string $method, string $url, array $options) use (&$captured, $response): ResponseInterface {
+            $captured = $options;
+
+            return $response;
+        },
+    );
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $tool->execute(['url' => 'https://example.com/redirect'], 1);
+
+    // The guard screened the URL as given; a redirect target is a host
+    // nobody screened.
+    expect($captured['max_redirects'] ?? null)->toBe(0);
+});
+
+it('still fetches a public https URL', function () {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
+
+    $response->allows('getStatusCode')->andReturn(200);
+    $response->allows('getHeaders')->andReturn(['content-type' => ['text/html; charset=utf-8']]);
+    $response->allows('getContent')->andReturn('<html><body><p>Public page</p></body></html>');
+
+    $client->expects('request')->with('GET', 'https://example.com/public', Mockery::any())->andReturn($response);
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $result = $tool->execute(['url' => 'https://example.com/public'], 1);
+
+    expect($result->success)->toBeTrue()
+        ->and($result->content)->toContain('Public page');
 });
 
 it('returns a helpful error when the fetch_pdf URL has no hostname after validation', function () {
