@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Illuminate\Database\Schema\Blueprint;
+use Spora\Models\RatelimitHit;
 use Spora\Services\DbRateLimiter;
 
 defined('DB_RL_PASSWORD') || define('DB_RL_PASSWORD', 'Password1!');
@@ -51,20 +51,23 @@ describe('DbRateLimiter', function (): void {
         // On SQLite `:memory:` the table is fresh per test, so dropping it
         // here was harmless. On MariaDB/MySQL CI the DB is per-worker and
         // persists across tests — DDL auto-commits on InnoDB so a rolled-back
-        // transaction cannot undo the DROP. Re-create the table here so the
-        // next test in this file (`attempt isolates bucket counts per key`)
-        // can still insert into it.
+        // transaction cannot undo the DROP. Restore the database afterwards
+        // so the next test in this file (`attempt isolates bucket counts per
+        // key`) can still insert into it.
         TestDatabaseFactory::freshDatabase();
         Capsule::schema()->drop('ratelimit_hits');
 
-        $limiter = new DbRateLimiter();
-        expect($limiter->attempt('client_d', 3, 60))->toBeTrue();
-
-        Capsule::schema()->create('ratelimit_hits', static function (Blueprint $t): void {
-            $t->string('key', 100);
-            $t->dateTime('hit_at');
-            $t->primary(['key', 'hit_at']);
-        });
+        try {
+            $limiter = new DbRateLimiter();
+            expect($limiter->attempt('client_d', 3, 60))->toBeTrue();
+        } finally {
+            // The whole database, not the table alone: re-creating the table
+            // by hand restored the pre-0095 schema — a composite
+            // `(key, hit_at)` primary key and no surrogate id — which the
+            // burst test then tripped over on MySQL/MariaDB, where the
+            // worker database outlives the test file.
+            TestDatabaseFactory::freshDatabase();
+        }
     });
 
     it('attempt isolates bucket counts per key', function (): void {
@@ -79,5 +82,46 @@ describe('DbRateLimiter', function (): void {
         $limiter = new DbRateLimiter();
         expect($limiter->attempt('k2', 3, 60))->toBeTrue()
             ->and($limiter->attempt('k1', 3, 60))->toBeFalse();
+    });
+
+    it('never records more hits than the cap allows when a competing request lands mid-window', function (): void {
+        // Reading the count and then writing the hit leaves a window in
+        // which a competing request is invisible: both read the same count
+        // and both pass the cap. This simulates that request — it records
+        // its hit right before the limiter's own write, which is exactly
+        // where the race lived.
+        $key = 'race_' . bin2hex(random_bytes(4));
+
+        /** @var array{armed: bool, injected: bool} $state */
+        $state = ['armed' => true, 'injected' => false];
+
+        Capsule::connection()->beforeExecuting(function (string $query) use (&$state, $key): void {
+            if (! $state['armed'] || $state['injected']) {
+                return;
+            }
+            $sql = strtolower($query);
+            if (! str_contains($sql, 'insert into') || ! str_contains($sql, 'ratelimit_hits')) {
+                return;
+            }
+
+            // Armed first: the injection is an insert of its own.
+            $state['injected'] = true;
+            Capsule::table('ratelimit_hits')->insert([
+                'key'    => $key,
+                'hit_at' => gmdate(DB_RL_DT),
+            ]);
+        });
+
+        try {
+            $accepted = (new DbRateLimiter())->attempt($key, 1, 60);
+        } finally {
+            // The hook lives on the connection, which outlives the test.
+            $state['armed'] = false;
+        }
+
+        // The competing request took the only slot, so this one is refused.
+        expect($accepted)->toBeFalse();
+        // And the bucket never holds more hits than the cap allows.
+        expect(RatelimitHit::query()->where('key', $key)->count())->toBe(1);
     });
 });

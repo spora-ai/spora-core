@@ -117,7 +117,13 @@ describe('SubAgentService::maybeResumeParent batch-open gate', function (): void
         // Simulate the race: a child worker completes mid-batch while the
         // parent is still spawning. The per-child hook must short-circuit
         // — only the batch-boundary hook clears the flag and resumes.
-        $seed = planDSeedParentInAwaiting(expectedCount: 2, spawnedCount: 1, batchOpen: true);
+        //
+        // The parent is seeded READY on purpose — the spawned ids match
+        // the expected count, so `loadReadyParent()` hands the hook a
+        // parent it could resume. Seed it any other way and the hook
+        // returns before it ever reaches the gate, and the refusal below
+        // would prove nothing about the gate.
+        $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: true);
         $parent = $seed['parent'];
         $childIds = $seed['childIds'];
 
@@ -134,20 +140,24 @@ describe('SubAgentService::maybeResumeParent batch-open gate', function (): void
         // Parent must still be AWAITING_SUB_AGENTS with the batch flag
         // still set.
         $parent->refresh();
-        expect($parent->status)->toBe('AWAITING_SUB_AGENTS');
         $data = (array) $parent->data;
-        expect($data['sub_agent_batch_open'])->toBeTrue();
+        expect(count($data['spawned_sub_task_ids']))->toBe($data['sub_agent_expected_count'])
+            ->and($parent->status)->toBe('AWAITING_SUB_AGENTS')
+            ->and($data['sub_agent_batch_open'])->toBeTrue();
     });
 
     it('falls through when the batch flag is clear and the gate passes', function (): void {
-        // Baseline: gate flag cleared, but spawned != expected → mid-batch
-        // check still refuses to resume.
-        $seed = planDSeedParentInAwaiting(expectedCount: 2, spawnedCount: 1, batchOpen: false);
+        // The same READY parent, with the batch flag cleared: the hook
+        // passes the gate and resumes the parent. This is the counterpart
+        // to the refusal above — without it, that refusal could still be
+        // an early return.
+        $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: false);
         $parent = $seed['parent'];
         $childIds = $seed['childIds'];
 
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
-        $orchestrator->shouldNotReceive('appendHistory');
+        // The resume writes the child's answer into the parent's history.
+        $orchestrator->shouldReceive('appendHistory')->once();
 
         $service = new SubAgentService(
             static fn(): OrchestratorInterface => $orchestrator,
@@ -156,7 +166,7 @@ describe('SubAgentService::maybeResumeParent batch-open gate', function (): void
         $service->maybeResumeParent($childIds[0]);
 
         $parent->refresh();
-        expect($parent->status)->toBe('AWAITING_SUB_AGENTS');
+        expect($parent->status)->toBe('QUEUED');
     });
 });
 
