@@ -19,8 +19,11 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  *
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
- * case, both producing a synthetic row whose `sequence` is the later of the
- * pair, so a compaction that covers the pair drops both halves or neither.
+ * case. A pair is one turn, but a summary's range is expressed in raw row
+ * sequences, so the range can cover one half of a pair and not the other.
+ * The coverage check therefore looks at both halves: a turn the summary
+ * covers entirely is dropped, and a turn it covers only half of sends the
+ * other half on its own.
  *
  * A compaction replaces the rows it covers with a summary. The rows
  * themselves stay in `task_history` — the operator can still read them — so
@@ -71,9 +74,12 @@ final class MessageHistoryBuilder
      * dropped without being sent — `role: summary` is not a wire role any
      * provider accepts.
      *
-     * Attachment rows fold into the adjacent `user` row in either order; the
-     * merged row's `sequence` is the later of the pair, so the range check
-     * reads the pair as one row and drops both halves or neither.
+     * Attachment rows fold into the adjacent `user` row in either order. The
+     * pair is one turn, but the summary's range is expressed in raw row
+     * sequences, so the range can end — or start — between the two halves.
+     * Both halves are therefore checked: a turn the summary covers entirely
+     * is dropped, and a turn it covers only half of sends the other half
+     * on its own, so the operator's text is neither repeated nor lost.
      *
      * @param  \Illuminate\Support\Collection<int, TaskHistory>  $rows
      * @return list<array<string, mixed>>
@@ -97,16 +103,39 @@ final class MessageHistoryBuilder
 
             $pair      = $this->consumeAdjacentPair($row, $rowsArray, $i);
             $effective = $pair !== null ? $pair['row'] : $row;
+            $firstSeq  = $pair !== null ? $pair['first'] : (int) $row->sequence;
+            $lastSeq   = $pair !== null ? $pair['last'] : (int) $row->sequence;
 
             // A summary stands in for the rows its range starts at, so it is
             // sent at that position rather than at its own row's position.
-            while ($pending !== [] && $pending[0]['first'] <= $effective->sequence) {
+            // The pair's FIRST sequence decides the position: a range that
+            // starts on the pair's second half has to be sent after the
+            // first half, which the summary does not cover.
+            while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
                 $messages[] = $this->summaryMessage($pending[0]['row']);
                 array_shift($pending);
             }
 
-            if (!$compactions->covers($effective->sequence)) {
+            $coversFirst = $compactions->covers($firstSeq);
+            $coversLast  = $compactions->covers($lastSeq);
+
+            if ($pair === null) {
+                if (!$coversFirst) {
+                    $messages[] = $this->messageFromHistoryRow($effective);
+                }
+            } elseif (!$coversFirst && !$coversLast) {
                 $messages[] = $this->messageFromHistoryRow($effective);
+            } elseif ($coversFirst && $coversLast) {
+                // The summary stands in for the whole turn.
+            } elseif ($coversFirst) {
+                // The summary covers the first half only. The second half is
+                // sent on its own — sending the merged row would repeat the
+                // half the summary already carries.
+                $messages[] = $this->messageFromHistoryRow($pair['halves'][1]);
+            } else {
+                // The summary covers the second half only. The first half is
+                // sent on its own — dropping the merged row would lose it.
+                $messages[] = $this->messageFromHistoryRow($pair['halves'][0]);
             }
 
             $i = $pair !== null ? $pair['nextIndex'] : $i + 1;
@@ -123,7 +152,7 @@ final class MessageHistoryBuilder
 
     /**
      * @param list<TaskHistory> $rowsArray
-     * @return array{row: TaskHistory, nextIndex: int}|null
+     * @return array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null
      */
     private function consumeAdjacentPair(TaskHistory $row, array $rowsArray, int $i): ?array
     {
@@ -141,7 +170,7 @@ final class MessageHistoryBuilder
      * The companion production-order helper is {@see consumeUserAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
-     * @return array{row: TaskHistory, nextIndex: int}|null
+     * @return array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null
      */
     private function consumeAttachmentPair(array $rowsArray, int $i): ?array
     {
@@ -152,17 +181,25 @@ final class MessageHistoryBuilder
         $merged = clone $rowsArray[$i];
         $merged->content   = $next->content;
         $merged->sequence  = $next->sequence;
-        return ['row' => $merged, 'nextIndex' => $i + 2];
+        return [
+            'row'       => $merged,
+            'nextIndex' => $i + 2,
+            'first'     => (int) $rowsArray[$i]->sequence,
+            'last'      => (int) $next->sequence,
+            'halves'    => [$rowsArray[$i], $next],
+        ];
     }
 
     /**
      * Production-order merge: row at `$i` is `user`, next is `attachment`.
      * The synthetic row reuses {@see attachmentMessage()} expansion; its
-     * `sequence` is the later of the pair, so the compaction's range check
-     * reads the pair as one row. Companion: {@see consumeAttachmentPair()}.
+     * `sequence` is the later of the pair, so the pair reads as one row
+     * wherever a single sequence is enough. The compaction's range check
+     * needs both sequences — see {@see applySummaryCompaction()}.
+     * Companion: {@see consumeAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray
-     * @return array{row: TaskHistory, nextIndex: int}|null
+     * @return array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null
      */
     private function consumeUserAttachmentPair(array $rowsArray, int $i): ?array
     {
@@ -173,7 +210,13 @@ final class MessageHistoryBuilder
         $merged = clone $next;
         $merged->content  = $rowsArray[$i]->content;
         $merged->sequence = $next->sequence;
-        return ['row' => $merged, 'nextIndex' => $i + 2];
+        return [
+            'row'       => $merged,
+            'nextIndex' => $i + 2,
+            'first'     => (int) $rowsArray[$i]->sequence,
+            'last'      => (int) $next->sequence,
+            'halves'    => [$rowsArray[$i], $next],
+        ];
     }
     /**
      * `summary` is internal bookkeeping that every provider rejects on the

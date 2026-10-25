@@ -44,7 +44,7 @@ A prompt that says "summarise the conversation above and draft a response" is a 
 
 - **A continuation prompt is NOT self-contained.** This is the inverse of the `sub_agent` rule: the child still holds its earlier conversation, so "change the heading to X" or "add a paragraph about Y" is a valid follow-up. Only restate what the child cannot see — a fact from *this* chat, a new constraint, a changed requirement.
 - **Only tasks this conversation started can be continued.** A task id from another conversation is refused.
-- **A continuation waits for the answer**, exactly like `sub_agent`: the parent suspends until the child answers, and the answer comes back as the tool result.
+- **A continuation waits for the answer**, exactly like `sub_agent`: the parent suspends until the child answers, and the answer reaches the parent on the next tick as the child's `final_response`. The tool result itself only says the task continues — it carries no answer.
 
 ## Handover is fire-and-forget
 
