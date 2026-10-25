@@ -186,6 +186,19 @@ final class SettingsRegistry
         return (string) $value;
     }
 
+    /**
+     * Read a stored value back into this setting's declared type.
+     *
+     * The row holds the encoded form, so the type is restored here: a list
+     * comes back as JSON, is decoded and normalised into a list of strings;
+     * a toggle becomes a boolean; a number becomes an integer; every other
+     * type comes back as the string it was stored as.
+     *
+     * Unlike {@see self::coerce()} this applies no `transform` — a row
+     * written through {@see \Spora\Settings\SettingsRepository::put()} is
+     * canonical already, and one inserted by any other means comes back
+     * without its transform.
+     */
     public function decode(SettingDefinition $d, string $raw): mixed
     {
         if (in_array($d->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true)) {

@@ -244,9 +244,12 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * Port 587 = STARTTLS (smtp://); port 465 = implicit TLS (smtps://).
-     * The configured `SPORA_MAIL_ENCRYPTION` selects the scheme so the
-     * handshake matches the server's expected protocol.
+     * The SMTP DSN for the configured mailer.
+     *
+     * `SPORA_MAIL_ENCRYPTION` alone picks the scheme: `tls` is STARTTLS on
+     * `smtp://`, `ssl` is implicit TLS on `smtps://`. The port is only part
+     * of the address and decides nothing, so it has to be the port the
+     * server expects for the encryption that was configured.
      *
      * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */
