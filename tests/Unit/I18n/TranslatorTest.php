@@ -128,6 +128,19 @@ describe('template matching', function (): void {
 
         expect($translator->trans('Saved 3 items'))->toBe('50 % von 3 Artikeln gespeichert');
     });
+
+    test('a rendered argument carrying a line break is translated', function (): void {
+        // An image prompt or a mail subject can carry a line break. The
+        // template matcher has to cross it, or the German catalogue is
+        // unreachable and the operator approves an English prompt.
+        $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+            'de' => ['Generate image for prompt: %s' => 'Bild erzeugen für die Eingabe: %s'],
+        ], 'template-multiline')));
+        $translator->useLocale('de');
+
+        expect($translator->trans("Generate image for prompt: a red cat\nin a garden"))
+            ->toBe("Bild erzeugen für die Eingabe: a red cat\nin a garden");
+    });
 });
 
 test('the locale starts at English and follows useLocale()', function (): void {
@@ -150,6 +163,20 @@ test('trans() replaces {named} placeholders from the parameter list', function (
         'Member {name} removed from {group}.',
         ['name' => 'Ada', 'group' => 'Ops'],
     ))->toBe('Ada wurde aus Ops entfernt.');
+});
+
+test('a parameter carrying a line break is interpolated verbatim', function (): void {
+    // The placeholder pattern matches the name, never the value, so a value
+    // with a line break in it is inserted as written.
+    $translator = new Translator(new CatalogLoader([], makeLocaleDir([
+        'de' => ['Member {name} removed from {group}.' => '{name} wurde aus {group} entfernt.'],
+    ], 'parameters-multiline')));
+    $translator->useLocale('de');
+
+    expect($translator->trans(
+        'Member {name} removed from {group}.',
+        ['name' => "Ada\nLovelace", 'group' => 'Ops'],
+    ))->toBe("Ada\nLovelace wurde aus Ops entfernt.");
 });
 
 test('a placeholder with no parameter is left as written', function (): void {
