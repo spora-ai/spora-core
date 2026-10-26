@@ -1336,9 +1336,15 @@ final class ContainerDefinitions
                 );
             },
 
+            // The Agent API's guard: its `callback_url` must be https.
             SsrfGuard::class => static function (): SsrfGuard {
                 return new SsrfGuard();
             },
+
+            // A second instance for callers that fetch an agent-named URL: a
+            // web fetch may be http as well. `SsrfGuard::class` stays the
+            // stricter one, so a caller cannot get the looser policy by accident.
+            'ssrf_guard.web_fetch' => static fn(): SsrfGuard => SsrfGuard::forWebFetch(),
 
             AgentApiKeyIssuer::class => static function (): AgentApiKeyIssuer {
                 return new AgentApiKeyIssuer();
@@ -1514,6 +1520,7 @@ final class ContainerDefinitions
                     $c->get(HttpTimeoutResolver::class),
                     $c->get(LoggerInterface::class),
                     $c->get(PdfMarkdownExtractor::class),
+                    $c->get('ssrf_guard.web_fetch'),
                 );
             },
 

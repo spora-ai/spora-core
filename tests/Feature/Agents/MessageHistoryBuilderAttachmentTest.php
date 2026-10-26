@@ -1010,3 +1010,179 @@ test('attachment rejects mislabeled binary content (text mime with NUL bytes) an
     // The binary content must not leak into the body.
     expect($composed['text'])->not->toContain("\x00\x01\x02\x03");
 });
+
+/**
+ * The rendered text of a message, plain string or attachment block list.
+ *
+ * @param array<string, mixed> $message
+ */
+function compactionBoundaryText(array $message): string
+{
+    $content = $message['content'];
+
+    if (is_string($content)) {
+        return $content;
+    }
+
+    if (!is_array($content)) {
+        return '';
+    }
+
+    $parts = [];
+    foreach ($content as $block) {
+        if (is_array($block) && isset($block['text']) && is_string($block['text'])) {
+            $parts[] = $block['text'];
+        }
+    }
+
+    return implode("\n", $parts);
+}
+
+test('a summary that covers the user row but not its attachment does not send the operator turn twice', function (): void {
+    // A summary's range is computed over raw row sequences, while the
+    // user/attachment merge happens later, at render time. A range ending
+    // between the two halves of a turn used to emit the operator's text twice.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'release notes body',
+        mime: 'text/plain',
+        filename: 'notes.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Ship the release notes',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 2,
+        'role'                      => 'summary',
+        // A real summary may quote the turn it stands in for.
+        'content'                   => 'The operator asked: Ship the release notes.',
+        'summarized_sequence_range' => '0-0',
+    ]);
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 3,
+        'role'     => 'assistant',
+        'content'  => 'Shipped.',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $rendered = implode("\n", array_map(compactionBoundaryText(...), $messages));
+
+    expect(substr_count($rendered, 'Ship the release notes'))->toBe(1);
+    // The attachment half is outside the summary's range, so it still reaches the model.
+    expect($rendered)->toContain('[Attached asset_id=');
+});
+
+test('a summary that covers the attachment but not its user row still delivers the operator turn', function (): void {
+    // The mirror image of the case above: the range starts between the two
+    // halves, so the merged row used to be dropped whole.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'release notes body',
+        mime: 'text/plain',
+        filename: 'notes.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Ship the release notes',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 2,
+        'role'                      => 'summary',
+        'content'                   => 'The attached notes file was read.',
+        'summarized_sequence_range' => '1-1',
+    ]);
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 3,
+        'role'     => 'assistant',
+        'content'  => 'Shipped.',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $rendered = implode("\n", array_map(compactionBoundaryText(...), $messages));
+
+    expect(substr_count($rendered, 'Ship the release notes'))->toBe(1);
+});
+
+test('a summary that covers both halves of a turn drops the whole turn', function (): void {
+    // The counterpart of the two half-covered cases: when the range spans the
+    // user row and its attachment, neither half may reach the model — the
+    // summary stands in for the entire turn.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'release notes body',
+        mime: 'text/plain',
+        filename: 'notes.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Ship the release notes',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 2,
+        'role'                      => 'summary',
+        'content'                   => 'The operator asked to ship the release notes.',
+        'summarized_sequence_range' => '0-1',
+    ]);
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 3,
+        'role'     => 'assistant',
+        'content'  => 'Shipped.',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $rendered = implode("\n", array_map(compactionBoundaryText(...), $messages));
+
+    expect($rendered)->not->toContain('Ship the release notes');
+    expect($rendered)->not->toContain('[Attached asset_id=');
+    expect($rendered)->toContain('The operator asked to ship the release notes.');
+    expect($rendered)->toContain('Shipped.');
+});

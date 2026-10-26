@@ -187,6 +187,14 @@ final class AgentApiScope
         return $this->requireTask($chatId, $agentId);
     }
 
+    /**
+     * Record the operator's approval and queue the chat again.
+     *
+     * @param list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}> $decisions
+     *
+     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     *     not pending approval — {@see self::chatMissing()} tells those apart.
+     */
     public function approve(int $chatId, int $agentId, int $ownerUserId, array $decisions): Task
     {
         $this->requireTask($chatId, $agentId);
@@ -195,6 +203,14 @@ final class AgentApiScope
         return $this->requireTask($chatId, $agentId);
     }
 
+    /**
+     * Record the operator's rejection and close the chat.
+     *
+     * @param string $reason Surfaced to the LLM so it can choose an alternative.
+     *
+     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     *     not pending approval — {@see self::chatMissing()} tells those apart.
+     */
     public function reject(int $chatId, int $agentId, int $ownerUserId, string $reason): Task
     {
         $this->requireTask($chatId, $agentId);
@@ -203,6 +219,15 @@ final class AgentApiScope
         return $this->requireTask($chatId, $agentId);
     }
 
+    /**
+     * Record the operator's answer and queue the chat again.
+     *
+     * @param string $toolCallId The pending tool call the answer belongs to.
+     * @param string $content    The answer as the operator wrote it.
+     *
+     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     *     not awaiting an answer — {@see self::chatMissing()} tells those apart.
+     */
     public function answer(int $chatId, int $agentId, int $ownerUserId, string $toolCallId, string $content): Task
     {
         $this->requireTask($chatId, $agentId);

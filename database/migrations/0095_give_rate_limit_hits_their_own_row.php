@@ -27,7 +27,7 @@ use Illuminate\Database\Schema\Blueprint;
  */
 return new class extends Migration
 {
-    private const INDEX = 'ratelimit_hits_key_hit_at_index';
+    private const INDEX = 'idx_ratelimit_hits_key_hit_at';
 
     public function up(): void
     {

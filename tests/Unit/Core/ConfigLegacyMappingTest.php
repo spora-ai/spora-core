@@ -30,8 +30,8 @@ function legacyReadPaths(): array
         'media_archive.promote_external', 'media_archive.max_promote_bytes',
         'media_archive.ffprobe_enabled',
         'asset_store.mode', 'asset_store.auto_threshold_bytes', 'asset_store.max_bytes',
-        // `SystemMailer` read the flat shape; the nested `mail` block that
-        // `install.php` writes into a fresh `config.php` was read by nothing.
+        // `SystemMailer` reads the flat shape; the nested `mail` block an
+        // older deployment carries in its `config.php` was read by nothing.
         // Both are mapped, and both spellings are asserted below.
         'mail_driver', 'mail_encryption', 'mail_from', 'mail_from_name', 'mail_host',
         'mail_password', 'mail_port', 'mail_username',

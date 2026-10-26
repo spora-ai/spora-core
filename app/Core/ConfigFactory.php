@@ -197,9 +197,9 @@ final class ConfigFactory
             'mail.from_name'                 => 'SPORA_MAIL_FROM_NAME',
             'mail.encryption'                => 'SPORA_MAIL_ENCRYPTION',
 
-            // The flat keys come second so they win. `SystemMailer` read the
-            // flat shape; the `mail` block that `install.php` writes into a
-            // fresh `config.php` was never actually read by anything. Both
+            // The flat keys come second so they win. `SystemMailer` reads
+            // the flat shape; the nested `mail` block an older deployment
+            // carries in its `config.php` was never read by anything. Both
             // are accepted so neither shape is silently dropped, and the one
             // that demonstrably worked takes precedence.
             'mail_driver'                    => 'SPORA_MAIL_DRIVER',

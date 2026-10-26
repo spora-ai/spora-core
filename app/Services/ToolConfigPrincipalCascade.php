@@ -27,7 +27,7 @@ namespace Spora\Services;
  * speech-storage PR (PR #238) ships without silently broadening the
  * effective-settings read path for every tool. The LLM-parity PR flips
  * it on (env override `SPORA_TOOLS_GROUP_CASCADE_ENABLED=true` or
- * `config('spora.tools.group_cascade_enabled', true)`). When off, only
+ * `config('tools_group_cascade_enabled', true)`). When off, only
  * the user-principal is consulted — the legacy single-tier shape, which
  * matches the expectations of every tool wired before the group
  * principals landed.

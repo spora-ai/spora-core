@@ -7,6 +7,7 @@ namespace Spora\Tools;
 use League\HTMLToMarkdown\HtmlConverter;
 use Psr\Log\LoggerInterface;
 use Spora\Services\MediaArchive\PdfMarkdownExtractor;
+use Spora\Services\SsrfGuard;
 use Spora\Services\ToolConfigService;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -31,7 +32,9 @@ use Throwable;
  *                    uploaded one read identically. Uses the same
  *                    HttpClient and `validateUrl()` as `fetch`.
  *
- * Both share the URL-validation guard (http/https only) and the
+ * Every operation passes {@see \Spora\Services\SsrfGuard} before a request
+ * goes out: an agent may name any URL, and the guard refuses the ones that
+ * resolve inside the deployment's own network. Both operations share the
  * 40 000-character output cap (`MAX_OUTPUT_CHARS`).
  */
 #[Tool(
@@ -60,7 +63,7 @@ final class ReadUrlTool extends AbstractTool
     /** Maximum output length in characters before truncation. */
     private const MAX_OUTPUT_CHARS = 40_000;
 
-    /** Permitted URL schemes — restricts SSRF via file://, gopher://, cloud metadata endpoints, etc. */
+    /** Permitted URL schemes — restricts SSRF via file://, gopher://, etc. */
     private const ALLOWED_SCHEMES = ['http', 'https'];
 
     /** Hard cap on PDF bytes — protects against multi-hundred-MB PDFs. */
@@ -69,33 +72,15 @@ final class ReadUrlTool extends AbstractTool
     /** PDF MIME type — sent as the `Accept` header on `fetch_pdf`. */
     private const PDF_MIME = 'application/pdf';
 
-    /**
-     * RFC1918 / loopback / link-local ranges — denied at fetch_pdf to
-     * prevent SSRF pivots through the tool. `validateUrl()` already
-     * blocks non-http(s) schemes; this layer blocks http(s) URLs whose
-     * hostname resolves into a private range.
-     */
-    private const SSRF_DENY_PREFIXES = [
-        '10.',
-        '192.168.',
-        '169.254.',
-        '127.',
-        '0.',
-        '172.16.', '172.17.', '172.18.', '172.19.',
-        '172.20.', '172.21.', '172.22.', '172.23.',
-        '172.24.', '172.25.', '172.26.', '172.27.',
-        '172.28.', '172.29.', '172.30.', '172.31.',
-    ];
-
-    /** `localhost` and the IPv6 loopback `::1` are likewise denied. */
-    private const SSRF_DENY_HOSTS = ['localhost', '::1', '0.0.0.0'];
-
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly ToolConfigService   $configService,
         private readonly HttpTimeoutResolver $timeoutResolver,
         private readonly ?LoggerInterface    $logger = null,
         private readonly ?PdfMarkdownExtractor $pdfExtractor = null,
+        // The container injects the shared guard; the default keeps a
+        // directly constructed tool screened too.
+        private readonly SsrfGuard           $ssrfGuard = new SsrfGuard(SsrfGuard::WEB_FETCH_POLICY),
     ) {}
 
     public function execute(
@@ -120,9 +105,9 @@ final class ReadUrlTool extends AbstractTool
         $url = trim((string) ($arguments['url'] ?? ''));
         $op = (string) ($arguments['op'] ?? 'fetch');
 
-        $validation = $this->validateUrl($url);
-        if ($validation instanceof ToolResult) {
-            return $validation;
+        $rejection = $this->screenUrl($url);
+        if ($rejection !== null) {
+            return $rejection;
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
@@ -138,14 +123,30 @@ final class ReadUrlTool extends AbstractTool
         }
     }
 
+    /** `null` when the URL may be fetched; otherwise the failure to report. */
+    private function screenUrl(string $url): ?ToolResult
+    {
+        $validation = $this->validateUrl($url);
+        if ($validation instanceof ToolResult) {
+            return $validation;
+        }
+
+        // Every operation is screened, not just the PDF one: an agent names
+        // the URL, and an internal endpoint's body would reach the model.
+        $reason = $this->ssrfGuard->rejectReason($url);
+
+        return $reason === null ? null : new ToolResult(false, $reason);
+    }
+
     private function validateUrl(string $url): ?ToolResult
     {
         if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
             return new ToolResult(false, 'A valid absolute URL is required.');
         }
 
-        // Allowlist only http/https — blocks file://, ftp://, gopher://,
-        // cloud metadata endpoints (http://169.254.169.254), etc.
+        // The scheme allowlist stops file://, ftp:// and gopher:// — it does
+        // not stop an http:// URL pointing at a private address. That screen
+        // is a separate layer, in SsrfGuard, and applies to every operation.
         $scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
         if (!in_array($scheme, self::ALLOWED_SCHEMES, true)) {
             return new ToolResult(false, 'Only http:// and https:// URLs are supported.');
@@ -175,6 +176,8 @@ final class ReadUrlTool extends AbstractTool
         $response = $this->httpClient->request('GET', $url, [
             'timeout' => $timeout,
             'headers' => $headers,
+            // The guard screened the URL as given; a redirect target is unscreened.
+            'max_redirects' => 0,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -208,10 +211,6 @@ final class ReadUrlTool extends AbstractTool
     /** @param array<string, mixed> $settings */
     private function fetchPdfBytes(string $url, array $settings): string|ToolResult
     {
-        $denied = $this->ssrfCheck($url);
-        if ($denied !== null) {
-            return $denied;
-        }
         $timeout = $this->timeoutResolver->resolve($settings['http_timeout'] ?? null);
         $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
 
@@ -221,6 +220,8 @@ final class ReadUrlTool extends AbstractTool
                 'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
                 'Accept'     => self::PDF_MIME,
             ],
+            // The guard screened the URL as given; a redirect target is unscreened.
+            'max_redirects' => 0,
         ]);
 
         return $this->validatePdfResponse($response);
@@ -243,48 +244,6 @@ final class ReadUrlTool extends AbstractTool
         }
 
         return $bytes;
-    }
-
-    private function ssrfCheck(string $url): ?ToolResult
-    {
-        $host = (string) (parse_url($url, PHP_URL_HOST) ?? '');
-        if ($host === '') {
-            return new ToolResult(false, 'Refusing to fetch a URL with no hostname.');
-        }
-        $lower = strtolower($host);
-        if (in_array($lower, self::SSRF_DENY_HOSTS, true)) {
-            return new ToolResult(false, 'Refusing to fetch a loopback or link-local hostname.');
-        }
-
-        return $this->checkResolvedIps($lower, $host);
-    }
-
-    /**
-     * Resolve the host (or treat the input as a literal IP, including
-     * bracketed IPv6) and deny the URL when any resolved address falls
-     * inside a private / loopback prefix.
-     *
-     * @return ?ToolResult null when the host cannot be resolved or no
-     *                    resolved address matches the deny-list — letting
-     *                    the request proceed to the HTTP layer.
-     */
-    private function checkResolvedIps(string $lowerHost, string $host): ?ToolResult
-    {
-        // Bare IPv6 hostnames may include brackets — strip them.
-        $ip = trim($lowerHost, '[]');
-        $resolved = filter_var($ip, FILTER_VALIDATE_IP) ? [$ip] : @gethostbynamel($host);
-        if (!is_array($resolved)) {
-            return null;
-        }
-        foreach ($resolved as $candidate) {
-            foreach (self::SSRF_DENY_PREFIXES as $prefix) {
-                if (str_starts_with((string) $candidate, $prefix)) {
-                    return new ToolResult(false, 'Refusing to fetch a private or loopback IP.');
-                }
-            }
-        }
-
-        return null;
     }
 
     private function convertPdf(string $bytes, string $url): ToolResult

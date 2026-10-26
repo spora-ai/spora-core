@@ -8,13 +8,11 @@ namespace Spora\Services;
  * Blocks outbound requests to URLs that resolve inside the deployment's
  * own network.
  *
- * Used by the Agent API, which POSTs to a caller-supplied `callback_url`.
- * `ReadUrlTool` has its own, narrower guard: it allows `http` as well as
- * `https`, and its deny list is a private constant there. The two are not
- * unified — merging them would tighten `ReadUrlTool`'s scheme policy, which
- * is a behaviour change to that tool and belongs in its own PR. Until then,
- * a fix to one is not automatically a fix to the other, and the deny lists
- * do not agree.
+ * Two callers share it: the Agent API, which POSTs to a caller-supplied
+ * `callback_url`, and {@see \Spora\Tools\ReadUrlTool}, which fetches a URL
+ * an agent named. They differ in what may be fetched and in how a refusal
+ * reads, so the guard takes a policy. The Agent API's policy is the default,
+ * so `new SsrfGuard()` behaves as it did before the tool was wired in.
  *
  * The resolve-then-check sequence has a DNS-rebinding window: the host is
  * resolved here and resolved again inside the HTTP client, and the two
@@ -23,10 +21,48 @@ namespace Spora\Services;
  * SNI/hostname pair these callers need. The guard raises the cost of an
  * attack rather than making it impossible — which is why every caller must
  * also refuse to follow redirects, or a redirect is an unscreened host.
+ *
+ * @phpstan-type Policy array{schemes: list<string>, max_length: int|null, messages: array<string, string>}
  */
 final class SsrfGuard
 {
-    private const ALLOWED_SCHEMES = ['https'];
+    /**
+     * The Agent API's policy: `https` only, a length cap matching the
+     * `agent_api_callbacks.url` column, and its usual refusal wording.
+     *
+     * @var Policy
+     */
+    private const CALLBACK_POLICY = [
+        'schemes'    => ['https'],
+        'max_length' => 2048,
+        'messages'   => [
+            'empty_or_too_long' => 'Callback URL is empty or exceeds 2048 characters.',
+            'invalid_url'       => 'Callback URL is not a valid absolute URL.',
+            'bad_scheme'        => 'Callback URL must use https.',
+            'no_host'           => 'Callback URL has no host.',
+            'loopback_host'     => 'Callback URL resolves to a loopback or link-local address.',
+            'private_address'   => 'Callback URL resolves to a private or reserved address.',
+        ],
+    ];
+
+    /**
+     * A web fetch runs under a looser policy: `http` as well as `https`, no
+     * length cap, and `ReadUrlTool`'s usual refusal wording.
+     *
+     * @var Policy
+     */
+    public const WEB_FETCH_POLICY = [
+        'schemes'    => ['http', 'https'],
+        'max_length' => null,
+        'messages'   => [
+            'empty_or_too_long' => 'A valid absolute URL is required.',
+            'invalid_url'       => 'A valid absolute URL is required.',
+            'bad_scheme'        => 'Only http:// and https:// URLs are supported.',
+            'no_host'           => 'Refusing to fetch a URL with no hostname.',
+            'loopback_host'     => 'Refusing to fetch a loopback or link-local hostname.',
+            'private_address'   => 'Refusing to fetch a private or loopback IP.',
+        ],
+    ];
 
     /**
      * Reserved IPv4 space as leading text prefixes: RFC1918, loopback,
@@ -46,6 +82,14 @@ final class SsrfGuard
 
     private const DENY_HOSTS = ['localhost', '::1', '0.0.0.0', '[::1]'];
 
+    /** @param Policy $policy */
+    public function __construct(private readonly array $policy = self::CALLBACK_POLICY) {}
+
+    public static function forWebFetch(): self
+    {
+        return new self(self::WEB_FETCH_POLICY);
+    }
+
     /**
      * @return string|null a human-readable reason the URL is refused, or null when it is acceptable
      */
@@ -63,15 +107,24 @@ final class SsrfGuard
     /** Everything decidable without a host: length, well-formedness, scheme. */
     private function rejectReasonForShape(string $url): ?string
     {
+        $messages = $this->policy['messages'];
+
         return match (true) {
-            $url === '' || strlen($url) > 2048
-                => 'Callback URL is empty or exceeds 2048 characters.',
+            $url === '' || $this->exceedsLengthCap($url)
+                => $messages['empty_or_too_long'],
             filter_var($url, FILTER_VALIDATE_URL) === false
-                => 'Callback URL is not a valid absolute URL.',
-            !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), self::ALLOWED_SCHEMES, true)
-                => 'Callback URL must use https.',
+                => $messages['invalid_url'],
+            !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), $this->policy['schemes'], true)
+                => $messages['bad_scheme'],
             default => null,
         };
+    }
+
+    private function exceedsLengthCap(string $url): bool
+    {
+        $max = $this->policy['max_length'];
+
+        return $max !== null && strlen($url) > $max;
     }
 
     private function rejectReasonForHost(string $host): ?string
@@ -79,7 +132,7 @@ final class SsrfGuard
         $host = strtolower($host);
 
         if ($host === '') {
-            return 'Callback URL has no host.';
+            return $this->policy['messages']['no_host'];
         }
 
         $literal = $this->rejectReasonForLiteral($host);
@@ -95,7 +148,7 @@ final class SsrfGuard
     private function rejectReasonForLiteral(string $host): ?string
     {
         if (in_array($host, self::DENY_HOSTS, true)) {
-            return 'Callback URL resolves to a loopback or link-local address.';
+            return $this->policy['messages']['loopback_host'];
         }
 
         $bare = trim($host, '[]');
@@ -105,7 +158,7 @@ final class SsrfGuard
         }
 
         return $this->matchesDenyPrefix($bare)
-            ? 'Callback URL resolves to a private or reserved address.'
+            ? $this->policy['messages']['private_address']
             : null;
     }
 
@@ -117,7 +170,7 @@ final class SsrfGuard
         // path and only ever fired on a literal `[::1]` host.
         foreach ($this->resolveBothFamilies($host) as $candidate) {
             if ($this->matchesDenyPrefix($candidate)) {
-                return 'Callback URL resolves to a private or reserved address.';
+                return $this->policy['messages']['private_address'];
             }
         }
 

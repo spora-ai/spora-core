@@ -197,6 +197,49 @@ describe('i18n:check rules', function (): void {
             expect($problems)->toBe([]);
         });
     });
+
+    describe('rule 6 — unreachable entries', function (): void {
+        it('reports nothing for a template the matcher reaches', function (): void {
+            $problems = i18nUnreachable([
+                "Create email folder '%s'" => "E-Mail-Ordner '%s' erstellen",
+            ]);
+
+            expect($problems)->toBe([]);
+        });
+
+        it('reaches a template whose argument carries a line break', function (): void {
+            // The defect this rule exists for: the entry is present and
+            // correct, and a matcher that cannot cross a line break never
+            // reaches it. The probe carries a line break, so the rule reports
+            // the entry exactly when the runtime would miss it.
+            $problems = i18nUnreachable([
+                'Generate image for prompt: %s' => 'Bild erzeugen für die Eingabe: %s',
+            ]);
+
+            expect($problems)->toBe([]);
+        });
+
+        it('reports nothing for a plain key', function (): void {
+            // An exact key is reached by an exact lookup; there is no rendered message to get wrong.
+            $problems = i18nUnreachable([
+                'Save' => 'Speichern',
+            ]);
+
+            expect($problems)->toBe([]);
+        });
+
+        it('reports an unreachable entry once, not once per probe', function (): void {
+            // A matcher that cannot use the template misses both probes, so
+            // the entry used to be listed twice and counted twice.
+            $problems = i18nUnreachable([
+                '50% done: %s' => '50 % erledigt: %s',
+            ]);
+
+            expect($problems)->toHaveCount(3)
+                ->and($problems[1])->toBe('de has 1 unreachable translation(s):')
+                ->and($problems[2])->toContain('"50% done: %s"');
+        });
+    });
 });
 
 /** Invoke one of the command's rule methods through reflection. */
@@ -226,6 +269,28 @@ function i18nParity(array $catalogue): array
     $instance = new I18nCheckCommand();
 
     return (new ReflectionMethod($instance, 'placeholderParity'))->invoke($instance, 'de', $catalogue);
+}
+
+/**
+ * Run the reachability rule against a fixture catalogue: the rule looks the
+ * rendered message up through the real translator, so the fixture has to be a
+ * file on disk — one it cannot read looks unreachable.
+ */
+function i18nUnreachable(array $catalogue): array
+{
+    $dir = sys_get_temp_dir() . '/spora-i18n-check-' . bin2hex(random_bytes(6));
+    mkdir($dir, 0o777, true);
+    $path = $dir . '/de.json';
+    file_put_contents($path, (string) json_encode($catalogue, JSON_UNESCAPED_UNICODE));
+
+    try {
+        $instance = new I18nCheckCommand();
+
+        return (new ReflectionMethod($instance, 'unreachable'))->invoke($instance, 'de', $catalogue, $path);
+    } finally {
+        unlink($path);
+        rmdir($dir);
+    }
 }
 
 // Referenced so the import is meaningful to static analysis: the command

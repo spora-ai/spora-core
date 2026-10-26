@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Spora\Build;
 
 use JsonException;
+use Spora\I18n\CatalogLoader;
 use Spora\I18n\TemplatePlaceholders;
+use Spora\I18n\Translator;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -24,6 +26,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   4. A message contains an unescaped `{`, `}` or `|`.
  *   5. A target value does not carry the `%s`/`%d` placeholders of its
  *      English source, in the same order.
+ *   6. A target entry the runtime cannot reach: the template it is keyed by
+ *      never matches a rendered message.
  */
 #[AsCommand(
     name: 'i18n:check',
@@ -31,8 +35,20 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class I18nCheckCommand extends Command
 {
-    /** The locales `i18n:check` enforces, minus `en` (generated, never checked). */
+    /**
+     * The locales `i18n:check` enforces as translation targets: `en` is the
+     * generated reference catalogue, checked for drift (rule 1) but never translated.
+     */
     private const TARGET_LOCALES = ['de'];
+
+    /** The synthetic `%s` argument: distinctive, so it cannot collide with a real catalogue key. */
+    private const PROBE = 'spora-i18n-probe';
+
+    /** The same argument carrying a line break — the one the matcher has to survive. */
+    private const PROBE_MULTILINE = "spora-i18n-probe\nspora-i18n-probe-second-line";
+
+    /** The synthetic `%d` argument — the matcher only accepts digits there. */
+    private const PROBE_NUMBER = '42';
 
     /**
      * The reason a word is allowed to keep its English spelling: German
@@ -113,6 +129,7 @@ final class I18nCheckCommand extends Command
             $problems = array_merge($problems, $this->orphans($locale, $harvested, $catalogue));
             $problems = array_merge($problems, $this->placeholders($locale, $english, $catalogue));
             $problems = array_merge($problems, $this->placeholderParity($locale, $catalogue));
+            $problems = array_merge($problems, $this->unreachable($locale, $catalogue, CatalogFiles::pathFor($locale)));
         }
 
         if ($problems !== []) {
@@ -349,5 +366,114 @@ final class I18nCheckCommand extends Command
             ['', sprintf('%s has %d placeholder mismatch(es):', $locale, count($mismatched))],
             $lines,
         );
+    }
+
+    /**
+     * Rule 6 — an entry the runtime cannot reach.
+     *
+     * The rules above read the catalogue as data; none can see that the
+     * *matcher* never matches. A template whose argument carries a line
+     * break never reaches its German value, so `trans()` answers with the
+     * English source. The entry is rendered with a synthetic argument and
+     * looked up through the real {@see \Spora\I18n\Translator}: the German
+     * value has to come back.
+     *
+     * The lookup runs twice per template — a single-line argument and one that
+     * crosses a line break; a matcher that cannot cross one fails the second.
+     *
+     * Only the `%s`/`%d` templates can be checked this way: a plain key is
+     * reached by an exact lookup, and a `{name}` key is substituted by the
+     * caller, so the catalogue holds the template, not the message.
+     *
+     * @param array<string, string> $catalogue
+     * @param string                $cataloguePath The file the catalogue was read from; the runtime lookup runs against that very file.
+     * @return list<string>
+     */
+    private function unreachable(string $locale, array $catalogue, string $cataloguePath): array
+    {
+        $translator = new Translator(new CatalogLoader([], dirname($cataloguePath)));
+        $translator->useLocale($locale);
+
+        $lines = [];
+
+        foreach ($catalogue as $key => $value) {
+            $placeholders = TemplatePlaceholders::in($key);
+
+            if ($placeholders === []) {
+                continue;
+            }
+
+            // Rule 5's business: without the placeholders there is no
+            // expected rendering to compare against.
+            if (TemplatePlaceholders::in($value) !== $placeholders) {
+                continue;
+            }
+
+            foreach ([self::PROBE, self::PROBE_MULTILINE] as $probe) {
+                $arguments = $this->argumentsFor($placeholders, $probe);
+                $rendered = self::render($key, $arguments);
+                $expected = self::render($value, $arguments);
+
+                if ($translator->trans($rendered) === $expected) {
+                    continue;
+                }
+
+                $lines[] = sprintf(
+                    '  "%s" — unreachable: the template does not match the message it is rendered into.',
+                    $key,
+                );
+
+                // One entry, one report. A matcher that misses the
+                // single-line probe misses the line-breaking one too, so
+                // without this the same key is listed once per probe and
+                // the count names entries that exist only once.
+                break;
+            }
+        }
+
+        if ($lines === []) {
+            return [];
+        }
+
+        return array_merge(
+            ['', sprintf('%s has %d unreachable translation(s):', $locale, count($lines))],
+            $lines,
+        );
+    }
+
+    /**
+     * The synthetic arguments for a template's placeholders, in order: a
+     * `%d` placeholder gets a number, a `%s` placeholder gets the probe — so
+     * the line-breaking argument rides on the string placeholder.
+     *
+     * @param list<string> $placeholders
+     * @return list<string>
+     */
+    private function argumentsFor(array $placeholders, string $probe): array
+    {
+        return array_map(
+            static fn(string $placeholder): string => $placeholder === '%d' ? self::PROBE_NUMBER : $probe,
+            $placeholders,
+        );
+    }
+
+    /**
+     * Substitute the arguments into a template, positionally.
+     *
+     * @param list<string> $arguments
+     */
+    private static function render(string $template, array $arguments): string
+    {
+        $parts = preg_split(TemplatePlaceholders::PATTERN, $template);
+        if ($parts === false) {
+            return $template;
+        }
+
+        $rendered = $parts[0] ?? '';
+        foreach ($arguments as $index => $argument) {
+            $rendered .= $argument . ($parts[$index + 1] ?? '');
+        }
+
+        return $rendered;
     }
 }
