@@ -422,6 +422,12 @@ final class I18nCheckCommand extends Command
                     '  "%s" — unreachable: the template does not match the message it is rendered into.',
                     $key,
                 );
+
+                // One entry, one report. A matcher that misses the
+                // single-line probe misses the line-breaking one too, so
+                // without this the same key is listed once per probe and
+                // the count names entries that exist only once.
+                break;
             }
         }
 

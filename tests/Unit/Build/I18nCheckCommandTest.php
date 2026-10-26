@@ -227,6 +227,18 @@ describe('i18n:check rules', function (): void {
 
             expect($problems)->toBe([]);
         });
+
+        it('reports an unreachable entry once, not once per probe', function (): void {
+            // A matcher that cannot use the template misses both probes, so
+            // the entry used to be listed twice and counted twice.
+            $problems = i18nUnreachable([
+                '50% done: %s' => '50 % erledigt: %s',
+            ]);
+
+            expect($problems)->toHaveCount(3)
+                ->and($problems[1])->toBe('de has 1 unreachable translation(s):')
+                ->and($problems[2])->toContain('"50% done: %s"');
+        });
     });
 });
 
