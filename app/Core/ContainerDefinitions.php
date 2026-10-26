@@ -1341,10 +1341,9 @@ final class ContainerDefinitions
                 return new SsrfGuard();
             },
 
-            // A second instance for callers that fetch an agent-named URL:
-            // a web fetch may be http as well. `SsrfGuard::class` stays the
-            // stricter one, so a caller asking for it by name cannot get the
-            // looser web-fetch policy by accident.
+            // A second instance for callers that fetch an agent-named URL: a
+            // web fetch may be http as well. `SsrfGuard::class` stays the
+            // stricter one, so a caller cannot get the looser policy by accident.
             'ssrf_guard.web_fetch' => static fn(): SsrfGuard => SsrfGuard::forWebFetch(),
 
             AgentApiKeyIssuer::class => static function (): AgentApiKeyIssuer {

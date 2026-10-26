@@ -20,10 +20,8 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  * Pairing is order-symmetric: {@see consumeAttachmentPair()} handles the
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
  * case. A pair is one turn, but a summary's range is expressed in raw row
- * sequences, so the range can cover one half of a pair and not the other.
- * The coverage check therefore looks at both halves: a turn the summary
- * covers entirely is dropped, and a turn it covers only half of sends the
- * other half on its own.
+ * sequences, so it can cover one half of a pair and not the other — both
+ * halves are checked, see {@see applySummaryCompaction()}.
  *
  * A compaction replaces the rows it covers with a summary. The rows
  * themselves stay in `task_history` — the operator can still read them — so
@@ -74,12 +72,8 @@ final class MessageHistoryBuilder
      * dropped without being sent — `role: summary` is not a wire role any
      * provider accepts.
      *
-     * Attachment rows fold into the adjacent `user` row in either order. The
-     * pair is one turn, but the summary's range is expressed in raw row
-     * sequences, so the range can end — or start — between the two halves.
-     * Both halves are therefore checked: a turn the summary covers entirely
-     * is dropped, and a turn it covers only half of sends the other half
-     * on its own, so the operator's text is neither repeated nor lost.
+     * Attachment rows fold into the adjacent `user` row in either order. A
+     * turn the summary covers only half of sends the other half on its own.
      *
      * @param  \Illuminate\Support\Collection<int, TaskHistory>  $rows
      * @return list<array<string, mixed>>
@@ -109,8 +103,7 @@ final class MessageHistoryBuilder
             // A summary stands in for the rows its range starts at, so it is
             // sent at that position rather than at its own row's position.
             // The pair's FIRST sequence decides the position: a range that
-            // starts on the pair's second half has to be sent after the
-            // first half, which the summary does not cover.
+            // starts on the second half must be sent after the first half.
             while ($pending !== [] && $pending[0]['first'] <= $firstSeq) {
                 $messages[] = $this->summaryMessage($pending[0]['row']);
                 array_shift($pending);
@@ -128,13 +121,12 @@ final class MessageHistoryBuilder
             } elseif ($coversFirst && $coversLast) {
                 // The summary stands in for the whole turn.
             } elseif ($coversFirst) {
-                // The summary covers the first half only. The second half is
-                // sent on its own — sending the merged row would repeat the
-                // half the summary already carries.
+                // Only the first half is covered: send the second half alone,
+                // not the merged row — that would repeat what the summary has.
                 $messages[] = $this->messageFromHistoryRow($pair['halves'][1]);
             } else {
-                // The summary covers the second half only. The first half is
-                // sent on its own — dropping the merged row would lose it.
+                // Only the second half is covered: send the first half alone —
+                // dropping the merged row would lose it.
                 $messages[] = $this->messageFromHistoryRow($pair['halves'][0]);
             }
 
@@ -194,8 +186,7 @@ final class MessageHistoryBuilder
      * Production-order merge: row at `$i` is `user`, next is `attachment`.
      * The synthetic row reuses {@see attachmentMessage()} expansion; its
      * `sequence` is the later of the pair, so the pair reads as one row
-     * wherever a single sequence is enough. The compaction's range check
-     * needs both sequences — see {@see applySummaryCompaction()}.
+     * wherever a single sequence is enough; the range check needs both.
      * Companion: {@see consumeAttachmentPair()}.
      *
      * @param list<TaskHistory> $rowsArray

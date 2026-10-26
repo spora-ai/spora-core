@@ -32,12 +32,11 @@ final class DbRateLimiter
      * within the rolling $windowSeconds window. Hits older than the window are
      * pruned before counting.
      *
-     * The prune and the insert share one transaction. As two separate
-     * statements they take the table's two row ranges — the pruned one and
-     * the live one — in separate transactions, and concurrent attempts for
-     * the same key cross over each other there. InnoDB resolves that as a
-     * deadlock, and a deadlocked attempt is failed open, which would let one
-     * request past the cap that the statement below just enforced.
+     * The prune and the insert share one transaction: as separate statements
+     * they take the table's two row ranges in different transactions, and
+     * concurrent attempts for the same key cross over each other there.
+     * InnoDB resolves that as a deadlock, and a deadlocked attempt is failed
+     * open — which would let one request past the cap just enforced.
      */
     public function attempt(string $key, int $maxAttempts, int $windowSeconds): bool
     {
@@ -49,10 +48,9 @@ final class DbRateLimiter
             try {
                 return $this->recordHit($key, $maxAttempts, $nowString, $cutoffString);
             } catch (Throwable $e) {
-                // A deadlock is transient: the transaction was rolled back, so
-                // nothing was recorded, and the transaction that collided
-                // with this one has committed by now. Retrying re-reads the
-                // count with that hit in it, so the cap still holds.
+                // A deadlock is transient: the transaction rolled back, so
+                // nothing was recorded and the colliding transaction has
+                // committed. Retrying re-reads the count with that hit in it.
                 if ($try < self::MAX_TRIES && $this->causedByConcurrencyError($e)) {
                     continue;
                 }
@@ -65,9 +63,7 @@ final class DbRateLimiter
         return true;
     }
 
-    /**
-     * Prunes the stale hits and records this one, if the window has room.
-     */
+    /** Prunes the stale hits and records this one, if the window has room. */
     private function recordHit(string $key, int $maxAttempts, string $nowString, string $cutoffString): bool
     {
         return Capsule::connection()->transaction(function () use ($key, $maxAttempts, $nowString, $cutoffString): bool {
@@ -77,8 +73,8 @@ final class DbRateLimiter
                 ->where('hit_at', '<=', $cutoffString)
                 ->delete();
 
-            // Nothing written means the window had no room left — that is
-            // the over-the-limit answer.
+            // Nothing written means the window had no room left — the
+            // over-the-limit answer.
             return $this->insertHitWithinLimit($key, $maxAttempts, $nowString, $cutoffString) === 1;
         });
     }
@@ -88,16 +84,13 @@ final class DbRateLimiter
      *
      * Counting the window and writing the hit are ONE statement: the `where`
      * clause counts the hits still inside the window, the `insert` writes
-     * this one, and a statement is atomic. A request that reads the count
-     * first and writes afterwards leaves a window in which a competing
-     * request slips in unnoticed — both read the same count and both pass
-     * the cap. Here the loser of the race sees the winner's hit, its count
-     * is no longer under the cap, and it writes nothing.
+     * this one, and a statement is atomic. Reading the count first and
+     * writing afterwards leaves a window in which a competing request slips
+     * in unnoticed — both read the same count and both pass the cap.
      *
-     * The cap is bound as an integer. SQLite compares an integer against a
+     * The cap is bound as an integer: SQLite compares an integer against a
      * TEXT value by type rather than by value, so a text-bound number never
-     * compares as less than an integer count — the cap would silently stop
-     * applying.
+     * compares as less than an integer count and the cap would stop applying.
      */
     private function insertHitWithinLimit(string $key, int $maxAttempts, string $nowString, string $cutoffString): int
     {

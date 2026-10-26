@@ -78,9 +78,8 @@ final class ReadUrlTool extends AbstractTool
         private readonly HttpTimeoutResolver $timeoutResolver,
         private readonly ?LoggerInterface    $logger = null,
         private readonly ?PdfMarkdownExtractor $pdfExtractor = null,
-        // The container injects the shared guard. The default keeps a
-        // directly constructed tool screened too — an unguarded tool is
-        // never the safe answer to a missing collaborator.
+        // The container injects the shared guard; the default keeps a
+        // directly constructed tool screened too.
         private readonly SsrfGuard           $ssrfGuard = new SsrfGuard(SsrfGuard::WEB_FETCH_POLICY),
     ) {}
 
@@ -112,8 +111,7 @@ final class ReadUrlTool extends AbstractTool
         }
 
         // Every operation is screened, not just the PDF one: an agent names
-        // the URL, and the body of a metadata endpoint or an internal
-        // service would land in the model context.
+        // the URL, and an internal endpoint's body would reach the model.
         $rejection = $this->ssrfGuard->rejectReason($url);
         if ($rejection !== null) {
             return new ToolResult(false, $rejection);
@@ -139,9 +137,8 @@ final class ReadUrlTool extends AbstractTool
         }
 
         // The scheme allowlist stops file://, ftp:// and gopher:// — it does
-        // not stop an http:// URL that points at a private address. The
-        // private-range screen is a separate layer, in SsrfGuard, and applies
-        // to every operation.
+        // not stop an http:// URL pointing at a private address. That screen
+        // is a separate layer, in SsrfGuard, and applies to every operation.
         $scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
         if (!in_array($scheme, self::ALLOWED_SCHEMES, true)) {
             return new ToolResult(false, 'Only http:// and https:// URLs are supported.');
@@ -171,8 +168,8 @@ final class ReadUrlTool extends AbstractTool
         $response = $this->httpClient->request('GET', $url, [
             'timeout' => $timeout,
             'headers' => $headers,
-            // The guard screened the URL as given. A redirect target is a
-            // host nobody screened, so the client must not follow one.
+            // The guard screened the URL as given; a redirect target is a
+            // host nobody screened.
             'max_redirects' => 0,
         ]);
 
@@ -216,8 +213,8 @@ final class ReadUrlTool extends AbstractTool
                 'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
                 'Accept'     => self::PDF_MIME,
             ],
-            // The guard screened the URL as given. A redirect target is a
-            // host nobody screened, so the client must not follow one.
+            // The guard screened the URL as given; a redirect target is a
+            // host nobody screened.
             'max_redirects' => 0,
         ]);
 

@@ -10,12 +10,10 @@ namespace Spora\Services;
  *
  * Two callers share it: the Agent API, which POSTs to a caller-supplied
  * `callback_url`, and {@see \Spora\Tools\ReadUrlTool}, which fetches a URL
- * an agent named. They do not agree on what may be fetched — the Agent API
- * accepts only `https`, the tool also accepts `http` — nor on how a refusal
- * reads, so the guard takes a policy: the allowed schemes, the URL length
- * cap, and the message for each kind of refusal. The Agent API's policy is
- * the default, so `new SsrfGuard()` behaves exactly as it did before the
- * tool was wired in.
+ * an agent named. They differ in what may be fetched and in how a refusal
+ * reads, so the guard takes a policy: allowed schemes, length cap and the
+ * message for each kind of refusal. The Agent API's policy is the default,
+ * so `new SsrfGuard()` behaves as it did before the tool was wired in.
  *
  * The resolve-then-check sequence has a DNS-rebinding window: the host is
  * resolved here and resolved again inside the HTTP client, and the two
@@ -25,18 +23,13 @@ namespace Spora\Services;
  * attack rather than making it impossible — which is why every caller must
  * also refuse to follow redirects, or a redirect is an unscreened host.
  *
- * @phpstan-type Policy array{
- *     schemes: list<string>,
- *     max_length: int|null,
- *     messages: array<string, string>,
- * }
+ * @phpstan-type Policy array{schemes: list<string>, max_length: int|null, messages: array<string, string>}
  */
 final class SsrfGuard
 {
     /**
-     * The Agent API's policy: `https` only, a length cap that matches the
-     * `agent_api_callbacks.url` column, and the wording the Agent API has
-     * always answered with.
+     * The Agent API's policy: `https` only, a length cap matching the
+     * `agent_api_callbacks.url` column, and its usual refusal wording.
      *
      * @var Policy
      */
@@ -54,8 +47,8 @@ final class SsrfGuard
     ];
 
     /**
-     * The policy a web fetch runs under: `http` as well as `https`, no
-     * length cap, and the wording `ReadUrlTool` has always used.
+     * A web fetch runs under a looser policy: `http` as well as `https`, no
+     * length cap, and `ReadUrlTool`'s usual refusal wording.
      *
      * @var Policy
      */

@@ -25,10 +25,8 @@ final class Translator
     /**
      * vue-i18n's named-parameter syntax, so a PHP and a Vue catalogue read the same.
      *
-     * The pattern matches the placeholder *name* and nothing else — an
-     * identifier, never the value — so the value is inserted verbatim and a
-     * value carrying a line break survives the substitution. Only the
-     * template matcher has to care about line breaks.
+     * The pattern matches the placeholder *name*, never the value, so the
+     * value is inserted verbatim — a value carrying a line break survives.
      */
     private const PLACEHOLDER_PATTERN = '/\{([A-Za-z_][A-Za-z0-9_]*)\}/';
 
@@ -184,11 +182,9 @@ final class Translator
             $quoted,
         );
 
-        // `s` (DOTALL) because a rendered argument can carry a line break —
-        // an image prompt, a mail subject, a pasted block of text. Without
-        // it `(.+?)` stops at the newline, the template never matches, and
-        // `trans()` falls back to the English source: the operator reads an
-        // English prompt in a German session and approves it.
+        // `s` (DOTALL) because a rendered argument can carry a line break:
+        // without it `(.+?)` stops at the newline, the template never matches,
+        // and `trans()` falls back to the English source.
         return '/^' . $pattern . '$/us';
     }
 

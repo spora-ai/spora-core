@@ -36,32 +36,27 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 final class I18nCheckCommand extends Command
 {
     /**
-     * The locales `i18n:check` enforces as translation targets.
-     *
-     * `en` is the generated reference catalogue, not a target: it is checked
-     * for drift against the harvest (rule 1) and never for a translation —
-     * it is the source the other catalogues are written from.
+     * The locales `i18n:check` enforces as translation targets. `en` is the
+     * generated reference catalogue, not a target: it is checked for drift
+     * against the harvest (rule 1), never for a translation.
      */
     private const TARGET_LOCALES = ['de'];
 
     /**
-     * The synthetic argument a `%s` placeholder is rendered with.
-     *
-     * Distinctive enough not to collide with a real catalogue key, and free
-     * of `%` and quotes so it cannot change the shape of the message it is
-     * substituted into.
+     * The synthetic argument a `%s` placeholder is rendered with: distinct
+     * enough not to collide with a real catalogue key, and free of `%` so it
+     * cannot change the shape of the message it is substituted into.
      */
     private const PROBE = 'spora-i18n-probe';
 
     /**
-     * The same argument carrying a line break.
-     *
-     * This is the argument the matcher has to survive: a rendered message
-     * whose argument contains a newline must still reach its translation.
+     * The same argument carrying a line break — the one the matcher has to
+     * survive: a rendered message whose argument contains a newline must
+     * still reach its translation.
      */
     private const PROBE_MULTILINE = "spora-i18n-probe\nspora-i18n-probe-second-line";
 
-    /** The synthetic argument a `%d` placeholder is rendered with. */
+    /** The synthetic argument a `%d` placeholder is rendered with — the matcher only accepts digits there. */
     private const PROBE_NUMBER = '42';
 
     /**
@@ -385,27 +380,21 @@ final class I18nCheckCommand extends Command
     /**
      * Rule 6 — an entry the runtime cannot reach.
      *
-     * Every rule above reads the catalogue as data: it compares keys and
-     * placeholders. None of them can see that the *matcher* never matches.
-     * A template whose rendered argument carries a line break, for instance,
-     * never reaches its German value, so the entry is present, correct and
-     * unreachable — and `trans()` answers with the English source, in a
-     * German session, in front of an operator about to approve a tool call.
+     * The rules above read the catalogue as data; none can see that the
+     * *matcher* never matches. A template whose rendered argument carries a
+     * line break never reaches its German value, so `trans()` answers with
+     * the English source in a German session. The entry is therefore
+     * rendered with a synthetic argument and looked up through the real
+     * {@see \Spora\I18n\Translator}: the German value has to come back.
      *
-     * So the entry is rendered with a synthetic argument and looked up
-     * through the real {@see \Spora\I18n\Translator}: the German value has
-     * to come back, carrying the same argument.
+     * The lookup runs twice per template — with a single-line argument and
+     * with one that crosses a line break; a matcher that cannot cross one
+     * passes the first and fails the second.
      *
-     * The lookup runs twice per template, once with an argument that fits on
-     * one line and once with one that does not. A matcher that cannot cross
-     * a line break passes the first and fails the second, which is exactly
-     * the shape of the defect this rule exists for.
-     *
-     * The limit: only the `%s`/`%d` templates can be checked this way. A
-     * plain key is reached by an exact lookup, which cannot miss; and a
-     * `{name}` key is reached with its placeholders already substituted by
-     * the caller, so the catalogue holds the template rather than the
-     * rendered message and there is no rendered message to look up.
+     * Only the `%s`/`%d` templates can be checked this way: a plain key is
+     * reached by an exact lookup, which cannot miss, and a `{name}` key is
+     * substituted by the caller, so the catalogue holds the template rather
+     * than the rendered message.
      *
      * @param array<string, string> $catalogue
      * @param string                $cataloguePath The file the catalogue was read from; the runtime lookup runs against that very file.
@@ -422,13 +411,11 @@ final class I18nCheckCommand extends Command
             $placeholders = TemplatePlaceholders::in($key);
 
             if ($placeholders === []) {
-                // An exact key: the lookup cannot miss it.
                 continue;
             }
 
-            // A translation that does not carry the placeholders of its key
-            // is rule 5's business — there is no expected rendering to
-            // compare against.
+            // Rule 5's business: without the placeholders there is no
+            // expected rendering to compare against.
             if (TemplatePlaceholders::in($value) !== $placeholders) {
                 continue;
             }
@@ -462,9 +449,9 @@ final class I18nCheckCommand extends Command
     /**
      * The synthetic arguments for a template's placeholders, in order.
      *
-     * A `%d` placeholder gets a number — the matcher only accepts digits
-     * there — and a `%s` placeholder gets the probe, so the argument that
-     * crosses a line break is the one a string placeholder carries.
+     * A `%d` placeholder gets a number and a `%s` placeholder gets the
+     * probe — so the argument that crosses a line break is the one a string
+     * placeholder carries.
      *
      * @param list<string> $placeholders
      * @return list<string>
