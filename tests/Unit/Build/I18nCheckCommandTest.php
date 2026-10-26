@@ -260,10 +260,9 @@ function i18nParity(array $catalogue): array
 }
 
 /**
- * Run the reachability rule against a fixture catalogue.
- *
- * The rule looks the rendered message up through the real translator, so the
- * fixture has to be a file on disk — one it cannot read looks unreachable.
+ * Run the reachability rule against a fixture catalogue: the rule looks the
+ * rendered message up through the real translator, so the fixture has to be a
+ * file on disk — one it cannot read looks unreachable.
  */
 function i18nUnreachable(array $catalogue): array
 {

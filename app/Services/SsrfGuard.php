@@ -11,8 +11,7 @@ namespace Spora\Services;
  * Two callers share it: the Agent API, which POSTs to a caller-supplied
  * `callback_url`, and {@see \Spora\Tools\ReadUrlTool}, which fetches a URL
  * an agent named. They differ in what may be fetched and in how a refusal
- * reads, so the guard takes a policy: allowed schemes, length cap and the
- * message for each kind of refusal. The Agent API's policy is the default,
+ * reads, so the guard takes a policy. The Agent API's policy is the default,
  * so `new SsrfGuard()` behaves as it did before the tool was wired in.
  *
  * The resolve-then-check sequence has a DNS-rebinding window: the host is

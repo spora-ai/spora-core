@@ -244,11 +244,10 @@ final class SystemMailer implements MailerInterface
     }
 
     /**
-     * The SMTP DSN for the configured mailer.
-     *
-     * `SPORA_MAIL_ENCRYPTION` alone picks the scheme: `tls` is STARTTLS on
-     * `smtp://`, `ssl` is implicit TLS on `smtps://`. The port decides
-     * nothing — it has to be the port the server expects for that encryption.
+     * The SMTP DSN for the configured mailer: `SPORA_MAIL_ENCRYPTION` alone
+     * picks the scheme — `tls` is STARTTLS on `smtp://`, `ssl` is implicit
+     * TLS on `smtps://`. The port decides nothing; it has to be the port the
+     * server expects for that encryption.
      *
      * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */

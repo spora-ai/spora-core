@@ -168,8 +168,7 @@ final class ReadUrlTool extends AbstractTool
         $response = $this->httpClient->request('GET', $url, [
             'timeout' => $timeout,
             'headers' => $headers,
-            // The guard screened the URL as given; a redirect target is a
-            // host nobody screened.
+            // The guard screened the URL as given; a redirect target is unscreened.
             'max_redirects' => 0,
         ]);
 
@@ -213,8 +212,7 @@ final class ReadUrlTool extends AbstractTool
                 'User-Agent' => 'Spora Agent/1.0 (+https://github.com/spora/spora)',
                 'Accept'     => self::PDF_MIME,
             ],
-            // The guard screened the URL as given; a redirect target is a
-            // host nobody screened.
+            // The guard screened the URL as given; a redirect target is unscreened.
             'max_redirects' => 0,
         ]);
 

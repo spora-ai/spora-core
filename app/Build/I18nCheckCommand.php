@@ -36,27 +36,18 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 final class I18nCheckCommand extends Command
 {
     /**
-     * The locales `i18n:check` enforces as translation targets. `en` is the
-     * generated reference catalogue, not a target: it is checked for drift
-     * against the harvest (rule 1), never for a translation.
+     * The locales `i18n:check` enforces as translation targets: `en` is the
+     * generated reference catalogue, checked for drift (rule 1) but never translated.
      */
     private const TARGET_LOCALES = ['de'];
 
-    /**
-     * The synthetic argument a `%s` placeholder is rendered with: distinct
-     * enough not to collide with a real catalogue key, and free of `%` so it
-     * cannot change the shape of the message it is substituted into.
-     */
+    /** The synthetic `%s` argument: distinctive, so it cannot collide with a real catalogue key. */
     private const PROBE = 'spora-i18n-probe';
 
-    /**
-     * The same argument carrying a line break — the one the matcher has to
-     * survive: a rendered message whose argument contains a newline must
-     * still reach its translation.
-     */
+    /** The same argument carrying a line break — the one the matcher has to survive. */
     private const PROBE_MULTILINE = "spora-i18n-probe\nspora-i18n-probe-second-line";
 
-    /** The synthetic argument a `%d` placeholder is rendered with — the matcher only accepts digits there. */
+    /** The synthetic `%d` argument — the matcher only accepts digits there. */
     private const PROBE_NUMBER = '42';
 
     /**
@@ -381,20 +372,18 @@ final class I18nCheckCommand extends Command
      * Rule 6 — an entry the runtime cannot reach.
      *
      * The rules above read the catalogue as data; none can see that the
-     * *matcher* never matches. A template whose rendered argument carries a
-     * line break never reaches its German value, so `trans()` answers with
-     * the English source in a German session. The entry is therefore
-     * rendered with a synthetic argument and looked up through the real
-     * {@see \Spora\I18n\Translator}: the German value has to come back.
+     * *matcher* never matches. A template whose argument carries a line
+     * break never reaches its German value, so `trans()` answers with the
+     * English source. The entry is rendered with a synthetic argument and
+     * looked up through the real {@see \Spora\I18n\Translator}: the German
+     * value has to come back.
      *
-     * The lookup runs twice per template — with a single-line argument and
-     * with one that crosses a line break; a matcher that cannot cross one
-     * passes the first and fails the second.
+     * The lookup runs twice per template — a single-line argument and one that
+     * crosses a line break; a matcher that cannot cross one fails the second.
      *
      * Only the `%s`/`%d` templates can be checked this way: a plain key is
-     * reached by an exact lookup, which cannot miss, and a `{name}` key is
-     * substituted by the caller, so the catalogue holds the template rather
-     * than the rendered message.
+     * reached by an exact lookup, and a `{name}` key is substituted by the
+     * caller, so the catalogue holds the template, not the message.
      *
      * @param array<string, string> $catalogue
      * @param string                $cataloguePath The file the catalogue was read from; the runtime lookup runs against that very file.
@@ -447,11 +436,9 @@ final class I18nCheckCommand extends Command
     }
 
     /**
-     * The synthetic arguments for a template's placeholders, in order.
-     *
-     * A `%d` placeholder gets a number and a `%s` placeholder gets the
-     * probe — so the argument that crosses a line break is the one a string
-     * placeholder carries.
+     * The synthetic arguments for a template's placeholders, in order: a
+     * `%d` placeholder gets a number, a `%s` placeholder gets the probe — so
+     * the line-breaking argument rides on the string placeholder.
      *
      * @param list<string> $placeholders
      * @return list<string>

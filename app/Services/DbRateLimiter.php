@@ -73,8 +73,7 @@ final class DbRateLimiter
                 ->where('hit_at', '<=', $cutoffString)
                 ->delete();
 
-            // Nothing written means the window had no room left — the
-            // over-the-limit answer.
+            // Nothing written means the window was full — the over-the-limit answer.
             return $this->insertHitWithinLimit($key, $maxAttempts, $nowString, $cutoffString) === 1;
         });
     }
@@ -89,8 +88,7 @@ final class DbRateLimiter
      * in unnoticed — both read the same count and both pass the cap.
      *
      * The cap is bound as an integer: SQLite compares an integer against a
-     * TEXT value by type rather than by value, so a text-bound number never
-     * compares as less than an integer count and the cap would stop applying.
+     * TEXT value by type, not by value, so a text-bound cap never applies.
      */
     private function insertHitWithinLimit(string $key, int $maxAttempts, string $nowString, string $cutoffString): int
     {
@@ -109,10 +107,7 @@ final class DbRateLimiter
         return Capsule::table('ratelimit_hits')->insertUsing(['key', 'hit_at'], $counted);
     }
 
-    /**
-     * Whether the failure is a deadlock or a lock-wait timeout — the two
-     * transient conditions a concurrent attempt can provoke.
-     */
+    /** Whether the failure is a deadlock or a lock-wait timeout — the transient conditions a concurrent attempt can provoke. */
     private function causedByConcurrencyError(Throwable $e): bool
     {
         return (new ConcurrencyErrorDetector())->causedByConcurrencyError($e);

@@ -118,7 +118,6 @@ describe('DbRateLimiter', function (): void {
 
         // The competing request took the only slot, so this one is refused.
         expect($accepted)->toBeFalse();
-        // And the bucket never holds more hits than the cap allows.
         expect(RatelimitHit::query()->where('key', $key)->count())->toBe(1);
     });
 });
