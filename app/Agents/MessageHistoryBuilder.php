@@ -21,7 +21,7 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
  * reverse-order case and {@see consumeUserAttachmentPair()} the production
  * case. A pair is one turn, but a summary's range is expressed in raw row
  * sequences, so it can cover one half of a pair and not the other — both
- * halves are checked, see {@see applySummaryCompaction()}.
+ * halves are checked, see {@see turnMessage()}.
  *
  * A compaction replaces the rows it covers with a summary. The rows
  * themselves stay in `task_history` — the operator can still read them — so
@@ -72,8 +72,8 @@ final class MessageHistoryBuilder
      * dropped without being sent — `role: summary` is not a wire role any
      * provider accepts.
      *
-     * Attachment rows fold into the adjacent `user` row in either order. A
-     * turn the summary covers only half of sends the other half on its own.
+     * Attachment rows fold into the adjacent `user` row in either order; what
+     * the turn contributes is decided by {@see turnMessage()}.
      *
      * @param  \Illuminate\Support\Collection<int, TaskHistory>  $rows
      * @return list<array<string, mixed>>
@@ -95,10 +95,8 @@ final class MessageHistoryBuilder
                 continue;
             }
 
-            $pair      = $this->consumeAdjacentPair($row, $rowsArray, $i);
-            $effective = $pair !== null ? $pair['row'] : $row;
-            $firstSeq  = $pair !== null ? $pair['first'] : (int) $row->sequence;
-            $lastSeq   = $pair !== null ? $pair['last'] : (int) $row->sequence;
+            $pair     = $this->consumeAdjacentPair($row, $rowsArray, $i);
+            $firstSeq = $pair['first'] ?? (int) $row->sequence;
 
             // A summary stands in for the rows its range starts at, so it is
             // sent at that position rather than at its own row's position.
@@ -109,28 +107,12 @@ final class MessageHistoryBuilder
                 array_shift($pending);
             }
 
-            $coversFirst = $compactions->covers($firstSeq);
-            $coversLast  = $compactions->covers($lastSeq);
-
-            if ($pair === null) {
-                if (!$coversFirst) {
-                    $messages[] = $this->messageFromHistoryRow($effective);
-                }
-            } elseif (!$coversFirst && !$coversLast) {
-                $messages[] = $this->messageFromHistoryRow($effective);
-            } elseif ($coversFirst && $coversLast) {
-                // The summary stands in for the whole turn.
-            } elseif ($coversFirst) {
-                // Only the first half is covered: send the second half alone,
-                // not the merged row — that would repeat what the summary has.
-                $messages[] = $this->messageFromHistoryRow($pair['halves'][1]);
-            } else {
-                // Only the second half is covered: send the first half alone —
-                // dropping the merged row would lose it.
-                $messages[] = $this->messageFromHistoryRow($pair['halves'][0]);
+            $message = $this->turnMessage($row, $pair, $compactions);
+            if ($message !== null) {
+                $messages[] = $message;
             }
 
-            $i = $pair !== null ? $pair['nextIndex'] : $i + 1;
+            $i = $pair['nextIndex'] ?? ($i + 1);
         }
 
         // A summary whose range starts after every row still belongs in the
@@ -140,6 +122,41 @@ final class MessageHistoryBuilder
         }
 
         return $messages;
+    }
+
+    /**
+     * What one turn contributes to the message list, or `null` when a summary
+     * already stands in for it.
+     *
+     * A summary's range is expressed in raw row sequences, so it can cover
+     * one half of a pair and not the other — the halves are checked
+     * separately and the uncovered one is sent on its own.
+     *
+     * @param  array{row: TaskHistory, nextIndex: int, first: int, last: int, halves: list<TaskHistory>}|null  $pair
+     * @return array<string, mixed>|null
+     */
+    private function turnMessage(TaskHistory $row, ?array $pair, ActiveCompactions $compactions): ?array
+    {
+        $coversFirst = $compactions->covers($pair['first'] ?? (int) $row->sequence);
+        $coversLast  = $compactions->covers($pair['last'] ?? (int) $row->sequence);
+
+        $message = null;
+
+        if ($pair === null) {
+            $message = $coversFirst ? null : $this->messageFromHistoryRow($row);
+        } elseif (!$coversFirst && !$coversLast) {
+            $message = $this->messageFromHistoryRow($pair['row']);
+        } elseif (!$coversFirst) {
+            // Only the second half is covered: send the first half alone —
+            // dropping the merged row would lose it.
+            $message = $this->messageFromHistoryRow($pair['halves'][0]);
+        } elseif (!$coversLast) {
+            // Only the first half is covered: send the second half alone,
+            // not the merged row — that would repeat what the summary has.
+            $message = $this->messageFromHistoryRow($pair['halves'][1]);
+        }
+
+        return $message;
     }
 
     /**

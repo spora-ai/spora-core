@@ -105,16 +105,9 @@ final class ReadUrlTool extends AbstractTool
         $url = trim((string) ($arguments['url'] ?? ''));
         $op = (string) ($arguments['op'] ?? 'fetch');
 
-        $validation = $this->validateUrl($url);
-        if ($validation instanceof ToolResult) {
-            return $validation;
-        }
-
-        // Every operation is screened, not just the PDF one: an agent names
-        // the URL, and an internal endpoint's body would reach the model.
-        $rejection = $this->ssrfGuard->rejectReason($url);
+        $rejection = $this->screenUrl($url);
         if ($rejection !== null) {
-            return new ToolResult(false, $rejection);
+            return $rejection;
         }
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
@@ -128,6 +121,21 @@ final class ReadUrlTool extends AbstractTool
             $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'op' => $op, 'exception' => $e]);
             return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
         }
+    }
+
+    /** `null` when the URL may be fetched; otherwise the failure to report. */
+    private function screenUrl(string $url): ?ToolResult
+    {
+        $validation = $this->validateUrl($url);
+        if ($validation instanceof ToolResult) {
+            return $validation;
+        }
+
+        // Every operation is screened, not just the PDF one: an agent names
+        // the URL, and an internal endpoint's body would reach the model.
+        $reason = $this->ssrfGuard->rejectReason($url);
+
+        return $reason === null ? null : new ToolResult(false, $reason);
     }
 
     private function validateUrl(string $url): ?ToolResult

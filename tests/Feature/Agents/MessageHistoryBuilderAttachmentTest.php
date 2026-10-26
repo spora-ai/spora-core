@@ -1135,3 +1135,54 @@ test('a summary that covers the attachment but not its user row still delivers t
 
     expect(substr_count($rendered, 'Ship the release notes'))->toBe(1);
 });
+
+test('a summary that covers both halves of a turn drops the whole turn', function (): void {
+    // The counterpart of the two half-covered cases: when the range spans the
+    // user row and its attachment, neither half may reach the model — the
+    // summary stands in for the entire turn.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'release notes body',
+        mime: 'text/plain',
+        filename: 'notes.txt',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 0,
+        'role'     => 'user',
+        'content'  => 'Ship the release notes',
+    ]);
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 1,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'text']],
+    ]);
+    TaskHistory::create([
+        'task_id'                   => $task->id,
+        'sequence'                  => 2,
+        'role'                      => 'summary',
+        'content'                   => 'The operator asked to ship the release notes.',
+        'summarized_sequence_range' => '0-1',
+    ]);
+    TaskHistory::create([
+        'task_id'  => $task->id,
+        'sequence' => 3,
+        'role'     => 'assistant',
+        'content'  => 'Shipped.',
+    ]);
+
+    $messages = (new MessageHistoryBuilder())->build($task->id);
+    $rendered = implode("\n", array_map(compactionBoundaryText(...), $messages));
+
+    expect($rendered)->not->toContain('Ship the release notes');
+    expect($rendered)->not->toContain('[Attached asset_id=');
+    expect($rendered)->toContain('The operator asked to ship the release notes.');
+    expect($rendered)->toContain('Shipped.');
+});
