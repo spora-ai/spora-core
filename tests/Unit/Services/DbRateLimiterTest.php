@@ -64,8 +64,7 @@ describe('DbRateLimiter', function (): void {
             // The whole database, not the table alone: re-creating the table
             // by hand restored the pre-0095 schema — a composite
             // `(key, hit_at)` primary key and no surrogate id — which the
-            // burst test then tripped over on MySQL/MariaDB, where the
-            // worker database outlives the test file.
+            // burst test tripped over on MySQL/MariaDB.
             TestDatabaseFactory::freshDatabase();
         }
     });
@@ -87,9 +86,7 @@ describe('DbRateLimiter', function (): void {
     it('never records more hits than the cap allows when a competing request lands mid-window', function (): void {
         // Reading the count and then writing the hit leaves a window in
         // which a competing request is invisible: both read the same count
-        // and both pass the cap. This simulates that request — it records
-        // its hit right before the limiter's own write, which is exactly
-        // where the race lived.
+        // and both pass the cap. This simulates that request.
         $key = 'race_' . bin2hex(random_bytes(4));
 
         /** @var array{armed: bool, injected: bool} $state */

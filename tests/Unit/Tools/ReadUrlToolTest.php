@@ -359,8 +359,7 @@ it('refuses a loopback or RFC1918 address on the default fetch operation', funct
 ]);
 
 it('refuses the bracketed IPv6 loopback', function () {
-    // `parse_url()` hands back the bracketed form, so a comparison against
-    // `::1` alone would miss it.
+    // `parse_url()` hands back the bracketed form, so a comparison against `::1` alone would miss it.
     $client = Mockery::mock(HttpClientInterface::class);
     $client->shouldNotReceive('request');
 
@@ -402,8 +401,7 @@ it('does not follow a redirect into the private range', function () {
     $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
     $tool->execute(['url' => 'https://example.com/redirect'], 1);
 
-    // The guard screened the URL as given; a redirect target is a host
-    // nobody screened.
+    // The guard screened the URL as given; a redirect target is unscreened.
     expect($captured['max_redirects'] ?? null)->toBe(0);
 });
 

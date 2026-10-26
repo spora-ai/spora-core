@@ -1012,10 +1012,9 @@ test('attachment rejects mislabeled binary content (text mime with NUL bytes) an
 });
 
 /**
- * The rendered text of a message, whether it carries a plain string or the
- * content-block list an attachment row expands into.
+ * The rendered text of a message, plain string or attachment block list.
  *
- * @param  array<string, mixed>  $message
+ * @param array<string, mixed> $message
  */
 function compactionBoundaryText(array $message): string
 {
@@ -1041,10 +1040,8 @@ function compactionBoundaryText(array $message): string
 
 test('a summary that covers the user row but not its attachment does not send the operator turn twice', function (): void {
     // A summary's range is computed over raw row sequences, while the
-    // user/attachment merge happens later, at render time. A range that
-    // ends between the two halves of a turn therefore used to emit the
-    // operator's text twice — once inside the summary, once verbatim in
-    // the merged row.
+    // user/attachment merge happens later, at render time. A range ending
+    // between the two halves of a turn used to emit the operator's text twice.
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();
@@ -1088,15 +1085,13 @@ test('a summary that covers the user row but not its attachment does not send th
     $rendered = implode("\n", array_map(compactionBoundaryText(...), $messages));
 
     expect(substr_count($rendered, 'Ship the release notes'))->toBe(1);
-    // The attachment half is outside the summary's range, so it still
-    // reaches the model.
+    // The attachment half is outside the summary's range, so it still reaches the model.
     expect($rendered)->toContain('[Attached asset_id=');
 });
 
 test('a summary that covers the attachment but not its user row still delivers the operator turn', function (): void {
     // The mirror image of the case above: the range starts between the two
-    // halves, so the merged row used to be dropped whole and the operator's
-    // turn never reached the model at all.
+    // halves, so the merged row used to be dropped whole.
     $agentId = seedAttachmentAgent();
     $task = makeAttachmentTask($agentId);
     $service = buildAttachmentService();

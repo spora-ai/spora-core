@@ -381,9 +381,8 @@ jobs:
   code-style:
     # The style gate. PHP-CS-Fixer runs in dry-run mode: it prints the files
     # it would change and exits non-zero, so a formatting slip blocks the
-    # merge instead of waiting for someone to run `composer format` and push
-    # the result. The dry-run is the whole point — a fixer that rewrites
-    # files in CI would leave the commit and the check disagreeing.
+    # merge. The dry-run is the whole point — a fixer that rewrites files in
+    # CI would leave the commit and the check disagreeing.
     name: php-cs-fixer (dry-run)
     runs-on: ubuntu-latest
     steps:

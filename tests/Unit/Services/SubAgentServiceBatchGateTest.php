@@ -118,11 +118,10 @@ describe('SubAgentService::maybeResumeParent batch-open gate', function (): void
         // parent is still spawning. The per-child hook must short-circuit
         // — only the batch-boundary hook clears the flag and resumes.
         //
-        // The parent is seeded READY on purpose — the spawned ids match
-        // the expected count, so `loadReadyParent()` hands the hook a
-        // parent it could resume. Seed it any other way and the hook
-        // returns before it ever reaches the gate, and the refusal below
-        // would prove nothing about the gate.
+        // The parent is seeded READY on purpose: the spawned ids match the
+        // expected count, so `loadReadyParent()` hands the hook a parent it
+        // could resume. Seeded any other way, the refusal below would prove
+        // nothing about the gate.
         $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: true);
         $parent = $seed['parent'];
         $childIds = $seed['childIds'];
@@ -147,10 +146,9 @@ describe('SubAgentService::maybeResumeParent batch-open gate', function (): void
     });
 
     it('falls through when the batch flag is clear and the gate passes', function (): void {
-        // The same READY parent, with the batch flag cleared: the hook
-        // passes the gate and resumes the parent. This is the counterpart
-        // to the refusal above — without it, that refusal could still be
-        // an early return.
+        // The same READY parent with the batch flag cleared: the hook passes
+        // the gate and resumes. Without this counterpart, the refusal above
+        // could still be an early return.
         $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: false);
         $parent = $seed['parent'];
         $childIds = $seed['childIds'];

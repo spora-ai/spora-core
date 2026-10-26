@@ -210,10 +210,8 @@ describe('i18n:check rules', function (): void {
         it('reaches a template whose argument carries a line break', function (): void {
             // The defect this rule exists for: the entry is present and
             // correct, and a matcher that cannot cross a line break never
-            // reaches it — so the operator reads the English source in a
-            // German session. The rule renders the template with a probe
-            // that carries a line break, so it reports the entry exactly
-            // when the runtime would miss it.
+            // reaches it. The probe carries a line break, so the rule reports
+            // the entry exactly when the runtime would miss it.
             $problems = i18nUnreachable([
                 'Generate image for prompt: %s' => 'Bild erzeugen für die Eingabe: %s',
             ]);
@@ -222,8 +220,7 @@ describe('i18n:check rules', function (): void {
         });
 
         it('reports nothing for a plain key', function (): void {
-            // An exact key is reached by an exact lookup; there is no
-            // rendered message to get wrong.
+            // An exact key is reached by an exact lookup; there is no rendered message to get wrong.
             $problems = i18nUnreachable([
                 'Save' => 'Speichern',
             ]);
@@ -265,9 +262,8 @@ function i18nParity(array $catalogue): array
 /**
  * Run the reachability rule against a fixture catalogue.
  *
- * The rule looks the rendered message up through the real translator, so
- * the fixture has to be a file on disk — a catalogue the translator cannot
- * read would make every entry look unreachable.
+ * The rule looks the rendered message up through the real translator, so the
+ * fixture has to be a file on disk — one it cannot read looks unreachable.
  */
 function i18nUnreachable(array $catalogue): array
 {

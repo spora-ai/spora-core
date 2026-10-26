@@ -131,8 +131,7 @@ describe('template matching', function (): void {
 
     test('a rendered argument carrying a line break is translated', function (): void {
         // An image prompt or a mail subject can carry a line break. The
-        // template matcher has to cross it, or the German catalogue is
-        // unreachable and the operator approves an English prompt.
+        // matcher has to cross it, or the German catalogue is unreachable.
         $translator = new Translator(new CatalogLoader([], makeLocaleDir([
             'de' => ['Generate image for prompt: %s' => 'Bild erzeugen für die Eingabe: %s'],
         ], 'template-multiline')));
@@ -166,8 +165,7 @@ test('trans() replaces {named} placeholders from the parameter list', function (
 });
 
 test('a parameter carrying a line break is interpolated verbatim', function (): void {
-    // The placeholder pattern matches the name, never the value, so a value
-    // with a line break in it is inserted as written.
+    // The placeholder pattern matches the name, never the value, so the value is inserted verbatim.
     $translator = new Translator(new CatalogLoader([], makeLocaleDir([
         'de' => ['Member {name} removed from {group}.' => '{name} wurde aus {group} entfernt.'],
     ], 'parameters-multiline')));

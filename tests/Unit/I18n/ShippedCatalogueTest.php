@@ -23,17 +23,15 @@ test('an approval prompt reaches the operator in the operator\'s language', func
     $catalogs = new CatalogLoader();
     $translator = new Translator($catalogs);
 
-    // The operator's own locale, resolved the way the kernel resolves it
-    // before the router runs: the stored locale, then the instance
-    // default, then English.
+    // The operator's own locale, resolved the way the kernel resolves it:
+    // the stored locale, then the instance default, then English.
     $translator->useLocale((new LocaleResolver($catalogs))->resolve('de'));
 
     $english = (new AskUserQuestionTool())->describeAction(['questions' => [['question' => 'Which one?']]]);
 
-    // The payload the operator's UI reads. The description is stored in
-    // English and translated at serialization time, so the operator reads
-    // the language they are working in — not whichever language was active
-    // when the tool call was made.
+    // The payload the operator's UI reads: the description is stored in
+    // English and translated at serialization time, so the operator reads the
+    // language they are working in.
     $toolCall = new ToolCall();
     $toolCall->setRawAttributes([
         'id'                    => 42,
