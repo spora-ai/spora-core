@@ -67,7 +67,14 @@ final class GlobalSettingsController
         }
 
         return new JsonResponse([
-            'data' => ['sections' => $sections, 'undecryptable' => $undecryptable],
+            'data' => [
+                'sections' => $sections,
+                'undecryptable' => $undecryptable,
+                // The plugin settings that did not make it. Read after the
+                // sections: the providers are resolved while the settings are
+                // collected, and that is when a failure is recorded.
+                'plugin_problems' => $this->registry->pluginProblems(),
+            ],
         ], Response::HTTP_OK);
     }
 

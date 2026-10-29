@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
+use Closure;
 use Spora\Core\Exceptions\SettingsDecryptionException;
 use Spora\Settings\SettingsRegistry;
 use Spora\Settings\SettingsRepository;
@@ -14,6 +15,8 @@ use Spora\Settings\SettingsRepository;
  *
  * Built from three layers at container time — defaults, `config.php`, `.env` —
  * and given a fourth, the database, by {@see self::applySettingsOverlay()}.
+ * The plugin-contributed settings arrive in a fifth, deferred layer: see
+ * {@see self::deferLayer()}.
  * Re-applying it is idempotent and is how a write made inside a request
  * becomes visible to the response answering it
  * ({@see \Spora\Http\MailConfigController::mailConfigResponse()}). There is no `all()` accessor that reads
@@ -31,6 +34,13 @@ final class Config
     private array $undecryptable = [];
 
     /**
+     * A layer of values that is resolved on the first read.
+     *
+     * @var (Closure(): array{values: array<string, mixed>, sources: array<string, string>})|null
+     */
+    private ?Closure $pendingLayer = null;
+
+    /**
      * @param array<string, mixed>  $values  Keyed by `SPORA_*`.
      * @param array<string, string> $sources Keyed by `SPORA_*`; one of the `SOURCE_*` constants.
      */
@@ -38,6 +48,21 @@ final class Config
         private array $values = [],
         private array $sources = [],
     ) {}
+
+    /**
+     * Defer a layer of values until the config is read.
+     *
+     * The plugin-contributed settings cannot be part of the construction: a
+     * plugin's settings provider may depend on the config, and the container
+     * refuses that cycle. The layer is therefore resolved on the first read,
+     * when the config exists and a provider can ask for it.
+     *
+     * @param Closure(): array{values: array<string, mixed>, sources: array<string, string>} $layer
+     */
+    public function deferLayer(Closure $layer): void
+    {
+        $this->pendingLayer = $layer;
+    }
 
     /**
      * Layer the stored settings over the three boot layers.
@@ -91,6 +116,7 @@ final class Config
 
     public function get(string $key, mixed $default = null): mixed
     {
+        $this->applyPendingLayer();
         $this->assertReadable($key);
 
         return $this->values[$key] ?? $default;
@@ -134,11 +160,15 @@ final class Config
 
     public function has(string $key): bool
     {
+        $this->applyPendingLayer();
+
         return array_key_exists($key, $this->values);
     }
 
     public function sourceOf(string $key): string
     {
+        $this->applyPendingLayer();
+
         return $this->sources[$key] ?? self::SOURCE_DEFAULT;
     }
 
@@ -147,6 +177,8 @@ final class Config
      */
     public function all(): array
     {
+        $this->applyPendingLayer();
+
         return $this->values;
     }
 
@@ -182,6 +214,35 @@ final class Config
                 . 'Re-enter its value in Global Settings, or run `bin/spora settings:reset` to fall back to your defaults.',
                 $key,
             ));
+        }
+    }
+
+    /**
+     * Fold the deferred layer in, once.
+     *
+     * The layer is cleared before it runs: a provider that reads the config
+     * while the layer is being resolved must not start it again.
+     *
+     * A value that is already there wins. The database layer is applied over
+     * the boot layers and can be applied before this one — a stored value
+     * must not be replaced by the declared default.
+     */
+    private function applyPendingLayer(): void
+    {
+        $layer = $this->pendingLayer;
+        if ($layer === null) {
+            return;
+        }
+        $this->pendingLayer = null;
+
+        ['values' => $values, 'sources' => $sources] = $layer();
+
+        foreach ($values as $key => $value) {
+            if (array_key_exists($key, $this->values)) {
+                continue;
+            }
+            $this->values[$key] = $value;
+            $this->sources[$key] = $sources[$key] ?? self::SOURCE_DEFAULT;
         }
     }
 }

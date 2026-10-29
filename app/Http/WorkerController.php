@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Spora\Http;
 
+use Psr\Log\LoggerInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Auth\AuthService;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Http\Exceptions\TooManyRequestsException;
+use Spora\Scheduling\DueWorkDispatcher;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\HousekeepingLock;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,7 +22,9 @@ use Throwable;
 /**
  * Browser-driven housekeeping endpoint for client-worker mode.
  *
- * Called periodically (every 5 min) by every authed user's SharedWorker.
+ * Called periodically — every 5 minutes by default, configurable with
+ * `SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS` — by every authed
+ * user's SharedWorker.
  * Reaps orphaned RUNNING tasks (browser or server disconnected) and
  * synchronously dispatches + ticks any due scheduled run for an agent
  * the caller can see — the browser does NOT need to drive the result
@@ -28,6 +33,11 @@ use Throwable;
  * Trade-off: scheduled runs only DISPATCH while a browser is open (same
  * as before — no daemon). The synchronous tick completes the resulting
  * task without requiring the browser to stay open after dispatch.
+ *
+ * The plugin-owned work a plugin declares through
+ * {@see \Spora\Scheduling\DueWorkProviderInterface} is dispatched here too,
+ * scoped to the principals the caller may act for — the same scope the
+ * scheduled-run dispatch uses.
  */
 final class WorkerController
 {
@@ -47,6 +57,8 @@ final class WorkerController
         private readonly ScheduledRunProcessor $scheduledProcessor,
         private readonly int $staleMinutes,
         private readonly int $tickLeaseSeconds,
+        private readonly DueWorkDispatcher $dueWorkDispatcher,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -119,11 +131,39 @@ final class WorkerController
                 $this->tickLeaseSeconds,
             );
 
+            $this->dispatchDueWork($userId);
+
             return $this->successResponse($reaped, $this->scheduledProcessor->lastProcessed, $userId);
         } catch (Throwable $e) {
             return $this->errorResponse($e);
         } finally {
             $this->housekeepingLock->release();
+        }
+    }
+
+    /**
+     * Run the plugin-owned work that is due for the principals this caller
+     * may act for.
+     *
+     * Its own try/catch: a plugin that fails must not turn a housekeeping
+     * call into a 500. The dispatcher already isolates a provider that
+     * throws from the others; this catches what happens around it — the
+     * principal lookup, and anything the dispatcher itself did not expect.
+     */
+    private function dispatchDueWork(int $userId): void
+    {
+        try {
+            $principalIds = (new PrincipalResolver())->visiblePrincipalIds($userId);
+            if ($principalIds === []) {
+                return;
+            }
+
+            $this->dueWorkDispatcher->dispatch($principalIds);
+        } catch (Throwable $e) {
+            $this->logger->error('Due-work dispatch failed', [
+                'caller_user_id' => $userId,
+                'exception'      => $e,
+            ]);
         }
     }
 

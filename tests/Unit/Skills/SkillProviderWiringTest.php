@@ -66,7 +66,7 @@ it('defaults skillProviders() to an empty list on plugins and extensions', funct
 });
 
 it('collects provider class names from loaded plugins', function (): void {
-    expect(skillsPluginLoader()->skillProviderClasses())
+    expect(skillsPluginLoader()->providerClasses()->skills())
         ->toBe([StubSkillProvider::class]);
 });
 
@@ -74,7 +74,7 @@ it('returns an empty list when no plugins contribute providers', function (): vo
     $loader = new PluginLoader([]);
     $loader->boot();
 
-    expect($loader->skillProviderClasses())->toBe([]);
+    expect($loader->providerClasses()->skills())->toBe([]);
 });
 
 it('the container puts core first and plugin providers after', function (): void {
@@ -118,7 +118,7 @@ it('dedupes a class named by two plugins', function (): void {
 
     // Two plugins, one class. Without the unique() the registry would hold the
     // same instance twice and every list would show each of its skills twice.
-    expect($loader->skillProviderClasses())->toBe([StubSkillProvider::class, StubSkillProvider::class])
+    expect($loader->providerClasses()->skills())->toBe([StubSkillProvider::class, StubSkillProvider::class])
         ->and(makeSkillsContainer($loader)->get(SkillProviderRegistry::class)->sources())
         ->toBe(['filesystem', 'stub']);
 });

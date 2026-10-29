@@ -56,7 +56,9 @@ final class ConfigController
                 'enabled'                       => $this->workerRuntimeMode === WorkerRuntimeMode::Client,
                 'tick_endpoint'                 => '/api/v1/tasks/{taskId}/tick',
                 'housekeeping_endpoint'         => '/api/v1/worker/housekeeping',
-                'housekeeping_interval_seconds' => 300,
+                // The registry declares the default; the coalesce only fires
+                // for a hand-built `Config` that omits the key.
+                'housekeeping_interval_seconds' => $this->config->getInt('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS') ?? 300,
                 'tick_interval_ms'              => 2000,
                 'tick_lease_seconds'            => $this->tickLeaseSeconds,
             ],

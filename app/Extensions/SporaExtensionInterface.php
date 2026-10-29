@@ -149,4 +149,38 @@ interface SporaExtensionInterface
      * @return list<class-string<\Spora\Search\SearchProviderInterface>>
      */
     public function searchProviders(): array;
+
+    /**
+     * Due-work provider classes this extension contributes.
+     *
+     * A *data* hook listing the classes that carry work of their own to run
+     * on a cadence. Core's scheduler fires prompts at agents; it knows
+     * nothing about a plugin's own schedule — a publishing slot, a metrics
+     * sweep — so a plugin says "I have work that is due" and the worker hands
+     * it the principals it may act for.
+     *
+     * A provider owns its rows: it guarantees that two workers on the same
+     * install do not run the same unit of work, and core executes what it
+     * hands back. Read once at container build time into
+     * {@see \Spora\Scheduling\DueWorkProviderRegistry}; the loader asks the
+     * live plugin object on both cold and warm boot, so a plugin shipping a
+     * new provider without touching its manifest still gets it.
+     *
+     * @return list<class-string<\Spora\Scheduling\DueWorkProviderInterface>>
+     */
+    public function dueWorkProviders(): array;
+
+    /**
+     * Plugin-settings provider classes this extension contributes.
+     *
+     * A provider lists the operator-facing settings its plugin owns; the
+     * host rewrites them into its own key and group shape and renders them
+     * on the Plugins tab. Read once at container build time into
+     * {@see \Spora\Settings\PluginSettingsRegistry}; the loader asks the
+     * live plugin object on both cold and warm boot, so a plugin shipping a
+     * new provider without touching its manifest still gets it.
+     *
+     * @return list<class-string<\Spora\Settings\PluginSettingsProviderInterface>>
+     */
+    public function pluginSettingProviders(): array;
 }

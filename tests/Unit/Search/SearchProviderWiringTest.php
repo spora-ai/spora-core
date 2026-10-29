@@ -113,7 +113,7 @@ it('defaults searchProviders() to an empty list on plugins and extensions', func
 });
 
 it('collects provider class names from loaded plugins, in declaration order', function (): void {
-    expect(searchPluginLoader()->searchProviderClasses())
+    expect(searchPluginLoader()->providerClasses()->search())
         ->toBe([STUB_SEARCH_PROVIDER, RIVAL_SEARCH_PROVIDER]);
 });
 
@@ -121,7 +121,7 @@ it('returns an empty list when no plugins contribute providers', function (): vo
     $loader = new PluginLoader([]);
     $loader->boot();
 
-    expect($loader->searchProviderClasses())->toBe([]);
+    expect($loader->providerClasses()->search())->toBe([]);
 });
 
 it('core contributes no search provider, so nothing can precede a plugin', function (): void {
@@ -138,7 +138,7 @@ it('the merged list is plugin load order, deduped', function (): void {
     // merge from both sides.
     $loader = searchPluginLoader(SEARCH_FIXTURE_ROOT_MORE);
 
-    expect($loader->searchProviderClasses())
+    expect($loader->providerClasses()->search())
         ->toBe([STUB_SEARCH_PROVIDER, RIVAL_SEARCH_PROVIDER, LATER_SEARCH_PROVIDER, STUB_SEARCH_PROVIDER])
         ->and(makeSearchContainer($loader)->get('search_provider_classes_merged'))
         ->toBe([STUB_SEARCH_PROVIDER, RIVAL_SEARCH_PROVIDER, LATER_SEARCH_PROVIDER]);

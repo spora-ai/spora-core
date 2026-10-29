@@ -1,0 +1,12 @@
+{
+    "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
+    "slug": "fixture-plugin-settings-plugin",
+    "description": "Test fixture plugin contributing operator-facing settings.",
+    "class": "Tests\\Fixtures\\Plugins\\PluginSettingsPlugin\\Plugin",
+    "icon": "puzzle",
+    "autoload": {
+        "psr-4": {
+            "Tests\\Fixtures\\Plugins\\PluginSettingsPlugin\\": "src/"
+        }
+    }
+}

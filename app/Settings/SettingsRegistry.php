@@ -30,6 +30,11 @@ use Spora\Core\RequestOrigin;
  * `SPORA_ENV_FILE`) are deliberately NOT declared. They never entered the
  * config array, they are consumed while `Paths` itself is being built, and
  * showing an operator an editable-looking field for one would be a lie.
+ *
+ * A plugin's own settings join the same set through
+ * {@see PluginSettingsRegistry}: the registry is still the one authority on
+ * what a setting is, so a plugin-contributed key is accepted by the admin
+ * API, stored under the plugin's own group and resolved like any other.
  */
 final class SettingsRegistry
 {
@@ -56,11 +61,28 @@ final class SettingsRegistry
     /** @var array<string, SettingDefinition>|null */
     private ?array $definitions = null;
 
+    /** @var array<string, SettingDefinition>|null */
+    private ?array $merged = null;
+
+    /**
+     * True while the plugin settings are being collected.
+     *
+     * A plugin's settings provider may depend on the registry — the way the
+     * social provider depends on the configuration — and the registry is what
+     * asks the provider for its settings. A provider that reads the registry
+     * in its own constructor re-enters this one; the guard stops that read
+     * from recursing for ever.
+     */
+    private bool $collecting = false;
+
     private readonly SettingDeclarations $declarations;
 
-    public function __construct(Paths $paths)
+    private readonly ?PluginSettingsRegistry $pluginSettings;
+
+    public function __construct(Paths $paths, ?PluginSettingsRegistry $pluginSettings = null)
     {
         $this->declarations = new SettingDeclarations($paths);
+        $this->pluginSettings = $pluginSettings;
     }
 
     /**
@@ -68,7 +90,73 @@ final class SettingsRegistry
      */
     public function all(): array
     {
+        if ($this->merged !== null) {
+            return $this->merged;
+        }
+
+        // A provider that reads the registry while the settings are being
+        // collected gets the core declarations: the plugin ones are not there
+        // yet. The result is not memoised — the outer call merges the full
+        // set, and a set merged from a half-built registry would drop every
+        // plugin setting.
+        if ($this->collecting) {
+            return $this->coreDefinitions();
+        }
+
+        $core = $this->coreDefinitions();
+        $plugin = $this->pluginDefinitions();
+
+        // Core first, so a core key a plugin also claims keeps the core
+        // definition. The plugin registry rejects such a claim; this is the
+        // backstop that makes core win even if one slipped through.
+        return $this->merged = $core + $plugin;
+    }
+
+    /**
+     * The core declarations, without the plugin-contributed settings.
+     *
+     * The config is built from these alone: a plugin's settings provider may
+     * depend on the config, so the providers cannot be resolved while the
+     * config is being built.
+     *
+     * @return array<string, SettingDefinition> keyed by setting key
+     */
+    public function coreDefinitions(): array
+    {
         return $this->definitions ??= $this->declarations->build();
+    }
+
+    /**
+     * The plugin-contributed settings.
+     *
+     * @return array<string, SettingDefinition> keyed by setting key
+     */
+    public function pluginDefinitions(): array
+    {
+        if ($this->collecting) {
+            return [];
+        }
+
+        return $this->collectPluginDefinitions();
+    }
+
+    /**
+     * The plugin settings that did not make it, and why.
+     *
+     * A provider that cannot be resolved, or whose settings collide with a
+     * core setting, contributes nothing. The operator has to be able to see
+     * that: a setting that silently does not exist is a setting nobody
+     * configured.
+     *
+     * @return list<array{provider: string, message: string}>
+     */
+    public function pluginProblems(): array
+    {
+        // Resolving the definitions is what records a failure, so the
+        // problems are only known once they have been looked for.
+        $this->pluginDefinitions();
+
+        return $this->pluginSettings?->problems() ?? [];
     }
 
     /**
@@ -138,13 +226,13 @@ final class SettingsRegistry
     public function coerce(SettingDefinition $d, mixed $raw): mixed
     {
         if ($raw === null) {
-            return $d->default;
+            return $this->clamp($d, $d->default);
         }
         if (in_array($d->type, [SettingDefinition::TYPE_MULTI_SELECT, SettingDefinition::TYPE_LIST], true)) {
             return $this->normalizeList($d, $raw);
         }
 
-        return match ($d->transform) {
+        $value = match ($d->transform) {
             // Normalised, not validated: the router strips the prefix from
             // incoming paths, so `/spora` and `spora` must resolve the same.
             'app_prefix' => RequestOrigin::normalizePrefix((string) $raw),
@@ -163,6 +251,24 @@ final class SettingsRegistry
                 default => (string) $raw,
             },
         };
+
+        return $this->clamp($d, $value);
+    }
+
+    /**
+     * Hold a value to the bounds its definition declares.
+     *
+     * The floor is applied to every layer — the environment, `config.php` and
+     * the stored row — so a value written before the floor existed cannot
+     * slip past it.
+     */
+    public function clamp(SettingDefinition $d, mixed $value): mixed
+    {
+        if ($d->min === null || !is_numeric($value)) {
+            return $value;
+        }
+
+        return max($d->min, (int) $value);
     }
 
     /**
@@ -194,6 +300,9 @@ final class SettingsRegistry
      * Unlike {@see self::coerce()} this applies no `transform`: a row written
      * through {@see \Spora\Settings\SettingsRepository::put()} is canonical
      * already, one inserted by any other means comes back without it.
+     *
+     * The declared floor still applies: a row written by other means can
+     * carry a value below it.
      */
     public function decode(SettingDefinition $d, string $raw): mixed
     {
@@ -201,11 +310,13 @@ final class SettingsRegistry
             return $this->normalizeList($d, $this->maybeJsonDecode($raw));
         }
 
-        return match ($d->type) {
+        $value = match ($d->type) {
             SettingDefinition::TYPE_TOGGLE => filter_var($raw, FILTER_VALIDATE_BOOLEAN),
             SettingDefinition::TYPE_NUMBER => (int) $raw,
             default => $raw,
         };
+
+        return $this->clamp($d, $value);
     }
 
     /**
@@ -229,6 +340,19 @@ final class SettingsRegistry
         return $d->transform === 'image_types'
             ? self::coerceImageTypes((string) $raw)
             : self::tokenize((string) $raw);
+    }
+
+    /**
+     * @return array<string, SettingDefinition>
+     */
+    private function collectPluginDefinitions(): array
+    {
+        $this->collecting = true;
+        try {
+            return $this->pluginSettings?->definitions() ?? [];
+        } finally {
+            $this->collecting = false;
+        }
     }
 
     /**

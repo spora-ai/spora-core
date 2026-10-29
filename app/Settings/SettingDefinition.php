@@ -42,6 +42,7 @@ final readonly class SettingDefinition
      * @param list<array{value: string, label: string}> $options For `select`.
      * @param string     $validation   Regex the raw string must match, or '' for none.
      * @param string     $transform    Named coercion for a value the raw-string form cannot express.
+     * @param int|null   $min          Lowest value the setting accepts. Every layer is held to it.
      */
     public function __construct(
         public string $key,
@@ -56,5 +57,6 @@ final readonly class SettingDefinition
         public array $options = [],
         public string $validation = '',
         public string $transform = '',
+        public ?int $min = null,
     ) {}
 }

@@ -16,9 +16,11 @@ use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
+use Spora\Scheduling\DueWorkDispatcher;
 use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -35,6 +37,7 @@ use Throwable;
  *   - WorkerReaper:          orphan task reaper
  *   - WorkerQueueProcessor:  queue/retry/child-process lifecycle
  *   - ScheduledRunProcessor: scheduled-run claim, dispatch, finalize
+ *   - DueWorkDispatcher:     plugin-owned work that is due
  *   - AgentApiCallbackDispatcher: Agent API webhook delivery
  */
 final class WorkerRunCommand extends Command
@@ -43,8 +46,22 @@ final class WorkerRunCommand extends Command
 
     private const REAP_INTERVAL_SECONDS = 300;
 
+    /**
+     * Seconds between refreshes of the principal list the worker acts for.
+     *
+     * The list is a full scan of the principals table, and the daemon runs
+     * the loop twice a second by default — reading it on every iteration
+     * would cost two table scans a second for the life of the daemon.
+     */
+    private const PRINCIPAL_SCOPE_REFRESH_SECONDS = 60;
+
     private bool $shouldQuit = false;
     private mixed $lockFd = null;
+
+    /** @var list<int>|null */
+    private ?array $principalScope = null;
+
+    private int $principalScopeReadAt = 0;
 
     /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
     public int $lastScheduledProcessedCount = 0;
@@ -55,6 +72,9 @@ final class WorkerRunCommand extends Command
 
     /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?AgentApiCallbackDispatcher $callbackDispatcher;
+
+    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
+    private readonly ?DueWorkDispatcher $dueWorkDispatcher;
 
     public function __construct(
         private readonly Database            $database,
@@ -73,6 +93,9 @@ final class WorkerRunCommand extends Command
         // the class must still be able to build this.
         $this->callbackDispatcher = $container->has(AgentApiCallbackDispatcher::class)
             ? $container->get(AgentApiCallbackDispatcher::class)
+            : null;
+        $this->dueWorkDispatcher = $container->has(DueWorkDispatcher::class)
+            ? $container->get(DueWorkDispatcher::class)
             : null;
         $this->queueProcessor = new WorkerQueueProcessor(
             $orchestrator,
@@ -366,6 +389,7 @@ final class WorkerRunCommand extends Command
         if ($options->isDaemon || $options->isOnce) {
             $this->scheduledRunProcessor->process($output);
             $this->lastScheduledProcessedCount = $this->scheduledRunProcessor->lastProcessed;
+            $this->dispatchDueWork();
             $this->dispatchAgentApiCallbacks();
         }
 
@@ -391,6 +415,42 @@ final class WorkerRunCommand extends Command
             return time();
         }
         return $lastReapAt;
+    }
+
+    /**
+     * Run the plugin-owned work that is due.
+     *
+     * The server worker has no caller, so it acts for the whole install —
+     * the same scope its scheduled-run claim has. A plugin that fails must
+     * not take the worker with it, so everything here is contained.
+     */
+    private function dispatchDueWork(): void
+    {
+        if ($this->dueWorkDispatcher === null) {
+            return;
+        }
+
+        // The principal list is a full scan of the principals table, and the
+        // daemon runs the loop twice a second by default — reading it on
+        // every iteration would cost two table scans a second for the life
+        // of the daemon. A principal created while the daemon runs is picked
+        // up within the refresh interval.
+        $now = time();
+        if ($this->principalScope === null
+            || ($now - $this->principalScopeReadAt) >= self::PRINCIPAL_SCOPE_REFRESH_SECONDS) {
+            $this->principalScope = (new PrincipalResolver())->allPrincipalIds();
+            $this->principalScopeReadAt = $now;
+        }
+
+        try {
+            $executed = $this->dueWorkDispatcher->dispatch($this->principalScope);
+
+            if ($executed > 0) {
+                $this->logger->info('Due work executed', ['executed' => $executed]);
+            }
+        } catch (Throwable $e) {
+            $this->logger->error('Due-work dispatch failed', ['exception' => $e]);
+        }
     }
 
     /**

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Core\Config;
+use Spora\Core\ConfigFactory;
 use Spora\Core\Paths;
 use Spora\Http\ConfigController;
 use Spora\Settings\SettingDefinition;
@@ -204,3 +205,75 @@ test('index() returns all three runtime feature flag keys together', function ()
     $body = json_decode($response->getContent(), true);
     expect($body)->toHaveKeys(['allow_registration', 'plugin_install_enabled', 'plugin_catalog_enabled']);
 });
+
+test('the housekeeping interval is a declared setting, so it has a default', function (): void {
+    $definition = (new SettingsRegistry(new Paths(BASE_PATH)))
+        ->get('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    expect($definition)->not->toBeNull()
+        ->and($definition->default)->toBe(300)
+        ->and($definition->type)->toBe(SettingDefinition::TYPE_NUMBER);
+});
+
+test('the housekeeping interval comes from the environment', function (): void {
+    $_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS'] = '45';
+
+    try {
+        $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+        expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(45);
+    } finally {
+        unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+    }
+});
+
+test('the housekeeping interval is 300 when nothing sets it', function (): void {
+    unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+    putenv('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+    expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(300);
+});
+
+/**
+ * The browser's housekeeping loop is what runs the due work in client-worker
+ * mode, and the endpoint allows six calls a minute. An interval below ten
+ * seconds is answered with 429, and an interval of zero switches the loop
+ * off altogether.
+ */
+test('the housekeeping interval never falls below ten seconds', function (string $value): void {
+    $_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS'] = $value;
+
+    try {
+        $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+        expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(10);
+    } finally {
+        unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+        putenv('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+    }
+})->with([
+    'zero'         => ['0'],
+    'below ten'    => ['5'],
+    'not a number' => ['soon'],
+]);
+
+test('the housekeeping interval says it has a floor', function (): void {
+    $definition = (new SettingsRegistry(new Paths(BASE_PATH)))
+        ->get('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    expect($definition?->min)->toBe(10)
+        ->and($definition?->description)->toContain('10 seconds');
+});
+
+/**
+ * The configuration a request sees when the environment is the only layer
+ * that says anything — the same path the kernel takes at boot.
+ */
+function configFromEnvironment(): Config
+{
+    $paths = new Paths(BASE_PATH);
+
+    return (new ConfigFactory(new SettingsRegistry($paths), $paths))->create();
+}

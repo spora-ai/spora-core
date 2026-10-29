@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Core;
 
+use Spora\Settings\SettingDefinition;
 use Spora\Settings\SettingsRegistry;
 
 /**
@@ -11,9 +12,15 @@ use Spora\Settings\SettingsRegistry;
  * opens: registry defaults, `config.php`, and `.env` / the OS environment.
  *
  * The fourth layer is applied later, by `Config::applySettingsOverlay()`.
+ *
+ * The plugin-contributed settings are a fifth layer, and they are deferred:
+ * see {@see self::create()}.
  */
 final class ConfigFactory
 {
+    /** @var array<string, mixed>|null The loaded `config.php`, read once. */
+    private ?array $configFile = null;
+
     public function __construct(
         private readonly SettingsRegistry $registry,
         private readonly Paths $paths,
@@ -21,15 +28,37 @@ final class ConfigFactory
 
     public function create(): Config
     {
-        $file = $this->configFileValues();
-        $env  = $this->envValues();
+        ['values' => $values, 'sources' => $sources] = $this->resolveValues($this->registry->coreDefinitions());
+
+        $config = new Config($values, $sources);
+
+        // The plugin-contributed settings are a second pass. A plugin's
+        // settings provider may depend on the config — it reads the app URL
+        // and the credentials to describe its settings — and the container
+        // refuses that cycle, so the providers can only be resolved once the
+        // config exists.
+        $config->deferLayer(fn(): array => $this->resolveValues($this->registry->pluginDefinitions()));
+
+        return $config;
+    }
+
+    /**
+     * The boot value of every given setting, and where it came from.
+     *
+     * @param array<string, SettingDefinition> $definitions
+     * @return array{values: array<string, mixed>, sources: array<string, string>}
+     */
+    private function resolveValues(array $definitions): array
+    {
+        $file = $this->configFileValues($definitions);
+        $env  = $this->envValues($definitions);
 
         $values = [];
         $sources = [];
-        foreach ($this->registry->all() as $key => $definition) {
+        foreach ($definitions as $key => $definition) {
             $raw = $env[$key] ?? $file[$key] ?? null;
             if ($raw === null) {
-                $values[$key] = $definition->default;
+                $values[$key] = $this->registry->clamp($definition, $definition->default);
                 $sources[$key] = Config::SOURCE_DEFAULT;
 
                 continue;
@@ -40,16 +69,17 @@ final class ConfigFactory
                 : Config::SOURCE_CONFIG_FILE;
         }
 
-        return new Config($values, $sources);
+        return ['values' => $values, 'sources' => $sources];
     }
 
     /**
+     * @param array<string, SettingDefinition> $definitions
      * @return array<string, string> keyed by `SPORA_*`
      */
-    private function envValues(): array
+    private function envValues(array $definitions): array
     {
         $out = [];
-        foreach (array_keys($this->registry->all()) as $key) {
+        foreach (array_keys($definitions) as $key) {
             // `?? null` rather than a truthiness check, because phpdotenv's default
             // adapter writes into `$_ENV` and `??` finds it there. An env var
             // set to the empty string therefore arrives as `''`, not as null
@@ -76,12 +106,12 @@ final class ConfigFactory
      *
      * A key present in both shapes resolves to the flat one.
      *
+     * @param array<string, SettingDefinition> $definitions
      * @return array<string, mixed>
      */
-    private function configFileValues(): array
+    private function configFileValues(array $definitions): array
     {
-        $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $this->paths->config());
-        $loaded = UserConfig::load($configPath);
+        $loaded = $this->loadedConfigFile();
         if ($loaded === []) {
             return [];
         }
@@ -93,13 +123,32 @@ final class ConfigFactory
                 $out[$newKey] = $value;
             }
         }
-        foreach (array_keys($this->registry->all()) as $key) {
+        foreach (array_keys($definitions) as $key) {
             if (array_key_exists($key, $loaded)) {
                 $out[$key] = $loaded[$key];
             }
         }
 
         return $out;
+    }
+
+    /**
+     * The loaded `config.php`, read once.
+     *
+     * The file is read for the core settings and again for the plugin ones;
+     * reading it twice would run the file twice.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadedConfigFile(): array
+    {
+        if ($this->configFile !== null) {
+            return $this->configFile;
+        }
+
+        $configPath = $_ENV['SPORA_CONFIG_PATH'] ?? (getenv('SPORA_CONFIG_PATH') ?: $this->paths->config());
+
+        return $this->configFile = UserConfig::load($configPath);
     }
 
     private static function dig(array $source, string $dotPath): mixed

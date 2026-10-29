@@ -113,4 +113,16 @@ abstract class AbstractExtension implements SporaExtensionInterface
     {
         return [];
     }
+
+    /** @return list<class-string<\Spora\Scheduling\DueWorkProviderInterface>> */
+    public function dueWorkProviders(): array
+    {
+        return [];
+    }
+
+    /** @return list<class-string<\Spora\Settings\PluginSettingsProviderInterface>> */
+    public function pluginSettingProviders(): array
+    {
+        return [];
+    }
 }
