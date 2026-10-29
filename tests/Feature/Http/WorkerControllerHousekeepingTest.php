@@ -10,6 +10,8 @@ use Spora\Auth\AuthService;
 use Spora\Console\Worker\ScheduledRunProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Http\WorkerController;
+use Spora\Scheduling\DueWorkDispatcher;
+use Spora\Scheduling\DueWorkProviderRegistry;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\HousekeepingLock;
 use Spora\Services\MercurePublisherInterface;
@@ -60,6 +62,8 @@ function makeHousekeepingController(WorkerRuntimeMode $runtimeMode): array
         $scheduledProcessor,
         60,
         600,
+        new DueWorkDispatcher(new DueWorkProviderRegistry(), new NullLogger()),
+        new NullLogger(),
     );
 
     return [

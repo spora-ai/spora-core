@@ -31,6 +31,8 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\WorkerController;
 use Spora\Models\MailTemplate;
 use Spora\Plugins\PluginLoader;
+use Spora\Scheduling\DueWorkDispatcher;
+use Spora\Scheduling\DueWorkProviderRegistry;
 use Spora\Search\SearchProviderRegistry;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentServiceInterface;
@@ -186,6 +188,8 @@ final class OrchestratorContainerBindings
                     // fires for a hand-built `Config` that omits them.
                     $config->getInt('SPORA_WORKER_STALE_MINUTES') ?? 60,
                     $config->getInt('SPORA_TICK_LEASE_SECONDS') ?? 600,
+                    $c->get(DueWorkDispatcher::class),
+                    $c->get(LoggerInterface::class),
                 );
             },
         ];
@@ -389,6 +393,34 @@ final class OrchestratorContainerBindings
                 }
 
                 return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
+            },
+
+            // Core ships no due-work provider: a plugin's own schedule is
+            // something only the plugin knows about. The empty left-hand list
+            // is why the merge below is *pure plugin load order*.
+            'due_work_provider_classes' => [],
+
+            'due_work_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('due_work_provider_classes'),
+                    $c->get(PluginLoader::class)->dueWorkProviderClasses(),
+                )));
+            },
+
+            DueWorkProviderRegistry::class => static function (ContainerInterface $c): DueWorkProviderRegistry {
+                $providers = [];
+                foreach ($c->get('due_work_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new DueWorkProviderRegistry($providers);
+            },
+
+            DueWorkDispatcher::class => static function (ContainerInterface $c): DueWorkDispatcher {
+                return new DueWorkDispatcher(
+                    $c->get(DueWorkProviderRegistry::class),
+                    $c->get(LoggerInterface::class),
+                );
             },
 
             // No cycle: the scanner needs PluginLoader, Paths and AppLoader,

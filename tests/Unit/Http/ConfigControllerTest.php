@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Core\Config;
+use Spora\Core\ConfigFactory;
 use Spora\Core\Paths;
 use Spora\Http\ConfigController;
 use Spora\Settings\SettingDefinition;
@@ -204,3 +205,44 @@ test('index() returns all three runtime feature flag keys together', function ()
     $body = json_decode($response->getContent(), true);
     expect($body)->toHaveKeys(['allow_registration', 'plugin_install_enabled', 'plugin_catalog_enabled']);
 });
+
+test('the housekeeping interval is a declared setting, so it has a default', function (): void {
+    $definition = (new SettingsRegistry(new Paths(BASE_PATH)))
+        ->get('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    expect($definition)->not->toBeNull()
+        ->and($definition->default)->toBe(300)
+        ->and($definition->type)->toBe(SettingDefinition::TYPE_NUMBER);
+});
+
+test('the housekeeping interval comes from the environment', function (): void {
+    $_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS'] = '45';
+
+    try {
+        $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+        expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(45);
+    } finally {
+        unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+    }
+});
+
+test('the housekeeping interval is 300 when nothing sets it', function (): void {
+    unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+    putenv('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+    expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(300);
+});
+
+/**
+ * The configuration a request sees when the environment is the only layer
+ * that says anything — the same path the kernel takes at boot.
+ */
+function configFromEnvironment(): Config
+{
+    $paths = new Paths(BASE_PATH);
+
+    return (new ConfigFactory(new SettingsRegistry($paths), $paths))->create();
+}

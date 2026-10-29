@@ -183,4 +183,26 @@ abstract class AbstractPlugin implements PluginInterface
     {
         return [];
     }
+
+    /**
+     * Due-work providers this plugin contributes. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::dueWorkProviders()}.
+     *
+     * @return list<class-string<\Spora\Scheduling\DueWorkProviderInterface>>
+     */
+    public function dueWorkProviders(): array
+    {
+        return [];
+    }
+
+    /**
+     * Plugin-settings providers this plugin contributes. See
+     * {@see \Spora\Extensions\SporaExtensionInterface::pluginSettingProviders()}.
+     *
+     * @return list<class-string<\Spora\Settings\PluginSettingsProviderInterface>>
+     */
+    public function pluginSettingProviders(): array
+    {
+        return [];
+    }
 }

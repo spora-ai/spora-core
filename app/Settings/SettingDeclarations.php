@@ -248,6 +248,15 @@ final class SettingDeclarations
                 validation: self::VALIDATION_UINT,
             ),
             new SettingDefinition(
+                key: 'SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS',
+                label: 'Client housekeeping interval',
+                type: SettingDefinition::TYPE_NUMBER,
+                default: 300,
+                section: 'worker',
+                description: 'Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests.',
+                validation: self::VALIDATION_UINT,
+            ),
+            new SettingDefinition(
                 key: 'SPORA_MAX_WORKERS',
                 label: 'Maximum concurrent workers',
                 type: SettingDefinition::TYPE_NUMBER,

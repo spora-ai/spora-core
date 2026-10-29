@@ -17,6 +17,7 @@ use Spora\Extensions\AppLoader;
 use Spora\Http\ToolController;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\ToolConfigService;
+use Spora\Settings\PluginSettingsRegistry;
 use Spora\Settings\SettingsRegistry;
 use Spora\Settings\SettingsRepository;
 use Spora\Tools\CalculatorTool;
@@ -60,12 +61,16 @@ function makeFakeContainer(?Config $config = null): Psr\Container\ContainerInter
             if ($id === SettingsRegistry::class) {
                 return new SettingsRegistry($this->paths);
             }
+            if ($id === PluginSettingsRegistry::class) {
+                return new PluginSettingsRegistry();
+            }
             throw new RuntimeException("Unexpected container lookup: $id");
         }
         public function has(string $id): bool
         {
             return $id === Paths::class
                 || $id === SettingsRegistry::class
+                || $id === PluginSettingsRegistry::class
                 || ($id === Config::class && $this->config !== null);
         }
     };
@@ -192,6 +197,7 @@ it('all() returns the merged definitions array', function (): void {
     expect($defs)->toBeArray();
     expect($defs)->toHaveKey(Config::class);
     expect($defs)->toHaveKey(SettingsRegistry::class);
+    expect($defs)->toHaveKey(PluginSettingsRegistry::class);
     expect($defs)->toHaveKey(SettingsRepository::class);
     expect($defs)->toHaveKey('tool_classes');
     expect($defs)->toHaveKey('llm_driver_classes');
@@ -365,6 +371,38 @@ it('coreServiceDefinitions resolves core services', function (): void {
 
     unset($kernel);
     gc_collect_cycles();
+});
+
+/**
+ * `spora:install` reaches the installer through the container, so the
+ * container's installer has to carry the plugin loader. An autowired one
+ * arrives with a null loader, and the plugin migrations then never run:
+ * the command reports a schema that is up to date while the plugin's
+ * tables are missing.
+ */
+it('the container hands the schema installer the plugin loader, so plugin migrations run', function (): void {
+    $pluginsDir = BASE_PATH . '/tests/Fixtures/plugins_with_migrations';
+
+    $_ENV['SPORA_PLUGINS_DIR'] = $pluginsDir;
+    putenv("SPORA_PLUGINS_DIR={$pluginsDir}");
+    $_ENV['SPORA_DB_PATH'] = ':memory:';
+    putenv('SPORA_DB_PATH=:memory:');
+
+    try {
+        $kernel = new Kernel();
+        $container = $kernel->getContainer();
+        // Resolving the database opens the connection the installer migrates.
+        $container->get(Spora\Core\Database::class);
+
+        $installer = $container->get(Spora\Core\DatabaseSchemaInstaller::class);
+        $installer->install();
+
+        expect(Illuminate\Database\Capsule\Manager::schema()->hasTable('plugin_widgets'))->toBeTrue();
+    } finally {
+        unset($_ENV['SPORA_PLUGINS_DIR'], $_ENV['SPORA_DB_PATH']);
+        putenv('SPORA_PLUGINS_DIR');
+        putenv('SPORA_DB_PATH');
+    }
 });
 
 it('every factory closure in the definitions array can be invoked', function (): void {

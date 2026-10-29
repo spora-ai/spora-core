@@ -162,6 +162,23 @@ final class PrincipalResolver
     }
 
     /**
+     * Every principal in the install.
+     *
+     * The server worker has no caller, so it acts for the whole install —
+     * the same scope its scheduled-run claim has, which is not scoped at all.
+     * This is that scope as a list, for the callers that have to name the
+     * principals they may act for.
+     *
+     * @return list<int>
+     */
+    public function allPrincipalIds(): array
+    {
+        $ids = Principal::query()->pluck('id');
+
+        return array_map(static fn(mixed $id): int => (int) $id, $ids->all());
+    }
+
+    /**
      * The user ids that can act on behalf of this principal:
      * - user-principal: [principal->user_id]
      * - group-principal: every member of principal->group_id

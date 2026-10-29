@@ -16,9 +16,11 @@ use Spora\Console\WorkerLoopOptions;
 use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
+use Spora\Scheduling\DueWorkDispatcher;
 use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -35,6 +37,7 @@ use Throwable;
  *   - WorkerReaper:          orphan task reaper
  *   - WorkerQueueProcessor:  queue/retry/child-process lifecycle
  *   - ScheduledRunProcessor: scheduled-run claim, dispatch, finalize
+ *   - DueWorkDispatcher:     plugin-owned work that is due
  *   - AgentApiCallbackDispatcher: Agent API webhook delivery
  */
 final class WorkerRunCommand extends Command
@@ -56,6 +59,9 @@ final class WorkerRunCommand extends Command
     /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?AgentApiCallbackDispatcher $callbackDispatcher;
 
+    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
+    private readonly ?DueWorkDispatcher $dueWorkDispatcher;
+
     public function __construct(
         private readonly Database            $database,
         OrchestratorInterface                $orchestrator,
@@ -73,6 +79,9 @@ final class WorkerRunCommand extends Command
         // the class must still be able to build this.
         $this->callbackDispatcher = $container->has(AgentApiCallbackDispatcher::class)
             ? $container->get(AgentApiCallbackDispatcher::class)
+            : null;
+        $this->dueWorkDispatcher = $container->has(DueWorkDispatcher::class)
+            ? $container->get(DueWorkDispatcher::class)
             : null;
         $this->queueProcessor = new WorkerQueueProcessor(
             $orchestrator,
@@ -366,6 +375,7 @@ final class WorkerRunCommand extends Command
         if ($options->isDaemon || $options->isOnce) {
             $this->scheduledRunProcessor->process($output);
             $this->lastScheduledProcessedCount = $this->scheduledRunProcessor->lastProcessed;
+            $this->dispatchDueWork();
             $this->dispatchAgentApiCallbacks();
         }
 
@@ -391,6 +401,32 @@ final class WorkerRunCommand extends Command
             return time();
         }
         return $lastReapAt;
+    }
+
+    /**
+     * Run the plugin-owned work that is due.
+     *
+     * The server worker has no caller, so it acts for the whole install —
+     * the same scope its scheduled-run claim has. A plugin that fails must
+     * not take the worker with it, so everything here is contained.
+     */
+    private function dispatchDueWork(): void
+    {
+        if ($this->dueWorkDispatcher === null) {
+            return;
+        }
+
+        try {
+            $executed = $this->dueWorkDispatcher->dispatch(
+                (new PrincipalResolver())->allPrincipalIds(),
+            );
+
+            if ($executed > 0) {
+                $this->logger->info('Due work executed', ['executed' => $executed]);
+            }
+        } catch (Throwable $e) {
+            $this->logger->error('Due-work dispatch failed', ['exception' => $e]);
+        }
     }
 
     /**

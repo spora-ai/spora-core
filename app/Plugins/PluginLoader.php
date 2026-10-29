@@ -320,6 +320,46 @@ final class PluginLoader
     }
 
     /**
+     * All {@see \Spora\Scheduling\DueWorkProviderInterface} class FQCNs
+     * contributed by loaded plugins, merged into the container's due-work
+     * provider list. Mirrors {@see searchProviderClasses()}.
+     *
+     * @return list<class-string<\Spora\Scheduling\DueWorkProviderInterface>>
+     */
+    public function dueWorkProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->dueWorkProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
+     * All {@see \Spora\Settings\PluginSettingsProviderInterface} class FQCNs
+     * contributed by loaded plugins, merged into the container's plugin
+     * settings list. Mirrors {@see searchProviderClasses()}.
+     *
+     * @return list<class-string<\Spora\Settings\PluginSettingsProviderInterface>>
+     */
+    public function pluginSettingProviderClasses(): array
+    {
+        $classes = [];
+
+        foreach ($this->plugins as $plugin) {
+            foreach ($plugin->pluginSettingProviders() as $class) {
+                $classes[] = $class;
+            }
+        }
+
+        return $classes;
+    }
+
+    /**
      * All loaded plugins, indexed by their manifest slug.
      *
      * @return array<string, PluginInterface>

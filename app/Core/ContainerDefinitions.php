@@ -10,8 +10,10 @@ use InvalidArgumentException;
 use Monolog\Handler\StreamHandler;
 use Monolog\Level;
 use Monolog\Logger as MonologLogger;
+use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
@@ -187,6 +189,8 @@ use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
+use Spora\Settings\PluginSettingsProviderInterface;
+use Spora\Settings\PluginSettingsRegistry;
 use Spora\Settings\SettingsRegistry;
 use Spora\Settings\SettingsRepository;
 use Spora\Skills\SkillProviderRegistry;
@@ -251,8 +255,44 @@ final class ContainerDefinitions
     private static function configDefinition(): array
     {
         return [
+            // The settings a plugin contributes are read from the live plugin
+            // objects, not from a cached list: a plugin that ships a provider
+            // without touching its manifest is picked up on the next boot.
+            PluginSettingsRegistry::class => static function (ContainerInterface $c): PluginSettingsRegistry {
+                // The plugin loader is the kernel's live instance. A container
+                // built from these definitions alone has none, and PHP-DI
+                // would autowire it and fail on its constructor arguments —
+                // no loader means no plugins, so there is nothing to
+                // contribute.
+                $classes = [];
+                try {
+                    $classes = $c->get(PluginLoader::class)->pluginSettingProviderClasses();
+                } catch (ContainerExceptionInterface) {
+                    // Intentionally empty.
+                }
+
+                return new PluginSettingsRegistry(
+                    $classes,
+                    static function (string $class) use ($c): PluginSettingsProviderInterface {
+                        $provider = $c->get($class);
+                        if (!$provider instanceof PluginSettingsProviderInterface) {
+                            throw new RuntimeException(sprintf(
+                                'Plugin settings provider "%s" does not implement %s.',
+                                $class,
+                                PluginSettingsProviderInterface::class,
+                            ));
+                        }
+
+                        return $provider;
+                    },
+                );
+            },
+
             SettingsRegistry::class => static fn(ContainerInterface $c): SettingsRegistry
-                => new SettingsRegistry($c->get(Paths::class)),
+                => new SettingsRegistry(
+                    $c->get(Paths::class),
+                    $c->get(PluginSettingsRegistry::class),
+                ),
 
             SettingsRepository::class => static fn(ContainerInterface $c): SettingsRepository
                 => new SettingsRepository(
@@ -314,6 +354,22 @@ final class ContainerDefinitions
                 );
                 $db->bootDatabaseConnectionOnly();
                 return $db;
+            },
+
+            // The CLI reaches the installer through the container, and an
+            // autowired installer arrives with a null plugin loader: the
+            // plugin migrations would then never run, and `spora:install`
+            // would report a schema that is up to date while a plugin's
+            // tables are missing. The web path never had this problem —
+            // `Database::boot()` builds its own installer with the loader.
+            DatabaseSchemaInstaller::class => static function (ContainerInterface $c): DatabaseSchemaInstaller {
+                return new DatabaseSchemaInstaller(
+                    $c->get(PluginLoader::class),
+                    $c->get(Database::class)->getStampPath(),
+                    null,
+                    $c->get(Paths::class),
+                    $c->has(AppLoader::class) ? $c->get(AppLoader::class) : null,
+                );
             },
 
             LoggerInterface::class => static function (ContainerInterface $c): LoggerInterface {

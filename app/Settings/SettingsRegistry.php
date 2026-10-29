@@ -30,6 +30,11 @@ use Spora\Core\RequestOrigin;
  * `SPORA_ENV_FILE`) are deliberately NOT declared. They never entered the
  * config array, they are consumed while `Paths` itself is being built, and
  * showing an operator an editable-looking field for one would be a lie.
+ *
+ * A plugin's own settings join the same set through
+ * {@see PluginSettingsRegistry}: the registry is still the one authority on
+ * what a setting is, so a plugin-contributed key is accepted by the admin
+ * API, stored under the plugin's own group and resolved like any other.
  */
 final class SettingsRegistry
 {
@@ -56,11 +61,17 @@ final class SettingsRegistry
     /** @var array<string, SettingDefinition>|null */
     private ?array $definitions = null;
 
+    /** @var array<string, SettingDefinition>|null */
+    private ?array $merged = null;
+
     private readonly SettingDeclarations $declarations;
 
-    public function __construct(Paths $paths)
+    private readonly ?PluginSettingsRegistry $pluginSettings;
+
+    public function __construct(Paths $paths, ?PluginSettingsRegistry $pluginSettings = null)
     {
         $this->declarations = new SettingDeclarations($paths);
+        $this->pluginSettings = $pluginSettings;
     }
 
     /**
@@ -68,7 +79,14 @@ final class SettingsRegistry
      */
     public function all(): array
     {
-        return $this->definitions ??= $this->declarations->build();
+        if ($this->merged !== null) {
+            return $this->merged;
+        }
+
+        $core = $this->definitions ??= $this->declarations->build();
+        $plugin = $this->pluginSettings?->definitions() ?? [];
+
+        return $this->merged = $plugin === [] ? $core : array_merge($core, $plugin);
     }
 
     /**
