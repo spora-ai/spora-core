@@ -10,7 +10,7 @@ use Spora\Speech\TranscriptionResult;
 
 /**
  * Test fixture provider — exercises the plugin discovery path on
- * {@see \Spora\Plugins\PluginLoader::speechToTextProviderClasses()}.
+ * {@see \Spora\Plugins\PluginProviderClasses::speechToText()}.
  * Reports `isConfigured() === false` so no real STT call is attempted
  * during the test; throws if transcribe() ever gets called.
  */

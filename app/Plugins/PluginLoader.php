@@ -146,38 +146,6 @@ final class PluginLoader
     }
 
     /**
-     * Speech-to-text provider class FQCNs contributed by loaded plugins.
-     *
-     * Mirrors {@see toolClasses()} — the speech registry uses this list
-     * to discover plugin-contributed
-     * {@see \Spora\Speech\SpeechToTextProviderInterface} implementations.
-     *
-     * Core ships its own {@see \Spora\Speech\OpenAiCompatibleTranscriber}
-     * for the OpenAI-multipart family (Mistral, OpenAI Whisper, Groq,
-     * Lemonfox, Fireworks, LocalAI, future) — it lives in
-     * `speech_to_text_provider_classes` (not here) so adding a new
-     * OpenAI-multipart vendor is a configuration row, not a code change.
-     * Plugins that need a bespoke wire shape beyond the OpenAI multipart
-     * (today: {@see Muse\MuseTranscribeProvider} for the
-     * Meta Muse STT endpoint with its custom two-part multipart and
-     * ffmpeg preprocessing) contribute their provider classes here.
-     *
-     * @return list<class-string>
-     */
-    public function speechToTextProviderClasses(): array
-    {
-        $classes = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->speechToTextProviders() as $class) {
-                $classes[] = $class;
-            }
-        }
-
-        return $classes;
-    }
-
-    /**
      * All agent-template directory roots contributed by loaded plugins, paired
      * with the contributing plugin's slug. Mirrors {@see skillPaths()}; the
      * container aggregates these alongside
@@ -224,56 +192,6 @@ final class PluginLoader
     }
 
     /**
-     * All {@see \Spora\Skills\SkillProviderInterface} classes contributed by
-     * loaded plugins, as a static class list. Mirrors
-     * {@see speechToTextProviderClasses()}.
-     *
-     * The container reads this once at build time and resolves the classes
-     * itself. A mutable registry populated from `boot()` would arrive too late
-     * — the registry that would read it is built in the same pass — and would
-     * need a second owner. That is also why the provider seam is a data hook
-     * rather than a fourth PSR-14 event: nothing wires subscribers before the
-     * container is built, so a `boot()`-fired event reaches no listeners.
-     *
-     * @return list<class-string<\Spora\Skills\SkillProviderInterface>>
-     */
-    public function skillProviderClasses(): array
-    {
-        $classes = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->skillProviders() as $class) {
-                $classes[] = $class;
-            }
-        }
-
-        return $classes;
-    }
-
-    /**
-     * All {@see \Spora\Search\SearchProviderInterface} class FQCNs contributed by
-     * loaded plugins, merged into the container's search provider list.
-     *
-     * Mirrors {@see skillProviderClasses()} rather than being generic over both:
-     * the two hooks have independent precedence, and one generic helper would
-     * have to invent a merge order for them.
-     *
-     * @return list<class-string<\Spora\Search\SearchProviderInterface>>
-     */
-    public function searchProviderClasses(): array
-    {
-        $classes = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->searchProviders() as $class) {
-                $classes[] = $class;
-            }
-        }
-
-        return $classes;
-    }
-
-    /**
      * All admin-panel App class FQCNs contributed by loaded plugins.
      * Merged into the host AppRegistry at container build time.
      *
@@ -295,7 +213,7 @@ final class PluginLoader
     /**
      * All shared settings group classes contributed by loaded plugins, fanned
      * out into {@see \Spora\Tools\SharedSettingsResolver} at container build
-     * time. Mirrors {@see searchProviderClasses()}.
+     * time. Mirrors {@see PluginProviderClasses::pluginSettings()}.
      *
      * Nothing is recorded in the {@see PluginLoaderCache} sidecar for this
      * hook, and nothing needs to be: `boot()` re-instantiates the plugin
@@ -320,43 +238,15 @@ final class PluginLoader
     }
 
     /**
-     * All {@see \Spora\Scheduling\DueWorkProviderInterface} class FQCNs
-     * contributed by loaded plugins, merged into the container's due-work
-     * provider list. Mirrors {@see searchProviderClasses()}.
+     * The provider classes the loaded plugins contribute.
      *
-     * @return list<class-string<\Spora\Scheduling\DueWorkProviderInterface>>
+     * Split out of this class so it stays under the SonarCloud S1448
+     * 20-method-per-class ceiling: the loader finds the plugins, and
+     * {@see PluginProviderClasses} answers what each of them contributes.
      */
-    public function dueWorkProviderClasses(): array
+    public function providerClasses(): PluginProviderClasses
     {
-        $classes = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->dueWorkProviders() as $class) {
-                $classes[] = $class;
-            }
-        }
-
-        return $classes;
-    }
-
-    /**
-     * All {@see \Spora\Settings\PluginSettingsProviderInterface} class FQCNs
-     * contributed by loaded plugins, merged into the container's plugin
-     * settings list. Mirrors {@see searchProviderClasses()}.
-     *
-     * @return list<class-string<\Spora\Settings\PluginSettingsProviderInterface>>
-     */
-    public function pluginSettingProviderClasses(): array
-    {
-        $classes = [];
-
-        foreach ($this->plugins as $plugin) {
-            foreach ($plugin->pluginSettingProviders() as $class) {
-                $classes[] = $class;
-            }
-        }
-
-        return $classes;
+        return new PluginProviderClasses($this->plugins);
     }
 
     /**

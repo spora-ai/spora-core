@@ -96,7 +96,7 @@ it('defaults dueWorkProviders() to an empty list on plugins and extensions', fun
 });
 
 it('collects provider class names from loaded plugins, in declaration order', function (): void {
-    expect(dueWorkPluginLoader()->dueWorkProviderClasses())
+    expect(dueWorkPluginLoader()->providerClasses()->dueWork())
         ->toBe([STUB_DUE_WORK_PROVIDER]);
 });
 
@@ -104,7 +104,7 @@ it('returns an empty list when no plugins contribute providers', function (): vo
     $loader = new PluginLoader([]);
     $loader->boot();
 
-    expect($loader->dueWorkProviderClasses())->toBe([]);
+    expect($loader->providerClasses()->dueWork())->toBe([]);
 });
 
 it('core contributes no due-work provider, so nothing can precede a plugin', function (): void {
@@ -115,7 +115,7 @@ it('core contributes no due-work provider, so nothing can precede a plugin', fun
 });
 
 it('the merged list is plugin load order, deduped', function (): void {
-    expect(dueWorkPluginLoader()->dueWorkProviderClasses())
+    expect(dueWorkPluginLoader()->providerClasses()->dueWork())
         ->toBe([STUB_DUE_WORK_PROVIDER])
         ->and(makeDueWorkContainer()->get('due_work_provider_classes_merged'))
         ->toBe([STUB_DUE_WORK_PROVIDER]);
@@ -158,7 +158,7 @@ it('a provider the plugin adds after the sidecar was written is still registered
 
     try {
         $cold = dueWorkPluginLoader($stamp);
-        expect($cold->dueWorkProviderClasses())->toHaveCount(1);
+        expect($cold->providerClasses()->dueWork())->toHaveCount(1);
 
         expect((string) file_get_contents($sidecar))->not->toContain('SecondDueWorkProvider');
 
@@ -166,8 +166,8 @@ it('a provider the plugin adds after the sidecar was written is still registered
 
         $warm = dueWorkPluginLoader($stamp);
 
-        expect($warm->dueWorkProviderClasses())->toHaveCount(2)
-            ->and($warm->dueWorkProviderClasses()[1])->toEndWith('\\SecondDueWorkProvider')
+        expect($warm->providerClasses()->dueWork())->toHaveCount(2)
+            ->and($warm->providerClasses()->dueWork()[1])->toEndWith('\\SecondDueWorkProvider')
             ->and(makeDueWorkContainer($warm)->get('due_work_provider_classes_merged'))
             ->toBe([STUB_DUE_WORK_PROVIDER, SECOND_DUE_WORK_PROVIDER]);
     } finally {

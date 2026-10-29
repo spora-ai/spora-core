@@ -22,7 +22,9 @@ use Throwable;
 /**
  * Browser-driven housekeeping endpoint for client-worker mode.
  *
- * Called periodically (every 5 min) by every authed user's SharedWorker.
+ * Called periodically — every 5 minutes by default, configurable with
+ * `SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS` — by every authed
+ * user's SharedWorker.
  * Reaps orphaned RUNNING tasks (browser or server disconnected) and
  * synchronously dispatches + ticks any due scheduled run for an agent
  * the caller can see — the browser does NOT need to drive the result

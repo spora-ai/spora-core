@@ -1,0 +1,12 @@
+{
+    "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
+    "slug": "fixture-config-dependent-settings-plugin",
+    "description": "Test fixture plugin contributing a settings provider that depends on the configuration.",
+    "class": "Tests\\Fixtures\\Plugins\\ConfigDependentPlugin\\Plugin",
+    "icon": "puzzle",
+    "autoload": {
+        "psr-4": {
+            "Tests\\Fixtures\\Plugins\\ConfigDependentPlugin\\": "src/"
+        }
+    }
+}

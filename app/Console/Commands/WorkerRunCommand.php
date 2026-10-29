@@ -46,8 +46,22 @@ final class WorkerRunCommand extends Command
 
     private const REAP_INTERVAL_SECONDS = 300;
 
+    /**
+     * Seconds between refreshes of the principal list the worker acts for.
+     *
+     * The list is a full scan of the principals table, and the daemon runs
+     * the loop twice a second by default — reading it on every iteration
+     * would cost two table scans a second for the life of the daemon.
+     */
+    private const PRINCIPAL_SCOPE_REFRESH_SECONDS = 60;
+
     private bool $shouldQuit = false;
     private mixed $lockFd = null;
+
+    /** @var list<int>|null */
+    private ?array $principalScope = null;
+
+    private int $principalScopeReadAt = 0;
 
     /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
     public int $lastScheduledProcessedCount = 0;
@@ -417,9 +431,7 @@ final class WorkerRunCommand extends Command
         }
 
         try {
-            $executed = $this->dueWorkDispatcher->dispatch(
-                (new PrincipalResolver())->allPrincipalIds(),
-            );
+            $executed = $this->dueWorkDispatcher->dispatch($this->principalScope());
 
             if ($executed > 0) {
                 $this->logger->info('Due work executed', ['executed' => $executed]);
@@ -427,6 +439,27 @@ final class WorkerRunCommand extends Command
         } catch (Throwable $e) {
             $this->logger->error('Due-work dispatch failed', ['exception' => $e]);
         }
+    }
+
+    /**
+     * The principals the worker may act for.
+     *
+     * Refreshed on an interval rather than on every iteration: a principal
+     * created while the daemon runs is picked up within the interval, and
+     * the daemon does not scan the principals table twice a second.
+     *
+     * @return list<int>
+     */
+    private function principalScope(): array
+    {
+        $now = time();
+        if ($this->principalScope === null
+            || ($now - $this->principalScopeReadAt) >= self::PRINCIPAL_SCOPE_REFRESH_SECONDS) {
+            $this->principalScope = (new PrincipalResolver())->allPrincipalIds();
+            $this->principalScopeReadAt = $now;
+        }
+
+        return $this->principalScope;
     }
 
     /**

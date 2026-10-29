@@ -237,6 +237,37 @@ test('the housekeeping interval is 300 when nothing sets it', function (): void 
 });
 
 /**
+ * The browser's housekeeping loop is what runs the due work in client-worker
+ * mode, and the endpoint allows six calls a minute. An interval below ten
+ * seconds is answered with 429, and an interval of zero switches the loop
+ * off altogether.
+ */
+test('the housekeeping interval never falls below ten seconds', function (string $value): void {
+    $_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS'] = $value;
+
+    try {
+        $body = json_decode((new ConfigController(configFromEnvironment()))->index()->getContent(), true);
+
+        expect($body['client_worker']['housekeeping_interval_seconds'])->toBe(10);
+    } finally {
+        unset($_ENV['SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS']);
+        putenv('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+    }
+})->with([
+    'zero'         => ['0'],
+    'below ten'    => ['5'],
+    'not a number' => ['soon'],
+]);
+
+test('the housekeeping interval says it has a floor', function (): void {
+    $definition = (new SettingsRegistry(new Paths(BASE_PATH)))
+        ->get('SPORA_WORKER_CLIENT_HOUSEKEEPING_INTERVAL_SECONDS');
+
+    expect($definition?->min)->toBe(10)
+        ->and($definition?->description)->toContain('10 seconds');
+});
+
+/**
  * The configuration a request sees when the environment is the only layer
  * that says anything — the same path the kernel takes at boot.
  */

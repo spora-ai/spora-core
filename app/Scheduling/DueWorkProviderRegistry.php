@@ -33,20 +33,4 @@ final readonly class DueWorkProviderRegistry
     {
         return $this->providers;
     }
-
-    /**
-     * The provider a unit of work belongs to, or null when no registered
-     * provider claims that class — a plugin that was uninstalled between the
-     * claim and the execution.
-     */
-    public function providerFor(string $class): ?DueWorkProviderInterface
-    {
-        foreach ($this->providers as $provider) {
-            if ($provider::class === $class) {
-                return $provider;
-            }
-        }
-
-        return null;
-    }
 }

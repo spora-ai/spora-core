@@ -168,3 +168,31 @@ test('the admin API lists the plugin setting on the plugins section', function (
     $keys = array_column($plugins['settings'], 'key');
     expect($keys)->toContain('SPORA_SOCIAL_LINKEDIN_CLIENT_ID');
 });
+
+/**
+ * A provider that cannot be resolved contributes nothing, and the operator
+ * has to be able to see that: a setting that silently does not exist is a
+ * setting nobody configured.
+ */
+function brokenPluginSettingsRegistry(): SettingsRegistry
+{
+    return new SettingsRegistry(
+        new Paths(BASE_PATH),
+        new PluginSettingsRegistry(
+            ['broken'],
+            static function (string $class): PluginSettingsProviderInterface {
+                throw new RuntimeException('the provider cannot be constructed');
+            },
+        ),
+    );
+}
+
+test('the admin API reports a plugin provider that did not contribute', function (): void {
+    $registry = brokenPluginSettingsRegistry();
+
+    $response = pluginSettingsController($registry)->index();
+    $problems = json_decode((string) $response->getContent(), true)['data']['plugin_problems'];
+
+    expect($problems)->toHaveCount(1)
+        ->and($problems[0]['message'])->toContain('the provider cannot be constructed');
+});

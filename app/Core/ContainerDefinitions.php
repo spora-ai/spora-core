@@ -13,7 +13,6 @@ use Monolog\Logger as MonologLogger;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
-use RuntimeException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
@@ -189,6 +188,7 @@ use Spora\Services\ToolsRecommendsSkillsValidator;
 use Spora\Services\UserPictures\UserPictureService;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
+use Spora\Settings\Exceptions\PluginSettingsProviderException;
 use Spora\Settings\PluginSettingsProviderInterface;
 use Spora\Settings\PluginSettingsRegistry;
 use Spora\Settings\SettingsRegistry;
@@ -266,7 +266,7 @@ final class ContainerDefinitions
                 // contribute.
                 $classes = [];
                 try {
-                    $classes = $c->get(PluginLoader::class)->pluginSettingProviderClasses();
+                    $classes = $c->get(PluginLoader::class)->providerClasses()->pluginSettings();
                 } catch (ContainerExceptionInterface) {
                     // Intentionally empty.
                 }
@@ -276,7 +276,7 @@ final class ContainerDefinitions
                     static function (string $class) use ($c): PluginSettingsProviderInterface {
                         $provider = $c->get($class);
                         if (!$provider instanceof PluginSettingsProviderInterface) {
-                            throw new RuntimeException(sprintf(
+                            throw new PluginSettingsProviderException(sprintf(
                                 'Plugin settings provider "%s" does not implement %s.',
                                 $class,
                                 PluginSettingsProviderInterface::class,
@@ -285,6 +285,11 @@ final class ContainerDefinitions
 
                         return $provider;
                     },
+                    // The core setting keys a plugin may not redefine. Read
+                    // through the registry, which owns the declarations — and
+                    // read lazily, because the registry is built from this
+                    // one.
+                    static fn(): array => array_keys($c->get(SettingsRegistry::class)->coreDefinitions()),
                 );
             },
 
@@ -721,7 +726,7 @@ final class ContainerDefinitions
             ],
             'speech_to_text_provider_classes_merged' => static fn(ContainerInterface $c): array => array_values(array_unique(array_merge(
                 $c->get('speech_to_text_provider_classes'),
-                $c->get(PluginLoader::class)->speechToTextProviderClasses(),
+                $c->get(PluginLoader::class)->providerClasses()->speechToText(),
             ))),
             SpeechToTextRegistry::class => static function (ContainerInterface $c): SpeechToTextRegistry {
                 $providers = [];

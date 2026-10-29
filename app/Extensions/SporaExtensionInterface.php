@@ -159,8 +159,9 @@ interface SporaExtensionInterface
      * sweep — so a plugin says "I have work that is due" and the worker hands
      * it the principals it may act for.
      *
-     * A provider owns its rows: it claims the work atomically and core
-     * executes what it hands back. Read once at container build time into
+     * A provider owns its rows: it guarantees that two workers on the same
+     * install do not run the same unit of work, and core executes what it
+     * hands back. Read once at container build time into
      * {@see \Spora\Scheduling\DueWorkProviderRegistry}; the loader asks the
      * live plugin object on both cold and warm boot, so a plugin shipping a
      * new provider without touching its manifest still gets it.

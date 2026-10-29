@@ -253,8 +253,13 @@ final class SettingDeclarations
                 type: SettingDefinition::TYPE_NUMBER,
                 default: 300,
                 section: 'worker',
-                description: 'Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests.',
+                description: 'Seconds between housekeeping calls from the browser in client-worker mode. '
+                    . 'A shorter interval notices due work sooner and costs more requests. '
+                    . 'Never below 10 seconds: the endpoint allows 6 calls a minute, so a shorter interval is answered with 429 — '
+                    . 'and an interval of 0 would switch the browser\'s housekeeping off entirely, '
+                    . 'which means no due work runs in client-worker mode.',
                 validation: self::VALIDATION_UINT,
+                min: 10,
             ),
             new SettingDefinition(
                 key: 'SPORA_MAX_WORKERS',

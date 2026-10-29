@@ -199,10 +199,86 @@ it('a plugin setting is never boot-only', function (): void {
     expect($registry->bootOnlyKeys())->not->toContain('SPORA_SOCIAL_LINKEDIN_CLIENT_ID');
 });
 
+/**
+ * A provider whose slug and key spell a core setting.
+ *
+ * The slug `db` and the key `driver` give `SPORA_DB_DRIVER` — a setting the
+ * host owns, and one that is read before the database opens.
+ */
+function coreKeyHijackingProvider(): PluginSettingsProviderInterface
+{
+    return new class implements PluginSettingsProviderInterface {
+        public function slug(): string
+        {
+            return 'db';
+        }
+
+        /**
+         * @return list<SettingDefinition>
+         */
+        public function settings(): array
+        {
+            return [
+                new SettingDefinition(
+                    key: 'driver',
+                    label: 'Hijacked driver',
+                    type: SettingDefinition::TYPE_SELECT,
+                    default: 'hijacked',
+                ),
+            ];
+        }
+    };
+}
+
+/**
+ * @param list<string> $reservedKeys
+ */
+function registryWithHijackingProvider(array $reservedKeys): SettingsRegistry
+{
+    $provider = coreKeyHijackingProvider();
+
+    return new SettingsRegistry(
+        new Paths(BASE_PATH),
+        new PluginSettingsRegistry(
+            ['hijacker'],
+            static fn(string $class): PluginSettingsProviderInterface => $provider,
+            static fn(): array => $reservedKeys,
+        ),
+    );
+}
+
+it('refuses a plugin setting that spells a core setting', function (): void {
+    $core = new SettingsRegistry(new Paths(BASE_PATH));
+    $registry = registryWithHijackingProvider(array_keys($core->coreDefinitions()));
+
+    expect($registry->get('SPORA_DB_DRIVER')?->group)->toBe('framework')
+        ->and($registry->get('SPORA_DB_DRIVER')?->bootOnly)->toBeTrue()
+        ->and($registry->get('SPORA_DB_DRIVER')?->default)->toBe('sqlite')
+        ->and($registry->get('SPORA_DB_DRIVER')?->label)->not->toBe('Hijacked driver');
+});
+
+it('the core setting wins even when the plugin registry does not guard', function (): void {
+    $registry = registryWithHijackingProvider([]);
+
+    expect($registry->get('SPORA_DB_DRIVER')?->group)->toBe('framework')
+        ->and($registry->get('SPORA_DB_DRIVER')?->bootOnly)->toBeTrue()
+        ->and($registry->get('SPORA_DB_DRIVER')?->default)->toBe('sqlite');
+});
+
+it('reports a refused plugin setting to the operator', function (): void {
+    $core = new SettingsRegistry(new Paths(BASE_PATH));
+    $registry = registryWithHijackingProvider(array_keys($core->coreDefinitions()));
+
+    $problems = $registry->pluginProblems();
+
+    expect($problems)->toHaveCount(1)
+        ->and($problems[0]['message'])->toContain('SPORA_DB_DRIVER');
+});
+
 it('the loader collects the plugin setting provider classes', function (): void {
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_plugin_settings']);
     $loader->boot();
 
-    expect($loader->pluginSettingProviderClasses())
+    expect($loader->providerClasses()->pluginSettings())
         ->toBe(['Tests\Fixtures\Plugins\PluginSettingsPlugin\StubPluginSettingsProvider']);
 });

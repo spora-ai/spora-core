@@ -6,18 +6,18 @@ use Spora\Plugins\PluginLoader;
 
 const FIXTURE_SPEECH_PROVIDER = BASE_PATH . '/tests/Fixtures/plugins_with_speech_provider';
 
-test('speechToTextProviderClasses() returns empty when no plugin contributes one', function (): void {
+test('the speech-to-text provider classes are empty when no plugin contributes one', function (): void {
     $loader = new PluginLoader([BASE_PATH . '/tests/Fixtures/plugins_with_manifest']);
     $loader->boot();
 
-    expect($loader->speechToTextProviderClasses())->toBe([]);
+    expect($loader->providerClasses()->speechToText())->toBe([]);
 });
 
-test('speechToTextProviderClasses() returns the FQCN contributed by a fixture plugin', function (): void {
+test('the speech-to-text provider classes carry the FQCN a fixture plugin contributes', function (): void {
     $loader = new PluginLoader([FIXTURE_SPEECH_PROVIDER]);
     $loader->boot();
 
-    $classes = $loader->speechToTextProviderClasses();
+    $classes = $loader->providerClasses()->speechToText();
 
     expect($classes)->toHaveCount(1);
     // We avoid referencing FixtureProvider::class directly because PHPStan

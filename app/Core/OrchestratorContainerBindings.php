@@ -343,7 +343,7 @@ final class OrchestratorContainerBindings
             'skill_provider_classes_merged' => static function (ContainerInterface $c): array {
                 return array_values(array_unique(array_merge(
                     $c->get('skill_provider_classes'),
-                    $c->get(PluginLoader::class)->skillProviderClasses(),
+                    $c->get(PluginLoader::class)->providerClasses()->skills(),
                 )));
             },
 
@@ -368,60 +368,12 @@ final class OrchestratorContainerBindings
                 );
             },
 
-            // Core ships none: a hit needs a page to display it and only the
-            // plugin owning the content has one. The seam stays so a plugin has
-            // somewhere to register.
-            //
-            // The empty left-hand list is why the merge below is *pure plugin
-            // load order*: nothing core-side can take precedence, so a plugin
-            // claiming a `type::id` another installed plugin already serves wins
-            // or loses by load order. That is deliberately not the rule the
-            // skills list above follows, where core's provider is first.
-            'search_provider_classes' => [],
-
-            'search_provider_classes_merged' => static function (ContainerInterface $c): array {
-                return array_values(array_unique(array_merge(
-                    $c->get('search_provider_classes'),
-                    $c->get(PluginLoader::class)->searchProviderClasses(),
-                )));
-            },
-
-            SearchProviderRegistry::class => static function (ContainerInterface $c): SearchProviderRegistry {
-                $providers = [];
-                foreach ($c->get('search_provider_classes_merged') as $class) {
-                    $providers[] = $c->get($class);
-                }
-
-                return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
-            },
+            ...self::searchProviders(),
 
             // Core ships no due-work provider: a plugin's own schedule is
             // something only the plugin knows about. The empty left-hand list
             // is why the merge below is *pure plugin load order*.
-            'due_work_provider_classes' => [],
-
-            'due_work_provider_classes_merged' => static function (ContainerInterface $c): array {
-                return array_values(array_unique(array_merge(
-                    $c->get('due_work_provider_classes'),
-                    $c->get(PluginLoader::class)->dueWorkProviderClasses(),
-                )));
-            },
-
-            DueWorkProviderRegistry::class => static function (ContainerInterface $c): DueWorkProviderRegistry {
-                $providers = [];
-                foreach ($c->get('due_work_provider_classes_merged') as $class) {
-                    $providers[] = $c->get($class);
-                }
-
-                return new DueWorkProviderRegistry($providers);
-            },
-
-            DueWorkDispatcher::class => static function (ContainerInterface $c): DueWorkDispatcher {
-                return new DueWorkDispatcher(
-                    $c->get(DueWorkProviderRegistry::class),
-                    $c->get(LoggerInterface::class),
-                );
-            },
+            ...self::dueWork(),
 
             // No cycle: the scanner needs PluginLoader, Paths and AppLoader,
             // none of which depend on the importer.
@@ -493,6 +445,80 @@ final class OrchestratorContainerBindings
             },
 
             MailTemplate::class => static fn(): MailTemplate => new MailTemplate(),
+        ];
+    }
+
+    /**
+     * The search-provider slice.
+     *
+     * Split out of {@see self::templates()} so that function stays under the
+     * SonarQube S138 line cap and its cognitive complexity under S3776.
+     */
+    private static function searchProviders(): array
+    {
+        return [
+            // Core ships none: a hit needs a page to display it and only the
+            // plugin owning the content has one. The seam stays so a plugin has
+            // somewhere to register.
+            //
+            // The empty left-hand list is why the merge below is *pure plugin
+            // load order*: nothing core-side can take precedence, so a plugin
+            // claiming a `type::id` another installed plugin already serves wins
+            // or loses by load order. That is deliberately not the rule the
+            // skills list above follows, where core's provider is first.
+            'search_provider_classes' => [],
+
+            'search_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('search_provider_classes'),
+                    $c->get(PluginLoader::class)->providerClasses()->search(),
+                )));
+            },
+
+            SearchProviderRegistry::class => static function (ContainerInterface $c): SearchProviderRegistry {
+                $providers = [];
+                foreach ($c->get('search_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new SearchProviderRegistry($providers, $c->get(LoggerInterface::class));
+            },
+        ];
+    }
+
+    /**
+     * The due-work provider slice.
+     *
+     * Split out of {@see self::templates()} so that function stays under the
+     * SonarQube S138 line cap and its cognitive complexity under S3776.
+     */
+    private static function dueWork(): array
+    {
+        return [
+            'due_work_provider_classes' => [],
+
+            'due_work_provider_classes_merged' => static function (ContainerInterface $c): array {
+                return array_values(array_unique(array_merge(
+                    $c->get('due_work_provider_classes'),
+                    $c->get(PluginLoader::class)->providerClasses()->dueWork(),
+                )));
+            },
+
+            DueWorkProviderRegistry::class => static function (ContainerInterface $c): DueWorkProviderRegistry {
+                $providers = [];
+                foreach ($c->get('due_work_provider_classes_merged') as $class) {
+                    $providers[] = $c->get($class);
+                }
+
+                return new DueWorkProviderRegistry($providers);
+            },
+
+            DueWorkDispatcher::class => static function (ContainerInterface $c): DueWorkDispatcher {
+                return new DueWorkDispatcher(
+                    $c->get(DueWorkProviderRegistry::class),
+                    $c->get(LoggerInterface::class),
+                );
+            },
         ];
     }
 

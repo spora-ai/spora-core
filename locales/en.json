@@ -266,7 +266,7 @@
     "Seconds a catalog search stays cached on disk.": "Seconds a catalog search stays cached on disk.",
     "Seconds allowed for the remote media fetch.": "Seconds allowed for the remote media fetch.",
     "Seconds before an HTTP request fails (default: 30)": "Seconds before an HTTP request fails (default: 30)",
-    "Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests.": "Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests.",
+    "Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests. Never below 10 seconds: the endpoint allows 6 calls a minute, so a shorter interval is answered with 429 — and an interval of 0 would switch the browser's housekeeping off entirely, which means no due work runs in client-worker mode.": "Seconds between housekeeping calls from the browser in client-worker mode. A shorter interval notices due work sooner and costs more requests. Never below 10 seconds: the endpoint allows 6 calls a minute, so a shorter interval is answered with 429 — and an interval of 0 would switch the browser's housekeeping off entirely, which means no due work runs in client-worker mode.",
     "Seconds the reaper waits past the last heartbeat before marking a run as failed.": "Seconds the reaper waits past the last heartbeat before marking a run as failed.",
     "Seconds to wait for a model response before giving up.": "Seconds to wait for a model response before giving up.",
     "Secret key file": "Secret key file",

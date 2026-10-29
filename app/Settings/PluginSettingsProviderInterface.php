@@ -24,7 +24,19 @@ interface PluginSettingsProviderInterface
      * enforced in one place instead of per plugin.
      *
      * The definitions are read while the configuration is being built, so a
-     * provider must not touch the database here.
+     * provider must not touch the database here. It may depend on the
+     * configuration: the host resolves the providers once the configuration
+     * exists, so a provider that reads it to describe its settings works.
+     *
+     * The host owns the storage group and the section. A `group` or a
+     * `section` on the definition is ignored — the key is rewritten, the
+     * rows are filed under `plugin:<slug>`, and the setting is rendered in
+     * the `plugins` section.
+     *
+     * A key that spells a core setting is refused. The host owns the key
+     * space: a plugin that could redefine `SPORA_DB_DRIVER` would move it
+     * out of the `framework` group and off the boot-only list, and the
+     * stored row would be orphaned.
      *
      * @return list<SettingDefinition>
      */

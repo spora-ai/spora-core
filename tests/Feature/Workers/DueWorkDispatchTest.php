@@ -214,7 +214,6 @@ it('a provider that throws does not fail the housekeeping response', function ()
     $response = $controller->housekeeping();
 
     expect($response->getStatusCode())->toBe(200);
-    // The provider after the broken one was still consulted.
     expect($working->claims)->toHaveCount(1);
 });
 
@@ -236,4 +235,40 @@ it('a provider that throws does not fail the worker run', function (): void {
 
     expect($exitCode)->toBe(0)
         ->and($working->claims)->toHaveCount(1);
+});
+
+/**
+ * The principal list is a full scan of the principals table, and the daemon
+ * runs its loop twice a second by default: reading it on every iteration
+ * would cost two table scans a second for the life of the daemon.
+ */
+it('the worker reads the principal list once, not on every iteration', function (): void {
+    $provider = new StubDueWorkProvider();
+    $dispatcher = new DueWorkDispatcher(new DueWorkProviderRegistry([$provider]), new NullLogger());
+
+    $command = makeDueWorkWorkerCommand($dispatcher);
+
+    $authService = bootAuthLayer();
+    $userId = $authService->register('due-work-scope@example.com', DUE_WORK_TEST_PASSWORD, 'DueWorkScope');
+    createUserPrincipalPublic($userId);
+
+    $connection = Illuminate\Database\Capsule\Manager::connection();
+    $connection->enableQueryLog();
+
+    try {
+        $dispatch = new ReflectionMethod($command, 'dispatchDueWork');
+        $dispatch->invoke($command);
+        $dispatch->invoke($command);
+
+        $principalQueries = array_filter(
+            $connection->getQueryLog(),
+            static fn(array $entry): bool => str_contains((string) $entry['query'], 'principals'),
+        );
+
+        expect($provider->claims)->toHaveCount(2)
+            ->and($principalQueries)->toHaveCount(1);
+    } finally {
+        $connection->flushQueryLog();
+        $connection->disableQueryLog();
+    }
 });

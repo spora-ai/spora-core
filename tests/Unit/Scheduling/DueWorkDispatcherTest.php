@@ -2,11 +2,13 @@
 
 declare(strict_types=1);
 
+use Psr\Log\LogLevel;
 use Psr\Log\NullLogger;
 use Spora\Scheduling\DueWork;
 use Spora\Scheduling\DueWorkDispatcher;
 use Spora\Scheduling\DueWorkProviderInterface;
 use Spora\Scheduling\DueWorkProviderRegistry;
+use Tests\Unit\Scheduling\DueWorkCapturingLogger;
 use Tests\Unit\Scheduling\SecondStubDueWorkProvider;
 use Tests\Unit\Scheduling\StubDueWorkProvider;
 
@@ -105,12 +107,42 @@ it('never executes work belonging to a principal the caller cannot act for', fun
         ->and((string) $provider->executed[0]->payload['id'])->toBe('mine');
 });
 
-it('a work item naming a provider that is not registered is skipped', function (): void {
+it('a unit is executed by the provider that reported it', function (): void {
+    $provider = new StubDueWorkProvider();
+    $other = new SecondStubDueWorkProvider();
+
+    // The provider names another registered provider. Routing on that name
+    // would hand the unit to a provider that never claimed it.
+    $provider->work = [dueWorkUnit($other::class, 7, '2026-01-01 10:00:00')];
+
+    $executed = dueWorkDispatcherFor([$provider, $other])->dispatch([7]);
+
+    expect($executed)->toBe(1)
+        ->and($provider->executed)->toHaveCount(1)
+        ->and($other->executed)->toBe([]);
+});
+
+it('a unit naming a provider that is not registered still runs on the provider that reported it', function (): void {
     $provider = new StubDueWorkProvider();
     $provider->work = [dueWorkUnit('Some\\Gone\\Provider', 7, '2026-01-01 10:00:00')];
 
     $executed = dueWorkDispatcherFor([$provider])->dispatch([7]);
 
+    expect($executed)->toBe(1)
+        ->and($provider->executed)->toHaveCount(1);
+});
+
+it('a unit outside the caller scope is discarded and logged as an error', function (): void {
+    $logger = new DueWorkCapturingLogger();
+    $provider = new StubDueWorkProvider();
+    $provider->work = [dueWorkUnit($provider::class, 99, '2026-01-01 10:00:00')];
+
+    $dispatcher = new DueWorkDispatcher(new DueWorkProviderRegistry([$provider]), $logger);
+    $executed = $dispatcher->dispatch([7]);
+
+    // At error level: a unit the provider had already claimed is lost work.
     expect($executed)->toBe(0)
-        ->and($provider->executed)->toBe([]);
+        ->and($provider->executed)->toBe([])
+        ->and($logger->records)->toHaveCount(1)
+        ->and($logger->records[0]['level'])->toBe(LogLevel::ERROR);
 });
