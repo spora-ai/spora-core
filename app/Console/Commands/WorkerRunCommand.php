@@ -430,28 +430,11 @@ final class WorkerRunCommand extends Command
             return;
         }
 
-        try {
-            $executed = $this->dueWorkDispatcher->dispatch($this->principalScope());
-
-            if ($executed > 0) {
-                $this->logger->info('Due work executed', ['executed' => $executed]);
-            }
-        } catch (Throwable $e) {
-            $this->logger->error('Due-work dispatch failed', ['exception' => $e]);
-        }
-    }
-
-    /**
-     * The principals the worker may act for.
-     *
-     * Refreshed on an interval rather than on every iteration: a principal
-     * created while the daemon runs is picked up within the interval, and
-     * the daemon does not scan the principals table twice a second.
-     *
-     * @return list<int>
-     */
-    private function principalScope(): array
-    {
+        // The principal list is a full scan of the principals table, and the
+        // daemon runs the loop twice a second by default — reading it on
+        // every iteration would cost two table scans a second for the life
+        // of the daemon. A principal created while the daemon runs is picked
+        // up within the refresh interval.
         $now = time();
         if ($this->principalScope === null
             || ($now - $this->principalScopeReadAt) >= self::PRINCIPAL_SCOPE_REFRESH_SECONDS) {
@@ -459,7 +442,15 @@ final class WorkerRunCommand extends Command
             $this->principalScopeReadAt = $now;
         }
 
-        return $this->principalScope;
+        try {
+            $executed = $this->dueWorkDispatcher->dispatch($this->principalScope);
+
+            if ($executed > 0) {
+                $this->logger->info('Due work executed', ['executed' => $executed]);
+            }
+        } catch (Throwable $e) {
+            $this->logger->error('Due-work dispatch failed', ['exception' => $e]);
+        }
     }
 
     /**
