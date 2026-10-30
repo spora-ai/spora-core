@@ -73,7 +73,6 @@ final class MediaUploadController
         $clientName = $file->getClientOriginalName();
         $sniffedMime = $this->sniffer->sniffFromBytes($bytes, $clientName);
 
-        // The allowlist must use the sniffed MIME, never the client header.
         $agentId = $this->readId($request->request->get('agent_id'));
         $principalId = $this->readId($request->request->get('principal_id'));
 
@@ -82,14 +81,7 @@ final class MediaUploadController
         $folderId = $this->readString($request->request->get('folder_id'));
         $kind = $this->readString($request->request->get('kind'));
 
-        $error = $this->checkMimeAllowed($sniffedMime, $agentId)
-            ?? $this->checkPrincipalAllowed($principalId, $userId)
-            ?? $this->checkKindAllowed($kind);
-        if ($error !== null) {
-            return $error;
-        }
-
-        $asset = $this->ingest(new MediaIngestRequest(
+        $asset = $this->ingestChecked(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
             filename: $clientName !== ''
@@ -105,7 +97,7 @@ final class MediaUploadController
             isTemporary: $isTemporary,
             folderId: $folderId,
             kind: $kind,
-        ));
+        ), $sniffedMime, $userId);
         if ($asset instanceof JsonResponse) {
             return $asset;
         }
@@ -123,6 +115,26 @@ final class MediaUploadController
             ['data' => $this->serializer->serialize($asset, $this->config->getString('SPORA_APP_URL'))],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * The checks the request must pass, and then the ingest.
+     *
+     * The allowlist is checked against the sniffed MIME, never the
+     * client header, and the mark's vocabulary is checked before the
+     * bytes reach the AssetStore.
+     */
+    private function ingestChecked(MediaIngestRequest $request, string $sniffedMime, int $userId): MediaAsset|JsonResponse
+    {
+        // The allowlist must use the sniffed MIME, never the client header.
+        $error = $this->checkMimeAllowed($sniffedMime, $request->agentId)
+            ?? $this->checkPrincipalAllowed($request->principalId, $userId)
+            ?? $this->checkKindAllowed($request->kind);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return $this->ingest($request);
     }
 
     /**
