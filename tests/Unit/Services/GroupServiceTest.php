@@ -6,6 +6,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\GroupMembership;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
 use Spora\Services\GroupService;
+use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 
@@ -333,6 +334,36 @@ describe('GroupService::deleteGroup extended paths', function (): void {
 
         expect(fn() => $service->deleteGroup($group->id, $ownerId2))
             ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
+    });
+
+    it('throws PrincipalHasDependentsException when the group owns a media folder', function (): void {
+        // `media_folders.principal_id` is ON DELETE RESTRICT, so a group
+        // that owns a folder used to die on an unhandled foreign-key
+        // violation instead of the domain error the endpoint answers.
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $ownerId2 = bootAuth($auth, 'dg-folder-owner@example.com', GROUP_TEST_PASSWORD);
+        $group = $service->createGroup($ownerId2, 'DG-FOLDER');
+        $principal = $principalService->ensureGroupPrincipal((int) $group->id);
+        (new MediaFolderService())->create((int) $principal->id, 'Corporate');
+
+        expect(fn() => $service->deleteGroup($group->id, $ownerId2))
+            ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
+
+        expect(Capsule::table('groups')->where('id', $group->id)->count())->toBe(1);
+    });
+
+    it('deletes the group once its media folder is gone', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $ownerId2 = bootAuth($auth, 'dg-folder-gone@example.com', GROUP_TEST_PASSWORD);
+        $group = $service->createGroup($ownerId2, 'DG-FOLDER-GONE');
+        $principal = $principalService->ensureGroupPrincipal((int) $group->id);
+        $folders = new MediaFolderService();
+        $folder = $folders->create((int) $principal->id, 'Corporate');
+        $folders->delete((int) $principal->id, (string) $folder->id);
+
+        $service->deleteGroup($group->id, $ownerId2);
+
+        expect(Capsule::table('groups')->where('id', $group->id)->count())->toBe(0);
     });
 });
 

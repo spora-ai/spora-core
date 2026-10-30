@@ -128,9 +128,12 @@ test('a message thrown as an exception argument is harvested', function (): void
     // into the error envelope, and the router translates what lands there.
     // The literal sits in `app/Services`, which the envelope harvest never
     // reads, so only the thrown-message harvest can reach it.
+    //
+    // The locator is asserted down to the file: the line moves with every
+    // edit above it, and the file is what the harvest is about.
     expect($harvested)->toHaveKey('Hex payload has odd length.')
         ->and(implode(' ', $harvested['Hex payload has odd length.']))
-            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:76');
+            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:');
 });
 
 test('a sprintf in an envelope position is harvested by its format string', function (): void {
@@ -140,7 +143,7 @@ test('a sprintf in an envelope position is harvested by its format string', func
     // translation, and the runtime fills them in.
     expect($harvested)->toHaveKey('MIME type "%s" is not in the upload allowlist.')
         ->and(implode(' ', $harvested['MIME type "%s" is not in the upload allowlist.']))
-            ->toContain('app/Http/MediaUploadController.php:118');
+            ->toContain('app/Http/MediaUploadController.php:');
 });
 
 test('an approval prompt is harvested as the format string it was built with', function (): void {

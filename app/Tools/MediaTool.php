@@ -240,6 +240,12 @@ use Spora\Tools\ValueObjects\ToolResult;
     description: 'Provenance for `create_media` — persisted on `media_assets.prompt` and read back by `get_media`. Ignored by every other op.',
     required: false,
 )]
+#[ToolParameter(
+    name: 'folder_id',
+    type: 'string',
+    description: 'UUID of the media folder to file the new asset in, for `create_media`. Omit it to file the asset in the root. Filenames are unique within a folder — a name the folder already holds is refused. Ignored by every other op; use the `media_folders` tool to file an existing asset.',
+    required: false,
+)]
 final class MediaTool extends AbstractTool
 {
     /** @var string  Single error string used for asset-not-found / not-in-scope responses. */

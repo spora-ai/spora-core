@@ -56,6 +56,93 @@ describe('ListMediaQueryBuilder search field', function (): void {
         $query = ListMediaQueryBuilder::fromRequest($request, 7);
         expect($query->search)->toBe('alpine sunset');
     });
+
+    it('passes the Media Archive panel\'s `search` spelling through as the search field', function (): void {
+        // The panel sends `search`; core documents `q`. Both are read.
+        $request = Request::create('/?search=alpine%20sunset');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->search)->toBe('alpine sunset');
+    });
+
+    it('prefers the canonical `q` when both spellings are present', function (): void {
+        $request = Request::create('/?q=canonical&search=alias');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->search)->toBe('canonical');
+    });
+});
+
+describe('ListMediaQueryBuilder plugin field', function (): void {
+    it('passes `plugin_slug` through as the plugin filter', function (): void {
+        $request = Request::create('/?plugin_slug=typst');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->pluginSlug)->toBe('typst');
+    });
+
+    it('passes the Media Archive panel\'s `plugin` spelling through as the plugin filter', function (): void {
+        $request = Request::create('/?plugin=typst');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->pluginSlug)->toBe('typst');
+    });
+
+    it('prefers the canonical `plugin_slug` when both spellings are present', function (): void {
+        $request = Request::create('/?plugin_slug=canonical&plugin=alias');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->pluginSlug)->toBe('canonical');
+    });
+});
+
+describe('ListMediaQueryBuilder folder_id field', function (): void {
+    it('returns null when folder_id is missing or empty', function (): void {
+        $request = Request::create('/');
+        expect(ListMediaQueryBuilder::fromRequest($request, 7)->folderId)->toBeNull();
+
+        $empty = Request::create('/?folder_id=');
+        expect(ListMediaQueryBuilder::fromRequest($empty, 7)->folderId)->toBeNull();
+    });
+
+    it('parses the scalar form', function (): void {
+        $request = Request::create('/?folder_id=3f7c1d2e-0000-4000-8000-000000000001');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->folderId)->toBe('3f7c1d2e-0000-4000-8000-000000000001');
+    });
+
+    it('parses the array-bracket form the Media Archive panel uses for repeated ids', function (): void {
+        $request = Request::create('/?folder_id[]=3f7c1d2e-0000-4000-8000-000000000001');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->folderId)->toBe('3f7c1d2e-0000-4000-8000-000000000001');
+    });
+
+    it('trims the value', function (): void {
+        $request = Request::create('/?folder_id=%20abc%20');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->folderId)->toBe('abc');
+    });
+});
+
+describe('ListMediaQueryBuilder kind field', function (): void {
+    it('returns null when kind is missing or empty', function (): void {
+        expect(ListMediaQueryBuilder::fromRequest(Request::create('/'), 7)->kind)->toBeNull();
+        expect(ListMediaQueryBuilder::fromRequest(Request::create('/?kind='), 7)->kind)->toBeNull();
+    });
+
+    it('parses the three known kinds', function (): void {
+        foreach (['asset', 'template', 'example'] as $kind) {
+            $query = ListMediaQueryBuilder::fromRequest(Request::create("/?kind={$kind}"), 7);
+            expect($query->kind)->toBe($kind);
+        }
+    });
+
+    it('silently drops an unknown kind (typo tolerance)', function (): void {
+        $request = Request::create('/?kind=bogus');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->kind)->toBeNull();
+    });
+
+    it('lowercases the value before comparing', function (): void {
+        $request = Request::create('/?kind=TEMPLATE');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->kind)->toBe('template');
+    });
 });
 describe('ListMediaQueryBuilder upload_source field', function (): void {
     it('returns null when source is missing or empty', function (): void {

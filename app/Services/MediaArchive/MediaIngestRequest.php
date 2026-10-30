@@ -70,6 +70,20 @@ final readonly class MediaIngestRequest
          * honour the per-agent retention ceiling.
          */
         public bool $isTemporary = false,
+        /**
+         * The folder the asset is filed in on ingest. Null = the root.
+         * The folder must belong to the row's principal; the folder's
+         * service owns that check.
+         */
+        public ?string $folderId = null,
+        /**
+         * The advisory mark on the asset (`asset` / `template` /
+         * `example`). Advisory means advisory: the service stores what
+         * it is handed. Refusing a value outside the vocabulary belongs
+         * to the HTTP layer — see
+         * {@see \Spora\Http\MediaUploadController::checkKindAllowed()}.
+         */
+        public ?string $kind = null,
     ) {
         // Empty strings are not a valid source — only non-empty payloads
         // count toward the "exactly one" invariant. Matches the rest of
@@ -120,6 +134,8 @@ final readonly class MediaIngestRequest
             uploadSource: $this->uploadSource,
             publicAccessToken: $this->publicAccessToken,
             isTemporary: $this->isTemporary,
+            folderId: $this->folderId,
+            kind: $this->kind,
         );
     }
 }

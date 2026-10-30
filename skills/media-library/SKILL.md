@@ -6,12 +6,14 @@ compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
   author: spora-ai
   version: "1.0"
-allowed-tools: media
+allowed-tools: media media_folders
 ---
 
 # Media library
 
 Eight operations on a single `media` tool: `search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, and `create_media`. The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
+
+A second tool, `media_folders`, carries the folder surface: `list_folders`, `file_asset`, and `search_assets`. See "Folders" below.
 
 ## Operation matrix
 
@@ -115,6 +117,26 @@ Two specific chains worth memorising:
 
 - `get_media` returns `parent_id` when the asset is itself a derivative. Use that to walk up: `get_media(asset_id: parent_id)` to see the source and its full derivative graph.
 - `get_media` returns `derivatives[]` for parent assets — a list of derivative rows with their own `media_id`s. Use those directly for `list_derivatives` / `get_media` / `get_source` follow-ups.
+
+## Folders
+
+The media library has folders. A folder belongs to the principal, carries a name and a path (`/Corporate`, `/Corporate/2026`), and holds assets. Two rules are enforced by the database: **sibling folders have unique names**, and **filenames are unique within a folder**.
+
+**You may not create, rename, move or delete folders.** The operator curates the tree — the folders API (`POST /api/v1/media/folders`) is theirs, not yours. What you may do is work inside the tree:
+
+| Op | What it does |
+| --- | --- |
+| `list_folders` | The principal's folders: `id`, `name`, `path`, `parent_id`, `asset_count` |
+| `file_asset` | File an asset into a folder (`asset_id` + `folder_id`); omit `folder_id` to move it back to the root |
+| `search_assets` | The assets inside one folder (`folder_id`) |
+
+`file_asset` fails when the folder already holds a file with that name — pick another name or another folder rather than retrying. `search_assets` needs a `folder_id`; call `list_folders` first when you do not have one. Both are scoped to your principal: an asset or folder of another principal is reported as missing, so there is nothing to probe for.
+
+`create_media` takes an optional `folder_id` too, so a new asset can be filed as it is written. Same rule: a name the folder already holds is refused. Without a `folder_id` the asset lands in the root — file it afterwards with `file_asset` when it belongs to one.
+
+## Kinds
+
+Every asset carries a **kind**: `asset` (the default), `template`, or `example`. The kind is **advisory** — it is a label the operator uses to filter the library, and a kind in that set never refuses an asset. A mis-marked template still works, and the operator can change the mark at any time. Never claim that an asset "is not a template" because of its kind; read the content instead.
 
 ## Scope
 

@@ -7,9 +7,13 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetKind;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
@@ -26,14 +30,23 @@ use Symfony\Component\HttpFoundation\Response;
  * - POST /api/v1/media
  *
  * Accepts `multipart/form-data` with a `file` part plus optional
- * `prompt`, `tags`, `metadata`. Bytes are MIME-sniffed (the client
- * header is never trusted), validated against the dynamic allowlist
- * computed by {@see MediaAllowedTypesService}, and routed through
- * the same `MediaArchiveService::ingest()` pipeline that tools use.
+ * `prompt`, `tags`, `metadata`, `folder_id` and `kind`. Bytes are
+ * MIME-sniffed (the client header is never trusted), validated against
+ * the dynamic allowlist computed by {@see MediaAllowedTypesService}, and
+ * routed through the same {@see MediaArchiveService::ingest()} pipeline
+ * that tools use.
  *
  * `ingest()` also mints the `md` derivative of a binary document, so a
  * PDF is readable by the LLM with no second operator action. Best effort:
  * a producer failure leaves the upload intact.
+ *
+ * `folder_id` files the upload in a folder of the target principal and
+ * `kind` marks it. The mark is advisory: a mark the operator chose is
+ * stored as given, and a value outside the mark's vocabulary is refused
+ * with a 400 before the bytes reach the AssetStore. The folder is
+ * checked against the target principal and against the folder's filename
+ * rule, so an upload that would collide is a 422 rather than a database
+ * error.
  */
 final class MediaUploadController
 {
@@ -60,23 +73,15 @@ final class MediaUploadController
         $clientName = $file->getClientOriginalName();
         $sniffedMime = $this->sniffer->sniffFromBytes($bytes, $clientName);
 
-        // The allowlist must use the sniffed MIME, never the client header.
-        $agentIdRaw = $request->request->get('agent_id');
-        $agentId = is_string($agentIdRaw) && ctype_digit($agentIdRaw) ? (int) $agentIdRaw : null;
-        $principalIdRaw = $request->request->get('principal_id');
-        $principalId = is_string($principalIdRaw) && ctype_digit($principalIdRaw)
-            ? (int) $principalIdRaw
-            : null;
-
-        $error = $this->checkMimeAllowed($sniffedMime, $agentId)
-            ?? $this->checkPrincipalAllowed($principalId, $userId);
-        if ($error !== null) {
-            return $error;
-        }
+        $agentId = $this->readId($request->request->get('agent_id'));
+        $principalId = $this->readId($request->request->get('principal_id'));
 
         $prompt = $request->request->get('prompt');
         $isTemporary = $this->parseBool($request->request->get('is_temporary'));
-        $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
+        $folderId = $this->readString($request->request->get('folder_id'));
+        $kind = $this->readString($request->request->get('kind'));
+
+        $asset = $this->ingestChecked(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
             filename: $clientName !== ''
@@ -90,7 +95,12 @@ final class MediaUploadController
             metadata: Utf8Sanitizer::scrub($this->parseJsonObject($request->request->get('metadata'))),
             uploadSource: 'upload',
             isTemporary: $isTemporary,
-        ));
+            folderId: $folderId,
+            kind: $kind,
+        ), $sniffedMime, $userId);
+        if ($asset instanceof JsonResponse) {
+            return $asset;
+        }
 
         // Real-time retention purge: only when the caller flagged the
         // row as temp AND attached an agent_id. Direct uploads to the
@@ -104,6 +114,96 @@ final class MediaUploadController
         return new JsonResponse(
             ['data' => $this->serializer->serialize($asset, $this->config->getString('SPORA_APP_URL'))],
             Response::HTTP_CREATED,
+        );
+    }
+
+    /**
+     * The checks the request must pass, and then the ingest.
+     *
+     * The allowlist is checked against the sniffed MIME, never the
+     * client header, and the mark's vocabulary is checked before the
+     * bytes reach the AssetStore.
+     */
+    private function ingestChecked(MediaIngestRequest $request, string $sniffedMime, int $userId): MediaAsset|JsonResponse
+    {
+        // The allowlist must use the sniffed MIME, never the client header.
+        $error = $this->checkMimeAllowed($sniffedMime, $request->agentId)
+            ?? $this->checkPrincipalAllowed($request->principalId, $userId)
+            ?? $this->checkKindAllowed($request->kind);
+        if ($error !== null) {
+            return $error;
+        }
+
+        return $this->ingest($request);
+    }
+
+    /**
+     * The ingest, or the error the request must answer.
+     *
+     * Split out of {@see store()} so that method stays under the
+     * 3-return brain-overload ceiling.
+     */
+    private function ingest(MediaIngestRequest $request): MediaAsset|JsonResponse
+    {
+        try {
+            return $this->mediaArchive->ingest($request);
+        } catch (MediaFolderNotFoundException) {
+            // The folder is the target tenant's, and this caller cannot
+            // see it. The same answer covers a folder that does not
+            // exist — the caller has no business telling the two apart.
+            return $this->error(
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'UNKNOWN_FOLDER',
+                'That folder does not exist.',
+            );
+        } catch (MediaFolderUniquenessException $e) {
+            return $this->error(
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'FOLDER_FILENAME_TAKEN',
+                $e->getMessage(),
+            );
+        }
+    }
+
+    /** A non-empty string from the form, or null. */
+    private function readString(mixed $raw): ?string
+    {
+        if (!is_string($raw)) {
+            return null;
+        }
+        $value = trim($raw);
+
+        return $value === '' ? null : $value;
+    }
+
+    /** A numeric id from the form, or null. */
+    private function readId(mixed $raw): ?int
+    {
+        if (!is_string($raw) || !ctype_digit($raw)) {
+            return null;
+        }
+
+        return (int) $raw;
+    }
+
+    /**
+     * The mark is advisory: a mark the operator chose is never refused.
+     *
+     * A value outside the vocabulary is refused, before the bytes reach
+     * the AssetStore — the column cannot hold it and the listing's filter
+     * cannot select it, so storing it would only produce a row nobody
+     * can find.
+     */
+    private function checkKindAllowed(?string $kind): ?JsonResponse
+    {
+        if ($kind === null || in_array($kind, MediaAssetKind::ALL, true)) {
+            return null;
+        }
+
+        return $this->error(
+            Response::HTTP_BAD_REQUEST,
+            'INVALID_KIND',
+            sprintf('kind must be one of: %s.', implode(', ', MediaAssetKind::ALL)),
         );
     }
 

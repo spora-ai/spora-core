@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -127,6 +129,12 @@ final readonly class MediaCreateHandler
                 toolName: 'create_media',
                 prompt: $prompt === '' ? null : $prompt,
                 uploadSource: 'tool',
+                folderId: $this->readFolderId($arguments),
+            ));
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException $e) {
+            return ToolResult::fail(sprintf(
+                '`create_media` could not file the document: %s',
+                $e->getMessage(),
             ));
         } catch (Throwable $e) {
             return ToolResult::fail(sprintf(
@@ -134,6 +142,22 @@ final readonly class MediaCreateHandler
                 $e->getMessage(),
             ));
         }
+    }
+
+    /**
+     * The folder the new asset is filed in, or null for the root.
+     *
+     * @param  array<string, mixed> $arguments
+     */
+    private function readFolderId(array $arguments): ?string
+    {
+        $raw = $arguments['folder_id'] ?? null;
+        if (!is_string($raw)) {
+            return null;
+        }
+        $value = trim($raw);
+
+        return $value === '' ? null : $value;
     }
 
     /**

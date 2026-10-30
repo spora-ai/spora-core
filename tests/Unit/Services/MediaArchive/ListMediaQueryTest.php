@@ -111,6 +111,8 @@ describe('ListMediaQuery::toArray()', function (): void {
             'agentOwnerUserId' => null,
             'principalIds'     => null,
             'includeTemporary' => false,
+            'folderId'         => null,
+            'kind'             => null,
         ]);
     });
 

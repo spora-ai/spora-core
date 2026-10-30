@@ -66,6 +66,17 @@ final readonly class ListMediaQuery
     public const OWNERSHIP_MINE = 'mine';
 
     /**
+     * The `kind` filter's vocabulary. The mark is advisory — it selects
+     * rows, it never refuses one — so the set is closed only for the
+     * filter's own sake: an unknown value is dropped by the builder and
+     * the listing stays unfiltered.
+     */
+    public const ALLOWED_KINDS = [
+        MediaAssetKind::ASSET,
+        MediaAssetKind::TEMPLATE,
+        MediaAssetKind::EXAMPLE,
+    ];
+    /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
      *        (`?types=image,document`). Null means no filter. When set,
      *        takes precedence over the singular `$mediaType` so the picker
@@ -122,6 +133,17 @@ final readonly class ListMediaQuery
          * `?include_temporary=true`.
          */
         public bool $includeTemporary = false,
+        /**
+         * Restricts the listing to the assets filed in this folder. Null =
+         * no filter. A folder outside the caller's principals yields no
+         * rows rather than somebody else's.
+         */
+        public ?string $folderId = null,
+        /**
+         * Restricts the listing to the assets carrying this advisory mark.
+         * Null = no filter.
+         */
+        public ?string $kind = null,
         public int $page = 1,
         public int $perPage = self::PER_PAGE_DEFAULT,
     ) {}
@@ -160,6 +182,8 @@ final readonly class ListMediaQuery
             'agentOwnerUserId' => $this->agentOwnerUserId,
             'principalIds'     => $this->principalIds,
             'includeTemporary' => $this->includeTemporary,
+            'folderId'         => $this->folderId,
+            'kind'             => $this->kind,
         ];
     }
 
