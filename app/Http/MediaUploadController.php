@@ -7,13 +7,18 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\Services\Exceptions\PrincipalMaterialisationException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
+use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,14 +31,21 @@ use Symfony\Component\HttpFoundation\Response;
  * - POST /api/v1/media
  *
  * Accepts `multipart/form-data` with a `file` part plus optional
- * `prompt`, `tags`, `metadata`. Bytes are MIME-sniffed (the client
- * header is never trusted), validated against the dynamic allowlist
- * computed by {@see MediaAllowedTypesService}, and routed through
- * the same `MediaArchiveService::ingest()` pipeline that tools use.
+ * `prompt`, `tags`, `metadata`, `folder_id` and `kind`. Bytes are
+ * MIME-sniffed (the client header is never trusted), validated against
+ * the dynamic allowlist computed by {@see MediaAllowedTypesService}, and
+ * routed through the same {@see MediaArchiveService::ingest()} pipeline
+ * that tools use.
  *
  * `ingest()` also mints the `md` derivative of a binary document, so a
  * PDF is readable by the LLM with no second operator action. Best effort:
  * a producer failure leaves the upload intact.
+ *
+ * `folder_id` files the upload in a folder of the target principal and
+ * `kind` marks it. The mark is advisory — whatever the client sends is
+ * stored as given. The folder is checked against the target principal
+ * and against the folder's filename rule, so an upload that would
+ * collide is a 422 rather than a database error.
  */
 final class MediaUploadController
 {
@@ -46,6 +58,8 @@ final class MediaUploadController
         private readonly MimeSniffer $sniffer,
         private readonly Config $config,
         private readonly MediaAssetSerializer $serializer = new MediaAssetSerializer(),
+        private readonly PrincipalService $principalService = new PrincipalService(new PrincipalResolver()),
+        private readonly MediaFolderService $folders = new MediaFolderService(),
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -76,6 +90,16 @@ final class MediaUploadController
 
         $prompt = $request->request->get('prompt');
         $isTemporary = $this->parseBool($request->request->get('is_temporary'));
+        $folderId = $this->readString($request->request->get('folder_id'));
+        $kind = $this->readString($request->request->get('kind'));
+
+        $filing = $folderId === null
+            ? null
+            : $this->checkFiling($this->effectivePrincipalId($principalId, $userId), $folderId, $clientName);
+        if ($filing instanceof JsonResponse) {
+            return $filing;
+        }
+
         $asset = $this->mediaArchive->ingest(new MediaIngestRequest(
             bytes: $bytes,
             mime: $sniffedMime,
@@ -90,6 +114,8 @@ final class MediaUploadController
             metadata: Utf8Sanitizer::scrub($this->parseJsonObject($request->request->get('metadata'))),
             uploadSource: 'upload',
             isTemporary: $isTemporary,
+            folderId: $folderId,
+            kind: $kind,
         ));
 
         // Real-time retention purge: only when the caller flagged the
@@ -105,6 +131,81 @@ final class MediaUploadController
             ['data' => $this->serializer->serialize($asset, $this->config->getString('SPORA_APP_URL'))],
             Response::HTTP_CREATED,
         );
+    }
+
+    /**
+     * Check that the upload may be filed in the named folder.
+     *
+     * A folder outside the target principal is reported with the same
+     * message as a folder that does not exist — the caller has no
+     * business knowing that it exists.
+     */
+    private function checkFiling(?int $principalId, ?string $folderId, string $filename): ?JsonResponse
+    {
+        if ($folderId === null) {
+            return null;
+        }
+
+        try {
+            if ($principalId !== null) {
+                $this->folders->fileTarget($principalId, $folderId, $filename);
+            }
+        } catch (MediaFolderNotFoundException) {
+            return $this->unknownFolder();
+        } catch (MediaFolderUniquenessException $e) {
+            return $this->error(
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'FOLDER_FILENAME_TAKEN',
+                $e->getMessage(),
+            );
+        }
+
+        if ($principalId === null) {
+            return $this->unknownFolder();
+        }
+
+        return null;
+    }
+
+    private function unknownFolder(): JsonResponse
+    {
+        return $this->error(
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            'UNKNOWN_FOLDER',
+            'That folder does not exist.',
+        );
+    }
+
+    /**
+     * The principal the upload lands in — the one the form names, or the
+     * caller's own user-principal.
+     *
+     * Null when the caller has no principal row at all: the ingest
+     * pipeline attributes the asset to no principal in that case, and an
+     * asset without a principal belongs to no folder.
+     */
+    private function effectivePrincipalId(?int $principalId, int $userId): ?int
+    {
+        if ($principalId !== null) {
+            return $principalId;
+        }
+
+        try {
+            return $this->principalService->ensureUserPrincipal($userId)->id;
+        } catch (PrincipalMaterialisationException) {
+            return null;
+        }
+    }
+
+    /** A non-empty string from the form, or null. */
+    private function readString(mixed $raw): ?string
+    {
+        if (!is_string($raw)) {
+            return null;
+        }
+        $value = trim($raw);
+
+        return $value === '' ? null : $value;
     }
 
     private function checkMimeAllowed(string $sniffedMime, ?int $agentId): ?JsonResponse

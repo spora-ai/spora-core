@@ -59,6 +59,8 @@ final class MediaAssetSerializer
             'storage_mode'        => $asset->storage_mode,
             'upload_source'       => $asset->upload_source,
             'is_temporary'        => (bool) $asset->is_temporary,
+            'folder_id'           => $asset->folder_id,
+            'kind'                => $asset->kind,
             'public_access_token' => $asset->public_access_token,
             'public_url'          => $this->buildPublicUrl($asset, $baseUrl),
             'derivatives'         => $this->loadDerivatives($asset),

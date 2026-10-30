@@ -2835,6 +2835,105 @@
                 ]
             }
         },
+        "/api/v1/media/folders": {
+            "get": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Index MediaFolder",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Store MediaFolder",
+                "parameters": [],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/media/folders/{id}": {
+            "delete": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Destroy MediaFolder",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Update MediaFolder",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "default": {
+                        "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
         "/api/v1/public/media/{id}": {
             "get": {
                 "tags": [

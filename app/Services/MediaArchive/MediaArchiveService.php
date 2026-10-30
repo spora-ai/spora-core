@@ -13,6 +13,7 @@ use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
+use Spora\Models\MediaFolder;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -143,14 +144,18 @@ final class MediaArchiveService
 
     private readonly MediaAssetResolver $resolver;
 
+    private readonly PrincipalResolver $principalResolver;
+
     public function __construct(
         private readonly MediaArchiveIngestPipeline $ingestPipeline,
         private readonly MediaDerivativeService $derivatives,
         ?PrincipalService $principalService = null,
         ?MediaAssetResolver $resolver = null,
+        ?PrincipalResolver $principalResolver = null,
     ) {
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->resolver = $resolver ?? new MediaAssetResolver(new PrincipalResolver());
+        $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
     /**
@@ -223,6 +228,12 @@ final class MediaArchiveService
             // migration 0056. Filter is a single equality, so the planner
             // uses the leading column of the index.
             $builder->where('upload_source', $query->uploadSource);
+        }
+        if ($query->folderId !== null) {
+            $this->applyFolderFilter($builder, $query);
+        }
+        if ($query->kind !== null) {
+            $builder->where('kind', $query->kind);
         }
         if ($query->from !== null) {
             $builder->where('created_at', '>=', Carbon::instance(DateTime::createFromInterface($query->from)));
@@ -355,6 +366,52 @@ final class MediaArchiveService
     public function countForAgent(int $agentId): int
     {
         return MediaAsset::query()->where('agent_id', $agentId)->count();
+    }
+
+    /**
+     * Scope the listing to one folder.
+     *
+     * A folder outside the caller's principals yields no rows rather than
+     * somebody else's: a probe for a foreign folder id must not be able
+     * to confirm that the folder exists.
+     */
+    private function applyFolderFilter(Builder $builder, ListMediaQuery $query): void
+    {
+        $folder = MediaFolder::query()->find($query->folderId);
+        $principalId = $folder !== null ? (int) $folder->principal_id : null;
+
+        if ($principalId === null || !in_array($principalId, $this->scopePrincipalIds($query), true)) {
+            $builder->whereIn('id', []);
+            return;
+        }
+
+        $builder->where('folder_id', $query->folderId);
+    }
+
+    /**
+     * The principals the listing is scoped to.
+     *
+     * @return list<int>
+     */
+    private function scopePrincipalIds(ListMediaQuery $query): array
+    {
+        $userId = $query->agentOwnerUserId ?? $query->userId;
+        if ($userId === null) {
+            // No caller to resolve the visible principals from — the
+            // query's own principal list is the scope. The HTTP layer
+            // intersects that list with the caller's visible principals
+            // before the service sees it.
+            return $query->principalIds !== null
+                ? array_map('intval', $query->principalIds)
+                : [];
+        }
+
+        $visible = $this->principalResolver->visiblePrincipalIds($userId);
+        if ($query->principalIds !== null && $query->principalIds !== []) {
+            $visible = array_intersect($visible, array_map('intval', $query->principalIds));
+        }
+
+        return array_values($visible);
     }
 
     /**

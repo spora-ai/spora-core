@@ -30,6 +30,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaFolderController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -339,6 +340,17 @@ final class RouteDefinitions
         // `/api/v1/media/allowed-types` in core.
         $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/derivatives', [MediaDerivativeController::class, 'create'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
+
+        // Media folders — core owns the folder table, so core owns its
+        // CRUD. The operator creates, renames, moves and deletes folders;
+        // the agent may only file an asset into one (see
+        // `Spora\Tools\MediaFolderTool`). A folder that belongs to another
+        // principal is a 404, not a 403, and a uniqueness violation is a
+        // 422 — both decided by the controller, not by the router.
+        $r->addRoute('GET', '/api/v1/media/folders', [MediaFolderController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('POST', '/api/v1/media/folders', [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', '/api/v1/media/folders/{id}', [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', '/api/v1/media/folders/{id}', [MediaFolderController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Public, token-gated media access. No auth middleware — the token
         // itself is the credential. The id is always a UUID shape; the

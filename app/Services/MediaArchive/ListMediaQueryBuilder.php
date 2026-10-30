@@ -37,11 +37,23 @@ final class ListMediaQueryBuilder
             mediaTypes: $mediaTypes,
             agentId: self::parseAgentId($params->get('agent_id')),
             userId: null,
-            pluginSlug: self::parseString($params->get('plugin_slug')),
+            pluginSlug: self::parseString(
+                // `plugin` is the spelling the Media Archive panel sends;
+                // `plugin_slug` is core's documented name. The panel is a
+                // separately released package, so its spelling is the one
+                // in the field and both are accepted — dropping the alias
+                // would silently break the released panel's plugin chip.
+                self::firstOf($params->get('plugin_slug'), $params->get('plugin')),
+            ),
             toolName: self::parseString($params->get('tool_name')),
             from: self::parseDate($params->get('from')),
             to: self::parseDate($params->get('to')),
-            search: self::parseString($params->get('q')),
+            search: self::parseString(
+                // `search` is the spelling the Media Archive panel sends;
+                // `q` is core's documented name. Same reasoning as the
+                // plugin filter above.
+                self::firstOf($params->get('q'), $params->get('search')),
+            ),
             sort: self::parseSort($params->get('sort')),
             uploadSource: self::parseUploadSource($params->get('source')),
             ownership: $ownership ?? ListMediaQuery::OWNERSHIP_MINE,
@@ -53,9 +65,23 @@ final class ListMediaQueryBuilder
             // ::resolvePrincipalFilter()`.
             principalIds: self::parsePrincipalIds($params->all()['principal_id'] ?? null),
             includeTemporary: self::parseBool($params->get('include_temporary'), false),
+            folderId: self::parseFolderId($params->all()['folder_id'] ?? null),
+            kind: self::parseKind($params->get('kind')),
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
         );
+    }
+
+    /**
+     * The canonical spelling when it carries a value, the alias otherwise.
+     */
+    private static function firstOf(mixed $canonical, mixed $alias): mixed
+    {
+        if (is_string($canonical) && $canonical !== '') {
+            return $canonical;
+        }
+
+        return $alias;
     }
 
     private static function parseMediaType(mixed $raw): ?MediaType
@@ -180,6 +206,47 @@ final class ListMediaQueryBuilder
     private static function parseString(mixed $raw): ?string
     {
         return is_string($raw) ? $raw : null;
+    }
+
+    /**
+     * Parse `?folder_id=` into the folder the listing is scoped to.
+     *
+     * The array-bracket form (`?folder_id[]=…`) is accepted because the
+     * Media Archive panel's convention for a repeated id is the
+     * bracket form (`principal_id[]`); a multi-select folder filter would
+     * arrive that way. Only the scalar is honoured for now — a list
+     * would need a `WHERE folder_id IN (…)`, and a half-implemented
+     * multi-folder filter that silently returns one folder's rows would
+     * be worse than none.
+     *
+     * An unknown folder id is not an error: the service resolves it and
+     * yields no rows when it belongs to another principal.
+     */
+    private static function parseFolderId(mixed $raw): ?string
+    {
+        $value = is_array($raw) ? reset($raw) : $raw;
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        return trim($value);
+    }
+
+    /**
+     * Parse `?kind=` into the advisory mark the listing is scoped to.
+     *
+     * An unknown value is dropped silently — mirroring the typo tolerance
+     * of the other filters — so the listing stays unfiltered instead of
+     * failing.
+     */
+    private static function parseKind(mixed $raw): ?string
+    {
+        if (!is_string($raw) || trim($raw) === '') {
+            return null;
+        }
+        $value = strtolower(trim($raw));
+
+        return in_array($value, ListMediaQuery::ALLOWED_KINDS, true) ? $value : null;
     }
 
     private static function parseInt(mixed $raw, int $default): int

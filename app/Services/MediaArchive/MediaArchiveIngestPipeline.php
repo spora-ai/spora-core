@@ -280,6 +280,15 @@ final class MediaArchiveIngestPipeline
         return $row;
     }
 
+    /**
+     * Refresh the row of an idempotent re-ingest.
+     *
+     * The filing (`folder_id`) and the mark (`kind`) are deliberately not
+     * refreshed: they are the operator's curation of an asset that
+     * already exists, and a re-ingest of the same source must not undo
+     * it. A caller that wants to move an asset files it through
+     * {@see MediaFolderService::fileAsset()}.
+     */
     private function applyFieldsToExisting(MediaAsset $existing, PersistedAssetFields $fields): void
     {
         $existing->fill([
@@ -347,6 +356,10 @@ final class MediaArchiveIngestPipeline
             // `isTemporary=false`, so the probe keeps both old and new
             // schemas happy.
             'is_temporary'       => fn() => $request->isTemporary,
+            // Folder and kind (migration 0097) — same probe: a pre-0097
+            // schema has neither column.
+            'folder_id'          => fn() => $request->folderId,
+            'kind'               => fn() => $request->kind ?? MediaAssetKind::ASSET,
         ];
         foreach ($optionalFields as $column => $valueFn) {
             if ($schema->hasColumn($table, $column)) {
