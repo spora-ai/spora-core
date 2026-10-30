@@ -118,8 +118,10 @@ final class MediaArchiveController
 
     /**
      * Tiny DTO rebuilder so {@see applyPrincipalScope()} stays under the
-     * 3-return brain-overload ceiling. The other fields are passed
-     * through verbatim — the controller only ever replaces principalIds.
+     * 3-return brain-overload ceiling. Every other field is passed
+     * through verbatim — the controller only ever replaces principalIds,
+     * and a field left out here would silently fall back to its
+     * constructor default.
      */
     private function withPrincipalIds(ListMediaQuery $query, ?array $principalIds): ListMediaQuery
     {
@@ -139,6 +141,8 @@ final class MediaArchiveController
             agentOwnerUserId: $query->agentOwnerUserId,
             principalIds: $principalIds,
             includeTemporary: $query->includeTemporary,
+            folderId: $query->folderId,
+            kind: $query->kind,
             page: $query->page,
             perPage: $query->perPage,
         );

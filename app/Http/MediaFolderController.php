@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Closure;
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
+use Spora\Models\MediaFolder;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
@@ -134,13 +136,9 @@ final class MediaFolderController
                 );
             }
 
-            $name = $body['name'] ?? null;
-            if ($renames && !is_string($name)) {
-                return $this->error('BAD_REQUEST', 'name must be a string.', Response::HTTP_BAD_REQUEST);
-            }
-            $parentId = $this->readParentId($body);
-            if ($parentId === self::INVALID_PARENT) {
-                return $this->error('BAD_REQUEST', 'parent_id must be a string or null.', Response::HTTP_BAD_REQUEST);
+            $invalid = $this->invalidField($body);
+            if ($invalid !== null) {
+                return $invalid;
             }
 
             $principalId = $this->resolvePrincipalId(
@@ -149,13 +147,7 @@ final class MediaFolderController
                 $id,
             );
 
-            $folder = $renames
-                ? $this->folders->rename($principalId, $id, (string) $name)
-                : $this->folders->move($principalId, $id, $parentId);
-
-            if ($renames && $moves) {
-                $folder = $this->folders->move($principalId, $id, $parentId);
-            }
+            $folder = $this->applyPatch($principalId, $id, $body);
 
             return new JsonResponse(['data' => $this->folders->describe($folder)]);
         });
@@ -188,13 +180,82 @@ final class MediaFolderController
     {
         try {
             return $operation();
-        } catch (MediaFolderNotFoundException) {
-            return $this->notFound('NOT_FOUND', self::MSG_NOT_FOUND);
-        } catch (MediaFolderUniquenessException $e) {
-            return $this->unprocessable('NOT_UNIQUE', $e->getMessage());
-        } catch (MediaFolderValidationException $e) {
-            return $this->error('BAD_REQUEST', $e->getMessage(), Response::HTTP_BAD_REQUEST);
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException | MediaFolderValidationException $e) {
+            return $this->folderError($e);
         }
+    }
+
+    /**
+     * The HTTP shape of a folder domain error.
+     *
+     * Split out of {@see respond()} so that method stays under the
+     * 3-return brain-overload ceiling.
+     */
+    private function folderError(
+        MediaFolderNotFoundException | MediaFolderUniquenessException | MediaFolderValidationException $e,
+    ): JsonResponse {
+        if ($e instanceof MediaFolderNotFoundException) {
+            return $this->notFound('NOT_FOUND', self::MSG_NOT_FOUND);
+        }
+        if ($e instanceof MediaFolderUniquenessException) {
+            return $this->unprocessable('NOT_UNIQUE', $e->getMessage());
+        }
+
+        return $this->error('BAD_REQUEST', $e->getMessage(), Response::HTTP_BAD_REQUEST);
+    }
+
+    /**
+     * The error for a field the patch carries in an unusable shape, or
+     * null when both are usable.
+     */
+    private function invalidField(array $body): ?JsonResponse
+    {
+        if (array_key_exists('name', $body) && !is_string($body['name'] ?? null)) {
+            return $this->error('BAD_REQUEST', 'name must be a string.', Response::HTTP_BAD_REQUEST);
+        }
+        if (array_key_exists('parent_id', $body) && $this->readParentId($body) === self::INVALID_PARENT) {
+            return $this->error('BAD_REQUEST', 'parent_id must be a string or null.', Response::HTTP_BAD_REQUEST);
+        }
+
+        return null;
+    }
+
+    /**
+     * The rename and the move, as one operation.
+     *
+     * The two writes share a transaction, so a move that collides with a
+     * sibling rolls the rename back: the caller never sees a 422 next to
+     * a folder that was renamed anyway.
+     */
+    private function renameAndMove(int $principalId, string $id, string $name, ?string $parentId): MediaFolder
+    {
+        return Capsule::connection()->transaction(
+            function () use ($principalId, $id, $name, $parentId): MediaFolder {
+                $this->folders->rename($principalId, $id, $name);
+
+                return $this->folders->move($principalId, $id, $parentId);
+            },
+        );
+    }
+
+    /**
+     * What the patch asks for: a rename, a move, or both.
+     */
+    private function applyPatch(int $principalId, string $id, array $body): MediaFolder
+    {
+        $renames = array_key_exists('name', $body);
+        $moves = array_key_exists('parent_id', $body);
+        $name = (string) ($body['name'] ?? '');
+        $parentId = $this->readParentId($body);
+
+        if ($renames && $moves) {
+            return $this->renameAndMove($principalId, $id, $name, $parentId);
+        }
+        if ($renames) {
+            return $this->folders->rename($principalId, $id, $name);
+        }
+
+        return $this->folders->move($principalId, $id, $parentId);
     }
 
     /**
@@ -279,13 +340,11 @@ final class MediaFolderController
      *
      * `null` is a valid value — it moves the folder to the root — so an
      * unusable value needs its own sentinel to be told apart from it.
+     * An absent key and an explicit `null` both mean the root.
      */
     private function readParentId(array $body): ?string
     {
-        if (!array_key_exists('parent_id', $body)) {
-            return null;
-        }
-        $value = $body['parent_id'];
+        $value = $body['parent_id'] ?? null;
         if ($value === null) {
             return null;
         }

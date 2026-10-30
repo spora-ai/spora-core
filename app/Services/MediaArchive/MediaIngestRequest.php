@@ -78,9 +78,10 @@ final readonly class MediaIngestRequest
         public ?string $folderId = null,
         /**
          * The advisory mark on the asset (`asset` / `template` /
-         * `example`). Advisory means advisory: whatever the caller
-         * passes is stored as given, and nothing in the read or write
-         * path refuses an asset because of it.
+         * `example`). Advisory means advisory: the service stores what
+         * it is handed. Refusing a value outside the vocabulary belongs
+         * to the HTTP layer — see
+         * {@see \Spora\Http\MediaUploadController::checkKindAllowed()}.
          */
         public ?string $kind = null,
     ) {

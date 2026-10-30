@@ -284,4 +284,30 @@ final class PrincipalService
         }
         return Agent::whereIn('principal_id', $principalIds)->pluck('id')->all();
     }
+
+    /**
+     * The media folders the given principals own.
+     *
+     * A folder is a metadata container the operator curates freely, so a
+     * principal that owns one cannot be deleted before the folder is
+     * gone — the same shape as the agent guard. `media_folders.principal_id`
+     * is `ON DELETE RESTRICT`, so the delete would otherwise die on an
+     * unhandled constraint violation.
+     *
+     * @param  list<int> $principalIds Principals to inspect (one or many)
+     * @return list<string>
+     */
+    public function dependentMediaFolderIds(array $principalIds): array
+    {
+        if ($principalIds === []) {
+            return [];
+        }
+
+        $ids = Capsule::table('media_folders')
+            ->whereIn('principal_id', $principalIds)
+            ->pluck('id')
+            ->all();
+
+        return array_values(array_map(static fn($id): string => (string) $id, $ids));
+    }
 }

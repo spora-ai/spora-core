@@ -369,6 +369,7 @@
     "cron_expression is invalid.": "cron_expression is invalid.",
     "data": "data",
     "decisions must be a non-empty array.": "decisions must be a non-empty array.",
+    "kind must be one of: %s.": "kind must be one of: %s.",
     "media_ids may carry at most ": "media_ids may carry at most ",
     "meta": "meta",
     "name cannot be empty.": "name cannot be empty.",

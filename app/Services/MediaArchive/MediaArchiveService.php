@@ -14,6 +14,8 @@ use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Models\MediaFolder;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -184,6 +186,8 @@ final class MediaArchiveService
      * `source_url` already exists).
      *
      * @throws InvalidArgumentException When `hex`/`base64` decoding fails.
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     public function ingest(MediaIngestRequest $request): MediaAsset
     {

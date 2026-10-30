@@ -12,6 +12,7 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\ListMediaQuery;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaAssetKind;
 use Spora\Services\MediaArchive\MediaFolderService;
@@ -113,7 +114,9 @@ describe('the ingest pipeline', function (): void {
     });
 
     it('stores an advisory kind outside the known vocabulary as given', function (): void {
-        // The kind is a hint, never a gate.
+        // The service stores what it is handed; refusing a value outside
+        // the vocabulary belongs to the HTTP layer, which answers 400
+        // before the bytes reach the asset store.
         $principalId = createUserPrincipalPublic(623);
         [$service] = writePathService();
 
@@ -233,5 +236,44 @@ describe('the upload endpoint', function (): void {
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    });
+
+    it('answers 400 for a kind outside the vocabulary and stores nothing', function (): void {
+        // A kind the column cannot hold and the filter cannot select is
+        // refused before the bytes reach the asset store — otherwise the
+        // row is written and the save trips the column's length check,
+        // which answers a 500 and leaves an orphaned blob behind.
+        [$service, $controller, $auth] = writePathService();
+        $userId = bootAuth($auth, 'wp-bad-kind@example.com', 'Password1!');
+        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+
+        $request = writePathUploadRequest('theme.md', '# hello', [
+            'principal_id' => (string) $principalId,
+            'kind'         => 'a-kind-that-is-far-too-long',
+        ]);
+
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_BAD_REQUEST);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_KIND');
+        expect($service->list(new ListMediaQuery(principalIds: [$principalId]))->total())->toBe(0);
+    });
+
+    it('stores a kind inside the vocabulary', function (): void {
+        [$service, $controller, $auth] = writePathService();
+        $userId = bootAuth($auth, 'wp-good-kind@example.com', 'Password1!');
+        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+
+        $request = writePathUploadRequest('theme.md', '# hello', [
+            'principal_id' => (string) $principalId,
+            'kind'         => MediaAssetKind::EXAMPLE,
+        ]);
+
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_CREATED);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['data']['kind'])->toBe(MediaAssetKind::EXAMPLE);
     });
 });

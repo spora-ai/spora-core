@@ -131,12 +131,7 @@ final readonly class MediaCreateHandler
                 uploadSource: 'tool',
                 folderId: $this->readFolderId($arguments),
             ));
-        } catch (MediaFolderNotFoundException $e) {
-            return ToolResult::fail(sprintf(
-                '`create_media` could not file the document: %s',
-                $e->getMessage(),
-            ));
-        } catch (MediaFolderUniquenessException $e) {
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException $e) {
             return ToolResult::fail(sprintf(
                 '`create_media` could not file the document: %s',
                 $e->getMessage(),

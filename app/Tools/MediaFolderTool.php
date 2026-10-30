@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Tools;
 
+use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\ListMediaQuery;
@@ -133,6 +134,34 @@ final class MediaFolderTool extends AbstractTool
 
     private function fileAsset(array $arguments, int $principalId): ToolResult
     {
+        $asset = $this->resolveAsset($arguments, $principalId);
+        if ($asset instanceof ToolResult) {
+            return $asset;
+        }
+
+        $folderId = $this->readFolderId($arguments);
+
+        $failure = $this->fileFailure($principalId, $asset, $folderId);
+        if ($failure !== null) {
+            return $failure;
+        }
+
+        $target = $folderId === null ? 'the root' : $folderId;
+
+        return ToolResult::ok(
+            sprintf('Filed asset %s in %s.', $asset->id, $target),
+            ['asset_id' => $asset->id, 'folder_id' => $asset->folder_id],
+        );
+    }
+
+    /**
+     * The asset the operation names, or the failure to report.
+     *
+     * An asset of another principal is reported as missing rather than
+     * as forbidden.
+     */
+    private function resolveAsset(array $arguments, int $principalId): MediaAsset|ToolResult
+    {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
         if ($assetId === '') {
             return ToolResult::fail('asset_id is required for file_asset.');
@@ -143,8 +172,14 @@ final class MediaFolderTool extends AbstractTool
             return ToolResult::fail('Media asset not found.');
         }
 
-        $folderId = $this->readFolderId($arguments);
+        return $asset;
+    }
 
+    /**
+     * The failure the folder write reported, or null when it succeeded.
+     */
+    private function fileFailure(int $principalId, MediaAsset $asset, ?string $folderId): ?ToolResult
+    {
         try {
             $this->folders->fileAsset($principalId, $asset, $folderId);
         } catch (MediaFolderNotFoundException) {
@@ -153,12 +188,7 @@ final class MediaFolderTool extends AbstractTool
             return ToolResult::fail($e->getMessage());
         }
 
-        $target = $folderId === null ? 'the root' : $folderId;
-
-        return ToolResult::ok(
-            sprintf('Filed asset %s in %s.', $asset->id, $target),
-            ['asset_id' => $asset->id, 'folder_id' => $asset->folder_id],
-        );
+        return null;
     }
 
     private function searchAssets(array $arguments, int $principalId): ToolResult

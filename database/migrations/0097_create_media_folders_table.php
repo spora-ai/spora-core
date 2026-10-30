@@ -25,9 +25,10 @@ use Illuminate\Database\Schema\Blueprint;
  *
  *   - `folder_id` — `ON DELETE SET NULL`, so a deleted folder leaves its
  *     assets in the root rather than deleting them.
- *   - `kind` — an advisory mark (`asset` / `template` / `example`). Nothing
- *     in the read or write path refuses an asset because of its `kind`;
- *     it is a filter hint for the operator UI.
+ *   - `kind` — an advisory mark (`asset` / `template` / `example`). A
+ *     mark in that vocabulary never refuses an asset; the upload
+ *     endpoint refuses a value outside it with a 400, because the column
+ *     cannot hold it. It is a filter hint for the operator UI.
  *
  * The UNIQUE `(folder_id, filename)` index makes filenames unique within a
  * folder. Assets with no folder are not constrained by it: every row that

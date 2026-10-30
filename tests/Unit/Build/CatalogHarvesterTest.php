@@ -130,7 +130,7 @@ test('a message thrown as an exception argument is harvested', function (): void
     // reads, so only the thrown-message harvest can reach it.
     expect($harvested)->toHaveKey('Hex payload has odd length.')
         ->and(implode(' ', $harvested['Hex payload has odd length.']))
-            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:76');
+            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:78');
 });
 
 test('a sprintf in an envelope position is harvested by its format string', function (): void {
@@ -140,7 +140,7 @@ test('a sprintf in an envelope position is harvested by its format string', func
     // translation, and the runtime fills them in.
     expect($harvested)->toHaveKey('MIME type "%s" is not in the upload allowlist.')
         ->and(implode(' ', $harvested['MIME type "%s" is not in the upload allowlist.']))
-            ->toContain('app/Http/MediaUploadController.php:160');
+            ->toContain('app/Http/MediaUploadController.php:206');
 });
 
 test('an approval prompt is harvested as the format string it was built with', function (): void {

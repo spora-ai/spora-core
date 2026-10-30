@@ -234,6 +234,58 @@ describe('PATCH /api/v1/media/folders/{id}', function (): void {
 
         expect($response->getStatusCode())->toBe(400);
     });
+
+    it('rolls the rename back when the move that follows it collides', function (): void {
+        // A patch carrying both is one operation. The rename lands on
+        // `/Existing`, the move would put it on `/Parent/Existing` — a
+        // path another folder already holds. The 422 must leave the
+        // folder exactly as it was, or the caller reads "nothing
+        // happened" next to a folder that was renamed anyway.
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-rollback@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $service = new MediaFolderService();
+        $parent = $service->create($principalId, 'Parent');
+        $service->create($principalId, 'Existing', (string) $parent->id);
+        $folder = $service->create($principalId, 'Child');
+
+        simulateLoggedInSession($callerId, 'mf-rollback@example.com');
+        $response = $controller->update(
+            (string) $folder->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, [
+                'name'      => 'Existing',
+                'parent_id' => (string) $parent->id,
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+
+        $unchanged = MediaFolder::query()->find($folder->id);
+        expect((string) $unchanged?->name)->toBe('Child');
+        expect((string) $unchanged?->path)->toBe('/Child');
+    });
+
+    it('renames and moves a folder in one patch', function (): void {
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-both@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $service = new MediaFolderService();
+        $parent = $service->create($principalId, 'Parent');
+        $folder = $service->create($principalId, 'Child');
+
+        simulateLoggedInSession($callerId, 'mf-both@example.com');
+        $response = $controller->update(
+            (string) $folder->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, [
+                'name'      => 'Renamed',
+                'parent_id' => (string) $parent->id,
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['data']['path'])->toBe('/Parent/Renamed');
+    });
 });
 
 describe('DELETE /api/v1/media/folders/{id}', function (): void {

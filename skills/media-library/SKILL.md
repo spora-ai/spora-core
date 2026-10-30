@@ -136,7 +136,7 @@ The media library has folders. A folder belongs to the principal, carries a name
 
 ## Kinds
 
-Every asset carries a **kind**: `asset` (the default), `template`, or `example`. The kind is **advisory** — it is a label the operator uses to filter the library, and nothing refuses an asset because of it. A mis-marked template still works, and the operator can change the mark at any time. Never claim that an asset "is not a template" because of its kind; read the content instead.
+Every asset carries a **kind**: `asset` (the default), `template`, or `example`. The kind is **advisory** — it is a label the operator uses to filter the library, and a kind in that set never refuses an asset. A mis-marked template still works, and the operator can change the mark at any time. Never claim that an asset "is not a template" because of its kind; read the content instead.
 
 ## Scope
 
