@@ -10,6 +10,8 @@ use Spora\Core\SecurityManager;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaAssetKind;
 use Spora\Services\MediaArchive\MediaFolderService;
@@ -61,8 +63,6 @@ function writePathService(): array
         new MimeSniffer(),
         new Config(),
         new \Spora\Services\MediaArchive\MediaAssetSerializer(),
-        new PrincipalService($resolver),
-        new MediaFolderService(),
     );
 
     return [$service, $controller, $auth];
@@ -127,6 +127,46 @@ describe('the ingest pipeline', function (): void {
 
         expect((string) $asset->kind)->toBe('house-style');
     });
+
+    it('refuses a filename the folder already holds with the domain error', function (): void {
+        // The rule is "one filename per folder". The ingest writes
+        // through the folder service, so the collision is a domain error
+        // the caller can answer with a 422 — not the raw unique-index
+        // violation that would surface as a 500.
+        $principalId = createUserPrincipalPublic(628);
+        $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+        [$service] = writePathService();
+
+        $service->ingest(new MediaIngestRequest(
+            bytes: '# hello',
+            mime: 'text/markdown',
+            filename: 'theme.md',
+            principalId: $principalId,
+            folderId: (string) $folder->id,
+        ));
+
+        expect(fn() => $service->ingest(new MediaIngestRequest(
+            bytes: '# hello again',
+            mime: 'text/markdown',
+            filename: 'theme.md',
+            principalId: $principalId,
+            folderId: (string) $folder->id,
+        )))->toThrow(MediaFolderUniquenessException::class);
+    });
+
+    it('refuses a folder that is not the asset\'s principal', function (): void {
+        $ownerId = createUserPrincipalPublic(629);
+        $foreignFolder = (new MediaFolderService())->create($ownerId, 'Corporate');
+        [$service] = writePathService();
+
+        expect(fn() => $service->ingest(new MediaIngestRequest(
+            bytes: '# hello',
+            mime: 'text/markdown',
+            filename: 'theme.md',
+            principalId: createUserPrincipalPublic(630),
+            folderId: (string) $foreignFolder->id,
+        )))->toThrow(MediaFolderNotFoundException::class);
+    });
 });
 
 describe('the upload endpoint', function (): void {
@@ -173,6 +213,9 @@ describe('the upload endpoint', function (): void {
         $response = $controller->store($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['error']['code'])->toBe('FOLDER_FILENAME_TAKEN');
+        expect($body['error']['message'])->toContain('theme.md');
     });
 
     it('answers 422 for a folder of another principal', function (): void {

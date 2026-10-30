@@ -594,6 +594,7 @@ final class ContainerDefinitions
                     $c->get(AssetStore::class),
                     $c->get(MediaDerivativeService::class),
                     $c->get(PrincipalService::class),
+                    $c->get(MediaFolderService::class),
                 );
             },
 
@@ -1158,8 +1159,6 @@ final class ContainerDefinitions
                     $c->get(MimeSniffer::class),
                     $c->get(Config::class),
                     new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
-                    $c->get(PrincipalService::class),
-                    $c->get(MediaFolderService::class),
                 );
             },
 

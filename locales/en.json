@@ -304,6 +304,7 @@
     "Template payload is invalid.": "Template payload is invalid.",
     "Test email sent successfully.": "Test email sent successfully.",
     "That folder does not exist.": "That folder does not exist.",
+    "The asset has no principal, so it cannot be filed in a media folder.": "The asset has no principal, so it cannot be filed in a media folder.",
     "The email address or password is incorrect.": "The email address or password is incorrect.",
     "The field \"role\" is required.": "The field \"role\" is required.",
     "The fields \"email\" and \"password\" are required.": "The fields \"email\" and \"password\" are required.",

@@ -140,7 +140,7 @@ test('a sprintf in an envelope position is harvested by its format string', func
     // translation, and the runtime fills them in.
     expect($harvested)->toHaveKey('MIME type "%s" is not in the upload allowlist.')
         ->and(implode(' ', $harvested['MIME type "%s" is not in the upload allowlist.']))
-            ->toContain('app/Http/MediaUploadController.php:219');
+            ->toContain('app/Http/MediaUploadController.php:160');
 });
 
 test('an approval prompt is harvested as the format string it was built with', function (): void {

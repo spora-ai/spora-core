@@ -358,6 +358,12 @@ describe('MediaFolderService::fileTarget', function (): void {
     });
 
     it('refuses a filename the folder already holds', function (): void {
+        // The check runs with nothing excluded. That is the case the
+        // MariaDB job caught: comparing the UUID column with an empty
+        // string is NULL on MariaDB's native `uuid` type (so the
+        // predicate matched no row and the write landed on the raw
+        // unique index), while it is an ordinary string comparison on
+        // MySQL's `char(36)` and on SQLite's TEXT.
         $principalId = createUserPrincipalPublic(573);
         $service = folderService();
         $folder = $service->create($principalId, 'Corporate');

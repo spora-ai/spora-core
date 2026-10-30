@@ -304,6 +304,7 @@
   "Template payload is invalid.": "Die Nutzdaten der Vorlage sind ungültig.",
   "Test email sent successfully.": "Die Test-E-Mail wurde erfolgreich gesendet.",
   "That folder does not exist.": "Dieser Ordner existiert nicht.",
+  "The asset has no principal, so it cannot be filed in a media folder.": "Das Asset hat keinen Principal und kann daher keinem Medienordner zugeordnet werden.",
   "The email address or password is incorrect.": "Die E-Mail-Adresse oder das Passwort ist falsch.",
   "The field \"role\" is required.": "Das Feld \"role\" ist erforderlich.",
   "The fields \"email\" and \"password\" are required.": "Die Felder \"email\" und \"password\" sind erforderlich.",

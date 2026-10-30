@@ -132,7 +132,7 @@ The media library has folders. A folder belongs to the principal, carries a name
 
 `file_asset` fails when the folder already holds a file with that name — pick another name or another folder rather than retrying. `search_assets` needs a `folder_id`; call `list_folders` first when you do not have one. Both are scoped to your principal: an asset or folder of another principal is reported as missing, so there is nothing to probe for.
 
-An asset created with `create_media` lands in the root. File it into a folder afterwards with `file_asset` when it belongs to one.
+`create_media` takes an optional `folder_id` too, so a new asset can be filed as it is written. Same rule: a name the folder already holds is refused. Without a `folder_id` the asset lands in the root — file it afterwards with `file_asset` when it belongs to one.
 
 ## Kinds
 

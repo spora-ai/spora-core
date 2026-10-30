@@ -233,11 +233,22 @@ final class MediaFolderService
 
         $taken = MediaAsset::query()
             ->where('folder_id', $folder->id)
-            ->where('filename', $filename)
-            ->where('id', '!=', $exceptAssetId)
-            ->exists();
+            ->where('filename', $filename);
 
-        if ($taken) {
+        // The exclusion is only emitted when there is something to
+        // exclude. Comparing a UUID column with an empty string is
+        // engine-dependent: MariaDB stores `media_assets.id` in its
+        // native `uuid` type, and that type compares as NULL against a
+        // string that is not a UUID — so `id != ''` matches *no row*
+        // there, while the same predicate is an ordinary string
+        // comparison on MySQL's `char(36)` and on SQLite's TEXT. The
+        // check would silently pass on MariaDB and the write would land
+        // on the raw unique index.
+        if ($exceptAssetId !== '') {
+            $taken->where('id', '!=', $exceptAssetId);
+        }
+
+        if ($taken->exists()) {
             throw new MediaFolderUniquenessException(sprintf(
                 'The folder "%s" already holds a file named "%s".',
                 (string) $folder->name,

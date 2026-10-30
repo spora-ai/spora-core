@@ -10,6 +10,7 @@ use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
 use Spora\Services\Exceptions\PrincipalMaterialisationException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 
@@ -37,6 +38,11 @@ final class MediaArchiveIngestPipeline
         private readonly AssetStore $assetStore,
         private readonly MediaDerivativeService $derivatives,
         private readonly PrincipalService $principalService,
+        // The folder tree owns the "one filename per folder" rule, so the
+        // ingest writes through it rather than around it. The default
+        // instance keeps the constructor callable with seven arguments —
+        // plugins build this pipeline in their own test harnesses.
+        private readonly MediaFolderService $folders = new MediaFolderService(),
     ) {}
 
     public function ingest(MediaIngestRequest $request): MediaAsset
@@ -356,9 +362,8 @@ final class MediaArchiveIngestPipeline
             // `isTemporary=false`, so the probe keeps both old and new
             // schemas happy.
             'is_temporary'       => fn() => $request->isTemporary,
-            // Folder and kind (migration 0097) — same probe: a pre-0097
-            // schema has neither column.
-            'folder_id'          => fn() => $request->folderId,
+            // Kind (migration 0097) — same probe: a pre-0097 schema has
+            // no such column.
             'kind'               => fn() => $request->kind ?? MediaAssetKind::ASSET,
         ];
         foreach ($optionalFields as $column => $valueFn) {
@@ -370,6 +375,24 @@ final class MediaArchiveIngestPipeline
             && $schema->hasColumn($table, 'public_access_token')) {
             $asset->public_access_token = $request->publicAccessToken;
         }
+
+        // The folder write goes through the folder service, which owns the
+        // "one filename per folder" rule. Writing `folder_id` straight
+        // onto the row would land on the raw unique index and answer a
+        // 500 where the rule says 422.
+        $folderId = $schema->hasColumn($table, 'folder_id') ? $request->folderId : null;
+        if ($folderId !== null && $folderId !== '') {
+            $principalId = $request->principalId;
+            if ($principalId === null) {
+                throw new MediaFolderNotFoundException(
+                    'The asset has no principal, so it cannot be filed in a media folder.',
+                );
+            }
+            $this->folders->fileAsset($principalId, $asset, $folderId);
+
+            return $asset;
+        }
+
         $asset->save();
 
         return $asset;
