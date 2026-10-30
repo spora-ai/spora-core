@@ -349,17 +349,11 @@ describe('MediaFolderService::fileAsset', function (): void {
 });
 
 describe('MediaFolderService::fileTarget', function (): void {
-    it('returns null for the root', function (): void {
-        $principalId = createUserPrincipalPublic(571);
-
-        expect(folderService()->fileTarget($principalId, null, 'theme.yml'))->toBeNull();
-    });
-
     it('returns the folder when the filename is free', function (): void {
         $principalId = createUserPrincipalPublic(572);
         $folder = folderService()->create($principalId, 'Corporate');
 
-        expect((string) folderService()->fileTarget($principalId, (string) $folder->id, 'theme.yml')?->id)
+        expect((string) folderService()->fileTarget($principalId, (string) $folder->id, 'theme.yml')->id)
             ->toBe((string) $folder->id);
     });
 
@@ -385,7 +379,7 @@ describe('MediaFolderService::fileTarget', function (): void {
             (string) $folder->id,
             'theme.yml',
             (string) $asset->id,
-        )?->id)->toBe((string) $folder->id);
+        )->id)->toBe((string) $folder->id);
     });
 });
 

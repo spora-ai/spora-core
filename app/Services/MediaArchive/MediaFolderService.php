@@ -204,7 +204,7 @@ final class MediaFolderService
     }
 
     /**
-     * The folder an asset may be filed in, or null for the root.
+     * The folder an asset may be filed in.
      *
      * Throws when the folder is not the principal's, or when the folder
      * already holds an asset with that filename — the rule the UNIQUE
@@ -218,14 +218,10 @@ final class MediaFolderService
      */
     public function fileTarget(
         int $principalId,
-        ?string $folderId,
+        string $folderId,
         ?string $filename,
         string $exceptAssetId = '',
-    ): ?MediaFolder {
-        if ($folderId === null || $folderId === '') {
-            return null;
-        }
-
+    ): MediaFolder {
         $folder = $this->requireFolder($principalId, $folderId);
 
         // A row without a filename is not constrained by the index — a
@@ -270,7 +266,7 @@ final class MediaFolderService
 
         $folder = $this->fileTarget($principalId, $folderId, $asset->filename, (string) $asset->id);
 
-        $asset->folder_id = (string) $folder?->id;
+        $asset->folder_id = (string) $folder->id;
         try {
             $asset->save();
         } catch (QueryException $e) {
@@ -279,7 +275,7 @@ final class MediaFolderService
             }
             throw new MediaFolderUniquenessException(sprintf(
                 'The folder "%s" already holds a file named "%s".',
-                (string) $folder?->name,
+                (string) $folder->name,
                 (string) $asset->filename,
             ), 0, $e);
         }
