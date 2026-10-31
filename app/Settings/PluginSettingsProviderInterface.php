@@ -23,10 +23,11 @@ interface PluginSettingsProviderInterface
      * `SPORA_` prefix — the registry builds the full key, so the rule is
      * enforced in one place instead of per plugin.
      *
-     * The definitions are read while the configuration is being built, so a
-     * provider must not touch the database here. It may depend on the
-     * configuration: the host resolves the providers once the configuration
-     * exists, so a provider that reads it to describe its settings works.
+     * The definitions are read on the configuration's first read — before the
+     * database is open — so a provider must not touch the database here. It
+     * may depend on the configuration: the host resolves the providers once
+     * the configuration exists, so a provider that reads it to describe its
+     * settings works.
      *
      * The host owns the storage group and the section. A `group` or a
      * `section` on the definition is ignored — the key is rewritten, the
