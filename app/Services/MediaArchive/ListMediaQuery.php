@@ -70,6 +70,9 @@ final readonly class ListMediaQuery
      * rows, it never refuses one — so the set is closed only for the
      * filter's own sake: an unknown value is dropped by the builder and
      * the listing stays unfiltered.
+     *
+     * Mirrors {@see MediaAssetKind::ALL} — the upload endpoint refuses a
+     * kind this list does not hold, so the two have to stay in step.
      */
     public const ALLOWED_KINDS = [
         MediaAssetKind::ASSET,

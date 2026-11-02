@@ -154,12 +154,6 @@ final class MediaFolderTool extends AbstractTool
         );
     }
 
-    /**
-     * The asset the operation names, or the failure to report.
-     *
-     * An asset of another principal is reported as missing rather than
-     * as forbidden.
-     */
     private function resolveAsset(array $arguments, int $principalId): MediaAsset|ToolResult
     {
         $assetId = trim((string) ($arguments['asset_id'] ?? ''));
@@ -175,9 +169,6 @@ final class MediaFolderTool extends AbstractTool
         return $asset;
     }
 
-    /**
-     * The failure the folder write reported, or null when it succeeded.
-     */
     private function fileFailure(int $principalId, MediaAsset $asset, ?string $folderId): ?ToolResult
     {
         try {

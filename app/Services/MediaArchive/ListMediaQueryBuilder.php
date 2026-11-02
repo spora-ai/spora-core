@@ -72,9 +72,6 @@ final class ListMediaQueryBuilder
         );
     }
 
-    /**
-     * The canonical spelling when it carries a value, the alias otherwise.
-     */
     private static function firstOf(mixed $canonical, mixed $alias): mixed
     {
         if (is_string($canonical) && $canonical !== '') {
@@ -214,10 +211,8 @@ final class ListMediaQueryBuilder
      * The array-bracket form (`?folder_id[]=…`) is accepted because the
      * Media Archive panel's convention for a repeated id is the
      * bracket form (`principal_id[]`); a multi-select folder filter would
-     * arrive that way. Only the scalar is honoured for now — a list
-     * would need a `WHERE folder_id IN (…)`, and a half-implemented
-     * multi-folder filter that silently returns one folder's rows would
-     * be worse than none.
+     * arrive that way. Only the first value is honoured — a list would
+     * need a `WHERE folder_id IN (…)`.
      *
      * An unknown folder id is not an error: the service resolves it and
      * yields no rows when it belongs to another principal.

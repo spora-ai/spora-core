@@ -17,9 +17,6 @@ function folderService(): MediaFolderService
     return new MediaFolderService();
 }
 
-/**
- * A media asset row owned by `$principalId`.
- */
 function folderTestAsset(int $principalId, string $filename): MediaAsset
 {
     $id = sprintf(

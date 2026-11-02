@@ -344,9 +344,8 @@ final class RouteDefinitions
         // Media folders — core owns the folder table, so core owns its
         // CRUD. The operator creates, renames, moves and deletes folders;
         // the agent may only file an asset into one (see
-        // `Spora\Tools\MediaFolderTool`). A folder that belongs to another
-        // principal is a 404, not a 403, and a uniqueness violation is a
-        // 422 — both decided by the controller, not by the router.
+        // `Spora\Tools\MediaFolderTool`). Which status a domain error
+        // becomes is the controller's decision, not the router's.
         $r->addRoute('GET', '/api/v1/media/folders', [MediaFolderController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/media/folders', [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', '/api/v1/media/folders/{id}', [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);

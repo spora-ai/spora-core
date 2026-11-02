@@ -35,7 +35,6 @@ use Spora\Services\Text\Utf8Sanitizer;
  */
 final class MediaFolderService
 {
-    /** The separator between path segments. */
     private const PATH_SEPARATOR = '/';
 
     /** The longest a folder name may be, matching the column width. */
@@ -70,7 +69,6 @@ final class MediaFolderService
         )->all();
     }
 
-    /** The folder, or null when it does not exist for this principal. */
     public function find(int $principalId, string $folderId): ?MediaFolder
     {
         return MediaFolder::query()

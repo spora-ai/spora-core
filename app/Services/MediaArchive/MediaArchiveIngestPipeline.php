@@ -43,8 +43,9 @@ final class MediaArchiveIngestPipeline
         private readonly PrincipalService $principalService,
         // The folder tree owns the "one filename per folder" rule, so the
         // ingest writes through it rather than around it. The default
-        // instance keeps the constructor callable with seven arguments —
-        // plugins build this pipeline in their own test harnesses.
+        // instance keeps the constructor callable with the arguments it
+        // took before folders existed — plugins build this pipeline in
+        // their own test harnesses.
         private readonly MediaFolderService $folders = new MediaFolderService(),
     ) {}
 

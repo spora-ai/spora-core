@@ -55,9 +55,8 @@ test('0097 adds folder_id and kind to media_assets', function (): void {
 });
 
 test('0097 creates the unique (folder_id, filename) index', function (): void {
-    // The rule D4 asks for: filenames are unique within a folder. The
-    // index is what enforces it — the service checks it first and
-    // reports a 422.
+    // The rule: filenames are unique within a folder. The index is what
+    // enforces it — the service checks it first and reports a 422.
     expect(mediaFolderIndexes('media_assets'))->toContain('media_assets_folder_filename_unique');
 });
 

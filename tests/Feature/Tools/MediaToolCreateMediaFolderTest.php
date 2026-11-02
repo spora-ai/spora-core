@@ -74,7 +74,6 @@ it('refuses a filename the folder already holds', function (): void {
 
         expect($second->success)->toBeFalse();
         expect($second->content)->toContain('theme.yml');
-        // The refusal is a message, not an exception: the turn continues.
         expect($second->content)->toContain('could not file the document');
     } finally {
         $restore();

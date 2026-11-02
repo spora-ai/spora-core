@@ -117,13 +117,6 @@ final class MediaUploadController
         );
     }
 
-    /**
-     * The checks the request must pass, and then the ingest.
-     *
-     * The allowlist is checked against the sniffed MIME, never the
-     * client header, and the mark's vocabulary is checked before the
-     * bytes reach the AssetStore.
-     */
     private function ingestChecked(MediaIngestRequest $request, string $sniffedMime, int $userId): MediaAsset|JsonResponse
     {
         // The allowlist must use the sniffed MIME, never the client header.
@@ -138,8 +131,6 @@ final class MediaUploadController
     }
 
     /**
-     * The ingest, or the error the request must answer.
-     *
      * Split out of {@see store()} so that method stays under the
      * 3-return brain-overload ceiling.
      */
@@ -187,12 +178,10 @@ final class MediaUploadController
     }
 
     /**
-     * The mark is advisory: a mark the operator chose is never refused.
-     *
      * A value outside the vocabulary is refused, before the bytes reach
-     * the AssetStore — the column cannot hold it and the listing's filter
-     * cannot select it, so storing it would only produce a row nobody
-     * can find.
+     * the AssetStore: the listing's filter could never select the row
+     * again. A mark inside the vocabulary is stored as given — the mark
+     * is advisory and never refuses an asset.
      */
     private function checkKindAllowed(?string $kind): ?JsonResponse
     {

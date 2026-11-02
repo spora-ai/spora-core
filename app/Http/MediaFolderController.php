@@ -29,10 +29,11 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Folders are principal-scoped. A request may name the principal it acts
  * on (`principal_id`); without one it acts on the caller's own
- * user-principal, or — for a request that names a folder — on the
- * folder's own principal. A folder outside the caller's visible
- * principals is a **404**, not a 403: the caller has no business knowing
- * that it exists.
+ * user-principal — the first of the visible principals, because
+ * `PrincipalResolver::visiblePrincipalIds()` puts the user-principal first
+ * — or, for a request that names a folder, on the folder's own principal.
+ * A folder outside the caller's visible principals is a **404**, not a
+ * 403: the caller has no business knowing that it exists.
  *
  * Auth and CSRF are enforced by the route's middleware; the controller
  * does not duplicate the check.
@@ -186,8 +187,6 @@ final class MediaFolderController
     }
 
     /**
-     * The HTTP shape of a folder domain error.
-     *
      * Split out of {@see respond()} so that method stays under the
      * 3-return brain-overload ceiling.
      */
@@ -204,10 +203,6 @@ final class MediaFolderController
         return $this->error('BAD_REQUEST', $e->getMessage(), Response::HTTP_BAD_REQUEST);
     }
 
-    /**
-     * The error for a field the patch carries in an unusable shape, or
-     * null when both are usable.
-     */
     private function invalidField(array $body): ?JsonResponse
     {
         if (array_key_exists('name', $body) && !is_string($body['name'] ?? null)) {
@@ -238,9 +233,6 @@ final class MediaFolderController
         );
     }
 
-    /**
-     * What the patch asks for: a rename, a move, or both.
-     */
     private function applyPatch(int $principalId, string $id, array $body): MediaFolder
     {
         $renames = array_key_exists('name', $body);
@@ -319,10 +311,6 @@ final class MediaFolderController
         return $visible;
     }
 
-    /**
-     * A principal id from the query string or the request body, or null
-     * when the request names none.
-     */
     private function readPrincipalId(mixed $raw): ?int
     {
         if (is_int($raw)) {

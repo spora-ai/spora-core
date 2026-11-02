@@ -55,10 +55,6 @@ function buildFolderKindController(): array
     ];
 }
 
-/**
- * A media row owned by the principal, filed in `$folderId` and marked
- * with `$kind`.
- */
 function seedFolderKindAsset(string $id, int $principalId, ?string $folderId, string $kind, string $filename): void
 {
     $now = date('Y-m-d H:i:s');

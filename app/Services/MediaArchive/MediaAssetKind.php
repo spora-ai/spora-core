@@ -11,10 +11,11 @@ namespace Spora\Services\MediaArchive;
  * a mark in this vocabulary never refuses an asset. A mis-marked theme
  * still works, and the operator can change the mark at any time.
  *
- * The three values are a closed set. The upload endpoint refuses a value
- * outside it with a 400 — the column cannot hold it and the filter
- * cannot select it — and the listing builder drops a value it does not
- * know, so the listing stays unfiltered.
+ * The three values are a closed set at the HTTP edge: the upload endpoint
+ * refuses a value outside it with a 400, and the listing builder drops a
+ * value it does not know, so the listing stays unfiltered. The column
+ * itself holds any short string — the service stores a mark outside this
+ * set as given — so the refusal is about a row no filter could select.
  */
 final class MediaAssetKind
 {

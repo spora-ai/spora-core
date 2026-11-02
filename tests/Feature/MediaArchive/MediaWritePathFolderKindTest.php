@@ -28,8 +28,10 @@ use Tests\Support\MediaArchiveTestSupport;
 /**
  * The media write path accepts `folder_id` and `kind`.
  *
- * The folder is where the asset lives and the kind is an advisory mark;
- * neither is a gate — the kind in particular never refuses an asset.
+ * The folder is a gate: an asset cannot be filed in a folder of another
+ * principal. The kind is advisory at the service layer — the service
+ * stores what it is handed — while the HTTP edge refuses a value outside
+ * the vocabulary with a 400.
  */
 function writePathService(): array
 {
