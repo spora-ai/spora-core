@@ -126,4 +126,13 @@ final class ScopedApiTestSupport
     {
         return $response instanceof JsonResponse;
     }
+
+    /**
+     * The smallest byte string the sniffer names as an image, so the agent's
+     * accept-list is consulted for `image/png` rather than something exotic.
+     */
+    public static function pngBytes(): string
+    {
+        return "\x89PNG\r\n\x1a\n" . str_repeat("\0", 64);
+    }
 }

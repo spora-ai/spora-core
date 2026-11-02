@@ -62,6 +62,81 @@ describe('chats on the group surface', function (): void {
         expect(count(ScopedApiTestSupport::data($response)['chats']))->toBe(1);
     });
 
+    it('reads the status, the messages and the transcript of a chat', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-read');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = (int) Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'hi',
+            'final_response' => 'Hello.',
+        ])->id;
+
+        $status = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'status',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/status", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($status->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($status)['chat']['answer'])->toBe('Hello.');
+
+        $messages = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($messages->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($messages))->toHaveKey('messages');
+
+        $transcript = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'transcript',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/transcript", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($transcript->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($transcript)['chat']['id'])->toBe($chatId);
+    });
+
+    it('continues a chat', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-continue');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = (int) Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'hi',
+            'final_response' => 'Hello.',
+        ])->id;
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'continueChat',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages",
+                ['text' => 'And another thing?'],
+            ),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(202);
+    });
+
     it('404s a chat of another group rather than 403', function (): void {
         $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
         $group = AgentApiTestSupport::seedGroup('chat-other');

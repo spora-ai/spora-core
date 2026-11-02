@@ -115,7 +115,18 @@ describe('agent CRUD on the group surface', function (): void {
             ScopedApiTestSupport::bearer(
                 $key,
                 ScopedApiTestSupport::GROUP_PREFIX . '/agents/' . $agentId,
-                ['agent' => ['system_prompt' => 'A new prompt.']],
+                [
+                    'name' => 'Renamed agent',
+                    'agent' => [
+                        'system_prompt' => 'A new prompt.',
+                        'description' => 'A new description.',
+                        'notes' => 'Some notes.',
+                        'max_steps' => 7,
+                        'allow_followup' => false,
+                        'retry_after_minutes' => 3,
+                        'max_retries' => 2,
+                    ],
+                ],
                 'PATCH',
             ),
             [$agentId],
@@ -125,9 +136,15 @@ describe('agent CRUD on the group surface', function (): void {
 
         $after = Agent::findOrFail($agentId);
         expect($after->system_prompt)->toBe('A new prompt.');
-        // The name was not in the payload, so it must survive.
-        expect($after->name)->toBe($before->name);
-        expect((int) $after->max_steps)->toBe((int) $before->max_steps);
+        expect($after->name)->toBe('Renamed agent');
+        expect($after->description)->toBe('A new description.');
+        expect($after->notes)->toBe('Some notes.');
+        expect((int) $after->max_steps)->toBe(7);
+        expect((bool) $after->allow_followup)->toBeFalse();
+        expect((int) $after->retry_after_minutes)->toBe(3);
+        expect((int) $after->max_retries)->toBe(2);
+        // The principal the agent belongs to is not the template's to change.
+        expect((int) $after->principal_id)->toBe((int) $before->principal_id);
     });
 
     it('404s an agent outside the group\'s reach', function (): void {
