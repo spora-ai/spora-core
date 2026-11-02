@@ -31,6 +31,15 @@ final class SettingDeclarations
      */
     public const VALIDATION_UINT = '/^\d+$/';
 
+    /**
+     * The worker-mode caveat, shared by the three API scopes.
+     *
+     * A named constant so the sentence lives once: it is the same caveat
+     * whichever scope an operator is reading about, and three copies of it
+     * are three chances to say it slightly differently.
+     */
+    private const WORKER_MODE_CAVEAT = 'Requires a server-side worker: in client-worker mode every endpoint answers 404. ';
+
     public function __construct(private readonly Paths $paths) {}
 
     /**
@@ -167,7 +176,7 @@ final class SettingDeclarations
                 default: false,
                 section: 'access',
                 description: 'Mounts a per-agent HTTP API so external tools can start and continue chats with that agent. '
-                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . self::WORKER_MODE_CAVEAT
                     . 'Each agent has its own API keys, under the agent\'s Settings → API keys.',
             ),
             new SettingDefinition(
@@ -177,7 +186,7 @@ final class SettingDeclarations
                 default: false,
                 section: 'access',
                 description: 'Mounts a per-group HTTP API so external tools can manage the agents and chats of one group. '
-                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . self::WORKER_MODE_CAVEAT
                     . 'A group\'s keys are minted by its owners and admins, under the group\'s Settings → API keys.',
             ),
             new SettingDefinition(
@@ -188,7 +197,7 @@ final class SettingDeclarations
                 section: 'access',
                 description: 'Mounts an install-wide HTTP API so external tools can manage every group, their agents and their chats. '
                     . 'Personal agents are not reachable through it. '
-                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . self::WORKER_MODE_CAVEAT
                     . 'Only a global admin can mint these keys.',
             ),
             new SettingDefinition(

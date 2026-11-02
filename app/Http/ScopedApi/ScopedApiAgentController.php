@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http\ScopedApi;
 
 use OpenApi\Attributes as OA;
+use Spora\AgentTemplates\ImportResult;
 use Spora\Auth\ApiKeyScope;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\Agent;
@@ -34,6 +35,10 @@ use Symfony\Component\HttpFoundation\Response;
 final class ScopedApiAgentController
 {
     use JsonControllerHelpers;
+
+    private const MSG_NO_SUCH_AGENT = 'No such agent, or not one this key may reach.';
+
+    private const MSG_GROUP_NOT_FOUND = 'Group not found.';
 
     public function __construct(
         private readonly ApiKeyAgentService $agents,
@@ -80,31 +85,18 @@ final class ScopedApiAgentController
             return $body;
         }
 
-        $groupId = $this->targetGroupId($context, $body);
+        $created = $this->createAgent($context, $body);
 
-        if ($groupId === null) {
-            return $this->notFound('GROUP_NOT_FOUND', 'Group not found.');
-        }
-
-        // `group_id` is API-level metadata: it says which group the agent
-        // belongs to, and it is not part of the template schema, so the
-        // validator would (correctly) reject it under UNKNOWN_TOP_LEVEL_KEY.
-        unset($body['group_id']);
-
-        try {
-            $import = $this->agents->create($groupId, $this->createdBy($context), $body);
-        } catch (InvalidTemplatePayloadException $e) {
-            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
-        } catch (MissingGroupPrincipalException $e) {
-            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        if ($created instanceof JsonResponse) {
+            return $created;
         }
 
         return new JsonResponse(
             [
                 'data' => [
-                    'agent' => AgentResource::toArray($import->agent),
-                    'warnings' => $import->warnings,
-                    'tools_enabled' => $import->toolsEnabled,
+                    'agent' => AgentResource::toArray($created->agent),
+                    'warnings' => $created->warnings,
+                    'tools_enabled' => $created->toolsEnabled,
                 ],
             ],
             Response::HTTP_CREATED,
@@ -113,14 +105,14 @@ final class ScopedApiAgentController
 
     #[OA\Get(summary: 'Read an agent in the import format')]
     #[OA\Response(response: 200, description: 'The agent, as an import-format payload.')]
-    #[OA\Response(response: 404, description: 'No such agent, or not one this key may reach.')]
+    #[OA\Response(response: 404, description: self::MSG_NO_SUCH_AGENT)]
     public function show(Request $request, int $agentId): JsonResponse
     {
         $context = ApiKeyContext::fromRequest($request);
         $agent = $this->reach->targetAgent($context, $agentId);
 
         if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_NO_SUCH_AGENT);
         }
 
         return new JsonResponse(['data' => ['agent' => $this->agents->export($agent)]]);
@@ -135,7 +127,7 @@ final class ScopedApiAgentController
         ],
     ))]
     #[OA\Response(response: 200, description: 'The agent was updated.')]
-    #[OA\Response(response: 404, description: 'No such agent, or not one this key may reach.')]
+    #[OA\Response(response: 404, description: self::MSG_NO_SUCH_AGENT)]
     #[OA\Response(response: 422, description: 'The payload is not a usable import format.')]
     public function update(Request $request, int $agentId): JsonResponse
     {
@@ -146,42 +138,83 @@ final class ScopedApiAgentController
             return $body;
         }
 
-        $agent = $this->reach->targetAgent($context, $agentId);
+        $updated = $this->updateAgent($context, $agentId, $body);
 
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
-        }
-
-        try {
-            $import = $this->agents->update($agent, $body);
-        } catch (InvalidTemplatePayloadException $e) {
-            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        if ($updated instanceof JsonResponse) {
+            return $updated;
         }
 
         return new JsonResponse([
             'data' => [
-                'agent' => AgentResource::toArray($import->agent),
-                'warnings' => $import->warnings,
-                'tools_enabled' => $import->toolsEnabled,
+                'agent' => AgentResource::toArray($updated->agent),
+                'warnings' => $updated->warnings,
+                'tools_enabled' => $updated->toolsEnabled,
             ],
         ]);
     }
 
     #[OA\Delete(summary: 'Delete an agent')]
     #[OA\Response(response: 200, description: 'The agent was deleted.')]
-    #[OA\Response(response: 404, description: 'No such agent, or not one this key may reach.')]
+    #[OA\Response(response: 404, description: self::MSG_NO_SUCH_AGENT)]
     public function destroy(Request $request, int $agentId): JsonResponse
     {
         $context = ApiKeyContext::fromRequest($request);
         $agent = $this->reach->targetAgent($context, $agentId);
 
         if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_NO_SUCH_AGENT);
         }
 
         $this->agents->delete($agent);
 
         return new JsonResponse(['data' => ['deleted' => true, 'agent_id' => $agentId]]);
+    }
+
+    /**
+     * Create the agent, or say why it cannot be created.
+     *
+     * @param array<string, mixed> $body
+     * @return JsonResponse|ImportResult
+     */
+    private function createAgent(ApiKeyContext $context, array $body): JsonResponse|ImportResult
+    {
+        $groupId = $this->targetGroupId($context, $body);
+
+        if ($groupId === null) {
+            return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);
+        }
+
+        // `group_id` is API-level metadata: it says which group the agent
+        // belongs to, and it is not part of the template schema, so the
+        // validator would (correctly) reject it under UNKNOWN_TOP_LEVEL_KEY.
+        unset($body['group_id']);
+
+        try {
+            return $this->agents->create($groupId, $this->createdBy($context), $body);
+        } catch (InvalidTemplatePayloadException | MissingGroupPrincipalException $e) {
+            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        }
+    }
+
+    /**
+     * Apply the payload to the agent, or say why it cannot be applied.
+     *
+     * @param array<string, mixed> $body
+     * @return JsonResponse|ImportResult
+     */
+    private function updateAgent(ApiKeyContext $context, int $agentId, array $body): JsonResponse|ImportResult
+    {
+        $agent = $this->reach->targetAgent($context, $agentId);
+
+        if ($agent === null) {
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_NO_SUCH_AGENT);
+        }
+
+        try {
+            return $this->agents->update($agent, $body);
+        } catch (InvalidTemplatePayloadException $e) {
+            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        }
     }
 
     /**
@@ -197,7 +230,7 @@ final class ScopedApiAgentController
     {
         $groupId = $context->scope === ApiKeyScope::Group
             ? $context->groupId
-            : (is_numeric($body['group_id'] ?? null) ? (int) $body['group_id'] : null);
+            : $this->intField($body, 'group_id');
 
         if ($groupId === null || Group::find($groupId) === null) {
             return null;
@@ -216,5 +249,15 @@ final class ScopedApiAgentController
     private function createdBy(ApiKeyContext $context): int
     {
         return $context->key->created_by ?? 0;
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function intField(array $body, string $name): ?int
+    {
+        $value = $body[$name] ?? null;
+
+        return is_numeric($value) ? (int) $value : null;
     }
 }

@@ -107,7 +107,7 @@ describe('Agent API media', function (): void {
         $theirs = AgentApiTestSupport::seedAgent('mtheirs');
 
         $container = mediaContainer();
-        $scope = $container->get(\Spora\Services\ApiKeys\ApiKeyChatAccess::class);
+        $scope = $container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class);
 
         $theirContext = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($theirs['agentId'], 'probe')[0],
@@ -182,7 +182,7 @@ describe('Agent API media', function (): void {
 
         // Without the subtree rule a sub-agent's output would be unreachable
         // from the parent that delegated to it.
-        expect($container->get(\Spora\Services\ApiKeys\ApiKeyChatAccess::class)
+        expect($container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class)
             ->isMediaReadableForAgent($parent['agentId'], $mediaId))->toBeTrue();
     });
 
@@ -215,7 +215,7 @@ describe('Agent API media', function (): void {
             'attachments' => [['media_id' => $mediaId, 'kind' => 'image']],
         ]);
 
-        expect($container->get(\Spora\Services\ApiKeys\ApiKeyChatAccess::class)
+        expect($container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class)
             ->isMediaReadableForAgent($agent['agentId'], $mediaId))->toBeTrue();
     });
 

@@ -7,9 +7,9 @@ namespace Spora\Http\AgentApi;
 use LogicException;
 use OpenApi\Attributes as OA;
 use Spora\Http\JsonControllerHelpers;
-use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\AssetStreamer;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -31,8 +31,8 @@ final class AgentApiMediaController
     use JsonControllerHelpers;
 
     public function __construct(
-        private readonly ApiKeyChatAccess $scope,
         private readonly ApiKeyFileIngest $ingest,
+        private readonly ApiKeyMediaAccess $media,
         private readonly AssetStreamer $streamer,
         private readonly MediaAssetSerializer $serializer,
     ) {}
@@ -81,7 +81,7 @@ final class AgentApiMediaController
             );
         }
 
-        $asset = $this->scope->findMedia($context, $mediaId);
+        $asset = $this->media->findMedia($context, $mediaId);
 
         if ($asset === null) {
             // The ingest stamped the agent id, so an id that cannot be read
@@ -107,7 +107,7 @@ final class AgentApiMediaController
     public function show(Request $request, string $mediaId): Response
     {
 
-        $asset = $this->scope->findMedia(ApiKeyContext::fromRequest($request), $mediaId);
+        $asset = $this->media->findMedia(ApiKeyContext::fromRequest($request), $mediaId);
 
         if ($asset === null) {
             return $this->notFound('NOT_FOUND', 'Media not found.');

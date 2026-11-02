@@ -14,6 +14,7 @@ use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -42,6 +43,7 @@ final class AgentApiChatController
         private readonly ApiKeyChatAccess $scope,
         private readonly ApiKeyChatProjection $projection,
         private readonly ApiKeyFileIngest $ingest,
+        private readonly ApiKeyMediaAccess $media,
         private readonly ApiKeyCallbackRecorder $callbacks,
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
@@ -379,7 +381,7 @@ final class AgentApiChatController
         $ids = [];
 
         foreach ($raw as $id) {
-            if (is_string($id) && $id !== '' && $this->scope->isMediaReadable($context, $id)) {
+            if (is_string($id) && $id !== '' && $this->media->isMediaReadable($context, $id)) {
                 $ids[] = $id;
             }
         }

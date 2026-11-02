@@ -90,30 +90,30 @@ final class ApiKeyAuthenticator
     private function context(Request $request, ApiKeyScope $expected): ?ApiKeyContext
     {
         $key = $this->key($request);
+        $scope = $key === null ? null : ApiKeyScope::fromValue($key->scope);
 
-        if ($key === null) {
+        if ($key === null || $scope === null || $scope !== $expected || !$this->isConsistent($scope, $key)) {
             return null;
         }
 
-        $scope = ApiKeyScope::fromValue($key->scope);
+        return $this->scopeContext($key, $scope);
+    }
 
-        if ($scope === null || $scope !== $expected) {
-            return null;
-        }
-
+    /**
+     * Whether the row's target matches its scope.
+     *
+     * A row that disagrees with itself is not a credential this build
+     * wrote, so it authenticates as nothing.
+     */
+    private function isConsistent(ApiKeyScope $scope, ApiKey $key): bool
+    {
         try {
             $scope->assertConsistent($key->agent_id, $key->group_id);
         } catch (InvalidArgumentException) {
-            // A row whose columns disagree with its scope is not a
-            // credential this build wrote. It authenticates as nothing.
-            return null;
+            return false;
         }
 
-        return match ($scope) {
-            ApiKeyScope::Agent => $this->agentContext($key),
-            ApiKeyScope::Group => $this->groupContext($key),
-            ApiKeyScope::Global => new ApiKeyContext($key, ApiKeyScope::Global),
-        };
+        return true;
     }
 
     /**
@@ -137,6 +137,18 @@ final class ApiKeyAuthenticator
         $key = ApiKey::find($id);
 
         return $key !== null && $this->issuer->verify($secret, $key)[0] ? $key : null;
+    }
+
+    /**
+     * The context for a key whose scope has been established.
+     */
+    private function scopeContext(ApiKey $key, ApiKeyScope $scope): ?ApiKeyContext
+    {
+        return match ($scope) {
+            ApiKeyScope::Agent => $this->agentContext($key),
+            ApiKeyScope::Group => $this->groupContext($key),
+            ApiKeyScope::Global => new ApiKeyContext($key, ApiKeyScope::Global),
+        };
     }
 
     /**

@@ -7,9 +7,11 @@ namespace Spora\Http\ScopedApi;
 use LogicException;
 use OpenApi\Attributes as OA;
 use Spora\Http\JsonControllerHelpers;
-use Spora\Services\ApiKeys\ApiKeyChatAccess;
+use Spora\Models\Agent;
+use Spora\Models\MediaAsset;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\AssetStreamer;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
@@ -34,9 +36,13 @@ final class ScopedApiMediaController
 {
     use JsonControllerHelpers;
 
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
+
+    private const MSG_NO_OWNER = 'The agent has no resolvable owner.';
+
     public function __construct(
-        private readonly ApiKeyChatAccess $access,
         private readonly ApiKeyFileIngest $ingest,
+        private readonly ApiKeyMediaAccess $media,
         private readonly ApiKeyReach $reach,
         private readonly AssetStreamer $streamer,
         private readonly MediaAssetSerializer $serializer,
@@ -70,46 +76,14 @@ final class ScopedApiMediaController
             return $bytes;
         }
 
-        $context = ApiKeyContext::fromRequest($request);
-        $agentId = $this->intField($request->request->all(), 'agent_id');
+        $outcome = $this->ingest($request, $bytes);
 
-        if ($agentId === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
-        }
-
-        $agent = $this->reach->targetAgent($context, $agentId);
-
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
-        }
-
-        $ownerUserId = $this->reach->ownerUserId($agent);
-
-        if ($ownerUserId === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'The agent has no resolvable owner.');
-        }
-
-        $mediaId = $this->ingest->ingestBytes($agent, $ownerUserId, $bytes['bytes'], $bytes['name']);
-
-        if ($mediaId === null) {
-            return $this->error(
-                'UNSUPPORTED_MEDIA_TYPE',
-                'This file type is not accepted by the agent.',
-                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
-            );
-        }
-
-        $asset = $this->access->findMedia($context, $mediaId);
-
-        if ($asset === null) {
-            // The ingest stamped the agent id, so an id that cannot be read
-            // back means the write and the scope predicate disagree — a bug
-            // worth failing loudly on rather than answering with a half-result.
-            throw new LogicException('Ingested media is immediately out of scope.');
+        if ($outcome instanceof JsonResponse) {
+            return $outcome;
         }
 
         return new JsonResponse(
-            ['data' => $this->serializer->serialize($asset, null)],
+            ['data' => $this->serializer->serialize($outcome, null)],
             Response::HTTP_CREATED,
         );
     }
@@ -122,7 +96,7 @@ final class ScopedApiMediaController
     #[OA\Response(response: 404, description: 'No such asset, or not one this key may read.')]
     public function show(Request $request, string $mediaId): Response
     {
-        $asset = $this->access->findMedia(ApiKeyContext::fromRequest($request), $mediaId);
+        $asset = $this->media->findMedia(ApiKeyContext::fromRequest($request), $mediaId);
 
         if ($asset === null) {
             return $this->notFound('NOT_FOUND', 'Media not found.');
@@ -132,6 +106,74 @@ final class ScopedApiMediaController
         // output is usually consumed by an LLM or shown to a person, not
         // saved to disk by a browser.
         return $this->streamer->stream($asset, 'inline') ?? $this->notFound('NOT_FOUND', 'Media not found.');
+    }
+
+    /**
+     * The agent the upload is for, and the user it is attributed to — or
+     * the answer saying why there is none.
+     *
+     * @return array{agent: Agent, ownerUserId: int}|JsonResponse
+     */
+    private function target(Request $request): array|JsonResponse
+    {
+        $agentId = $this->intField($request->request->all(), 'agent_id');
+
+        if ($agentId === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
+        }
+
+        $agent = $this->reach->targetAgent(ApiKeyContext::fromRequest($request), $agentId);
+
+        if ($agent === null) {
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
+        }
+
+        $ownerUserId = $this->reach->ownerUserId($agent);
+
+        return $ownerUserId === null
+            ? $this->unprocessable('VALIDATION_ERROR', self::MSG_NO_OWNER)
+            : ['agent' => $agent, 'ownerUserId' => $ownerUserId];
+    }
+
+    /**
+     * Ingest the upload, or say why it cannot be ingested.
+     *
+     * @param array{bytes: string, name: string} $bytes
+     * @return JsonResponse|MediaAsset
+     */
+    private function ingest(Request $request, array $bytes): JsonResponse|MediaAsset
+    {
+        $target = $this->target($request);
+
+        if ($target instanceof JsonResponse) {
+            return $target;
+        }
+
+        $mediaId = $this->ingest->ingestBytes(
+            $target['agent'],
+            $target['ownerUserId'],
+            $bytes['bytes'],
+            $bytes['name'],
+        );
+
+        if ($mediaId === null) {
+            return $this->error(
+                'UNSUPPORTED_MEDIA_TYPE',
+                'This file type is not accepted by the agent.',
+                Response::HTTP_UNSUPPORTED_MEDIA_TYPE,
+            );
+        }
+
+        $asset = $this->media->findMedia(ApiKeyContext::fromRequest($request), $mediaId);
+
+        if ($asset === null) {
+            // The ingest stamped the agent id, so an id that cannot be read
+            // back means the write and the scope predicate disagree — a bug
+            // worth failing loudly on rather than answering with a half-result.
+            throw new LogicException('Ingested media is immediately out of scope.');
+        }
+
+        return $asset;
     }
 
     /**

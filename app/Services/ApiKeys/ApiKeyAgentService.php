@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Spora\Services\ApiKeys;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\AgentTemplates\AgentTemplate;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\AgentTemplates\ImportResult;
 use Spora\Models\Agent;
-use Spora\Services\AgentService;
 use Spora\Services\Exceptions\InvalidTemplatePayloadException;
 use Spora\Services\PrincipalService;
 
@@ -29,7 +29,6 @@ final class ApiKeyAgentService
         private readonly AgentTemplateExporter $exporter,
         private readonly AgentTemplateValidator $validator,
         private readonly PrincipalService $principalService,
-        private readonly AgentService $agentService,
     ) {}
 
     /**
@@ -102,9 +101,14 @@ final class ApiKeyAgentService
 
     /**
      * Delete an agent and everything that cascades from it.
+     *
+     * The scope has already established that the key may reach this agent,
+     * so there is no second visibility check here — the caller owns the
+     * authorisation. The cascade is the schema's: the agent's chats, tools
+     * and media go with it.
      */
     public function delete(Agent $agent): bool
     {
-        return $this->agentService->deleteAgentById((int) $agent->id);
+        return Capsule::table('agents')->where('id', (int) $agent->id)->delete() > 0;
     }
 }

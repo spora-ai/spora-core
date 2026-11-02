@@ -125,7 +125,7 @@ final class EnvelopeLiteralHarvest implements Harvest
     private function errorLiteralAt(array $tokens, int $index, array $token, array $constants, array $messageIndex): ?array
     {
         if ($this->startsHelperCall($tokens, $index)) {
-            return $this->stringArgument($tokens, $index, $messageIndex[$token[1]]);
+            return $this->stringArgument($tokens, $index, $messageIndex[$token[1]], $constants);
         }
 
         if ($token[0] !== T_CONSTANT_ENCAPSED_STRING || trim($token[1], "'\"") !== 'message') {
@@ -192,13 +192,14 @@ final class EnvelopeLiteralHarvest implements Harvest
 
     /**
      * One argument of the helper call starting at `$index`, when it is a
-     * bare string literal or a `sprintf(...)` whose format string is the
-     * message.
+     * bare string literal, a class constant, or a `sprintf(...)` whose
+     * format string is the message.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     * @param array<string, string>                           $constants
      * @return ?array{0: string, 1: int} message, line
      */
-    private function stringArgument(array $tokens, int $index, int $position): ?array
+    private function stringArgument(array $tokens, int $index, int $position, array $constants): ?array
     {
         if ($position < 0) {
             return null;
@@ -209,7 +210,7 @@ final class EnvelopeLiteralHarvest implements Harvest
             return null;
         }
 
-        return $this->literalArgument($argument);
+        return $this->literalArgument($argument, $constants);
     }
 
     /**
@@ -268,14 +269,18 @@ final class EnvelopeLiteralHarvest implements Harvest
     /**
      * The string literal an argument contributes, if it has one.
      *
-     * A bare literal is one. So is `sprintf('format %s', …)` — the format
-     * string *is* the message, with placeholders the translation keeps. A
-     * concatenation is not: `'a' . $b` has no whole message to key on.
+     * A bare literal is one. So is a class constant declared in the same
+     * file — the extractor reads one file at a time, so a constant from
+     * another file is out of scope. So is `sprintf('format %s', …)` — the
+     * format string *is* the message, with placeholders the translation
+     * keeps. A concatenation is not: `'a' . $b` has no whole message to
+     * key on.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $argument
+     * @param array<string, string>                           $constants
      * @return ?array{0: string, 1: int} message, line
      */
-    private function literalArgument(array $argument): ?array
+    private function literalArgument(array $argument, array $constants): ?array
     {
         $significant = $this->significantTokens($argument);
         $first = $significant[0] ?? null;
@@ -284,9 +289,47 @@ final class EnvelopeLiteralHarvest implements Harvest
             return [$this->tokens->decode($first[1]), $first[2]];
         }
 
+        $constant = $this->constantArgument($significant, $constants);
+        if ($constant !== null) {
+            return $constant;
+        }
+
         $format = $this->sprintfFormatArgument($significant);
 
         return $format === null ? null : [$this->tokens->decode($format[1]), $format[2]];
+    }
+
+    /**
+     * The literal a `self::MSG_X` argument refers to, resolved in the file
+     * that declares it.
+     *
+     * A message held in a constant is still a message an operator reads,
+     * so it belongs in the catalogue like any other — the constant is how
+     * the code says it once, not how it says it to nobody.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $significant
+     * @param array<string, string>                           $constants
+     * @return ?array{0: string, 1: int} message, line
+     */
+    private function constantArgument(array $significant, array $constants): ?array
+    {
+        $scope = $significant[0] ?? null;
+        $separator = $significant[1] ?? null;
+        $name = $significant[2] ?? null;
+
+        if (!is_array($scope) || $scope[0] !== T_STRING || $scope[1] !== 'self') {
+            return null;
+        }
+
+        if (!is_array($separator) || $separator[0] !== T_DOUBLE_COLON) {
+            return null;
+        }
+
+        if (!is_array($name) || $name[0] !== T_STRING || !isset($constants[$name[1]])) {
+            return null;
+        }
+
+        return [$constants[$name[1]], $name[2]];
     }
 
     /**

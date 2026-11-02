@@ -43,6 +43,10 @@ final class ScopedApiKeyController
 
     private const MAX_NAME_LENGTH = 100;
 
+    private const MSG_CANNOT_MANAGE_GROUP = 'You cannot manage API keys for this group.';
+
+    private const MSG_NOT_GLOBAL_ADMIN = 'Only a global admin can manage global API keys.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly GroupService $groupService,
@@ -157,7 +161,7 @@ final class ScopedApiKeyController
     #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
     public function globalIndex(Request $request): JsonResponse
     {
-        $denied = $this->guardGlobal($request);
+        $denied = $this->guardGlobal();
 
         if ($denied !== null) {
             return $denied;
@@ -188,7 +192,7 @@ final class ScopedApiKeyController
     #[OA\Response(response: 422, description: 'The name was missing or too long.')]
     public function globalStore(Request $request): JsonResponse
     {
-        $denied = $this->guardGlobal($request);
+        $denied = $this->guardGlobal();
 
         if ($denied !== null) {
             return $denied;
@@ -224,7 +228,7 @@ final class ScopedApiKeyController
     #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
     public function globalDestroy(Request $request): JsonResponse
     {
-        $denied = $this->guardGlobal($request);
+        $denied = $this->guardGlobal();
 
         if ($denied !== null) {
             return $denied;
@@ -293,13 +297,13 @@ final class ScopedApiKeyController
 
         return $this->groupService::callerCanManage($groupId, (int) $userId, $this->authService->isAdmin())
             ? null
-            : $this->forbidden('FORBIDDEN', 'You cannot manage API keys for this group.');
+            : $this->forbidden('FORBIDDEN', self::MSG_CANNOT_MANAGE_GROUP);
     }
 
     /**
      * A global key is a global-admin right, and nothing else.
      */
-    private function guardGlobal(Request $request): ?JsonResponse
+    private function guardGlobal(): ?JsonResponse
     {
         $userId = $this->authService->currentUserId();
 
@@ -309,6 +313,6 @@ final class ScopedApiKeyController
 
         return $this->authService->isAdmin()
             ? null
-            : $this->forbidden('FORBIDDEN', 'Only a global admin can manage global API keys.');
+            : $this->forbidden('FORBIDDEN', self::MSG_NOT_GLOBAL_ADMIN);
     }
 }

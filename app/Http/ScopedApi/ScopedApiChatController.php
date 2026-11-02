@@ -15,6 +15,7 @@ use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -40,10 +41,15 @@ final class ScopedApiChatController
     /** Ceiling on `media_ids`, each of which costs a lookup to authorise. */
     private const MAX_MEDIA_IDS = 32;
 
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
+
+    private const MSG_NO_OWNER = 'The agent has no resolvable owner.';
+
     public function __construct(
         private readonly ApiKeyChatAccess $access,
         private readonly ApiKeyChatProjection $projection,
         private readonly ApiKeyFileIngest $ingest,
+        private readonly ApiKeyMediaAccess $media,
         private readonly ApiKeyCallbackRecorder $callbacks,
         private readonly ApiKeyReach $reach,
         private readonly SsrfGuard $ssrf,
@@ -105,45 +111,22 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
-
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $agentId = $body['agent_id'] ?? null;
-
-        if (!is_numeric($agentId)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
-        }
-
-        $agent = $this->reach->targetAgent($context, (int) $agentId);
-
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
-        }
-
-        $prepared = $this->prepareStart($body, $agent);
+        $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($context, $body);
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
-        try {
-            $task = $this->access->startChat(
-                $context,
-                (int) $agent->id,
-                $prepared['text'],
-                $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
-                $prepared['mediaIds'],
-            );
-        } catch (InvalidArgumentException) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+        $task = $this->start($context, $prepared);
+
+        if ($task === null) {
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
         }
 
         // Recorded after the chat exists: a failed insert leaves a queued chat
         // with no callback rather than rolling back work the agent has already
         // been handed.
-        $this->callbacks->record($context->key, (int) $agent->id, $task, $prepared['callbackUrl']);
+        $this->callbacks->record($context->key, $prepared['agentId'], $task, $prepared['callbackUrl']);
 
         return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
     }
@@ -153,7 +136,7 @@ final class ScopedApiChatController
     #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function status(Request $request, int $chatId): JsonResponse
     {
-        $task = $this->loadChat($request, $chatId);
+        $task = $this->loadChat(ApiKeyContext::fromRequest($request), $chatId);
 
         if ($task instanceof JsonResponse) {
             return $task;
@@ -168,7 +151,7 @@ final class ScopedApiChatController
     #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function messages(Request $request, int $chatId): JsonResponse
     {
-        $task = $this->loadChat($request, $chatId);
+        $task = $this->loadChat(ApiKeyContext::fromRequest($request), $chatId);
 
         if ($task instanceof JsonResponse) {
             return $task;
@@ -222,57 +205,57 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
+        $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($context, $chatId, $body);
 
-        if ($body instanceof JsonResponse) {
-            return $body;
+        if ($prepared instanceof JsonResponse) {
+            return $prepared;
         }
 
-        $text = $this->requiredText($body);
+        $outcome = $this->continue($context, $chatId, $prepared);
 
-        if ($text === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
+        if ($outcome instanceof JsonResponse) {
+            return $outcome;
         }
 
-        $task = $this->loadChat($request, $chatId);
-
-        if ($task instanceof JsonResponse) {
-            return $task;
-        }
-
-        $mediaIds = $this->readableMediaIds($body, (int) $task->agent_id);
-
-        if ($mediaIds === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
-        }
-
-        try {
-            $task = $this->access->continueChat(
-                $context,
-                $chatId,
-                $text,
-                $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
-                $mediaIds,
-            );
-        } catch (InvalidArgumentException $e) {
-            return $this->chatConflict($context, $chatId, $e);
-        }
-
-        return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
+        return new JsonResponse(['data' => ['chat' => $this->projection->status($outcome)]], Response::HTTP_ACCEPTED);
     }
 
     /**
      * Everything about a start request that can be refused, plus the values
      * that survive the check.
      *
-     * Inline files are ingested here rather than in {@see self::store()} so
-     * that the refusal paths and the ingestion sit in one place — an
-     * attachment is worth as much as the prompt, and a request that fails on
-     * its body should not have written anything first.
+     * @param array<string, mixed> $body
+     * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     */
+    private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
+    {
+        $agentId = $this->intField($body, 'agent_id');
+
+        if ($agentId === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
+        }
+
+        $agent = $this->reach->targetAgent($context, $agentId);
+
+        if ($agent === null) {
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
+        }
+
+        $problem = $this->startProblem($body, $agent);
+
+        if ($problem !== null) {
+            return $problem;
+        }
+
+        return $this->startValues($body, $agent);
+    }
+
+    /**
+     * The first thing wrong with a start request, or null.
      *
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>}
      */
-    private function prepareStart(array $body, Agent $agent): JsonResponse|array
+    private function startProblem(array $body, Agent $agent): ?JsonResponse
     {
         $problem = match (true) {
             $this->requiredText($body) === null => 'text is required.',
@@ -280,35 +263,98 @@ final class ScopedApiChatController
                 && $this->ssrf->rejectReason((string) $this->stringField($body, 'callback_url')) !== null
                 => 'callback_url is not an acceptable https URL.',
             isset($body['files']) && !is_array($body['files']) => 'files must be an array.',
+            $this->tooManyMediaIds($body) => 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.',
+            $this->reach->ownerUserId($agent) === null => self::MSG_NO_OWNER,
             default => null,
         };
 
-        if ($problem !== null) {
-            return $this->unprocessable('VALIDATION_ERROR', $problem);
-        }
+        return $problem === null ? null : $this->unprocessable('VALIDATION_ERROR', $problem);
+    }
 
+    /**
+     * The values that survive the check.
+     *
+     * @param array<string, mixed> $body
+     * @return array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     */
+    private function startValues(array $body, Agent $agent): array
+    {
         $mediaIds = $this->readableMediaIds($body, (int) $agent->id);
-
-        if ($mediaIds === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
-        }
-
-        $callbackUrl = $this->stringField($body, 'callback_url');
-        $ownerUserId = $this->reach->ownerUserId($agent);
-
-        if ($ownerUserId === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'The agent has no resolvable owner.');
-        }
+        $ownerUserId = (int) $this->reach->ownerUserId($agent);
 
         foreach ($this->ingest->ingestInlineFiles($agent, $ownerUserId, array_values($body['files'] ?? [])) as $id) {
             $mediaIds[] = $id;
         }
 
         return [
+            'agentId' => (int) $agent->id,
             'text' => (string) $this->requiredText($body),
-            'callbackUrl' => $callbackUrl,
+            'callbackUrl' => $this->stringField($body, 'callback_url'),
+            'maxSteps' => $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
             'mediaIds' => $mediaIds,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>}
+     */
+    private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
+    {
+        $text = $this->requiredText($body);
+
+        if ($text === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
+        }
+
+        $task = $this->loadChat($context, $chatId);
+
+        if ($task instanceof JsonResponse) {
+            return $task;
+        }
+
+        return [
+            'text' => $text,
+            'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
+            'mediaIds' => $this->readableMediaIds($body, (int) $task->agent_id),
+        ];
+    }
+
+    /**
+     * @param array{text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, agentId: int} $prepared
+     */
+    private function start(ApiKeyContext $context, array $prepared): ?Task
+    {
+        try {
+            return $this->access->startChat(
+                $context,
+                $prepared['agentId'],
+                $prepared['text'],
+                $prepared['maxSteps'],
+                $prepared['mediaIds'],
+            );
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /**
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>} $prepared
+     * @return Task|JsonResponse
+     */
+    private function continue(ApiKeyContext $context, int $chatId, array $prepared): Task|JsonResponse
+    {
+        try {
+            return $this->access->continueChat(
+                $context,
+                $chatId,
+                $prepared['text'],
+                $prepared['additionalSteps'],
+                $prepared['mediaIds'],
+            );
+        } catch (InvalidArgumentException $e) {
+            return $this->chatConflict($context, $chatId, $e);
+        }
     }
 
     /**
@@ -330,10 +376,10 @@ final class ScopedApiChatController
     /**
      * @return Task|JsonResponse the chat, or the 404 envelope
      */
-    private function loadChat(Request $request, int $chatId): Task|JsonResponse
+    private function loadChat(ApiKeyContext $context, int $chatId): Task|JsonResponse
     {
         try {
-            return $this->access->requireTask(ApiKeyContext::fromRequest($request), $chatId);
+            return $this->access->requireTask($context, $chatId);
         } catch (InvalidArgumentException) {
             return $this->notFound('NOT_FOUND', ApiKeyChatAccess::ERR_NOT_FOUND);
         }
@@ -370,18 +416,30 @@ final class ScopedApiChatController
     }
 
     /**
+     * Whether the request carries more media ids than the ceiling allows.
+     *
+     * Each id is a lookup, so an uncapped list is an uncapped number of
+     * queries. Rejected rather than truncated, because a caller that
+     * silently lost attachments has no way to tell that from one that sent
+     * none.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function tooManyMediaIds(array $body): bool
+    {
+        $raw = $body['media_ids'] ?? null;
+
+        return is_array($raw) && count($raw) > self::MAX_MEDIA_IDS;
+    }
+
+    /**
      * Only ids the target agent can read are forwarded, so a caller cannot
      * attach an asset id it observed somewhere else.
      *
-     * `null` when the request carries more ids than {@see self::MAX_MEDIA_IDS}:
-     * each one is a lookup, so an uncapped list is an uncapped number of
-     * queries. Rejected rather than truncated, because a caller that silently
-     * lost attachments has no way to tell that from one that sent none.
-     *
      * @param array<string, mixed> $body
-     * @return list<string>|null
+     * @return list<string>
      */
-    private function readableMediaIds(array $body, int $agentId): ?array
+    private function readableMediaIds(array $body, int $agentId): array
     {
         $raw = $body['media_ids'] ?? null;
 
@@ -389,14 +447,10 @@ final class ScopedApiChatController
             return [];
         }
 
-        if (count($raw) > self::MAX_MEDIA_IDS) {
-            return null;
-        }
-
         $ids = [];
 
         foreach ($raw as $id) {
-            if (is_string($id) && $id !== '' && $this->access->isMediaReadableForAgent($agentId, $id)) {
+            if (is_string($id) && $id !== '' && $this->media->isMediaReadableForAgent($agentId, $id)) {
                 $ids[] = $id;
             }
         }

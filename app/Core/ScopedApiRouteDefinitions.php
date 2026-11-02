@@ -86,6 +86,18 @@ use Spora\OpenApi\RouteSpecCollector;
  */
 final class ScopedApiRouteDefinitions
 {
+    /** The bearer surface a group key drives. */
+    private const GROUP_PREFIX = '/api/v1/group-api';
+
+    /** The bearer surface a global key drives. */
+    private const GLOBAL_PREFIX = '/api/v1/global-api';
+
+    /** The agent path, relative to a surface's prefix. */
+    private const AGENT_PATH = '/agents/{agentId}';
+
+    /** The group path, relative to the global surface's prefix. */
+    private const GROUP_PATH = '/groups/{groupId}';
+
     public static function register(MiddlewareRouteCollector | RouteSpecCollector $r, ?Config $config = null): void
     {
         $admin = [AuthMiddleware::class, CsrfMiddleware::class];
@@ -99,18 +111,18 @@ final class ScopedApiRouteDefinitions
         $r->addRoute('DELETE', '/api/v1/global-api-keys/{keyId}', [$keys, 'globalDestroy'], $admin);
 
         if (self::enabled($r, $config, 'SPORA_GROUP_API')) {
-            self::registerScopedSurface($r, '/api/v1/group-api', GroupApiKeyMiddleware::class);
-            $r->addRoute('GET', '/api/v1/group-api/group', [ScopedApiGroupController::class, 'ownGroup'], [GroupApiKeyMiddleware::class]);
+            self::registerScopedSurface($r, self::GROUP_PREFIX, GroupApiKeyMiddleware::class);
+            $r->addRoute('GET', self::GROUP_PREFIX . '/group', [ScopedApiGroupController::class, 'ownGroup'], [GroupApiKeyMiddleware::class]);
         }
 
         if (self::enabled($r, $config, 'SPORA_GLOBAL_API')) {
-            self::registerScopedSurface($r, '/api/v1/global-api', GlobalApiKeyMiddleware::class);
+            self::registerScopedSurface($r, self::GLOBAL_PREFIX, GlobalApiKeyMiddleware::class);
             $groups = ScopedApiGroupController::class;
-            $r->addRoute('GET', '/api/v1/global-api/groups', [$groups, 'index'], [GlobalApiKeyMiddleware::class]);
-            $r->addRoute('POST', '/api/v1/global-api/groups', [$groups, 'store'], [GlobalApiKeyMiddleware::class]);
-            $r->addRoute('GET', '/api/v1/global-api/groups/{groupId}', [$groups, 'show'], [GlobalApiKeyMiddleware::class]);
-            $r->addRoute('PATCH', '/api/v1/global-api/groups/{groupId}', [$groups, 'update'], [GlobalApiKeyMiddleware::class]);
-            $r->addRoute('DELETE', '/api/v1/global-api/groups/{groupId}', [$groups, 'destroy'], [GlobalApiKeyMiddleware::class]);
+            $r->addRoute('GET', self::GLOBAL_PREFIX . '/groups', [$groups, 'index'], [GlobalApiKeyMiddleware::class]);
+            $r->addRoute('POST', self::GLOBAL_PREFIX . '/groups', [$groups, 'store'], [GlobalApiKeyMiddleware::class]);
+            $r->addRoute('GET', self::GLOBAL_PREFIX . self::GROUP_PATH, [$groups, 'show'], [GlobalApiKeyMiddleware::class]);
+            $r->addRoute('PATCH', self::GLOBAL_PREFIX . self::GROUP_PATH, [$groups, 'update'], [GlobalApiKeyMiddleware::class]);
+            $r->addRoute('DELETE', self::GLOBAL_PREFIX . self::GROUP_PATH, [$groups, 'destroy'], [GlobalApiKeyMiddleware::class]);
         }
     }
 
@@ -134,9 +146,9 @@ final class ScopedApiRouteDefinitions
 
         $r->addRoute('GET', $prefix . '/agents', [$agent, 'index'], $bearer);
         $r->addRoute('POST', $prefix . '/agents', [$agent, 'store'], $bearer);
-        $r->addRoute('GET', $prefix . '/agents/{agentId}', [$agent, 'show'], $bearer);
-        $r->addRoute('PATCH', $prefix . '/agents/{agentId}', [$agent, 'update'], $bearer);
-        $r->addRoute('DELETE', $prefix . '/agents/{agentId}', [$agent, 'destroy'], $bearer);
+        $r->addRoute('GET', $prefix . self::AGENT_PATH, [$agent, 'show'], $bearer);
+        $r->addRoute('PATCH', $prefix . self::AGENT_PATH, [$agent, 'update'], $bearer);
+        $r->addRoute('DELETE', $prefix . self::AGENT_PATH, [$agent, 'destroy'], $bearer);
 
         $r->addRoute('GET', $prefix . '/chats', [$chat, 'index'], $bearer);
         $r->addRoute('POST', $prefix . '/chats', [$chat, 'store'], $bearer);

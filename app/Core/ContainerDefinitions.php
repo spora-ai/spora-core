@@ -130,6 +130,7 @@ use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
 use Spora\Services\ApiKeys\ApiKeyGroupService;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\ApiKeys\CallbackSecretResolver;
 use Spora\Services\AssetStore;
@@ -256,6 +257,7 @@ final class ContainerDefinitions
             self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
             self::agentApiDefinitions(),
+            self::scopedApiDefinitions(),
             self::toolDefinitions(),
             self::extensionDefinitions(),
             self::orchestratorDefinitions(),
@@ -1440,8 +1442,14 @@ final class ContainerDefinitions
             ApiKeyChatAccess::class => static function (ContainerInterface $c): ApiKeyChatAccess {
                 return new ApiKeyChatAccess(
                     $c->get(TaskServiceInterface::class),
-                    $c->get(MediaArchiveService::class),
                     $c->get(ToolCallSerializer::class),
+                    $c->get(ApiKeyReach::class),
+                );
+            },
+
+            ApiKeyMediaAccess::class => static function (ContainerInterface $c): ApiKeyMediaAccess {
+                return new ApiKeyMediaAccess(
+                    $c->get(MediaArchiveService::class),
                     $c->get(ApiKeyReach::class),
                 );
             },
@@ -1491,6 +1499,7 @@ final class ContainerDefinitions
                     $c->get(ApiKeyChatAccess::class),
                     $c->get(ApiKeyChatProjection::class),
                     $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyMediaAccess::class),
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
@@ -1506,8 +1515,8 @@ final class ContainerDefinitions
 
             AgentApiMediaController::class => static function (ContainerInterface $c): AgentApiMediaController {
                 return new AgentApiMediaController(
-                    $c->get(ApiKeyChatAccess::class),
                     $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyMediaAccess::class),
                     $c->get(AssetStreamer::class),
                     $c->get(MediaAssetSerializer::class),
                 );
@@ -1521,13 +1530,25 @@ final class ContainerDefinitions
                 );
             },
 
+        ];
+    }
+
+    /**
+     * The group-scoped and global-scoped surfaces.
+     *
+     * Split from {@see self::agentApiDefinitions()} because the three
+     * scopes together outgrew one method — and because they are three
+     * separate surfaces, not one.
+     */
+    private static function scopedApiDefinitions(): array
+    {
+        return [
             ApiKeyAgentService::class => static function (ContainerInterface $c): ApiKeyAgentService {
                 return new ApiKeyAgentService(
                     $c->get(AgentTemplateImporter::class),
                     $c->get(AgentTemplateExporter::class),
                     $c->get(AgentTemplateValidator::class),
                     $c->get(PrincipalService::class),
-                    $c->get(AgentService::class),
                 );
             },
 
@@ -1551,6 +1572,7 @@ final class ContainerDefinitions
                     $c->get(ApiKeyChatAccess::class),
                     $c->get(ApiKeyChatProjection::class),
                     $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyMediaAccess::class),
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(ApiKeyReach::class),
                     $c->get(SsrfGuard::class),
@@ -1567,8 +1589,8 @@ final class ContainerDefinitions
 
             ScopedApiMediaController::class => static function (ContainerInterface $c): ScopedApiMediaController {
                 return new ScopedApiMediaController(
-                    $c->get(ApiKeyChatAccess::class),
                     $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyMediaAccess::class),
                     $c->get(ApiKeyReach::class),
                     $c->get(AssetStreamer::class),
                     $c->get(MediaAssetSerializer::class),
