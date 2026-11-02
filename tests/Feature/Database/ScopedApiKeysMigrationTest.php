@@ -22,14 +22,14 @@ beforeEach(function (): void {
     TestDatabaseFactory::freshConnectionOnly();
 
     Capsule::schema()->create('users', static function (Blueprint $table): void {
-        $table->increments('id');
+        $table->bigIncrements('id');
         $table->string('email');
         $table->string('name');
         $table->timestamps();
     });
 
     Capsule::schema()->create('groups', static function (Blueprint $table): void {
-        $table->increments('id');
+        $table->bigIncrements('id');
         $table->string('name');
         $table->text('description')->nullable();
         $table->unsignedBigInteger('created_by_user_id')->nullable();
@@ -37,14 +37,14 @@ beforeEach(function (): void {
     });
 
     Capsule::schema()->create('agents', static function (Blueprint $table): void {
-        $table->increments('id');
+        $table->bigIncrements('id');
         $table->unsignedBigInteger('principal_id');
         $table->string('name');
         $table->timestamps();
     });
 
     Capsule::schema()->create('tasks', static function (Blueprint $table): void {
-        $table->increments('id');
+        $table->bigIncrements('id');
         $table->unsignedBigInteger('agent_id');
         $table->text('user_prompt')->nullable();
         $table->string('status')->nullable();
@@ -53,7 +53,7 @@ beforeEach(function (): void {
     });
 
     Capsule::schema()->create('settings', static function (Blueprint $table): void {
-        $table->increments('id');
+        $table->bigIncrements('id');
         $table->string('group_key', 64);
         $table->string('setting_key', 128);
         $table->text('value');
