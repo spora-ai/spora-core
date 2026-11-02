@@ -275,6 +275,25 @@ final class AgentService implements AgentServiceInterface
         return true;
     }
 
+    /**
+     * Delete an agent without a user-scoped visibility check.
+     *
+     * For the callers that have already established the reach by other
+     * means — an API key whose scope names the agent — and would otherwise
+     * have to impersonate a user to reuse {@see self::deleteAgent()}. The
+     * caller owns the authorisation; this method owns the delete.
+     */
+    public function deleteAgentById(int $agentId): bool
+    {
+        if (Agent::where('id', $agentId)->doesntExist()) {
+            return false;
+        }
+
+        Capsule::table('agents')->where('id', $agentId)->delete();
+
+        return true;
+    }
+
     public function setPinned(int $userId, int $agentId, bool $pinned): Agent
     {
         return $this->setFlag($userId, $agentId, 'is_pinned', $pinned);

@@ -49,6 +49,7 @@ function makeSetupTester(): CommandTester
         ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     $command = new SetupCommand(

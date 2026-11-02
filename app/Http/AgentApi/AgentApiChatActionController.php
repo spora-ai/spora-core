@@ -7,9 +7,9 @@ namespace Spora\Http\AgentApi;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Http\JsonControllerHelpers;
-use Spora\Services\AgentApi\AgentApiChatProjection;
-use Spora\Services\AgentApi\AgentApiContext;
-use Spora\Services\AgentApi\AgentApiScope;
+use Spora\Services\ApiKeys\ApiKeyChatAccess;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
+use Spora\Services\ApiKeys\ApiKeyContext;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -32,8 +32,8 @@ final class AgentApiChatActionController
     use JsonControllerHelpers;
 
     public function __construct(
-        private readonly AgentApiScope $scope,
-        private readonly AgentApiChatProjection $projection,
+        private readonly ApiKeyChatAccess $scope,
+        private readonly ApiKeyChatProjection $projection,
     ) {}
 
     #[OA\Post(path: '/api/v1/agent-api/chats/{chatId}/approve', summary: 'Approve pending tool calls', tags: ['Agent-api'])]
@@ -42,7 +42,7 @@ final class AgentApiChatActionController
         properties: [new OA\Property(property: 'decisions', type: 'array', items: new OA\Items(type: 'object'))],
     ))]
     #[OA\Response(response: 202, description: 'Approval recorded; the chat is queued again.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not pending approval.')]
     public function approve(Request $request, int $chatId): JsonResponse
     {
@@ -59,12 +59,12 @@ final class AgentApiChatActionController
             return $this->unprocessable('VALIDATION_ERROR', 'decisions must be a non-empty array.');
         }
 
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
 
         return $this->act(
             $chatId,
             $context,
-            fn(): int => $this->scope->approve($chatId, $context->agentId(), $context->ownerUserId, $decisions)->id,
+            fn(): int => $this->scope->approve($context, $chatId, $decisions)->id,
         );
     }
 
@@ -73,7 +73,7 @@ final class AgentApiChatActionController
         properties: [new OA\Property(property: 'reason', type: 'string')],
     ))]
     #[OA\Response(response: 202, description: 'Rejection recorded.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not pending approval.')]
     public function reject(Request $request, int $chatId): JsonResponse
     {
@@ -85,15 +85,14 @@ final class AgentApiChatActionController
         }
 
         $reason = $body['reason'] ?? null;
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
 
         return $this->act(
             $chatId,
             $context,
             fn(): int => $this->scope->reject(
+                $context,
                 $chatId,
-                $context->agentId(),
-                $context->ownerUserId,
                 is_string($reason) && trim($reason) !== '' ? trim($reason) : 'Rejected via the Agent API.',
             )->id,
         );
@@ -108,7 +107,7 @@ final class AgentApiChatActionController
         ],
     ))]
     #[OA\Response(response: 202, description: 'Answer recorded; the chat is queued again.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not awaiting input.')]
     public function answer(Request $request, int $chatId): JsonResponse
     {
@@ -126,15 +125,14 @@ final class AgentApiChatActionController
             return $this->unprocessable('VALIDATION_ERROR', 'tool_call_id and content are required.');
         }
 
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
 
         return $this->act(
             $chatId,
             $context,
             fn(): int => $this->scope->answer(
+                $context,
                 $chatId,
-                $context->agentId(),
-                $context->ownerUserId,
                 $toolCallId,
                 trim($content),
             )->id,
@@ -147,19 +145,19 @@ final class AgentApiChatActionController
      * A 404 and a 409 are told apart by whether the chat is on this agent at
      * all, not by the exception's message.
      */
-    private function act(int $chatId, AgentApiContext $context, callable $transition): JsonResponse
+    private function act(int $chatId, ApiKeyContext $context, callable $transition): JsonResponse
     {
         try {
             $taskId = $transition();
         } catch (InvalidArgumentException $e) {
-            $missing = $this->scope->chatMissing($chatId, $context->agentId());
+            $missing = $this->scope->chatMissing($context, $chatId);
 
             return $missing
-                ? $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND)
+                ? $this->notFound('NOT_FOUND', ApiKeyChatAccess::ERR_NOT_FOUND)
                 : $this->error('INVALID_STATE', $e->getMessage(), Response::HTTP_CONFLICT);
         }
 
-        $task = $this->scope->requireTask($taskId, $context->agentId());
+        $task = $this->scope->requireTask($context, $taskId);
 
         return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
     }

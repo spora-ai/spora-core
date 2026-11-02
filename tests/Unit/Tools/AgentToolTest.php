@@ -45,6 +45,7 @@ function makeAgentTool(
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $agentService */
@@ -89,6 +90,7 @@ function makeAgentToolWithPlugins(): array
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
     $validator = new AgentTemplateValidator();
     /** @var AgentServiceInterface&MockInterface $service */

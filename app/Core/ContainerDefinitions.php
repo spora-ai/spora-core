@@ -22,7 +22,7 @@ use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateValidator;
 use Spora\Apps\AppRegistry;
 use Spora\Apps\PluginsApp;
-use Spora\Auth\AgentApiKeyIssuer;
+use Spora\Auth\ApiKeyIssuer;
 use Spora\Auth\AuthService;
 use Spora\Console\Commands\AssetGcCommand;
 use Spora\Console\Commands\AuditOperationOverridesCommand;
@@ -80,8 +80,11 @@ use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AgentApiKeyMiddleware;
+use Spora\Http\Middleware\ApiKeyAuthenticator;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Http\Middleware\GlobalApiKeyMiddleware;
+use Spora\Http\Middleware\GroupApiKeyMiddleware;
 use Spora\Http\NotificationController;
 use Spora\Http\NotificationSubscriptionController;
 use Spora\Http\PluginsController;
@@ -90,6 +93,12 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
+use Spora\Http\ScopedApi\ScopedApiAgentController;
+use Spora\Http\ScopedApi\ScopedApiChatActionController;
+use Spora\Http\ScopedApi\ScopedApiChatController;
+use Spora\Http\ScopedApi\ScopedApiGroupController;
+use Spora\Http\ScopedApi\ScopedApiKeyController;
+use Spora\Http\ScopedApi\ScopedApiMediaController;
 use Spora\Http\SseController;
 use Spora\Http\TaskCompactController;
 use Spora\Http\TaskController;
@@ -104,13 +113,6 @@ use Spora\Http\UserProfileController;
 use Spora\I18n\Translator;
 use Spora\Plugins\PluginLoader;
 use Spora\Security\CsrfTokenService;
-use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
-use Spora\Services\AgentApi\AgentApiCallbackRecorder;
-use Spora\Services\AgentApi\AgentApiChatProjection;
-use Spora\Services\AgentApi\AgentApiContext;
-use Spora\Services\AgentApi\AgentApiFileIngest;
-use Spora\Services\AgentApi\AgentApiScope;
-use Spora\Services\AgentApi\CallbackSecretResolver;
 use Spora\Services\AgentFavoriteService;
 use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentManifest;
@@ -120,6 +122,16 @@ use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\AgentToolSettingsServiceInterface;
+use Spora\Services\ApiKeys\ApiKeyAgentService;
+use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
+use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
+use Spora\Services\ApiKeys\ApiKeyChatAccess;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
+use Spora\Services\ApiKeys\ApiKeyContext;
+use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyGroupService;
+use Spora\Services\ApiKeys\ApiKeyReach;
+use Spora\Services\ApiKeys\CallbackSecretResolver;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetStreamer;
 use Spora\Services\AuthValidator;
@@ -1407,62 +1419,79 @@ final class ContainerDefinitions
             // stricter one, so a caller cannot get the looser policy by accident.
             'ssrf_guard.web_fetch' => static fn(): SsrfGuard => SsrfGuard::forWebFetch(),
 
-            AgentApiKeyIssuer::class => static function (): AgentApiKeyIssuer {
-                return new AgentApiKeyIssuer();
+            ApiKeyIssuer::class => static function (): ApiKeyIssuer {
+                return new ApiKeyIssuer();
             },
 
             CallbackSecretResolver::class => static function (): CallbackSecretResolver {
                 return new CallbackSecretResolver();
             },
 
-            AgentApiChatProjection::class => static function (): AgentApiChatProjection {
-                return new AgentApiChatProjection();
+            ApiKeyChatProjection::class => static function (): ApiKeyChatProjection {
+                return new ApiKeyChatProjection();
             },
 
-            AgentApiContext::class => \DI\autowire(),
+            ApiKeyContext::class => \DI\autowire(),
 
-            AgentApiScope::class => static function (ContainerInterface $c): AgentApiScope {
-                return new AgentApiScope(
+            ApiKeyReach::class => static function (ContainerInterface $c): ApiKeyReach {
+                return new ApiKeyReach($c->get(PrincipalResolver::class));
+            },
+
+            ApiKeyChatAccess::class => static function (ContainerInterface $c): ApiKeyChatAccess {
+                return new ApiKeyChatAccess(
                     $c->get(TaskServiceInterface::class),
                     $c->get(MediaArchiveService::class),
                     $c->get(ToolCallSerializer::class),
+                    $c->get(ApiKeyReach::class),
                 );
             },
 
-            AgentApiCallbackRecorder::class => static fn(): AgentApiCallbackRecorder => new AgentApiCallbackRecorder(),
+            ApiKeyCallbackRecorder::class => static fn(): ApiKeyCallbackRecorder => new ApiKeyCallbackRecorder(),
 
-            AgentApiFileIngest::class => static function (ContainerInterface $c): AgentApiFileIngest {
-                return new AgentApiFileIngest(
+            ApiKeyFileIngest::class => static function (ContainerInterface $c): ApiKeyFileIngest {
+                return new ApiKeyFileIngest(
                     $c->get(MediaArchiveService::class),
                     $c->get(MediaAllowedTypesService::class),
                     $c->get(MimeSniffer::class),
                 );
             },
 
-            AgentApiCallbackDispatcher::class => static function (ContainerInterface $c): AgentApiCallbackDispatcher {
-                return new AgentApiCallbackDispatcher(
+            ApiKeyCallbackDispatcher::class => static function (ContainerInterface $c): ApiKeyCallbackDispatcher {
+                return new ApiKeyCallbackDispatcher(
                     $c->get(HttpClientInterface::class),
-                    $c->get(AgentApiChatProjection::class),
+                    $c->get(ApiKeyChatProjection::class),
                     $c->get(CallbackSecretResolver::class),
                     $c->get(LoggerInterface::class),
                 );
             },
 
-            AgentApiKeyMiddleware::class => static function (ContainerInterface $c): AgentApiKeyMiddleware {
-                return new AgentApiKeyMiddleware(
-                    $c->get(AgentApiKeyIssuer::class),
+            ApiKeyAuthenticator::class => static function (ContainerInterface $c): ApiKeyAuthenticator {
+                return new ApiKeyAuthenticator(
+                    $c->get(ApiKeyIssuer::class),
                     $c->get(PrincipalResolver::class),
                     $c->get(DbRateLimiter::class),
                     $c->get(Config::class),
                 );
             },
 
+            AgentApiKeyMiddleware::class => static function (ContainerInterface $c): AgentApiKeyMiddleware {
+                return new AgentApiKeyMiddleware($c->get(ApiKeyAuthenticator::class));
+            },
+
+            GroupApiKeyMiddleware::class => static function (ContainerInterface $c): GroupApiKeyMiddleware {
+                return new GroupApiKeyMiddleware($c->get(ApiKeyAuthenticator::class));
+            },
+
+            GlobalApiKeyMiddleware::class => static function (ContainerInterface $c): GlobalApiKeyMiddleware {
+                return new GlobalApiKeyMiddleware($c->get(ApiKeyAuthenticator::class));
+            },
+
             AgentApiChatController::class => static function (ContainerInterface $c): AgentApiChatController {
                 return new AgentApiChatController(
-                    $c->get(AgentApiScope::class),
-                    $c->get(AgentApiChatProjection::class),
-                    $c->get(AgentApiFileIngest::class),
-                    $c->get(AgentApiCallbackRecorder::class),
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyChatProjection::class),
+                    $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
                 );
@@ -1470,15 +1499,15 @@ final class ContainerDefinitions
 
             AgentApiChatActionController::class => static function (ContainerInterface $c): AgentApiChatActionController {
                 return new AgentApiChatActionController(
-                    $c->get(AgentApiScope::class),
-                    $c->get(AgentApiChatProjection::class),
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyChatProjection::class),
                 );
             },
 
             AgentApiMediaController::class => static function (ContainerInterface $c): AgentApiMediaController {
                 return new AgentApiMediaController(
-                    $c->get(AgentApiScope::class),
-                    $c->get(AgentApiFileIngest::class),
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyFileIngest::class),
                     $c->get(AssetStreamer::class),
                     $c->get(MediaAssetSerializer::class),
                 );
@@ -1488,7 +1517,73 @@ final class ContainerDefinitions
                 return new AgentApiKeyController(
                     $c->get(AuthService::class),
                     $c->get(PrincipalResolver::class),
-                    $c->get(AgentApiKeyIssuer::class),
+                    $c->get(ApiKeyIssuer::class),
+                );
+            },
+
+            ApiKeyAgentService::class => static function (ContainerInterface $c): ApiKeyAgentService {
+                return new ApiKeyAgentService(
+                    $c->get(AgentTemplateImporter::class),
+                    $c->get(AgentTemplateExporter::class),
+                    $c->get(AgentTemplateValidator::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(AgentService::class),
+                );
+            },
+
+            ApiKeyGroupService::class => static function (ContainerInterface $c): ApiKeyGroupService {
+                return new ApiKeyGroupService(
+                    $c->get(GroupService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(GroupPictureService::class),
+                );
+            },
+
+            ScopedApiAgentController::class => static function (ContainerInterface $c): ScopedApiAgentController {
+                return new ScopedApiAgentController(
+                    $c->get(ApiKeyAgentService::class),
+                    $c->get(ApiKeyReach::class),
+                );
+            },
+
+            ScopedApiChatController::class => static function (ContainerInterface $c): ScopedApiChatController {
+                return new ScopedApiChatController(
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyChatProjection::class),
+                    $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyCallbackRecorder::class),
+                    $c->get(ApiKeyReach::class),
+                    $c->get(SsrfGuard::class),
+                    $c->get(Config::class),
+                );
+            },
+
+            ScopedApiChatActionController::class => static function (ContainerInterface $c): ScopedApiChatActionController {
+                return new ScopedApiChatActionController(
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyChatProjection::class),
+                );
+            },
+
+            ScopedApiMediaController::class => static function (ContainerInterface $c): ScopedApiMediaController {
+                return new ScopedApiMediaController(
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyFileIngest::class),
+                    $c->get(ApiKeyReach::class),
+                    $c->get(AssetStreamer::class),
+                    $c->get(MediaAssetSerializer::class),
+                );
+            },
+
+            ScopedApiGroupController::class => static function (ContainerInterface $c): ScopedApiGroupController {
+                return new ScopedApiGroupController($c->get(ApiKeyGroupService::class));
+            },
+
+            ScopedApiKeyController::class => static function (ContainerInterface $c): ScopedApiKeyController {
+                return new ScopedApiKeyController(
+                    $c->get(AuthService::class),
+                    $c->get(GroupService::class),
+                    $c->get(ApiKeyIssuer::class),
                 );
             },
         ];

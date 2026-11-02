@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Services\AgentApi;
+namespace Tests\Unit\Services\ApiKeys;
 
 use Spora\Agents\TaskLifecyclePolicy;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\ToolCall;
-use Spora\Services\AgentApi\AgentApiChatProjection;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Tests\Concerns\CreatesPrincipal;
 
 /**
@@ -16,12 +16,12 @@ use Tests\Concerns\CreatesPrincipal;
  * `/status`, `/messages` and `/transcript` is the point of the feature, so
  * each is pinned here separately from the HTTP layer.
  */
-describe('AgentApiChatProjection', function (): void {
+describe('ApiKeyChatProjection', function (): void {
     uses(CreatesPrincipal::class);
 
-    function projection(): AgentApiChatProjection
+    function projection(): ApiKeyChatProjection
     {
-        return new AgentApiChatProjection();
+        return new ApiKeyChatProjection();
     }
 
     /**
@@ -128,7 +128,7 @@ describe('AgentApiChatProjection', function (): void {
         expect($settled)->toBe(
             $policy->isTerminal($status)
             || $status === 'ABORTED'
-            || in_array($status, AgentApiChatProjection::BLOCKED_STATUSES, true),
+            || in_array($status, ApiKeyChatProjection::BLOCKED_STATUSES, true),
         );
     })->with([
         'COMPLETED' => ['COMPLETED', true],

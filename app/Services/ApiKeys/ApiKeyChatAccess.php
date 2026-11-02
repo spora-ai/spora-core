@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
 use Illuminate\Database\Capsule\Manager as DB;
+use Illuminate\Database\Eloquent\Builder;
 use InvalidArgumentException;
+use Spora\Auth\ApiKeyScope;
+use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -16,15 +19,20 @@ use Spora\Services\TaskServiceInterface;
 use Spora\Services\ToolCallSerializer;
 
 /**
- * Scopes an Agent API request to the one agent its key belongs to.
+ * The chat and media surface behind an API key, limited to what the key's
+ * reach allows.
  *
- * The *agent scope* is decided here rather than by the user-scoped
+ * The *scope* is decided here rather than by the user-scoped
  * `TaskServiceInterface` methods, whose visibility comes from
  * `visiblePrincipalIds()`: a principal is shared by every group member,
  * which is the right rule for the admin UI and far too wide for a
- * credential. A key may only ever reach its own agent's chats.
+ * credential. A key may only ever reach the agents its own scope names.
+ *
+ * The agent set is a query, not a list: the global scope would otherwise
+ * have to read every group-owned agent on the install before it could
+ * answer the first question.
  */
-final class AgentApiScope
+final class ApiKeyChatAccess
 {
     /**
      * The error vocabulary, public because the controllers answer with these
@@ -47,6 +55,7 @@ final class AgentApiScope
         private readonly TaskServiceInterface $taskService,
         private readonly MediaArchiveService $mediaArchive,
         private readonly ToolCallSerializer $toolCallSerializer,
+        private readonly ApiKeyReach $reach,
     ) {}
 
     /**
@@ -56,15 +65,16 @@ final class AgentApiScope
      * policy to report — and because it carries `pending_questions`, which is
      * what a parked chat's questions arrive on.
      *
-     * Throws rather than returning null when the chat is not this agent's —
-     * every caller needs a 404 for that and only for that, and a nullable
-     * return would make "missing chat" indistinguishable from "no history".
+     * Throws rather than returning null when the chat is outside the key's
+     * reach — every caller needs a 404 for that and only for that, and a
+     * nullable return would make "missing chat" indistinguishable from "no
+     * history".
      *
      * @return array<string, mixed>
      */
-    public function transcript(int $chatId, int $agentId, ?int $sinceSequence): array
+    public function transcript(ApiKeyContext $ctx, int $chatId, ?int $sinceSequence): array
     {
-        $task = $this->requireTask($chatId, $agentId);
+        $task = $this->requireTask($ctx, $chatId);
 
         return [
             'id' => (int) $task->id,
@@ -87,14 +97,16 @@ final class AgentApiScope
     }
 
     /**
-     * The chat, when it belongs to `$agentId`.
+     * The chat, when it is inside the key's reach.
      *
-     * @throws InvalidArgumentException when it does not — callers tell that
+     * @throws InvalidArgumentException when it is not — callers tell that
      *     apart from a wrong-state 409 with {@see self::chatMissing()}.
      */
-    public function requireTask(int $chatId, int $agentId): Task
+    public function requireTask(ApiKeyContext $ctx, int $chatId): Task
     {
-        $task = Task::where('id', $chatId)->where('agent_id', $agentId)->first();
+        $task = Task::where('id', $chatId)
+            ->whereIn('agent_id', $this->reach->agentIds($ctx))
+            ->first();
 
         if ($task === null) {
             throw new InvalidArgumentException(self::ERR_NOT_FOUND);
@@ -104,20 +116,22 @@ final class AgentApiScope
     }
 
     /**
-     * Whether the chat simply is not this agent's — as opposed to existing
-     * but being in a state that forbids the call. The two answer 404 and 409
+     * Whether the chat simply is not reachable — as opposed to existing but
+     * being in a state that forbids the call. The two answer 404 and 409
      * respectively, and a caller must not be able to tell "no such chat" from
      * "chat exists, wrong agent" by probing ids.
      */
-    public function chatMissing(int $chatId, int $agentId): bool
+    public function chatMissing(ApiKeyContext $ctx, int $chatId): bool
     {
-        return !Task::where('id', $chatId)->where('agent_id', $agentId)->exists();
+        return !Task::where('id', $chatId)
+            ->whereIn('agent_id', $this->reach->agentIds($ctx))
+            ->exists();
     }
 
     /**
      * Always paginated, defaulting to a page rather than to everything.
      *
-     * Each row goes through `AgentApiChatProjection::status()`, which adds
+     * Each row goes through `ApiKeyChatProjection::status()`, which adds
      * up to two more queries for a chat with no `final_response` or one
      * parked on an approval. An agent with a long backlog would turn one
      * uncapped request into an unbounded body and O(n) queries — and the
@@ -125,9 +139,9 @@ final class AgentApiScope
      *
      * @return list<Task>
      */
-    public function listChats(int $agentId, ?string $since, ?int $page, ?int $perPage): array
+    public function listChats(ApiKeyContext $ctx, ?string $since, ?int $page, ?int $perPage): array
     {
-        $query = Task::where('agent_id', $agentId)
+        $query = Task::whereIn('agent_id', $this->reach->agentIds($ctx))
             ->orderByDesc('id');
 
         if ($since !== null && $since !== '') {
@@ -144,17 +158,19 @@ final class AgentApiScope
 
     /**
      * @param list<string> $mediaIds ids already checked by
-     *   {@see \Spora\Http\AgentApi\AgentApiChatController::readableMediaIds()}
+     *   {@see \Spora\Http\ScopedApi\ScopedApiChatController::readableMediaIds()}
      */
     public function startChat(
-        int $ownerUserId,
+        ApiKeyContext $ctx,
         int $agentId,
         string $prompt,
         ?int $maxSteps,
         array $mediaIds,
     ): Task {
+        $agent = $this->requireAgent($ctx, $agentId);
+
         $resource = $this->taskService->startTask(
-            $ownerUserId,
+            $this->ownerFor($ctx, $agent),
             $agentId,
             $prompt,
             $maxSteps,
@@ -168,23 +184,28 @@ final class AgentApiScope
 
     /**
      * @param list<string> $mediaIds ids already checked by
-     *   {@see \Spora\Http\AgentApi\AgentApiChatController::readableMediaIds()}
+     *   {@see \Spora\Http\ScopedApi\ScopedApiChatController::readableMediaIds()}
      */
     public function continueChat(
+        ApiKeyContext $ctx,
         int $chatId,
-        int $agentId,
-        int $ownerUserId,
         string $text,
         ?int $additionalSteps,
         array $mediaIds,
     ): Task {
-        $this->requireTask($chatId, $agentId);
+        $task = $this->requireTask($ctx, $chatId);
 
         // The user-scoped continue is the only implementation of the
         // continue state machine; scoping happens here, one line above.
-        $this->taskService->continueTask($chatId, $ownerUserId, $text, $additionalSteps, $mediaIds);
+        $this->taskService->continueTask(
+            $chatId,
+            $this->ownerFor($ctx, $this->agentOf($task)),
+            $text,
+            $additionalSteps,
+            $mediaIds,
+        );
 
-        return $this->requireTask($chatId, $agentId);
+        return $this->requireTask($ctx, $chatId);
     }
 
     /**
@@ -192,15 +213,15 @@ final class AgentApiScope
      *
      * @param list<array{provider_call_id: string, decision: 'approve'|'reject', arguments?: array<string, mixed>, reason?: string}> $decisions
      *
-     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     * @throws InvalidArgumentException when the chat is not reachable, or is
      *     not pending approval — {@see self::chatMissing()} tells those apart.
      */
-    public function approve(int $chatId, int $agentId, int $ownerUserId, array $decisions): Task
+    public function approve(ApiKeyContext $ctx, int $chatId, array $decisions): Task
     {
-        $this->requireTask($chatId, $agentId);
-        $this->taskService->approveTask($chatId, $ownerUserId, $decisions);
+        $task = $this->requireTask($ctx, $chatId);
+        $this->taskService->approveTask($chatId, $this->ownerFor($ctx, $this->agentOf($task)), $decisions);
 
-        return $this->requireTask($chatId, $agentId);
+        return $this->requireTask($ctx, $chatId);
     }
 
     /**
@@ -208,15 +229,15 @@ final class AgentApiScope
      *
      * @param string $reason Surfaced to the LLM so it can choose an alternative.
      *
-     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     * @throws InvalidArgumentException when the chat is not reachable, or is
      *     not pending approval — {@see self::chatMissing()} tells those apart.
      */
-    public function reject(int $chatId, int $agentId, int $ownerUserId, string $reason): Task
+    public function reject(ApiKeyContext $ctx, int $chatId, string $reason): Task
     {
-        $this->requireTask($chatId, $agentId);
-        $this->taskService->rejectTask($chatId, $ownerUserId, $reason);
+        $task = $this->requireTask($ctx, $chatId);
+        $this->taskService->rejectTask($chatId, $this->ownerFor($ctx, $this->agentOf($task)), $reason);
 
-        return $this->requireTask($chatId, $agentId);
+        return $this->requireTask($ctx, $chatId);
     }
 
     /**
@@ -225,15 +246,20 @@ final class AgentApiScope
      * @param string $toolCallId The pending tool call the answer belongs to.
      * @param string $content    The answer as the operator wrote it.
      *
-     * @throws InvalidArgumentException when the chat is not this agent's, or is
+     * @throws InvalidArgumentException when the chat is not reachable, or is
      *     not awaiting an answer — {@see self::chatMissing()} tells those apart.
      */
-    public function answer(int $chatId, int $agentId, int $ownerUserId, string $toolCallId, string $content): Task
+    public function answer(ApiKeyContext $ctx, int $chatId, string $toolCallId, string $content): Task
     {
-        $this->requireTask($chatId, $agentId);
-        $this->taskService->answerTask($chatId, $ownerUserId, $toolCallId, $content);
+        $task = $this->requireTask($ctx, $chatId);
+        $this->taskService->answerTask(
+            $chatId,
+            $this->ownerFor($ctx, $this->agentOf($task)),
+            $toolCallId,
+            $content,
+        );
 
-        return $this->requireTask($chatId, $agentId);
+        return $this->requireTask($ctx, $chatId);
     }
 
     /**
@@ -241,8 +267,45 @@ final class AgentApiScope
      * to a chat in the agent's own tree (which is how a sub-agent's output
      * becomes reachable through its parent), or when a chat of this agent
      * attached it.
+     *
+     * The reach is the key's whole: a group key can read any of its
+     * group's media, which is what the group is.
      */
-    public function isMediaReadable(string $mediaId, int $agentId): bool
+    public function isMediaReadable(ApiKeyContext $ctx, string $mediaId): bool
+    {
+        return $this->isMediaReadableIn($this->reach->agentIds($ctx), $mediaId);
+    }
+
+    /**
+     * Whether a media asset is readable by one specific agent.
+     *
+     * The start path needs this rather than the reach-wide check: a chat
+     * is started with *one* agent, and an attachment that belongs to a
+     * sibling agent in the same group has no business in it.
+     */
+    public function isMediaReadableForAgent(int $agentId, string $mediaId): bool
+    {
+        return $this->isMediaReadableIn(
+            Agent::query()->select('id')->where('id', $agentId),
+            $mediaId,
+        );
+    }
+
+    public function findMedia(ApiKeyContext $ctx, string $mediaId): ?MediaAsset
+    {
+        $asset = $this->mediaArchive->find($mediaId);
+
+        if ($asset === null || !$this->isAssetReadable($this->reach->agentIds($ctx), $asset)) {
+            return null;
+        }
+
+        return $asset;
+    }
+
+    /**
+     * @param Builder<Agent> $agentIds
+     */
+    private function isMediaReadableIn(Builder $agentIds, string $mediaId): bool
     {
         $asset = $this->mediaArchive->find($mediaId);
 
@@ -250,42 +313,45 @@ final class AgentApiScope
             return false;
         }
 
-        return $this->isAssetReadable($asset, $agentId);
-    }
-
-    public function findMedia(string $mediaId, int $agentId): ?MediaAsset
-    {
-        $asset = $this->mediaArchive->find($mediaId);
-
-        if ($asset === null || !$this->isAssetReadable($asset, $agentId)) {
-            return null;
-        }
-
-        return $asset;
-    }
-
-    private function isAssetReadable(MediaAsset $asset, int $agentId): bool
-    {
-        if ($asset->agent_id !== null && (int) $asset->agent_id === $agentId) {
-            return true;
-        }
-
-        if ($asset->task_id !== null && $this->isTaskInScope((int) $asset->task_id, $agentId)) {
-            return true;
-        }
-
-        return $this->isAttachedToScopedChat((string) $asset->id, $agentId);
+        return $this->isAssetReadable($agentIds, $asset);
     }
 
     /**
-     * Whether a task belongs to this agent, or descends from one of its tasks.
+     * @param Builder<Agent> $agentIds
+     */
+    private function isAssetReadable(Builder $agentIds, MediaAsset $asset): bool
+    {
+        if ($asset->agent_id !== null && $this->ownsAgent($agentIds, (int) $asset->agent_id)) {
+            return true;
+        }
+
+        if ($asset->task_id !== null && $this->isTaskInScope($agentIds, (int) $asset->task_id)) {
+            return true;
+        }
+
+        return $this->isAttachedToScopedChat($agentIds, (string) $asset->id);
+    }
+
+    /**
+     * @param Builder<Agent> $agentIds
+     */
+    private function ownsAgent(Builder $agentIds, int $agentId): bool
+    {
+        return Agent::query()->where('id', $agentId)->whereIn('id', $agentIds)->exists();
+    }
+
+    /**
+     * Whether a task belongs to a reachable agent, or descends from one of
+     * its tasks.
      *
      * Walks *up* the `parent_task_id` chain rather than down: the asset on a
      * sub-agent's chat carries the sub-task's id, and it is the parent's chat
      * that a caller of the parent can see. A depth cap stops a cycle in the
      * chain from hanging the request.
+     *
+     * @param Builder<Agent> $agentIds
      */
-    private function isTaskInScope(int $taskId, int $agentId): bool
+    private function isTaskInScope(Builder $agentIds, int $taskId): bool
     {
         $seen = [];
         $current = $taskId;
@@ -299,11 +365,9 @@ final class AgentApiScope
 
             $seen[$current] = true;
 
-            if ((int) $task->agent_id === $agentId) {
+            if ($this->ownsAgent($agentIds, (int) $task->agent_id)) {
                 return true;
             }
-
-            $seen[$current] = true;
 
             // 0 is the end-of-chain sentinel: ids are auto-increment from 1,
             // so the next `find()` misses and the climb stops.
@@ -312,18 +376,61 @@ final class AgentApiScope
 
         return false;
     }
+
     /**
      * An upload ingested for a chat carries no `agent_id` and no `task_id`
      * on the media row — the linkage is the `task_history` attachment row —
      * so that is the only place an inbound attachment can be traced back.
+     *
+     * @param Builder<Agent> $agentIds
      */
-    private function isAttachedToScopedChat(string $mediaId, int $agentId): bool
+    private function isAttachedToScopedChat(Builder $agentIds, string $mediaId): bool
     {
         return DB::table('task_history')
             ->join('tasks', 'tasks.id', '=', 'task_history.task_id')
-            ->where('tasks.agent_id', $agentId)
+            ->whereIn('tasks.agent_id', $agentIds)
             ->where('task_history.attachments', 'like', '%"' . $mediaId . '"%')
             ->exists();
+    }
+
+    /**
+     * The agent, when it is inside the key's reach.
+     *
+     * @throws InvalidArgumentException when it is not — a caller must not be
+     *     able to probe which agent ids exist.
+     */
+    private function requireAgent(ApiKeyContext $ctx, int $agentId): Agent
+    {
+        return $this->reach->targetAgent($ctx, $agentId)
+            ?? throw new InvalidArgumentException(self::ERR_NOT_FOUND);
+    }
+
+    /**
+     * The user a chat with this agent is attributed to.
+     *
+     * The agent scope knows its own owner already — the middleware resolved
+     * it — while the group and global scopes resolve the owner of the
+     * *target* agent, because the target changes per request.
+     */
+    private function ownerFor(ApiKeyContext $ctx, Agent $agent): int
+    {
+        if ($ctx->scope === ApiKeyScope::Agent) {
+            return $ctx->ownerUserId ?? throw new InvalidArgumentException(self::ERR_NOT_FOUND);
+        }
+
+        return $this->reach->ownerUserId($agent)
+            ?? throw new InvalidArgumentException(self::ERR_NOT_FOUND);
+    }
+
+    private function agentOf(Task $task): Agent
+    {
+        $agent = Agent::find((int) $task->agent_id);
+
+        if ($agent === null) {
+            throw new InvalidArgumentException(self::ERR_NOT_FOUND);
+        }
+
+        return $agent;
     }
 
     /**

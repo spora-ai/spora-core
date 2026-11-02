@@ -15,4 +15,4 @@ use RuntimeException;
  * for the cause should not have to know that "some RuntimeException" is the
  * only one this path can throw.
  */
-final class AgentApiContextException extends RuntimeException {}
+final class ApiKeyContextException extends RuntimeException {}

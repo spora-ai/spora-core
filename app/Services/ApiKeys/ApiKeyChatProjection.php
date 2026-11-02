@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
 use Spora\Agents\TaskLifecyclePolicy;
 use Spora\Agents\ValueObjects\AgentState;
@@ -21,7 +21,7 @@ use Throwable;
  * sees. Tool calls and thinking live in the last one only, so an
  * integrator polling for an answer never pays for them.
  */
-final class AgentApiChatProjection
+final class ApiKeyChatProjection
 {
     /**
      * Statuses that mean the chat can no longer progress without the

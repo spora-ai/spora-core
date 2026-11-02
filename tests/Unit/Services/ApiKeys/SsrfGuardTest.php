@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Services\AgentApi;
+namespace Tests\Unit\Services\ApiKeys;
 
 use Spora\Services\SsrfGuard;
 

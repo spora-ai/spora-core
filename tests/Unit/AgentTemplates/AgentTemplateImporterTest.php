@@ -171,6 +171,7 @@ test('opt-in export settings round-trip through the importer without secrets', f
         ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig, $settingsApplier),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
     $exporter = new Spora\AgentTemplates\AgentTemplateExporter(
         $plugins,
@@ -204,6 +205,7 @@ test('missing skill slugs warn and are dropped from imported settings', function
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig, $settingsApplier),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
     $raw = [
         'id' => 'skills', 'name' => 'Skills', 'version' => '1.0.0',

@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
-use Spora\Models\AgentApiKey;
+use Spora\Models\ApiKey;
 
 /**
  * Supplies the callback-signing secret for a key id.
@@ -24,7 +24,7 @@ final class CallbackSecretResolver
 {
     public function for(string $keyId): ?string
     {
-        $key = AgentApiKey::find($keyId);
+        $key = ApiKey::find($keyId);
 
         return $key === null ? null : $key->secret_hash;
     }

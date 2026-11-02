@@ -8,15 +8,21 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One credential for one agent's Agent API surface.
+ * One credential for one of the API surfaces.
  *
  * `id` is the 16-byte random hex embedded in the presented key, and
  * `secret_hash` is the only trace of the secret itself — a SHA-256 hex
  * digest, compared with `hash_equals` and never sent over the wire.
  * Deleting a key is a hard delete, which cascades its pending callbacks.
  *
+ * `scope` says what the key may reach and which of `agent_id` / `group_id`
+ * names the target; see {@see \Spora\Auth\ApiKeyScope} for the rule and for
+ * why it is a column rather than something a reader infers.
+ *
  * @property string      $id
- * @property int         $agent_id
+ * @property string      $scope
+ * @property int|null    $agent_id
+ * @property int|null    $group_id
  * @property string      $name
  * @property string      $secret_hash
  * @property \Carbon\Carbon|null $last_used_at
@@ -24,15 +30,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property \Carbon\Carbon|null $created_at
  * @property \Carbon\Carbon|null $updated_at
  * @property Agent|null  $agent
+ * @property Group|null  $group
  * @property User|null   $createdBy
  */
-final class AgentApiKey extends Model
+final class ApiKey extends Model
 {
-    protected $table = 'agent_api_keys';
+    protected $table = 'api_keys';
 
     protected $fillable = [
         'id',
+        'scope',
         'agent_id',
+        'group_id',
         'name',
         'secret_hash',
         'last_used_at',
@@ -41,6 +50,7 @@ final class AgentApiKey extends Model
 
     protected $casts = [
         'agent_id' => 'integer',
+        'group_id' => 'integer',
         'created_by' => 'integer',
         'last_used_at' => 'datetime',
         'created_at' => 'datetime',
@@ -49,7 +59,7 @@ final class AgentApiKey extends Model
 
     /**
      * Both are non-defaults for the same reason: the id is supplied by
-     * {@see \Spora\Auth\AgentApiKeyIssuer}, not the DB.
+     * {@see \Spora\Auth\ApiKeyIssuer}, not the DB.
      */
     public $incrementing = false;
 
@@ -58,6 +68,11 @@ final class AgentApiKey extends Model
     public function agent(): BelongsTo
     {
         return $this->belongsTo(Agent::class);
+    }
+
+    public function group(): BelongsTo
+    {
+        return $this->belongsTo(Group::class);
     }
 
     public function createdBy(): BelongsTo

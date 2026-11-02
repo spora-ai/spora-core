@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
+use Spora\Models\Agent;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -11,14 +12,18 @@ use Spora\Services\MediaArchive\MimeSniffer;
 
 /**
  * Turns an external caller's file — a multipart part or an inline data URL
- * — into a media asset owned by the key's agent.
+ * — into a media asset owned by the agent the key is talking to.
  *
  * Both paths converge here so they cannot diverge on the checks that
  * matter: the MIME is sniffed from the bytes rather than taken from the
  * client's header or the data URL's declared type, and the agent's own
  * MIME allowlist is consulted before anything is persisted.
+ *
+ * The agent is a parameter rather than something read off the key: the
+ * agent scope always has exactly one, while the group and global scopes
+ * name the target agent per request.
  */
-final class AgentApiFileIngest
+final class ApiKeyFileIngest
 {
     /**
      * Inline files ride in the JSON body, so they are held to the data-URL
@@ -36,14 +41,14 @@ final class AgentApiFileIngest
     ) {}
 
     /**
-     * Ingest bytes as the context's agent, or null when the sniffed type is
+     * Ingest bytes as the given agent, or null when the sniffed type is
      * not in the agent's allowlist.
      *
      * The declared MIME never wins: bytes are sniffed, matching the upload
      * controller's rule, so a caller cannot label a payload as something
      * the agent does not accept.
      */
-    public function ingestBytes(AgentApiContext $context, string $bytes, string $filename): ?string
+    public function ingestBytes(Agent $agent, int $ownerUserId, string $bytes, string $filename): ?string
     {
         if ($bytes === '') {
             return null;
@@ -51,7 +56,7 @@ final class AgentApiFileIngest
 
         $mime = $this->sniffer->sniffFromBytes($bytes, $filename);
 
-        if (!$this->allowed->isAllowed($mime, $context->agentId())) {
+        if (!$this->allowed->isAllowed($mime, (int) $agent->id)) {
             return null;
         }
 
@@ -59,9 +64,9 @@ final class AgentApiFileIngest
             bytes: $bytes,
             mime: $mime,
             filename: $filename,
-            userId: $context->ownerUserId,
-            principalId: (int) $context->agent->principal_id,
-            agentId: $context->agentId(),
+            userId: $ownerUserId,
+            principalId: (int) $agent->principal_id,
+            agentId: (int) $agent->id,
             uploadSource: 'agent-api',
             isTemporary: false,
         ));
@@ -73,7 +78,7 @@ final class AgentApiFileIngest
      * @param list<mixed> $files the raw `files` array from the request body
      * @return list<string> media ids, in the order given
      */
-    public function ingestInlineFiles(AgentApiContext $context, array $files): array
+    public function ingestInlineFiles(Agent $agent, int $ownerUserId, array $files): array
     {
         $ids = [];
         $seen = 0;
@@ -92,7 +97,8 @@ final class AgentApiFileIngest
             $seen++;
 
             $id = $this->ingestBytes(
-                $context,
+                $agent,
+                $ownerUserId,
                 $decoded['bytes'],
                 $decoded['filename'] ?? 'inline-' . $seen,
             );

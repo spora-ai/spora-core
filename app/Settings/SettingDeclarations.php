@@ -171,12 +171,33 @@ final class SettingDeclarations
                     . 'Each agent has its own API keys, under the agent\'s Settings → API keys.',
             ),
             new SettingDefinition(
-                key: 'SPORA_AGENT_API_RATE_LIMIT_MAX',
-                label: 'Agent API rate limit',
+                key: 'SPORA_GROUP_API',
+                label: 'Group API',
+                type: SettingDefinition::TYPE_TOGGLE,
+                default: false,
+                section: 'access',
+                description: 'Mounts a per-group HTTP API so external tools can manage the agents and chats of one group. '
+                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . 'A group\'s keys are minted by its owners and admins, under the group\'s Settings → API keys.',
+            ),
+            new SettingDefinition(
+                key: 'SPORA_GLOBAL_API',
+                label: 'Global API',
+                type: SettingDefinition::TYPE_TOGGLE,
+                default: false,
+                section: 'access',
+                description: 'Mounts an install-wide HTTP API so external tools can manage every group, their agents and their chats. '
+                    . 'Personal agents are not reachable through it. '
+                    . 'Requires a server-side worker: in client-worker mode every endpoint answers 404. '
+                    . 'Only a global admin can mint these keys.',
+            ),
+            new SettingDefinition(
+                key: 'SPORA_API_RATE_LIMIT_MAX',
+                label: 'API rate limit',
                 type: SettingDefinition::TYPE_NUMBER,
                 default: 60,
                 section: 'access',
-                description: 'Requests per minute a single Agent API key may make. Exceeding it answers 429 with a Retry-After header.',
+                description: 'Requests per minute a single API key may make, whatever its scope. Exceeding it answers 429 with a Retry-After header.',
             ),
         ];
     }
