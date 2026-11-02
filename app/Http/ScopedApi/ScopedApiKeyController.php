@@ -151,7 +151,7 @@ final class ScopedApiKeyController
     #[OA\Get(
         path: '/api/v1/global-api-keys',
         summary: 'List the global API keys',
-        tags: ['Admin'],
+        tags: ['Global-api'],
     )]
     #[OA\Response(response: 200, description: 'Key metadata. Secrets are never returned.')]
     #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
@@ -177,7 +177,7 @@ final class ScopedApiKeyController
     #[OA\Post(
         path: '/api/v1/global-api-keys',
         summary: 'Mint a global API key',
-        tags: ['Admin'],
+        tags: ['Global-api'],
     )]
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
         required: ['name'],
@@ -218,7 +218,7 @@ final class ScopedApiKeyController
     #[OA\Delete(
         path: '/api/v1/global-api-keys/{keyId}',
         summary: 'Revoke a global API key',
-        tags: ['Admin'],
+        tags: ['Global-api'],
     )]
     #[OA\Response(response: 200, description: 'Revoked. Idempotent — the same body whether or not the key existed.')]
     #[OA\Response(response: 403, description: 'The caller is not a global admin.')]

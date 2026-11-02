@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-1-g4b07b0b6"
+        "version": "0.32.0-2-gb5770ce8"
     },
     "servers": [
         {
@@ -4097,7 +4097,7 @@
         "/api/v1/global-api-keys": {
             "get": {
                 "tags": [
-                    "Admin"
+                    "Global-api"
                 ],
                 "summary": "List the global API keys",
                 "parameters": [],
@@ -4117,7 +4117,7 @@
             },
             "post": {
                 "tags": [
-                    "Admin"
+                    "Global-api"
                 ],
                 "summary": "Mint a global API key",
                 "parameters": [],
@@ -4163,7 +4163,7 @@
         "/api/v1/global-api-keys/{keyId}": {
             "delete": {
                 "tags": [
-                    "Admin"
+                    "Global-api"
                 ],
                 "summary": "Revoke a global API key",
                 "parameters": [
