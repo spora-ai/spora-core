@@ -233,14 +233,7 @@ final class MediaArchiveService
             // uses the leading column of the index.
             $builder->where('upload_source', $query->uploadSource);
         }
-        if ($query->folderId !== null) {
-            $this->applyFolderFilter($builder, $query);
-        } elseif ($query->unfiled) {
-            // The folder filter is the more specific one, so it wins when a
-            // DTO carries both. The predicate is an extra AND on top of the
-            // ownership scope, never a replacement for it.
-            $builder->whereNull('folder_id');
-        }
+        $this->applyFolderScope($builder, $query);
         if ($query->kind !== null) {
             $builder->where('kind', $query->kind);
         }
@@ -375,6 +368,30 @@ final class MediaArchiveService
     public function countForAgent(int $agentId): int
     {
         return MediaAsset::query()->where('agent_id', $agentId)->count();
+    }
+
+    /**
+     * Scope the listing by folder.
+     *
+     * Two filters live here and they are exclusive: a folder id names
+     * one folder, the `unfiled` flag names the assets filed in none. The
+     * folder is the more specific one, so it wins when a DTO carries
+     * both — a caller that named a folder and asked for the unfiled
+     * rows at once gets the folder's rows.
+     *
+     * Both are an extra AND on top of the ownership scope, never a
+     * replacement for it.
+     */
+    private function applyFolderScope(Builder $builder, ListMediaQuery $query): void
+    {
+        if ($query->folderId !== null) {
+            $this->applyFolderFilter($builder, $query);
+            return;
+        }
+
+        if ($query->unfiled) {
+            $builder->whereNull('folder_id');
+        }
     }
 
     /**
