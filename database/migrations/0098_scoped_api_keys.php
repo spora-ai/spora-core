@@ -48,17 +48,19 @@ return new class extends Migration
     {
         $schema = Capsule::schema();
 
-        if ($schema->hasTable(self::KEYS_TABLE)) {
-            return;
+        // The table work is skipped once it has happened; the settings
+        // rename is not, because it is idempotent on its own and a run that
+        // stopped between the two would otherwise leave the old name behind.
+        if (!$schema->hasTable(self::KEYS_TABLE)) {
+            $this->createKeysTable();
+            $this->copyKeys();
+
+            $this->createCallbacksTable();
+            $this->copyCallbacks();
+
+            $this->dropLegacyTables();
         }
 
-        $this->createKeysTable();
-        $this->copyKeys();
-
-        $this->createCallbacksTable();
-        $this->copyCallbacks();
-
-        $this->dropLegacyTables();
         $this->renameRateLimitSetting();
     }
 
@@ -66,17 +68,16 @@ return new class extends Migration
     {
         $schema = Capsule::schema();
 
-        if ($schema->hasTable(self::OLD_KEYS_TABLE)) {
-            return;
+        if (!$schema->hasTable(self::OLD_KEYS_TABLE)) {
+            $this->createLegacyKeysTable();
+            $this->copyAgentScopedKeysBack();
+
+            $this->createLegacyCallbacksTable();
+            $this->copyCallbacksBack();
+
+            $this->dropScopedTables();
         }
 
-        $this->createLegacyKeysTable();
-        $this->copyAgentScopedKeysBack();
-
-        $this->createLegacyCallbacksTable();
-        $this->copyCallbacksBack();
-
-        $this->dropScopedTables();
         $this->restoreRateLimitSetting();
     }
 
