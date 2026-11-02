@@ -119,6 +119,41 @@ describe('ListMediaQueryBuilder folder_id field', function (): void {
     });
 });
 
+describe('ListMediaQueryBuilder unfiled field', function (): void {
+    it('is false when the parameter is missing', function (): void {
+        expect(ListMediaQueryBuilder::fromRequest(Request::create('/'), 7)->unfiled)->toBeFalse();
+    });
+
+    it('is true for unfiled=true', function (): void {
+        $query = ListMediaQueryBuilder::fromRequest(Request::create('/?unfiled=true'), 7);
+        expect($query->unfiled)->toBeTrue();
+    });
+
+    it('is true for the other truthy spellings parseBool accepts', function (): void {
+        foreach (['1', 'yes'] as $value) {
+            $query = ListMediaQueryBuilder::fromRequest(Request::create("/?unfiled={$value}"), 7);
+            expect($query->unfiled)->toBeTrue();
+        }
+    });
+
+    it('is false for unfiled=false', function (): void {
+        $query = ListMediaQueryBuilder::fromRequest(Request::create('/?unfiled=false'), 7);
+        expect($query->unfiled)->toBeFalse();
+    });
+
+    it('is false for a typo (typo tolerance)', function (): void {
+        $query = ListMediaQueryBuilder::fromRequest(Request::create('/?unfiled=maybe'), 7);
+        expect($query->unfiled)->toBeFalse();
+    });
+
+    it('drops the flag when a folder id is present — the folder filter is the more specific one', function (): void {
+        $request = Request::create('/?unfiled=true&folder_id=3f7c1d2e-0000-4000-8000-000000000001');
+        $query = ListMediaQueryBuilder::fromRequest($request, 7);
+        expect($query->folderId)->toBe('3f7c1d2e-0000-4000-8000-000000000001');
+        expect($query->unfiled)->toBeFalse();
+    });
+});
+
 describe('ListMediaQueryBuilder kind field', function (): void {
     it('returns null when kind is missing or empty', function (): void {
         expect(ListMediaQueryBuilder::fromRequest(Request::create('/'), 7)->kind)->toBeNull();

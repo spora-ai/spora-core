@@ -69,6 +69,13 @@ final class MediaArchiveController
         schema: new OA\Schema(type: 'string'),
     )]
     #[OA\Parameter(
+        name: 'unfiled',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing to the assets filed in no folder. Ignored when `folder_id` is present — the folder filter is the more specific of the two.',
+        schema: new OA\Schema(type: 'boolean'),
+    )]
+    #[OA\Parameter(
         name: 'kind',
         in: 'query',
         required: false,
@@ -156,6 +163,7 @@ final class MediaArchiveController
             principalIds: $principalIds,
             includeTemporary: $query->includeTemporary,
             folderId: $query->folderId,
+            unfiled: $query->unfiled,
             kind: $query->kind,
             page: $query->page,
             perPage: $query->perPage,

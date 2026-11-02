@@ -28,6 +28,8 @@ final class ListMediaQueryBuilder
         // missing ownership values resolve to this safe default.
         $ownership = self::parseOwnership($params->get('ownership'));
 
+        $folderId = self::parseFolderId($params->all()['folder_id'] ?? null);
+
         return new ListMediaQuery(
             // `types=` wins over `type=` when both are supplied — the picker
             // sends the multi-value form. A singular `type` is still
@@ -65,7 +67,10 @@ final class ListMediaQueryBuilder
             // ::resolvePrincipalFilter()`.
             principalIds: self::parsePrincipalIds($params->all()['principal_id'] ?? null),
             includeTemporary: self::parseBool($params->get('include_temporary'), false),
-            folderId: self::parseFolderId($params->all()['folder_id'] ?? null),
+            folderId: $folderId,
+            // The folder filter is the more specific one, so an explicit
+            // `folder_id` wins: the two can never both be set from the wire.
+            unfiled: $folderId === null && self::parseBool($params->get('unfiled'), false),
             kind: self::parseKind($params->get('kind')),
             page: self::parseInt($params->get('page'), 1),
             perPage: self::parseInt($params->get('per_page'), ListMediaQuery::PER_PAGE_DEFAULT),
@@ -250,7 +255,8 @@ final class ListMediaQueryBuilder
     }
 
     /**
-     * Coerce `?include_temporary=…` (and friends) into a strict bool.
+     * Coerce a boolean query flag (`?include_temporary=…`, `?unfiled=…`)
+     * into a strict bool.
      * `FILTER_VALIDATE_BOOLEAN` normalises `true` / `1` / `"true"` /
      * `"1"` / `"yes"` to true; everything else (including `null`,
      * missing key, `"false"`, `"0"`, typos) falls back to the default.

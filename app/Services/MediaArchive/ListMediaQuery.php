@@ -143,6 +143,16 @@ final readonly class ListMediaQuery
          */
         public ?string $folderId = null,
         /**
+         * Restricts the listing to the assets filed in no folder. False =
+         * no filter.
+         *
+         * Mutually exclusive with `$folderId`: the folder filter is the
+         * more specific one, so it wins when a DTO carries both. The
+         * builder keeps the two apart from the wire; the service repeats
+         * the rule so a directly constructed DTO behaves the same.
+         */
+        public bool $unfiled = false,
+        /**
          * Restricts the listing to the assets carrying this advisory mark.
          * Null = no filter.
          */
@@ -186,6 +196,7 @@ final readonly class ListMediaQuery
             'principalIds'     => $this->principalIds,
             'includeTemporary' => $this->includeTemporary,
             'folderId'         => $this->folderId,
+            'unfiled'          => $this->unfiled,
             'kind'             => $this->kind,
         ];
     }

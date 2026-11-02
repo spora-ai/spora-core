@@ -112,6 +112,7 @@ describe('ListMediaQuery::toArray()', function (): void {
             'principalIds'     => null,
             'includeTemporary' => false,
             'folderId'         => null,
+            'unfiled'          => false,
             'kind'             => null,
         ]);
     });
@@ -138,6 +139,11 @@ describe('ListMediaQuery::toArray()', function (): void {
     it('projects the principalIds filter through toArray() when set', function (): void {
         $arr = (new ListMediaQuery(principalIds: [10, 20]))->toArray();
         expect($arr['principalIds'])->toBe([10, 20]);
+    });
+
+    it('projects the unfiled filter through toArray() when set', function (): void {
+        $arr = (new ListMediaQuery(unfiled: true))->toArray();
+        expect($arr['unfiled'])->toBeTrue();
     });
 });
 

@@ -235,6 +235,11 @@ final class MediaArchiveService
         }
         if ($query->folderId !== null) {
             $this->applyFolderFilter($builder, $query);
+        } elseif ($query->unfiled) {
+            // The folder filter is the more specific one, so it wins when a
+            // DTO carries both. The predicate is an extra AND on top of the
+            // ownership scope, never a replacement for it.
+            $builder->whereNull('folder_id');
         }
         if ($query->kind !== null) {
             $builder->where('kind', $query->kind);

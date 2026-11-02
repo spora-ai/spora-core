@@ -124,3 +124,64 @@ it('applies the folder and the kind filter together', function (): void {
 
     expect($page->total())->toBe(1);
 });
+
+it('returns only the assets filed in no folder when the unfiled filter is set', function (): void {
+    $principalId = createUserPrincipalPublic(608);
+    $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+    seedFilteredAsset('00000000-0000-4000-8000-000000000061', $principalId, (string) $folder->id, MediaAssetKind::ASSET, 'theme.yml');
+    seedFilteredAsset('00000000-0000-4000-8000-000000000062', $principalId, null, MediaAssetKind::ASSET, 'loose.md');
+
+    $page = mediaArchiveServiceForFilters()->list(new ListMediaQuery(
+        unfiled: true,
+        principalIds: [$principalId],
+    ));
+
+    expect($page->total())->toBe(1);
+    expect($page->items()[0]->id)->toBe('00000000-0000-4000-8000-000000000062');
+});
+
+it('lists the assets filed in a folder too when the unfiled filter is not set', function (): void {
+    $principalId = createUserPrincipalPublic(609);
+    $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+    seedFilteredAsset('00000000-0000-4000-8000-000000000071', $principalId, (string) $folder->id, MediaAssetKind::ASSET, 'theme.yml');
+    seedFilteredAsset('00000000-0000-4000-8000-000000000072', $principalId, null, MediaAssetKind::ASSET, 'loose.md');
+
+    $page = mediaArchiveServiceForFilters()->list(new ListMediaQuery(principalIds: [$principalId]));
+
+    expect($page->total())->toBe(2);
+});
+
+it('keeps the unfiled filter inside the principal scope', function (): void {
+    $principalId = createUserPrincipalPublic(610);
+    $otherId = createUserPrincipalPublic(611);
+
+    seedFilteredAsset('00000000-0000-4000-8000-000000000081', $principalId, null, MediaAssetKind::ASSET, 'mine.md');
+    seedFilteredAsset('00000000-0000-4000-8000-000000000082', $otherId, null, MediaAssetKind::ASSET, 'theirs.md');
+
+    $page = mediaArchiveServiceForFilters()->list(new ListMediaQuery(
+        unfiled: true,
+        principalIds: [$principalId],
+    ));
+
+    expect($page->total())->toBe(1);
+    expect($page->items()[0]->id)->toBe('00000000-0000-4000-8000-000000000081');
+});
+
+it('prefers the folder filter when the query carries both filters', function (): void {
+    $principalId = createUserPrincipalPublic(612);
+    $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+    seedFilteredAsset('00000000-0000-4000-8000-000000000091', $principalId, (string) $folder->id, MediaAssetKind::ASSET, 'theme.yml');
+    seedFilteredAsset('00000000-0000-4000-8000-000000000092', $principalId, null, MediaAssetKind::ASSET, 'loose.md');
+
+    $page = mediaArchiveServiceForFilters()->list(new ListMediaQuery(
+        folderId: (string) $folder->id,
+        unfiled: true,
+        principalIds: [$principalId],
+    ));
+
+    expect($page->total())->toBe(1);
+    expect($page->items()[0]->id)->toBe('00000000-0000-4000-8000-000000000091');
+});

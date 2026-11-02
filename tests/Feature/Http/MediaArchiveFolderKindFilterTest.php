@@ -130,3 +130,27 @@ it('filters the listing by kind when the request scopes by principal', function 
     expect($ids)->toBe(['00000000-0000-4000-8000-00000000f012']);
     expect($body['data']['total'])->toBe(1);
 });
+
+it('filters the listing by unfiled when the request scopes by principal', function (): void {
+    [$controller, $auth, $principalService] = buildFolderKindController();
+    $callerId = bootAuth($auth, 'mfk-unfiled@example.com', MEDIA_FOLDER_KIND_PASSWORD);
+    $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+    $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+    seedFolderKindAsset('00000000-0000-4000-8000-00000000f021', $principalId, (string) $folder->id, MediaAssetKind::ASSET, 'theme.yml');
+    seedFolderKindAsset('00000000-0000-4000-8000-00000000f022', $principalId, null, MediaAssetKind::ASSET, 'loose.md');
+
+    simulateLoggedInSession($callerId, 'mfk-unfiled@example.com');
+    $request = Request::create('/api/v1/media', 'GET', [
+        'principal_id' => [$principalId],
+        'unfiled'      => 'true',
+    ]);
+
+    $response = $controller->index($request);
+
+    expect($response->getStatusCode())->toBe(200);
+    $body = json_decode((string) $response->getContent(), true);
+    $ids  = array_column($body['data']['assets'], 'id');
+    expect($ids)->toBe(['00000000-0000-4000-8000-00000000f022']);
+    expect($body['data']['total'])->toBe(1);
+});
