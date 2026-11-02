@@ -282,11 +282,12 @@ final class PluginSettingsRegistry
     /**
      * Report a provider that misbehaved.
      *
-     * `error_log` and not the PSR-3 logger: the registry is read while the
-     * configuration is built, and the logger is built *from* that
-     * configuration — so there is no logger to inject here. The same reason
-     * {@see \Spora\Plugins\PluginLoader} reports a failing subscriber to
-     * `error_log`.
+     * `error_log` and not the PSR-3 logger: the plugin settings are folded
+     * into the configuration on its first read, and that read can happen
+     * while the logger is still being built — the logger is built *from*
+     * that configuration — so there is no logger to inject here. The same
+     * reason {@see \Spora\Plugins\PluginLoader} reports a failing subscriber
+     * to `error_log`.
      *
      * The message is also kept, so the operator sees the failure in the
      * settings response rather than only in the error log.
