@@ -313,6 +313,23 @@ final class EnvelopeLiteralHarvest implements Harvest
      */
     private function constantArgument(array $significant, array $constants): ?array
     {
+        $name = $this->constantName($significant);
+
+        if ($name === null || !isset($constants[$name[0]])) {
+            return null;
+        }
+
+        return [$constants[$name[0]], $name[1]];
+    }
+
+    /**
+     * The name and line a `self::MSG_X` argument refers to.
+     *
+     * @param list<array{0: int, 1: string, 2: int}|string> $significant
+     * @return ?array{0: string, 1: int} name, line
+     */
+    private function constantName(array $significant): ?array
+    {
         $scope = $significant[0] ?? null;
         $separator = $significant[1] ?? null;
         $name = $significant[2] ?? null;
@@ -325,11 +342,9 @@ final class EnvelopeLiteralHarvest implements Harvest
             return null;
         }
 
-        if (!is_array($name) || $name[0] !== T_STRING || !isset($constants[$name[1]])) {
-            return null;
-        }
-
-        return [$constants[$name[1]], $name[2]];
+        return is_array($name) && $name[0] === T_STRING
+            ? [$name[1], $name[2]]
+            : null;
     }
 
     /**

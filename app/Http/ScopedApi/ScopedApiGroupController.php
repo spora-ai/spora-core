@@ -137,7 +137,7 @@ final class ScopedApiGroupController
             return $body;
         }
 
-        $updated = $this->applyUpdate($context, $groupId, $body);
+        $updated = $this->applyUpdate($groupId, $body);
 
         if ($updated instanceof JsonResponse) {
             return $updated;
@@ -202,7 +202,7 @@ final class ScopedApiGroupController
      * @param array<string, mixed> $body
      * @return JsonResponse|Group
      */
-    private function applyUpdate(ApiKeyContext $context, int $groupId, array $body): JsonResponse|Group
+    private function applyUpdate(int $groupId, array $body): JsonResponse|Group
     {
         if (Group::find($groupId) === null) {
             return $this->notFound('GROUP_NOT_FOUND', self::MSG_GROUP_NOT_FOUND);

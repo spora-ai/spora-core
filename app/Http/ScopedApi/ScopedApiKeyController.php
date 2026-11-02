@@ -159,7 +159,7 @@ final class ScopedApiKeyController
     )]
     #[OA\Response(response: 200, description: 'Key metadata. Secrets are never returned.')]
     #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
-    public function globalIndex(Request $request): JsonResponse
+    public function globalIndex(): JsonResponse
     {
         $denied = $this->guardGlobal();
 

@@ -229,16 +229,10 @@ final class ScopedApiChatController
      */
     private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
     {
-        $agentId = $this->intField($body, 'agent_id');
+        $agent = $this->targetAgent($context, $body);
 
-        if ($agentId === null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
-        }
-
-        $agent = $this->reach->targetAgent($context, $agentId);
-
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
+        if ($agent instanceof JsonResponse) {
+            return $agent;
         }
 
         $problem = $this->startProblem($body, $agent);
@@ -248,6 +242,25 @@ final class ScopedApiChatController
         }
 
         return $this->startValues($body, $agent);
+    }
+
+    /**
+     * The agent the chat is for, or the answer saying why there is none.
+     *
+     * @param array<string, mixed> $body
+     * @return JsonResponse|Agent
+     */
+    private function targetAgent(ApiKeyContext $context, array $body): JsonResponse|Agent
+    {
+        $agentId = $this->intField($body, 'agent_id');
+
+        if ($agentId === null) {
+            return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
+        }
+
+        $agent = $this->reach->targetAgent($context, $agentId);
+
+        return $agent ?? $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
     }
 
     /**

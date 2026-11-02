@@ -93,12 +93,6 @@ use Spora\Http\PromptTemplateController;
 use Spora\Http\PublicMediaController;
 use Spora\Http\RetryChainController;
 use Spora\Http\ScheduledRunController;
-use Spora\Http\ScopedApi\ScopedApiAgentController;
-use Spora\Http\ScopedApi\ScopedApiChatActionController;
-use Spora\Http\ScopedApi\ScopedApiChatController;
-use Spora\Http\ScopedApi\ScopedApiGroupController;
-use Spora\Http\ScopedApi\ScopedApiKeyController;
-use Spora\Http\ScopedApi\ScopedApiMediaController;
 use Spora\Http\SseController;
 use Spora\Http\TaskCompactController;
 use Spora\Http\TaskController;
@@ -122,14 +116,12 @@ use Spora\Services\AgentService;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsService;
 use Spora\Services\AgentToolSettingsServiceInterface;
-use Spora\Services\ApiKeys\ApiKeyAgentService;
 use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
-use Spora\Services\ApiKeys\ApiKeyGroupService;
 use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\ApiKeys\CallbackSecretResolver;
@@ -257,11 +249,11 @@ final class ContainerDefinitions
             self::apiTaskControllerDefinitions(),
             self::adminControllerDefinitions(),
             self::agentApiDefinitions(),
-            self::scopedApiDefinitions(),
             self::toolDefinitions(),
             self::extensionDefinitions(),
             self::orchestratorDefinitions(),
             SpeechProviderConfigContainerBindings::all(),
+            ScopedApiContainerBindings::all(),
             self::consoleCommandDefinitions(),
         );
     }
@@ -1530,84 +1522,6 @@ final class ContainerDefinitions
                 );
             },
 
-        ];
-    }
-
-    /**
-     * The group-scoped and global-scoped surfaces.
-     *
-     * Split from {@see self::agentApiDefinitions()} because the three
-     * scopes together outgrew one method — and because they are three
-     * separate surfaces, not one.
-     */
-    private static function scopedApiDefinitions(): array
-    {
-        return [
-            ApiKeyAgentService::class => static function (ContainerInterface $c): ApiKeyAgentService {
-                return new ApiKeyAgentService(
-                    $c->get(AgentTemplateImporter::class),
-                    $c->get(AgentTemplateExporter::class),
-                    $c->get(AgentTemplateValidator::class),
-                    $c->get(PrincipalService::class),
-                );
-            },
-
-            ApiKeyGroupService::class => static function (ContainerInterface $c): ApiKeyGroupService {
-                return new ApiKeyGroupService(
-                    $c->get(GroupService::class),
-                    $c->get(PrincipalService::class),
-                    $c->get(GroupPictureService::class),
-                );
-            },
-
-            ScopedApiAgentController::class => static function (ContainerInterface $c): ScopedApiAgentController {
-                return new ScopedApiAgentController(
-                    $c->get(ApiKeyAgentService::class),
-                    $c->get(ApiKeyReach::class),
-                );
-            },
-
-            ScopedApiChatController::class => static function (ContainerInterface $c): ScopedApiChatController {
-                return new ScopedApiChatController(
-                    $c->get(ApiKeyChatAccess::class),
-                    $c->get(ApiKeyChatProjection::class),
-                    $c->get(ApiKeyFileIngest::class),
-                    $c->get(ApiKeyMediaAccess::class),
-                    $c->get(ApiKeyCallbackRecorder::class),
-                    $c->get(ApiKeyReach::class),
-                    $c->get(SsrfGuard::class),
-                    $c->get(Config::class),
-                );
-            },
-
-            ScopedApiChatActionController::class => static function (ContainerInterface $c): ScopedApiChatActionController {
-                return new ScopedApiChatActionController(
-                    $c->get(ApiKeyChatAccess::class),
-                    $c->get(ApiKeyChatProjection::class),
-                );
-            },
-
-            ScopedApiMediaController::class => static function (ContainerInterface $c): ScopedApiMediaController {
-                return new ScopedApiMediaController(
-                    $c->get(ApiKeyFileIngest::class),
-                    $c->get(ApiKeyMediaAccess::class),
-                    $c->get(ApiKeyReach::class),
-                    $c->get(AssetStreamer::class),
-                    $c->get(MediaAssetSerializer::class),
-                );
-            },
-
-            ScopedApiGroupController::class => static function (ContainerInterface $c): ScopedApiGroupController {
-                return new ScopedApiGroupController($c->get(ApiKeyGroupService::class));
-            },
-
-            ScopedApiKeyController::class => static function (ContainerInterface $c): ScopedApiKeyController {
-                return new ScopedApiKeyController(
-                    $c->get(AuthService::class),
-                    $c->get(GroupService::class),
-                    $c->get(ApiKeyIssuer::class),
-                );
-            },
         ];
     }
 
