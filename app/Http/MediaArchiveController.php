@@ -61,6 +61,20 @@ final class MediaArchiveController
         description: 'Repeatable principal id to scope the listing by. Intersected with the caller\'s visible principals server-side; out-of-scope ids are silently dropped. Used by the Media Archive plugin\'s `ALL / My Media / Group X` chip row. Use the `principal_id[]=…` array-bracket form so repeated keys are preserved through PHP parse_str.',
         schema: new OA\Schema(type: 'array', items: new OA\Items(type: 'integer')),
     )]
+    #[OA\Parameter(
+        name: 'folder_id',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing to one folder. An exact match: a parent folder does not include the assets filed in its subfolders. The folder is intersected with the principal scope, so a folder owned outside it yields no rows. The array-bracket form `folder_id[]=…` is accepted; only the first value is honoured.',
+        schema: new OA\Schema(type: 'string'),
+    )]
+    #[OA\Parameter(
+        name: 'kind',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing by the asset\'s kind. The mark is advisory — a value outside the vocabulary is dropped and the listing stays unfiltered.',
+        schema: new OA\Schema(type: 'string', enum: ['asset', 'template', 'example']),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();

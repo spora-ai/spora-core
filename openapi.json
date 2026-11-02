@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.30.0-14-gb1190d38"
+        "version": "0.32.0-6-gec7204fe"
     },
     "servers": [
         {
@@ -2646,6 +2646,29 @@
                             "items": {
                                 "type": "integer"
                             }
+                        }
+                    },
+                    {
+                        "name": "folder_id",
+                        "in": "query",
+                        "description": "Scope the listing to one folder. An exact match: a parent folder does not include the assets filed in its subfolders. The folder is intersected with the principal scope, so a folder owned outside it yields no rows. The array-bracket form `folder_id[]=…` is accepted; only the first value is honoured.",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "kind",
+                        "in": "query",
+                        "description": "Scope the listing by the asset's kind. The mark is advisory — a value outside the vocabulary is dropped and the listing stays unfiltered.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "asset",
+                                "template",
+                                "example"
+                            ]
                         }
                     }
                 ],
