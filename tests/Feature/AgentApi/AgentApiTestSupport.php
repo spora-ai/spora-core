@@ -127,6 +127,13 @@ final class AgentApiTestSupport
      * A user with a personal principal and an agent wired to a global LLM
      * config, which is the minimum for `startTask` to resolve ownership.
      *
+     * A decoy agent is created first, and the real one is given the same
+     * principal. Without it the agent ids and the principal ids would line
+     * up — one user, one principal and one agent each, so the nth agent
+     * carries the nth principal id — and a rule that filtered on the wrong
+     * column would then match by coincidence. The decoy shifts the agent
+     * ids out of the principal id space.
+     *
      * @return array{userId: int, principalId: int, agentId: int}
      */
     public static function seedAgent(string $suffix = 'a'): array
@@ -136,6 +143,14 @@ final class AgentApiTestSupport
 
         $principalId = createUserPrincipalPublic($userId);
         $llm = self::llmConfig($suffix);
+
+        Agent::create([
+            'principal_id' => $principalId,
+            'name' => "Agent API {$suffix} decoy",
+            'llm_driver_config_id' => $llm->id,
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
 
         $agent = Agent::create([
             'principal_id' => $principalId,

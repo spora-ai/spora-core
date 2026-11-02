@@ -42,7 +42,7 @@ final class ApiKeyReach
     public function agents(ApiKeyContext $ctx): Builder
     {
         return match ($ctx->scope) {
-            ApiKeyScope::Agent => $this->agentsWithPrincipal($ctx->agentId() === null ? [] : [$ctx->agentId()]),
+            ApiKeyScope::Agent => $this->agentsWithId($ctx->agentId()),
             ApiKeyScope::Group => $this->agentsWithPrincipal($this->groupPrincipalIds($ctx)),
             ApiKeyScope::Global => Agent::query()->whereIn('principal_id', $this->allGroupPrincipalIds()),
         };
@@ -100,6 +100,20 @@ final class ApiKeyReach
     private function agentsWithPrincipal(array $principalIds): Builder
     {
         return Agent::query()->whereIn('principal_id', $principalIds);
+    }
+
+    /**
+     * The one agent the key names.
+     *
+     * The agent scope filters on the agent's own id, not on its principal: a
+     * key names an agent, and the agent's principal may be a group with
+     * other agents in it.
+     *
+     * @return Builder<Agent>
+     */
+    private function agentsWithId(?int $agentId): Builder
+    {
+        return Agent::query()->whereIn('id', $agentId === null ? [] : [$agentId]);
     }
 
     /**

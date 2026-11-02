@@ -36,14 +36,43 @@ describe('the reach of a key', function (): void {
         );
     }
 
+    /**
+     * An agent that shares a principal with the ones before it, and whose
+     * own id is not that principal's id.
+     *
+     * `seedAgent()` creates one user, one principal and one agent each, so
+     * the nth agent it makes carries the nth principal id — and a rule that
+     * filtered on the wrong column would then match by coincidence. The
+     * decoy shifts the agent ids out of the principal id space, so the
+     * assertions below can only pass for the right reason.
+     */
+    function seedAgentOffThePrincipal(int $principalId, string $name): int
+    {
+        return (int) Agent::create([
+            'principal_id' => $principalId,
+            'name' => $name,
+            'max_steps' => 10,
+            'is_active' => true,
+        ])->id;
+    }
+
     it('lets an agent key reach its own agent and nothing else', function (): void {
-        $mine = AgentApiTestSupport::seedAgent('reach-mine');
-        $theirs = AgentApiTestSupport::seedAgent('reach-theirs');
+        $owner = bootAuthLayer();
+        $userId = $owner->register('reach-owner@example.com', 'Password1!', 'Reach Owner');
+        $principalId = createUserPrincipalPublic($userId);
 
-        $context = contextFor(ApiKeyScope::Agent, $mine['agentId']);
+        // The decoy: it takes agent id 1, so the two agents under test get
+        // ids 2 and 3 — neither of them the principal's id.
+        seedAgentOffThePrincipal($principalId, 'Decoy');
+        $mine = seedAgentOffThePrincipal($principalId, 'Mine');
+        $theirs = seedAgentOffThePrincipal($principalId, 'Theirs');
 
-        expect(reach()->allows($context, $mine['agentId']))->toBeTrue();
-        expect(reach()->allows($context, $theirs['agentId']))->toBeFalse();
+        expect($mine)->not->toBe($principalId);
+
+        $context = contextFor(ApiKeyScope::Agent, $mine);
+
+        expect(reach()->allows($context, $mine))->toBeTrue();
+        expect(reach()->allows($context, $theirs))->toBeFalse();
     });
 
     it('lets a group key reach every agent of its group and no other', function (): void {
