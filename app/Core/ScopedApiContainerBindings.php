@@ -12,6 +12,7 @@ use Spora\Auth\ApiKeyIssuer;
 use Spora\Auth\AuthService;
 use Spora\Http\ScopedApi\ScopedApiAgentController;
 use Spora\Http\ScopedApi\ScopedApiChatActionController;
+use Spora\Http\ScopedApi\ScopedApiChatBody;
 use Spora\Http\ScopedApi\ScopedApiChatController;
 use Spora\Http\ScopedApi\ScopedApiGroupController;
 use Spora\Http\ScopedApi\ScopedApiKeyController;
@@ -77,11 +78,17 @@ final class ScopedApiContainerBindings
                     $c->get(ApiKeyChatAccess::class),
                     $c->get(ApiKeyChatProjection::class),
                     $c->get(ApiKeyFileIngest::class),
-                    $c->get(ApiKeyMediaAccess::class),
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(ApiKeyReach::class),
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
+                    $c->get(ScopedApiChatBody::class),
+                );
+            },
+
+            ScopedApiChatBody::class => static function (ContainerInterface $c): ScopedApiChatBody {
+                return new ScopedApiChatBody(
+                    $c->get(ApiKeyMediaAccess::class),
                 );
             },
 

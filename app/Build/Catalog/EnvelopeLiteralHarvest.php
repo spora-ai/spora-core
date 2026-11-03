@@ -289,7 +289,7 @@ final class EnvelopeLiteralHarvest implements Harvest
             return [$this->tokens->decode($first[1]), $first[2]];
         }
 
-        $constant = $this->constantArgument($significant, $constants);
+        $constant = $this->constants->resolveSelfConstant($significant, $constants);
         if ($constant !== null) {
             return $constant;
         }
@@ -297,54 +297,6 @@ final class EnvelopeLiteralHarvest implements Harvest
         $format = $this->sprintfFormatArgument($significant);
 
         return $format === null ? null : [$this->tokens->decode($format[1]), $format[2]];
-    }
-
-    /**
-     * The literal a `self::MSG_X` argument refers to, resolved in the file
-     * that declares it.
-     *
-     * A message held in a constant is still a message an operator reads,
-     * so it belongs in the catalogue like any other — the constant is how
-     * the code says it once, not how it says it to nobody.
-     *
-     * @param list<array{0: int, 1: string, 2: int}|string> $significant
-     * @param array<string, string>                           $constants
-     * @return ?array{0: string, 1: int} message, line
-     */
-    private function constantArgument(array $significant, array $constants): ?array
-    {
-        $name = $this->constantName($significant);
-
-        if ($name === null || !isset($constants[$name[0]])) {
-            return null;
-        }
-
-        return [$constants[$name[0]], $name[1]];
-    }
-
-    /**
-     * The name and line a `self::MSG_X` argument refers to.
-     *
-     * @param list<array{0: int, 1: string, 2: int}|string> $significant
-     * @return ?array{0: string, 1: int} name, line
-     */
-    private function constantName(array $significant): ?array
-    {
-        $scope = $significant[0] ?? null;
-        $separator = $significant[1] ?? null;
-        $name = $significant[2] ?? null;
-
-        if (!is_array($scope) || $scope[0] !== T_STRING || $scope[1] !== 'self') {
-            return null;
-        }
-
-        if (!is_array($separator) || $separator[0] !== T_DOUBLE_COLON) {
-            return null;
-        }
-
-        return is_array($name) && $name[0] === T_STRING
-            ? [$name[1], $name[2]]
-            : null;
     }
 
     /**

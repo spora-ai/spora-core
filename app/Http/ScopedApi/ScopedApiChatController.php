@@ -15,7 +15,6 @@ use Spora\Services\ApiKeys\ApiKeyChatAccess;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
-use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\ApiKeys\ApiKeyReach;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -38,9 +37,6 @@ final class ScopedApiChatController
 {
     use JsonControllerHelpers;
 
-    /** Ceiling on `media_ids`, each of which costs a lookup to authorise. */
-    private const MAX_MEDIA_IDS = 32;
-
     private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
 
     private const MSG_NO_OWNER = 'The agent has no resolvable owner.';
@@ -49,11 +45,11 @@ final class ScopedApiChatController
         private readonly ApiKeyChatAccess $access,
         private readonly ApiKeyChatProjection $projection,
         private readonly ApiKeyFileIngest $ingest,
-        private readonly ApiKeyMediaAccess $media,
         private readonly ApiKeyCallbackRecorder $callbacks,
         private readonly ApiKeyReach $reach,
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
+        private readonly ScopedApiChatBody $body,
     ) {}
 
     #[OA\Get(summary: 'List the chats this key may reach')]
@@ -254,7 +250,7 @@ final class ScopedApiChatController
      */
     private function targetAgent(ApiKeyContext $context, array $body): JsonResponse|Agent
     {
-        $agentId = $this->intField($body, 'agent_id');
+        $agentId = $this->body->int($body, 'agent_id');
 
         if ($agentId === null) {
             return $this->unprocessable('VALIDATION_ERROR', 'agent_id is required.');
@@ -272,13 +268,14 @@ final class ScopedApiChatController
      */
     private function startProblem(array $body, Agent $agent): ?JsonResponse
     {
+        $callbackUrl = $this->body->string($body, 'callback_url');
+
         $problem = match (true) {
-            $this->requiredText($body) === null => 'text is required.',
-            $this->stringField($body, 'callback_url') !== null
-                && $this->ssrf->rejectReason((string) $this->stringField($body, 'callback_url')) !== null
+            $this->body->text($body) === null => 'text is required.',
+            $callbackUrl !== null && $this->ssrf->rejectReason($callbackUrl) !== null
                 => 'callback_url is not an acceptable https URL.',
             isset($body['files']) && !is_array($body['files']) => 'files must be an array.',
-            $this->tooManyMediaIds($body) => 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.',
+            $this->body->tooManyMediaIds($body) => 'media_ids may carry at most ' . ScopedApiChatBody::MAX_MEDIA_IDS . ' ids.',
             $this->reach->ownerUserId($agent) === null => self::MSG_NO_OWNER,
             default => null,
         };
@@ -294,7 +291,7 @@ final class ScopedApiChatController
      */
     private function startValues(array $body, Agent $agent): array
     {
-        $mediaIds = $this->readableMediaIds($body, (int) $agent->id);
+        $mediaIds = $this->body->readableMediaIds($body, (int) $agent->id);
         $ownerUserId = (int) $this->reach->ownerUserId($agent);
 
         foreach ($this->ingest->ingestInlineFiles($agent, $ownerUserId, array_values($body['files'] ?? [])) as $id) {
@@ -303,9 +300,9 @@ final class ScopedApiChatController
 
         return [
             'agentId' => (int) $agent->id,
-            'text' => (string) $this->requiredText($body),
-            'callbackUrl' => $this->stringField($body, 'callback_url'),
-            'maxSteps' => $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
+            'text' => (string) $this->body->text($body),
+            'callbackUrl' => $this->body->string($body, 'callback_url'),
+            'maxSteps' => $this->boundedInt($this->body->int($body, 'max_steps'), 1, 100),
             'mediaIds' => $mediaIds,
         ];
     }
@@ -316,7 +313,7 @@ final class ScopedApiChatController
      */
     private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
     {
-        $text = $this->requiredText($body);
+        $text = $this->body->text($body);
 
         if ($text === null) {
             return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
@@ -330,8 +327,8 @@ final class ScopedApiChatController
 
         return [
             'text' => $text,
-            'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
-            'mediaIds' => $this->readableMediaIds($body, (int) $task->agent_id),
+            'additionalSteps' => $this->boundedInt($this->body->int($body, 'additional_steps'), 1, 100),
+            'mediaIds' => $this->body->readableMediaIds($body, (int) $task->agent_id),
         ];
     }
 
@@ -398,78 +395,5 @@ final class ScopedApiChatController
         } catch (InvalidArgumentException) {
             return $this->notFound('NOT_FOUND', ApiKeyChatAccess::ERR_NOT_FOUND);
         }
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function requiredText(array $body): ?string
-    {
-        $text = trim($this->stringField($body, 'text') ?? $this->stringField($body, 'prompt') ?? '');
-
-        return $text === '' ? null : $text;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function stringField(array $body, string $name): ?string
-    {
-        $value = $body[$name] ?? null;
-
-        return is_string($value) && trim($value) !== '' ? trim($value) : null;
-    }
-
-    /**
-     * @param array<string, mixed> $body
-     */
-    private function intField(array $body, string $name): ?int
-    {
-        $value = $body[$name] ?? null;
-
-        return is_numeric($value) ? (int) $value : null;
-    }
-
-    /**
-     * Whether the request carries more media ids than the ceiling allows.
-     *
-     * Each id is a lookup, so an uncapped list is an uncapped number of
-     * queries. Rejected rather than truncated, because a caller that
-     * silently lost attachments has no way to tell that from one that sent
-     * none.
-     *
-     * @param array<string, mixed> $body
-     */
-    private function tooManyMediaIds(array $body): bool
-    {
-        $raw = $body['media_ids'] ?? null;
-
-        return is_array($raw) && count($raw) > self::MAX_MEDIA_IDS;
-    }
-
-    /**
-     * Only ids the target agent can read are forwarded, so a caller cannot
-     * attach an asset id it observed somewhere else.
-     *
-     * @param array<string, mixed> $body
-     * @return list<string>
-     */
-    private function readableMediaIds(array $body, int $agentId): array
-    {
-        $raw = $body['media_ids'] ?? null;
-
-        if (!is_array($raw)) {
-            return [];
-        }
-
-        $ids = [];
-
-        foreach ($raw as $id) {
-            if (is_string($id) && $id !== '' && $this->media->isMediaReadableForAgent($agentId, $id)) {
-                $ids[] = $id;
-            }
-        }
-
-        return $ids;
     }
 }
