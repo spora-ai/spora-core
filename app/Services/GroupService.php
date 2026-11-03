@@ -361,6 +361,8 @@ final class GroupService
         if ($folderIds !== []) {
             throw new PrincipalHasDependentsException(
                 "Group {$groupId} cannot be deleted while it owns " . count($folderIds) . ' media folder(s).',
+                [],
+                $folderIds,
             );
         }
 
@@ -383,11 +385,13 @@ final class GroupService
                 }
                 $folderRecheck = Capsule::table('media_folders')
                     ->where('principal_id', $principal->id)
-                    ->count();
-                if ($folderRecheck > 0) {
+                    ->pluck('id')
+                    ->all();
+                if ($folderRecheck !== []) {
                     throw new PrincipalHasDependentsException(
                         "Group {$groupId} cannot be deleted while it owns media folders (race detected).",
                         [],
+                        array_map(static fn($id): string => (string) $id, $folderRecheck),
                     );
                 }
                 Capsule::table('principals')->where('id', $principal->id)->delete();

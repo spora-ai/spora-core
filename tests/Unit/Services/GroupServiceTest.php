@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\GroupMembership;
 use Spora\Services\Exceptions\GroupMembershipRuleException;
+use Spora\Services\Exceptions\PrincipalHasDependentsException;
 use Spora\Services\GroupService;
 use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\PrincipalResolver;
@@ -333,7 +334,7 @@ describe('GroupService::deleteGroup extended paths', function (): void {
         ]);
 
         expect(fn() => $service->deleteGroup($group->id, $ownerId2))
-            ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
+            ->toThrow(PrincipalHasDependentsException::class);
     });
 
     it('throws PrincipalHasDependentsException when the group owns a media folder', function (): void {
@@ -344,12 +345,24 @@ describe('GroupService::deleteGroup extended paths', function (): void {
         $ownerId2 = bootAuth($auth, 'dg-folder-owner@example.com', GROUP_TEST_PASSWORD);
         $group = $service->createGroup($ownerId2, 'DG-FOLDER');
         $principal = $principalService->ensureGroupPrincipal((int) $group->id);
-        (new MediaFolderService())->create((int) $principal->id, 'Corporate');
+        $folder = (new MediaFolderService())->create((int) $principal->id, 'Corporate');
 
-        expect(fn() => $service->deleteGroup($group->id, $ownerId2))
-            ->toThrow(Spora\Services\Exceptions\PrincipalHasDependentsException::class);
+        try {
+            $service->deleteGroup($group->id, $ownerId2);
+            $this->fail('Expected a PrincipalHasDependentsException.');
+        } catch (PrincipalHasDependentsException $e) {
+            // The folder is the dependent, and the agent payload is
+            // absent: a single payload with both would point the
+            // operator at a transfer endpoint that cannot unblock a
+            // folder.
+            expect($e->folderIds)->toBe([(string) $folder->id]);
+            expect($e->agentIds)->toBe([]);
+        }
 
+        // The refusal must not have deleted anything.
         expect(Capsule::table('groups')->where('id', $group->id)->count())->toBe(1);
+        expect(Capsule::table('principals')->where('id', $principal->id)->count())->toBe(1);
+        expect(Capsule::table('media_folders')->where('id', $folder->id)->count())->toBe(1);
     });
 
     it('deletes the group once its media folder is gone', function (): void {
