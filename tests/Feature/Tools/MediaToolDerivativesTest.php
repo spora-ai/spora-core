@@ -441,7 +441,7 @@ describe('MediaTool::create_derivative', function (): void {
         }
     });
 
-    it('fails with a hint pointing at list_derivatives when no producer supports the format/source pair', function (): void {
+    it('fails by naming the formats the producers support for this asset', function (): void {
         seedMediaToolDerivativeParent('cccccccc-1111-2222-3333-cccccccccccc');
 
         [$tool, $restore] = makeMediaToolForDerivatives();
@@ -460,13 +460,19 @@ describe('MediaTool::create_derivative', function (): void {
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('No derivative producer supports format "pdf"');
-            expect($result->content)->toContain('list_derivatives');
+            // The answer to "which format should I ask for?" — the
+            // catalogue of the formats a registered producer supports for
+            // this asset. Not a pointer at `list_derivatives`, which
+            // lists the derivatives an asset already has and on a fresh
+            // asset is empty.
+            expect($result->content)->toContain('No registered producer accepts this asset');
+            expect($result->content)->not->toContain('list_derivatives');
         } finally {
             $restore();
         }
     });
 
-    it('fails when `format` is omitted', function (): void {
+    it('fails by naming the supported formats when `format` is omitted', function (): void {
         seedMediaToolDerivativeParent('dddddddd-1111-2222-3333-dddddddddddd');
 
         [$tool, $restore] = makeMediaToolForDerivatives();
@@ -481,7 +487,9 @@ describe('MediaTool::create_derivative', function (): void {
 
             expect($result->success)->toBeFalse();
             expect($result->content)->toContain('`format` is required');
-            expect($result->content)->toContain('list_derivatives');
+            expect($result->content)->toContain('The formats a registered producer supports for this asset are:');
+            expect($result->content)->toContain('pdf');
+            expect($result->content)->not->toContain('list_derivatives');
         } finally {
             $restore();
         }

@@ -121,7 +121,7 @@ final readonly class MediaDerivativeHandler
         ?int $userId,
         ?PrincipalContext $context,
     ): ToolResult {
-        $inputs = $this->validateInputs($arguments);
+        $inputs = $this->validateInputs($parent, $arguments);
         if ($inputs instanceof ToolResult) {
             return $inputs;
         }
@@ -149,12 +149,14 @@ final readonly class MediaDerivativeHandler
      * @param  array<string, mixed> $arguments
      * @return ToolResult | array{format: string, options: array<string, mixed>}
      */
-    private function validateInputs(array $arguments): ToolResult|array
+    private function validateInputs(MediaAsset $parent, array $arguments): ToolResult|array
     {
         $format = strtolower(trim((string) ($arguments['format'] ?? '')));
         if ($format === '') {
-            return ToolResult::fail('`format` is required for `create_derivative`. '
-                . 'Call `list_derivatives(asset_id: <parent>)` to discover the formats the registered producers support.');
+            return ToolResult::fail(sprintf(
+                '`format` is required for `create_derivative`. %s',
+                $this->supportedFormats($parent),
+            ));
         }
 
         $options = $arguments['options'] ?? [];
@@ -168,8 +170,7 @@ final readonly class MediaDerivativeHandler
     private function derivativeFailure(Throwable $e, MediaAsset $parent, string $format): ToolResult
     {
         if ($e instanceof \Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException) {
-            return ToolResult::fail($e->getMessage()
-                . ' Call `list_derivatives(asset_id: ' . $parent->id . ')` to discover the formats the registered producers support.');
+            return ToolResult::fail($e->getMessage() . ' ' . $this->supportedFormats($parent));
         }
 
         return ToolResult::fail(sprintf(
@@ -177,6 +178,37 @@ final readonly class MediaDerivativeHandler
             $format,
             $e->getMessage(),
         ));
+    }
+
+    /**
+     * The derivative formats a registered producer can emit for this
+     * asset, as a sentence the model can act on.
+     *
+     * The catalogue is the producer registry itself, so the answer is
+     * the formats the producers actually advertise for this asset's mime
+     * or extension — not the formats that happen to exist. Pointing the
+     * model at `list_derivatives` instead would be a dead end: that op
+     * lists the derivatives an asset *already has*, which on a fresh
+     * asset is none at all.
+     */
+    private function supportedFormats(MediaAsset $parent): string
+    {
+        $available = array_values(array_filter(
+            $this->derivatives->availableOptionsFor($parent),
+            static fn(array $option): bool => (bool) $option['available'],
+        ));
+
+        if ($available === []) {
+            return sprintf(
+                'No registered producer accepts this asset\'s mime (%s) or file extension, so it has no derivative formats.',
+                (string) ($parent->mime_type ?? 'unknown'),
+            );
+        }
+
+        return sprintf(
+            'The formats a registered producer supports for this asset are: %s.',
+            implode(', ', array_map(static fn(array $option): string => (string) $option['format'], $available)),
+        );
     }
 
     /**
@@ -192,6 +224,8 @@ final readonly class MediaDerivativeHandler
 
         $content = sprintf(
             "Created derivative %s of %s (format=%s, mime=%s).\n\n%s\n\n"
+            . '`format` is the producer\'s preset name and `mime` is the type of the bytes it produced '
+            . '(a `thumbnail-256` render comes back as `image/webp`). '
             . 'Echo the block above verbatim so the chat UI renders the result.',
             $derivative->id,
             $parent->id,
