@@ -32,6 +32,15 @@ use Spora\Tools\ValueObjects\ToolResult;
  */
 final readonly class MediaFolderHandler
 {
+    /**
+     * The refusal for a folder that is not the principal's.
+     *
+     * The same words for every operation that names one: the folder
+     * either is the principal's or it does not exist as far as the
+     * caller is concerned.
+     */
+    private const MSG_FOLDER_NOT_FOUND = 'That media folder does not exist.';
+
     public function __construct(
         private MediaFolderService $folders,
         private MediaArchiveService $archive,
@@ -90,10 +99,10 @@ final readonly class MediaFolderHandler
 
         try {
             $folder = $this->folders->create($principalId, $name, $parentId);
-        } catch (MediaFolderNotFoundException) {
-            return ToolResult::fail('That parent folder does not exist.');
-        } catch (MediaFolderUniquenessException | MediaFolderValidationException $e) {
-            return ToolResult::fail($e->getMessage());
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException | MediaFolderValidationException $e) {
+            return ToolResult::fail(
+                $e instanceof MediaFolderNotFoundException ? 'That parent folder does not exist.' : $e->getMessage(),
+            );
         }
 
         return ToolResult::ok(
@@ -110,22 +119,20 @@ final readonly class MediaFolderHandler
      */
     private function renameFolder(int $principalId, array $arguments): ToolResult
     {
-        $folderId = $this->readId($arguments, 'folder_id');
-        if ($folderId === null) {
-            return ToolResult::fail('folder_id is required for rename_folder.');
+        $refusal = $this->missingArgument('rename_folder', $arguments, ['folder_id', 'name']);
+        if ($refusal !== null) {
+            return $refusal;
         }
 
-        $name = trim((string) ($arguments['name'] ?? ''));
-        if ($name === '') {
-            return ToolResult::fail('name is required for rename_folder.');
-        }
+        $folderId = (string) $arguments['folder_id'];
+        $name = trim((string) $arguments['name']);
 
         try {
             $folder = $this->folders->rename($principalId, $folderId, $name);
-        } catch (MediaFolderNotFoundException) {
-            return ToolResult::fail('That media folder does not exist.');
-        } catch (MediaFolderUniquenessException | MediaFolderValidationException $e) {
-            return ToolResult::fail($e->getMessage());
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException | MediaFolderValidationException $e) {
+            return ToolResult::fail(
+                $e instanceof MediaFolderNotFoundException ? self::MSG_FOLDER_NOT_FOUND : $e->getMessage(),
+            );
         }
 
         return ToolResult::ok(
@@ -150,7 +157,7 @@ final readonly class MediaFolderHandler
         try {
             $this->folders->delete($principalId, $folderId);
         } catch (MediaFolderNotFoundException) {
-            return ToolResult::fail('That media folder does not exist.');
+            return ToolResult::fail(self::MSG_FOLDER_NOT_FOUND);
         }
 
         return ToolResult::ok(
@@ -228,6 +235,26 @@ final readonly class MediaFolderHandler
     }
 
     /**
+     * The refusal for a missing argument, or null when they are all there.
+     *
+     * One check for a list of parameters, so the operation methods stay
+     * under the 3-return ceiling the house style sets.
+     *
+     * @param  array<string, mixed> $arguments
+     * @param  list<string>         $required
+     */
+    private function missingArgument(string $operation, array $arguments, array $required): ?ToolResult
+    {
+        foreach ($required as $parameter) {
+            if (trim((string) ($arguments[$parameter] ?? '')) === '') {
+                return ToolResult::fail(sprintf('%s is required for %s.', $parameter, $operation));
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @param  array<string, mixed> $arguments
      */
     private function resolveAsset(array $arguments, int $principalId): MediaAsset|ToolResult
@@ -250,7 +277,7 @@ final readonly class MediaFolderHandler
         try {
             $this->folders->fileAsset($principalId, $asset, $folderId);
         } catch (MediaFolderNotFoundException) {
-            return ToolResult::fail('That media folder does not exist.');
+            return ToolResult::fail(self::MSG_FOLDER_NOT_FOUND);
         } catch (MediaFolderUniquenessException $e) {
             return ToolResult::fail($e->getMessage());
         }
