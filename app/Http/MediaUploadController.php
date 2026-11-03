@@ -146,19 +146,13 @@ final class MediaUploadController
                 'NOT_FOUND',
                 'That folder does not exist.',
             );
-        } catch (MediaFolderUniquenessException $e) {
-            return $this->error(
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-                'FOLDER_FILENAME_TAKEN',
-                $e->getMessage(),
-            );
-        } catch (MediaFolderValidationException $e) {
+        } catch (MediaFolderUniquenessException | MediaFolderValidationException $e) {
             // The upload named a folder but carries no principal, so
             // it cannot be filed — a field the server refuses, not a
             // folder that is missing.
             return $this->error(
                 Response::HTTP_UNPROCESSABLE_ENTITY,
-                'VALIDATION_ERROR',
+                $e instanceof MediaFolderUniquenessException ? 'FOLDER_FILENAME_TAKEN' : 'VALIDATION_ERROR',
                 $e->getMessage(),
             );
         }
