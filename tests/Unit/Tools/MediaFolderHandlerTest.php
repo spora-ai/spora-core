@@ -325,7 +325,12 @@ describe('MediaFolderHandler::search_assets', function (): void {
         expect($result->content)->toContain('folder_id is required');
     });
 
-    it('yields nothing for a folder of another principal', function (): void {
+    it('reports a folder of another principal as missing, not as empty', function (): void {
+        // The folder is resolved before the listing, so "no such folder"
+        // and "an empty folder" do not read the same. Another
+        // principal's folder resolves to nothing here too — it is
+        // reported as missing, never as forbidden, because the
+        // difference would be an oracle to probe with.
         $ownerId = createUserPrincipalPublic(641);
         $otherId = createUserPrincipalPublic(642);
         $folder = (new MediaFolderService())->create($ownerId, 'Corporate');
@@ -336,8 +341,21 @@ describe('MediaFolderHandler::search_assets', function (): void {
             ['folder_id' => (string) $folder->id],
         );
 
-        expect($result->success)->toBeTrue();
-        expect($result->data['total'])->toBe(0);
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toBe('That media folder does not exist.');
+    });
+
+    it('reports a folder that does not exist as missing', function (): void {
+        $principalId = createUserPrincipalPublic(645);
+
+        $result = folderHandlerFor($principalId)->run(
+            'search_assets',
+            $principalId,
+            ['folder_id' => '99999999-9999-9999-9999-999999999999'],
+        );
+
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toBe('That media folder does not exist.');
     });
 });
 

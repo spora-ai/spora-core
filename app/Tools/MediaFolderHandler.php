@@ -211,6 +211,15 @@ final readonly class MediaFolderHandler
             return ToolResult::fail('folder_id is required for search_assets.');
         }
 
+        // The folder is resolved before the listing, so "no such folder"
+        // and "an empty folder" do not read the same. The lookup is
+        // principal-scoped, so another principal's folder resolves to
+        // null here too and is reported as missing — never as forbidden,
+        // which would be an oracle to probe with.
+        if ($this->folders->find($principalId, $folderId) === null) {
+            return ToolResult::fail(self::MSG_FOLDER_NOT_FOUND);
+        }
+
         $limit = max(1, min(ListMediaQuery::PER_PAGE_MAX, (int) ($arguments['limit'] ?? 24)));
         $page = $this->archive->list(new ListMediaQuery(
             folderId: $folderId,
