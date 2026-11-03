@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-14-gc2ce3e2c"
+        "version": "0.32.0-20-geaedcdd7"
     },
     "servers": [
         {
@@ -4138,6 +4138,1853 @@
                 ]
             }
         },
+        "/api/v1/groups/{groupId}/api-keys": {
+            "get": {
+                "tags": [
+                    "Groups"
+                ],
+                "summary": "List a group's API keys",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Key metadata. Secrets are never returned."
+                    },
+                    "403": {
+                        "description": "The caller cannot manage this group."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Groups"
+                ],
+                "summary": "Mint a group API key",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "maxLength": 100
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The key, with its plaintext secret. Shown once."
+                    },
+                    "403": {
+                        "description": "The caller cannot manage this group."
+                    },
+                    "422": {
+                        "description": "The name was missing or too long."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/groups/{groupId}/api-keys/{keyId}": {
+            "delete": {
+                "tags": [
+                    "Groups"
+                ],
+                "summary": "Revoke a group API key",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "keyId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Revoked. Idempotent — the same body whether or not the key existed."
+                    },
+                    "403": {
+                        "description": "The caller cannot manage this group."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api-keys": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "List the global API keys",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Key metadata. Secrets are never returned."
+                    },
+                    "403": {
+                        "description": "The caller is not a global admin."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Mint a global API key",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "maxLength": 100
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The key, with its plaintext secret. Shown once."
+                    },
+                    "403": {
+                        "description": "The caller is not a global admin."
+                    },
+                    "422": {
+                        "description": "The name was missing or too long."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api-keys/{keyId}": {
+            "delete": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Revoke a global API key",
+                "parameters": [
+                    {
+                        "name": "keyId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Revoked. Idempotent — the same body whether or not the key existed."
+                    },
+                    "403": {
+                        "description": "The caller is not a global admin."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    },
+                    {
+                        "csrfToken": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/agents": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "List the agents this key may reach",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "The agents in the key's reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Create an agent from the import format",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "agent"
+                                ],
+                                "properties": {
+                                    "agent": {
+                                        "description": "The agent block of the import format.",
+                                        "type": "object"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "group_id": {
+                                        "description": "The owning group. The global surface only.",
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The agent was created."
+                    },
+                    "404": {
+                        "description": "The group does not exist, or is outside the key's reach."
+                    },
+                    "422": {
+                        "description": "The payload is not a usable import format."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/agents/{agentId}": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Read an agent in the import format",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The agent, as an import-format payload."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Delete an agent",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The agent was deleted."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Update an agent from the import format",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "agent": {
+                                        "description": "The agent fields to write.",
+                                        "type": "object"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The agent was updated."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "422": {
+                        "description": "The payload is not a usable import format."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "List the chats this key may reach",
+                "parameters": [
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "description": "ISO-8601 timestamp; only chats updated after it.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "One page of chats, newest first. 25 per page by default."
+                    },
+                    "422": {
+                        "description": "`since` was not a parseable date."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Start a chat with one of the agents this key reaches",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "agent_id",
+                                    "text"
+                                ],
+                                "properties": {
+                                    "agent_id": {
+                                        "description": "The agent to talk to.",
+                                        "type": "integer"
+                                    },
+                                    "text": {
+                                        "description": "The user message.",
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "files": {
+                                        "description": "Inline attachments as data URLs.",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "callback_url": {
+                                        "type": "string",
+                                        "format": "uri"
+                                    },
+                                    "max_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The chat was queued."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "422": {
+                        "description": "The request body was not usable."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/status": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Status and final answer",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status, answer, and any block."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/messages": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "User messages and answers only",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The conversation, tool calls omitted."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Continue a chat",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "text"
+                                ],
+                                "properties": {
+                                    "text": {
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "additional_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The follow-up was queued."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not in a state that can be continued."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/transcript": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Everything the admin UI shows",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tool calls, thinking, usage totals."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/approve": {
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Approve pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "decisions"
+                                ],
+                                "properties": {
+                                    "decisions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Approval recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/reject": {
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Reject pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "reason": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Rejection recorded."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/chats/{chatId}/answer": {
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Answer the agent's question",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tool_call_id",
+                                    "content"
+                                ],
+                                "properties": {
+                                    "tool_call_id": {
+                                        "type": "string"
+                                    },
+                                    "content": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Answer recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not awaiting input."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/media": {
+            "post": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Upload a file for one of the agents this key reaches",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "agent_id": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The asset was ingested."
+                    },
+                    "400": {
+                        "description": "No file was sent under \"file\"."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "415": {
+                        "description": "The file type is not in the agent's allowlist."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/media/{mediaId}": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "Fetch a media asset this key may read",
+                "parameters": [
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The asset bytes."
+                    },
+                    "404": {
+                        "description": "No such asset, or not one this key may read."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/group-api/group": {
+            "get": {
+                "tags": [
+                    "Group-api"
+                ],
+                "summary": "The group this key belongs to",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "The key's group."
+                    },
+                    "404": {
+                        "description": "No such group."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/agents": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "List the agents this key may reach",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "The agents in the key's reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Create an agent from the import format",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "agent"
+                                ],
+                                "properties": {
+                                    "agent": {
+                                        "description": "The agent block of the import format.",
+                                        "type": "object"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "group_id": {
+                                        "description": "The owning group. The global surface only.",
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The agent was created."
+                    },
+                    "404": {
+                        "description": "The group does not exist, or is outside the key's reach."
+                    },
+                    "422": {
+                        "description": "The payload is not a usable import format."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/agents/{agentId}": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Read an agent in the import format",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The agent, as an import-format payload."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Delete an agent",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The agent was deleted."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Update an agent from the import format",
+                "parameters": [
+                    {
+                        "name": "agentId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "agent": {
+                                        "description": "The agent fields to write.",
+                                        "type": "object"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The agent was updated."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "422": {
+                        "description": "The payload is not a usable import format."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "List the chats this key may reach",
+                "parameters": [
+                    {
+                        "name": "since",
+                        "in": "query",
+                        "description": "ISO-8601 timestamp; only chats updated after it.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "One page of chats, newest first. 25 per page by default."
+                    },
+                    "422": {
+                        "description": "`since` was not a parseable date."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Start a chat with one of the agents this key reaches",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "agent_id",
+                                    "text"
+                                ],
+                                "properties": {
+                                    "agent_id": {
+                                        "description": "The agent to talk to.",
+                                        "type": "integer"
+                                    },
+                                    "text": {
+                                        "description": "The user message.",
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "files": {
+                                        "description": "Inline attachments as data URLs.",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "callback_url": {
+                                        "type": "string",
+                                        "format": "uri"
+                                    },
+                                    "max_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The chat was queued."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "422": {
+                        "description": "The request body was not usable."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/status": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Status and final answer",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status, answer, and any block."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/messages": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "User messages and answers only",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The conversation, tool calls omitted."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Continue a chat",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "text"
+                                ],
+                                "properties": {
+                                    "text": {
+                                        "type": "string"
+                                    },
+                                    "media_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "additional_steps": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The follow-up was queued."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not in a state that can be continued."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/transcript": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Everything the admin UI shows",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "since_sequence",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tool calls, thinking, usage totals."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/approve": {
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Approve pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "decisions"
+                                ],
+                                "properties": {
+                                    "decisions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Approval recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/reject": {
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Reject pending tool calls",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "reason": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Rejection recorded."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not pending approval."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/chats/{chatId}/answer": {
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Answer the agent's question",
+                "parameters": [
+                    {
+                        "name": "chatId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tool_call_id",
+                                    "content"
+                                ],
+                                "properties": {
+                                    "tool_call_id": {
+                                        "type": "string"
+                                    },
+                                    "content": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Answer recorded; the chat is queued again."
+                    },
+                    "404": {
+                        "description": "No such chat on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not awaiting input."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/media": {
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Upload a file for one of the agents this key reaches",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "agent_id": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The asset was ingested."
+                    },
+                    "400": {
+                        "description": "No file was sent under \"file\"."
+                    },
+                    "404": {
+                        "description": "No such agent, or not one this key may reach."
+                    },
+                    "415": {
+                        "description": "The file type is not in the agent's allowlist."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/media/{mediaId}": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Fetch a media asset this key may read",
+                "parameters": [
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "mediaId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The asset bytes."
+                    },
+                    "404": {
+                        "description": "No such asset, or not one this key may read."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/groups": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "List every group",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "Every group in the install."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Create a group",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The group was created."
+                    },
+                    "403": {
+                        "description": "The key has no owner to create a group with."
+                    },
+                    "422": {
+                        "description": "The name was missing."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/global-api/groups/{groupId}": {
+            "get": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Read a group",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The group."
+                    },
+                    "404": {
+                        "description": "Group not found."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Delete a group",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The group was deleted."
+                    },
+                    "404": {
+                        "description": "Group not found."
+                    },
+                    "409": {
+                        "description": "The group still owns agents."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "tags": [
+                    "Global-api"
+                ],
+                "summary": "Update a group",
+                "parameters": [
+                    {
+                        "name": "groupId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The group was updated."
+                    },
+                    "404": {
+                        "description": "Group not found."
+                    },
+                    "422": {
+                        "description": "The name was empty."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/agent-templates": {
             "get": {
                 "tags": [
@@ -6085,7 +7932,7 @@
             },
             "bearerAuth": {
                 "type": "http",
-                "description": "Agent API key (`spk_<id>_<secret>`), scoped to one agent. Required by `AgentApiKeyMiddleware`; no session or CSRF token is accepted on that surface.",
+                "description": "API key (`spk_<id>_<secret>`), scoped to one agent, one group or the whole install. Required by the API key middleware; no session or CSRF token is accepted on those surfaces.",
                 "name": null,
                 "in": null,
                 "scheme": "bearer"

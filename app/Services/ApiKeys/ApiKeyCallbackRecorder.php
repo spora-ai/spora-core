@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
 use Illuminate\Support\Carbon;
-use Spora\Models\AgentApiCallback;
+use Spora\Models\ApiCallback;
+use Spora\Models\ApiKey;
 use Spora\Models\Task;
 
 /**
@@ -18,22 +19,25 @@ use Spora\Models\Task;
  * settled. A row that outlives its chat is removed by the cascade on
  * `chat_id`.
  */
-final class AgentApiCallbackRecorder
+final class ApiKeyCallbackRecorder
 {
     /**
      * Record the callback this chat owes, while it is still `QUEUED`. Returns
      * null — and writes nothing — when no `callback_url` was supplied.
+     *
+     * The agent id is the chat's agent: the target agent on the group and
+     * global surfaces, the key's own agent on the agent one.
      */
-    public function record(AgentApiContext $context, Task $task, ?string $callbackUrl): ?AgentApiCallback
+    public function record(ApiKey $key, int $agentId, Task $task, ?string $callbackUrl): ?ApiCallback
     {
         if ($callbackUrl === null || $callbackUrl === '') {
             return null;
         }
 
-        return AgentApiCallback::create([
+        return ApiCallback::create([
             'chat_id' => (int) $task->id,
-            'key_id' => $context->key->id,
-            'agent_id' => $context->agentId(),
+            'key_id' => $key->id,
+            'agent_id' => $agentId,
             'url' => $callbackUrl,
             // Nothing is owed yet: the chat has not settled.
             'pending_status' => null,
@@ -41,7 +45,7 @@ final class AgentApiCallbackRecorder
             // Armed immediately rather than left NULL. The sweep selects
             // `next_attempt_at IS NOT NULL AND <= now`, so a NULL here is a
             // row nothing can ever pick up — the chat would finish and no
-            // callback would fire. `AgentApiCallbackDispatcher` defers the
+            // callback would fire. `ApiKeyCallbackDispatcher` defers the
             // row again while the chat is still running.
             'next_attempt_at' => Carbon::now('UTC'),
         ]);

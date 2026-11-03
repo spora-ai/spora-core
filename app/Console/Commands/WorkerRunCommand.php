@@ -17,7 +17,7 @@ use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\Paths;
 use Spora\Scheduling\DueWorkDispatcher;
-use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
+use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalResolver;
@@ -38,7 +38,7 @@ use Throwable;
  *   - WorkerQueueProcessor:  queue/retry/child-process lifecycle
  *   - ScheduledRunProcessor: scheduled-run claim, dispatch, finalize
  *   - DueWorkDispatcher:     plugin-owned work that is due
- *   - AgentApiCallbackDispatcher: Agent API webhook delivery
+ *   - ApiKeyCallbackDispatcher: Agent API webhook delivery
  */
 final class WorkerRunCommand extends Command
 {
@@ -71,7 +71,7 @@ final class WorkerRunCommand extends Command
     private readonly ScheduledRunProcessor $scheduledRunProcessor;
 
     /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
-    private readonly ?AgentApiCallbackDispatcher $callbackDispatcher;
+    private readonly ?ApiKeyCallbackDispatcher $callbackDispatcher;
 
     /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?DueWorkDispatcher $dueWorkDispatcher;
@@ -91,8 +91,8 @@ final class WorkerRunCommand extends Command
         // reason the reaper is: the command's constructor is already long and
         // positional. Optional, because a test container that does not know
         // the class must still be able to build this.
-        $this->callbackDispatcher = $container->has(AgentApiCallbackDispatcher::class)
-            ? $container->get(AgentApiCallbackDispatcher::class)
+        $this->callbackDispatcher = $container->has(ApiKeyCallbackDispatcher::class)
+            ? $container->get(ApiKeyCallbackDispatcher::class)
             : null;
         $this->dueWorkDispatcher = $container->has(DueWorkDispatcher::class)
             ? $container->get(DueWorkDispatcher::class)

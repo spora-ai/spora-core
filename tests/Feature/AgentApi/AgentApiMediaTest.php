@@ -39,14 +39,15 @@ describe('Agent API media', function (): void {
         [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'upload');
 
         $container = mediaContainer();
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
 
-        $mediaId = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class)
-            ->ingestBytes($context, pngBytes(), 'chart.png');
+        $mediaId = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class)
+            ->ingestBytes($context->requireAgent(), $context->requireOwnerUserId(), pngBytes(), 'chart.png');
 
         expect($mediaId)->not->toBeNull();
 
@@ -59,17 +60,18 @@ describe('Agent API media', function (): void {
 
     it('refuses a type the agent does not accept', function (): void {
         $seed = AgentApiTestSupport::seedAgent('badtype');
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
 
         $container = mediaContainer();
-        $ingest = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class);
+        $ingest = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class);
 
         // Executable content: the sniff names it, the allow-list refuses it.
-        expect($ingest->ingestBytes($context, "#!/bin/sh\nrm -rf /\n", 'payload.sh'))->toBeNull();
+        expect($ingest->ingestBytes($context->requireAgent(), $context->requireOwnerUserId(), "#!/bin/sh\nrm -rf /\n", 'payload.sh'))->toBeNull();
     });
 
     it('reads back its own agent\'s media inline', function (): void {
@@ -77,16 +79,17 @@ describe('Agent API media', function (): void {
         [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'readback');
 
         $container = mediaContainer();
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
-        $mediaId = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class)
-            ->ingestBytes($context, pngBytes(), 'chart.png');
+        $mediaId = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class)
+            ->ingestBytes($context->requireAgent(), $context->requireOwnerUserId(), pngBytes(), 'chart.png');
 
         $request = \Symfony\Component\HttpFoundation\Request::create("/api/v1/agent-api/media/{$mediaId}", 'GET');
-        $request->attributes->set('agent_api_context', $context);
+        $request->attributes->set('api_key_context', $context);
 
         $response = $container->get(AgentApiMediaController::class)->show($request, $mediaId);
 
@@ -104,22 +107,24 @@ describe('Agent API media', function (): void {
         $theirs = AgentApiTestSupport::seedAgent('mtheirs');
 
         $container = mediaContainer();
-        $scope = $container->get(\Spora\Services\AgentApi\AgentApiScope::class);
+        $scope = $container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class);
 
-        $theirContext = new \Spora\Services\AgentApi\AgentApiContext(
+        $theirContext = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($theirs['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($theirs['agentId']),
             $theirs['userId'],
         );
-        $mediaId = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class)
-            ->ingestBytes($theirContext, pngBytes(), 'theirs.png');
+        $mediaId = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class)
+            ->ingestBytes($theirContext->requireAgent(), $theirContext->requireOwnerUserId(), pngBytes(), 'theirs.png');
 
-        expect($scope->isMediaReadable($mediaId, $mine['agentId']))->toBeFalse();
-        expect($scope->isMediaReadable($mediaId, $theirs['agentId']))->toBeTrue();
+        expect($scope->isMediaReadableForAgent($mine['agentId'], $mediaId))->toBeFalse();
+        expect($scope->isMediaReadableForAgent($theirs['agentId'], $mediaId))->toBeTrue();
 
         $request = \Symfony\Component\HttpFoundation\Request::create("/api/v1/agent-api/media/{$mediaId}", 'GET');
-        $request->attributes->set('agent_api_context', new \Spora\Services\AgentApi\AgentApiContext(
+        $request->attributes->set('api_key_context', new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($mine['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($mine['agentId']),
             $mine['userId'],
         ));
@@ -133,8 +138,9 @@ describe('Agent API media', function (): void {
         $seed = AgentApiTestSupport::seedAgent('unknown');
         $container = mediaContainer();
         $request = \Symfony\Component\HttpFoundation\Request::create('/api/v1/agent-api/media/nope', 'GET');
-        $request->attributes->set('agent_api_context', new \Spora\Services\AgentApi\AgentApiContext(
+        $request->attributes->set('api_key_context', new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         ));
@@ -147,13 +153,14 @@ describe('Agent API media', function (): void {
         $child = AgentApiTestSupport::seedAgent('child');
 
         $container = mediaContainer();
-        $childContext = new \Spora\Services\AgentApi\AgentApiContext(
+        $childContext = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($child['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($child['agentId']),
             $child['userId'],
         );
-        $mediaId = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class)
-            ->ingestBytes($childContext, pngBytes(), 'from-child.png');
+        $mediaId = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class)
+            ->ingestBytes($childContext->requireAgent(), $childContext->requireOwnerUserId(), pngBytes(), 'from-child.png');
 
         $parentTask = \Spora\Models\Task::create([
             'agent_id' => $parent['agentId'],
@@ -175,21 +182,22 @@ describe('Agent API media', function (): void {
 
         // Without the subtree rule a sub-agent's output would be unreachable
         // from the parent that delegated to it.
-        expect($container->get(\Spora\Services\AgentApi\AgentApiScope::class)
-            ->isMediaReadable($mediaId, $parent['agentId']))->toBeTrue();
+        expect($container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class)
+            ->isMediaReadableForAgent($parent['agentId'], $mediaId))->toBeTrue();
     });
 
     it('reads an asset one of its own chats attached', function (): void {
         $agent = AgentApiTestSupport::seedAgent('attached');
         $container = mediaContainer();
 
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($agent['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($agent['agentId']),
             $agent['userId'],
         );
-        $mediaId = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class)
-            ->ingestBytes($context, pngBytes(), 'uploaded.png');
+        $mediaId = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class)
+            ->ingestBytes($context->requireAgent(), $context->requireOwnerUserId(), pngBytes(), 'uploaded.png');
 
         // An inbound upload is attributed to the agent but carries no task_id;
         // the only link back to a chat is the history row.
@@ -207,30 +215,31 @@ describe('Agent API media', function (): void {
             'attachments' => [['media_id' => $mediaId, 'kind' => 'image']],
         ]);
 
-        expect($container->get(\Spora\Services\AgentApi\AgentApiScope::class)
-            ->isMediaReadable($mediaId, $agent['agentId']))->toBeTrue();
+        expect($container->get(\Spora\Services\ApiKeys\ApiKeyMediaAccess::class)
+            ->isMediaReadableForAgent($agent['agentId'], $mediaId))->toBeTrue();
     });
 
     it('decodes an inline data URL and ignores what it should not', function (): void {
         $seed = AgentApiTestSupport::seedAgent('decode');
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
 
-        $ingest = mediaContainer()->get(\Spora\Services\AgentApi\AgentApiFileIngest::class);
+        $ingest = mediaContainer()->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class);
         $png = pngBytes();
         $good = 'data:image/png;base64,' . base64_encode($png);
 
         // Driven through the public entry point rather than the decoder, so
         // what is asserted is what a caller actually gets.
-        expect($ingest->ingestInlineFiles($context, [['filename' => 'a.png', 'data_url' => $good]]))->toHaveCount(1);
+        expect($ingest->ingestInlineFiles($context->requireAgent(), $context->requireOwnerUserId(), [['filename' => 'a.png', 'data_url' => $good]]))->toHaveCount(1);
 
         // A URL that is not a data URL, a non-base64 data URL, undecodable
         // base64, and an entry that is not an object are all skipped rather
         // than raising.
-        expect($ingest->ingestInlineFiles($context, [
+        expect($ingest->ingestInlineFiles($context->requireAgent(), $context->requireOwnerUserId(), [
             ['filename' => 'b.png', 'data_url' => 'https://example.com/x.png'],
             ['filename' => 'c.png', 'data_url' => 'data:image/png,notbase64'],
             ['filename' => 'd.png', 'data_url' => 'data:image/png;base64,!!!'],
@@ -239,28 +248,29 @@ describe('Agent API media', function (): void {
         ]))->toBe([]);
 
         // A bare base64 payload without the data: prefix is accepted too.
-        expect($ingest->ingestInlineFiles($context, [
+        expect($ingest->ingestInlineFiles($context->requireAgent(), $context->requireOwnerUserId(), [
             ['filename' => 'f.png', 'base64' => base64_encode($png)],
         ]))->toHaveCount(1);
     });
 
     it('refuses an inline file above the size ceiling', function (): void {
         $seed = AgentApiTestSupport::seedAgent('toobig');
-        $context = new \Spora\Services\AgentApi\AgentApiContext(
+        $context = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
 
         $container = mediaContainer();
-        $ingest = $container->get(\Spora\Services\AgentApi\AgentApiFileIngest::class);
+        $ingest = $container->get(\Spora\Services\ApiKeys\ApiKeyFileIngest::class);
 
         // 16 MiB is the ceiling on what is persisted. The bytes are decoded in
         // full before the check, so this is not a memory bound — `post_max_size`
         // is.
         $oversized = 'data:image/png;base64,' . base64_encode(str_repeat('a', 17 * 1024 * 1024));
 
-        expect($ingest->ingestInlineFiles($context, [['filename' => 'big.bin', 'data_url' => $oversized]]))->toBe([]);
+        expect($ingest->ingestInlineFiles($context->requireAgent(), $context->requireOwnerUserId(), [['filename' => 'big.bin', 'data_url' => $oversized]]))->toBe([]);
     });
 
     it('attaches an inline file to a new chat', function (): void {
@@ -294,8 +304,8 @@ describe('Agent API media', function (): void {
         // Asserted through the projection rather than the raw column: what a
         // caller receives is the resolved URL, which is the part that can be
         // wrong even when the stored row looks fine.
-        $messages = (new \Spora\Services\AgentApi\AgentApiChatProjection())
-            ->messages($chatId, null, 'https://spora.test');
+        $messages = (new \Spora\Services\ApiKeys\ApiKeyChatProjection())
+            ->messages($chatId, null, 'https://spora.test', \Spora\Auth\ApiKeyScope::Agent);
 
         $refs = $messages[0]['attachments'];
         expect($refs)->toHaveCount(1);

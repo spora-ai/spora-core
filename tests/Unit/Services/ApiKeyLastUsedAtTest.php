@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Carbon;
-use Spora\Auth\AgentApiKeyIssuer;
+use Spora\Auth\ApiKeyIssuer;
 use Spora\Core\Config;
-use Spora\Http\Middleware\AgentApiKeyMiddleware;
-use Spora\Models\AgentApiKey;
+use Spora\Http\Middleware\ApiKeyAuthenticator;
+use Spora\Models\ApiKey;
 use Spora\Services\DbRateLimiter;
 use Spora\Services\PrincipalResolver;
 use Tests\Feature\AgentApi\AgentApiTestSupport;
@@ -45,10 +45,10 @@ it('advances last_used_at on a host whose timezone is not UTC', function (): voi
         // model still carrying the Carbon it was written with would answer
         // correctly whatever the process timezone were, which is exactly why
         // this passed when it was first written against the unfixed code.
-        $fresh = AgentApiKey::query()->findOrFail($key->getKey());
+        $fresh = ApiKey::query()->findOrFail($key->getKey());
 
-        $middleware = new AgentApiKeyMiddleware(
-            new AgentApiKeyIssuer(),
+        $middleware = new ApiKeyAuthenticator(
+            new ApiKeyIssuer(),
             new PrincipalResolver(),
             new DbRateLimiter(),
             new Config([]),
@@ -69,8 +69,8 @@ it('leaves last_used_at alone inside the resolution window', function (): void {
     $stamped = Carbon::now('UTC')->subSeconds(5);
     $key->forceFill(['last_used_at' => $stamped])->save();
 
-    $middleware = new AgentApiKeyMiddleware(
-        new AgentApiKeyIssuer(),
+    $middleware = new ApiKeyAuthenticator(
+        new ApiKeyIssuer(),
         new PrincipalResolver(),
         new DbRateLimiter(),
         new Config([]),
@@ -86,8 +86,8 @@ it('reads a key that has never been used without error', function (): void {
     $seed = AgentApiTestSupport::seedAgent('tz-null');
     [$key] = AgentApiTestSupport::mintKey($seed['agentId'], 'tz-null');
 
-    $middleware = new AgentApiKeyMiddleware(
-        new AgentApiKeyIssuer(),
+    $middleware = new ApiKeyAuthenticator(
+        new ApiKeyIssuer(),
         new PrincipalResolver(),
         new DbRateLimiter(),
         new Config([]),

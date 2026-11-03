@@ -82,6 +82,35 @@ final class GroupService
     }
 
     /**
+     * Update a group's name and/or description.
+     *
+     * The changes are a map rather than two nullable arguments, because
+     * "not mentioned" and "set to nothing" are different edits: a caller
+     * that sends only `name` must not clear the description.
+     *
+     * @param array{name?: string, description?: ?string} $changes
+     */
+    public function updateGroup(int $groupId, array $changes): Group
+    {
+        $updates = [];
+
+        if (array_key_exists('name', $changes)) {
+            $updates['name'] = $changes['name'];
+        }
+
+        if (array_key_exists('description', $changes)) {
+            $updates['description'] = $changes['description'];
+        }
+
+        if ($updates !== []) {
+            $updates['updated_at'] = date(self::DB_TIMESTAMP_FORMAT);
+            Capsule::table('groups')->where('id', $groupId)->update($updates);
+        }
+
+        return Group::findOrFail($groupId);
+    }
+
+    /**
      * Add a member to a group with the given role. Caller must be
      * `owner` or `admin` of the group, or a global admin (pass
      * `$isAdmin = true`). Adding at `owner` tier requires `owner`-tier

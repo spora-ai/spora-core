@@ -9,11 +9,12 @@ use OpenApi\Attributes as OA;
 use Spora\Core\Config;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\Task;
-use Spora\Services\AgentApi\AgentApiCallbackRecorder;
-use Spora\Services\AgentApi\AgentApiChatProjection;
-use Spora\Services\AgentApi\AgentApiContext;
-use Spora\Services\AgentApi\AgentApiFileIngest;
-use Spora\Services\AgentApi\AgentApiScope;
+use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
+use Spora\Services\ApiKeys\ApiKeyChatAccess;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
+use Spora\Services\ApiKeys\ApiKeyContext;
+use Spora\Services\ApiKeys\ApiKeyFileIngest;
+use Spora\Services\ApiKeys\ApiKeyMediaAccess;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -39,10 +40,11 @@ final class AgentApiChatController
     private const MAX_MEDIA_IDS = 32;
 
     public function __construct(
-        private readonly AgentApiScope $scope,
-        private readonly AgentApiChatProjection $projection,
-        private readonly AgentApiFileIngest $ingest,
-        private readonly AgentApiCallbackRecorder $callbacks,
+        private readonly ApiKeyChatAccess $scope,
+        private readonly ApiKeyChatProjection $projection,
+        private readonly ApiKeyFileIngest $ingest,
+        private readonly ApiKeyMediaAccess $media,
+        private readonly ApiKeyCallbackRecorder $callbacks,
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
     ) {}
@@ -70,14 +72,13 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'since must be a parseable date.');
         }
 
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
         $tasks = $this->scope->listChats(
-            $context->agentId(),
+            $context,
             $since,
             $this->queryInt($request, 'page'),
             $this->queryInt($request, 'per_page'),
         );
-
         return new JsonResponse([
             'data' => ['chats' => array_map(fn(Task $t): array => $this->projection->status($t), $tasks)],
         ]);
@@ -101,7 +102,7 @@ final class AgentApiChatController
     #[OA\Response(response: 422, description: 'The request body was not usable.')]
     public function store(Request $request): JsonResponse
     {
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
         // `prepareStart` answers the error, so both rejections leave by the
@@ -113,8 +114,8 @@ final class AgentApiChatController
         }
 
         $task = $this->scope->startChat(
-            $context->ownerUserId,
-            $context->agentId(),
+            $context,
+            $context->requireAgentId(),
             $prepared['text'],
             $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
             $prepared['mediaIds'],
@@ -123,7 +124,7 @@ final class AgentApiChatController
         // Recorded after the chat exists: a failed insert leaves a queued chat
         // with no callback rather than rolling back work the agent has already
         // been handed.
-        $this->callbacks->record($context, $task, $prepared['callbackUrl']);
+        $this->callbacks->record($context->key, $context->requireAgentId(), $task, $prepared['callbackUrl']);
 
         return new JsonResponse(['data' => ['chat' => $this->projection->status($task)]], Response::HTTP_ACCEPTED);
     }
@@ -140,7 +141,7 @@ final class AgentApiChatController
      * @param array<string, mixed> $body
      * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>}
      */
-    private function prepareStart(array $body, AgentApiContext $context): JsonResponse|array
+    private function prepareStart(array $body, ApiKeyContext $context): JsonResponse|array
     {
         $problem = match (true) {
             $this->requiredText($body) === null => 'text is required.',
@@ -163,7 +164,11 @@ final class AgentApiChatController
 
         $callbackUrl = $this->stringField($body, 'callback_url');
 
-        foreach ($this->ingest->ingestInlineFiles($context, array_values($body['files'] ?? [])) as $id) {
+        foreach ($this->ingest->ingestInlineFiles(
+            $context->requireAgent(),
+            $context->requireOwnerUserId(),
+            array_values($body['files'] ?? []),
+        ) as $id) {
             $mediaIds[] = $id;
         }
 
@@ -176,7 +181,7 @@ final class AgentApiChatController
 
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/status', summary: 'Status and final answer', tags: ['Agent-api'])]
     #[OA\Response(response: 200, description: 'Status, answer, and any block.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function status(Request $request, int $chatId): JsonResponse
     {
 
@@ -192,10 +197,10 @@ final class AgentApiChatController
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/messages', summary: 'User messages and answers only', tags: ['Agent-api'])]
     #[OA\Parameter(name: 'since_sequence', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
     #[OA\Response(response: 200, description: 'The conversation, tool calls omitted.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function messages(Request $request, int $chatId): JsonResponse
     {
-
+        $context = ApiKeyContext::fromRequest($request);
         $task = $this->loadChat($request, $chatId);
 
         if ($task instanceof JsonResponse) {
@@ -208,6 +213,7 @@ final class AgentApiChatController
                     (int) $task->id,
                     $this->queryInt($request, 'since_sequence'),
                     $this->config->getString('SPORA_APP_URL'),
+                    $context->scope,
                 ),
             ],
         ]);
@@ -216,20 +222,20 @@ final class AgentApiChatController
     #[OA\Get(path: '/api/v1/agent-api/chats/{chatId}/transcript', summary: 'Everything the admin UI shows', tags: ['Agent-api'])]
     #[OA\Parameter(name: 'since_sequence', in: 'query', required: false, schema: new OA\Schema(type: 'integer'))]
     #[OA\Response(response: 200, description: 'Tool calls, thinking, usage totals.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function transcript(Request $request, int $chatId): JsonResponse
     {
 
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
 
         try {
             $transcript = $this->scope->transcript(
+                $context,
                 $chatId,
-                $context->agentId(),
                 $this->queryInt($request, 'since_sequence'),
             );
         } catch (InvalidArgumentException) {
-            return $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND);
+            return $this->notFound('NOT_FOUND', ApiKeyChatAccess::ERR_NOT_FOUND);
         }
 
         return new JsonResponse(['data' => ['chat' => $transcript]]);
@@ -248,11 +254,11 @@ final class AgentApiChatController
         ],
     ))]
     #[OA\Response(response: 202, description: 'The follow-up was queued.')]
-    #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
+    #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     #[OA\Response(response: 409, description: 'The chat is not in a state that can be continued.')]
     public function continueChat(Request $request, int $chatId): JsonResponse
     {
-        $context = AgentApiContext::fromRequest($request);
+        $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
         $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($body, $context);
@@ -263,9 +269,8 @@ final class AgentApiChatController
 
         try {
             $task = $this->scope->continueChat(
+                $context,
                 $chatId,
-                $context->agentId(),
-                $context->ownerUserId,
                 $prepared['text'],
                 $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
                 $prepared['mediaIds'],
@@ -281,7 +286,7 @@ final class AgentApiChatController
      * @param array<string, mixed> $body
      * @return JsonResponse|array{text: string, mediaIds: list<string>}
      */
-    private function prepareContinue(array $body, AgentApiContext $context): JsonResponse|array
+    private function prepareContinue(array $body, ApiKeyContext $context): JsonResponse|array
     {
         $text = $this->requiredText($body);
 
@@ -303,13 +308,13 @@ final class AgentApiChatController
      * it cannot be continued from, is a 409. Both are the same exception, so
      * the distinction is made here rather than at each call site.
      */
-    private function chatConflict(int $chatId, AgentApiContext $context, InvalidArgumentException $e): JsonResponse
+    private function chatConflict(int $chatId, ApiKeyContext $context, InvalidArgumentException $e): JsonResponse
     {
-        $missing = $this->scope->chatMissing($chatId, $context->agentId());
+        $missing = $this->scope->chatMissing($context, $chatId);
 
         return $this->error(
             $missing ? 'NOT_FOUND' : 'INVALID_STATE',
-            $missing ? AgentApiScope::ERR_NOT_FOUND : $e->getMessage(),
+            $missing ? ApiKeyChatAccess::ERR_NOT_FOUND : $e->getMessage(),
             $missing ? Response::HTTP_NOT_FOUND : Response::HTTP_CONFLICT,
         );
     }
@@ -320,9 +325,9 @@ final class AgentApiChatController
     private function loadChat(Request $request, int $chatId): Task|JsonResponse
     {
         try {
-            return $this->scope->requireTask($chatId, AgentApiContext::fromRequest($request)->agentId());
+            return $this->scope->requireTask(ApiKeyContext::fromRequest($request), $chatId);
         } catch (InvalidArgumentException) {
-            return $this->notFound('NOT_FOUND', AgentApiScope::ERR_NOT_FOUND);
+            return $this->notFound('NOT_FOUND', ApiKeyChatAccess::ERR_NOT_FOUND);
         }
     }
 
@@ -368,7 +373,7 @@ final class AgentApiChatController
      * @param array<string, mixed> $body
      * @return list<string>|null
      */
-    private function readableMediaIds(array $body, AgentApiContext $context): ?array
+    private function readableMediaIds(array $body, ApiKeyContext $context): ?array
     {
         $raw = $body['media_ids'] ?? null;
 
@@ -383,7 +388,7 @@ final class AgentApiChatController
         $ids = [];
 
         foreach ($raw as $id) {
-            if (is_string($id) && $id !== '' && $this->scope->isMediaReadable($id, $context->agentId())) {
+            if (is_string($id) && $id !== '' && $this->media->isMediaReadable($context, $id)) {
                 $ids[] = $id;
             }
         }

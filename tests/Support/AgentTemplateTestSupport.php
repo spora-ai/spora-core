@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 use Spora\AgentTemplates\AgentTemplateAgentCreator;
+use Spora\AgentTemplates\AgentTemplateAgentUpdater;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
 use Spora\AgentTemplates\AgentTemplateSettingsApplier;
@@ -57,6 +58,7 @@ function makeImporter(): AgentTemplateImporter
         new AgentTemplateScanner($paths->agentTemplateRoots()),
         $toolsApplier,
         $agentCreator,
+        new AgentTemplateAgentUpdater(),
         null,
     );
 }

@@ -20,6 +20,8 @@ use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Http\Middleware\GlobalApiKeyMiddleware;
+use Spora\Http\Middleware\GroupApiKeyMiddleware;
 
 /**
  * Builds an `OpenApi` document whose paths/methods/security come straight from
@@ -73,7 +75,7 @@ final class RouteToOpenApi
                 name: 'bearerAuth',
                 type: 'http',
                 scheme: 'bearer',
-                description: 'Agent API key (`spk_<id>_<secret>`), scoped to one agent. Required by `AgentApiKeyMiddleware`; no session or CSRF token is accepted on that surface.',
+                description: 'API key (`spk_<id>_<secret>`), scoped to one agent, one group or the whole install. Required by the API key middleware; no session or CSRF token is accepted on those surfaces.',
             ),
         ];
         $openapi->components = $components;
@@ -315,6 +317,8 @@ final class RouteToOpenApi
                 CsrfMiddleware::class => $this->isSafeMethod($method) ? null : 'csrfToken',
                 AdminMiddleware::class => 'cookieAuth',
                 AgentApiKeyMiddleware::class => 'bearerAuth',
+                GroupApiKeyMiddleware::class => 'bearerAuth',
+                GlobalApiKeyMiddleware::class => 'bearerAuth',
                 default => null,
             };
             if ($name !== null) {

@@ -217,7 +217,7 @@ describe('Agent API multipart upload', function (): void {
             null,
             true,
         ));
-        $request->attributes->set('agent_api_context', $GLOBALS['agentApiUploadContext']);
+        $request->attributes->set('api_key_context', $GLOBALS['agentApiUploadContext']);
 
         return $request;
     }
@@ -230,8 +230,9 @@ describe('Agent API multipart upload', function (): void {
             new ScriptedLlmDriver(new LLMResponse(content: 'x', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'u')),
         );
 
-        $GLOBALS['agentApiUploadContext'] = new \Spora\Services\AgentApi\AgentApiContext(
+        $GLOBALS['agentApiUploadContext'] = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );
@@ -257,8 +258,9 @@ describe('Agent API multipart upload', function (): void {
         );
 
         $request = \Symfony\Component\HttpFoundation\Request::create('/api/v1/agent-api/media', 'POST');
-        $request->attributes->set('agent_api_context', new \Spora\Services\AgentApi\AgentApiContext(
+        $request->attributes->set('api_key_context', new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         ));
@@ -275,8 +277,9 @@ describe('Agent API multipart upload', function (): void {
             new ScriptedLlmDriver(new LLMResponse(content: 'x', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'u')),
         );
 
-        $GLOBALS['agentApiUploadContext'] = new \Spora\Services\AgentApi\AgentApiContext(
+        $GLOBALS['agentApiUploadContext'] = new \Spora\Services\ApiKeys\ApiKeyContext(
             AgentApiTestSupport::mintKey($seed['agentId'], 'probe')[0],
+            \Spora\Auth\ApiKeyScope::Agent,
             \Spora\Models\Agent::findOrFail($seed['agentId']),
             $seed['userId'],
         );

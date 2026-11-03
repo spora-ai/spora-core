@@ -28,7 +28,7 @@ final class SsrfGuard
 {
     /**
      * The Agent API's policy: `https` only, a length cap matching the
-     * `agent_api_callbacks.url` column, and its usual refusal wording.
+     * `api_callbacks.url` column, and its usual refusal wording.
      *
      * @var Policy
      */

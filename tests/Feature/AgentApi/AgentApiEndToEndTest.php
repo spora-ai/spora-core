@@ -391,7 +391,7 @@ describe('Agent API authorisation', function (): void {
     it('counts only authenticated requests against the rate limit', function (): void {
         $seed = AgentApiTestSupport::seedAgent('rl');
         [$keyRow, $plaintext] = AgentApiTestSupport::mintKey($seed['agentId'], 'rl');
-        $bucket = 'agentapi:' . $keyRow->id;
+        $bucket = 'api:' . $keyRow->id;
 
         $llm = new ScriptedLlmDriver(new LLMResponse(content: 'hi', toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'r1'));
         $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);

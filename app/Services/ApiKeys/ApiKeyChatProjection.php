@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
 use Spora\Agents\TaskLifecyclePolicy;
 use Spora\Agents\ValueObjects\AgentState;
+use Spora\Auth\ApiKeyScope;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
 use Spora\Models\ToolCall;
@@ -21,7 +22,7 @@ use Throwable;
  * sees. Tool calls and thinking live in the last one only, so an
  * integrator polling for an answer never pays for them.
  */
-final class AgentApiChatProjection
+final class ApiKeyChatProjection
 {
     /**
      * Statuses that mean the chat can no longer progress without the
@@ -59,9 +60,13 @@ final class AgentApiChatProjection
      * order-symmetric with it. An attachment with no user turn to join becomes
      * a message carrying only the files, rather than disappearing.
      *
+     * The scope names the surface the attachment is read back from: a group
+     * key cannot read an agent key's media, so a URL pointing at the agent
+     * surface would be a dead link.
+     *
      * @return list<array<string, mixed>>
      */
-    public function messages(int $chatId, ?int $sinceSequence, ?string $appUrl): array
+    public function messages(int $chatId, ?int $sinceSequence, ?string $appUrl, ApiKeyScope $scope): array
     {
         $query = TaskHistory::where('task_id', $chatId)
             ->whereIn('role', ['user', 'assistant', 'attachment'])
@@ -78,7 +83,7 @@ final class AgentApiChatProjection
 
         foreach ($query->get() as $row) {
             if ($row->role === 'attachment') {
-                $this->attach($messages, $this->attachments($row, $appUrl), $orphaned, $orphanedSequence, (int) $row->sequence);
+                $this->attach($messages, $this->attachments($row, $appUrl, $scope), $orphaned, $orphanedSequence, (int) $row->sequence);
 
                 continue;
             }
@@ -89,7 +94,7 @@ final class AgentApiChatProjection
                 continue;
             }
 
-            $own = $this->attachments($row, $appUrl);
+            $own = $this->attachments($row, $appUrl, $scope);
             $carried = $orphaned;
             $sequence = $orphanedSequence ?? (int) $row->sequence;
             $orphaned = [];
@@ -148,7 +153,7 @@ final class AgentApiChatProjection
     /**
      * @return list<array{media_id: string, kind: string, url?: string}>|null
      */
-    private function attachments(TaskHistory $row, ?string $appUrl): ?array
+    private function attachments(TaskHistory $row, ?string $appUrl, ApiKeyScope $scope): ?array
     {
         $sanitized = TaskHistorySerializer::sanitizeAttachmentsForApi($row->attachments);
 
@@ -164,7 +169,7 @@ final class AgentApiChatProjection
                 'media_id' => $attachment['media_id'],
                 'kind' => $attachment['kind'],
             ];
-            $entry['url'] = $base . '/api/v1/agent-api/media/' . rawurlencode($attachment['media_id']);
+            $entry['url'] = $base . $scope->surfacePrefix() . '/media/' . rawurlencode($attachment['media_id']);
             $out[] = $entry;
         }
 

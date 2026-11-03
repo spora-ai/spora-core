@@ -2,13 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Services\AgentApi;
+namespace Tests\Unit\Services\ApiKeys;
 
 use Spora\Agents\TaskLifecyclePolicy;
+use Spora\Auth\ApiKeyScope;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\ToolCall;
-use Spora\Services\AgentApi\AgentApiChatProjection;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Tests\Concerns\CreatesPrincipal;
 
 /**
@@ -16,12 +17,12 @@ use Tests\Concerns\CreatesPrincipal;
  * `/status`, `/messages` and `/transcript` is the point of the feature, so
  * each is pinned here separately from the HTTP layer.
  */
-describe('AgentApiChatProjection', function (): void {
+describe('ApiKeyChatProjection', function (): void {
     uses(CreatesPrincipal::class);
 
-    function projection(): AgentApiChatProjection
+    function projection(): ApiKeyChatProjection
     {
-        return new AgentApiChatProjection();
+        return new ApiKeyChatProjection();
     }
 
     /**
@@ -128,7 +129,7 @@ describe('AgentApiChatProjection', function (): void {
         expect($settled)->toBe(
             $policy->isTerminal($status)
             || $status === 'ABORTED'
-            || in_array($status, AgentApiChatProjection::BLOCKED_STATUSES, true),
+            || in_array($status, ApiKeyChatProjection::BLOCKED_STATUSES, true),
         );
     })->with([
         'COMPLETED' => ['COMPLETED', true],
@@ -155,7 +156,7 @@ describe('AgentApiChatProjection', function (): void {
         $task->taskHistory()->create(['sequence' => 2, 'role' => 'tool', 'tool_name' => 'stub_input', 'content' => 'r']);
         $task->taskHistory()->create(['sequence' => 3, 'role' => 'assistant', 'content' => 'done']);
 
-        $messages = projection()->messages((int) $task->id, null, 'https://spora.test');
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test', ApiKeyScope::Agent);
 
         expect(array_column($messages, 'role'))->toBe(['user', 'assistant']);
         expect(array_column($messages, 'text'))->toBe(['hi', 'done']);
@@ -171,7 +172,7 @@ describe('AgentApiChatProjection', function (): void {
             'attachments' => [['media_id' => 'm-1', 'kind' => 'image']],
         ]);
 
-        $messages = projection()->messages((int) $task->id, null, 'https://spora.test/');
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test/', ApiKeyScope::Agent);
 
         expect($messages[0]['attachments'])->toBe([
             [
@@ -181,6 +182,28 @@ describe('AgentApiChatProjection', function (): void {
             ],
         ]);
     });
+
+    it('gives every attachment an absolute URL on the surface the key drives', function (ApiKeyScope $scope, string $prefix): void {
+        $task = task(['user_prompt' => 'look']);
+
+        $task->taskHistory()->create([
+            'sequence' => 0,
+            'role' => 'user',
+            'content' => 'look',
+            'attachments' => [['media_id' => 'm-1', 'kind' => 'image']],
+        ]);
+
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test', $scope);
+
+        // The URL has to name the surface that will accept it: a group key
+        // cannot read an agent key's media, so an agent-api link is a dead
+        // link for it.
+        expect($messages[0]['attachments'][0]['url'])->toBe("https://spora.test{$prefix}/media/m-1");
+    })->with([
+        'the agent surface' => [ApiKeyScope::Agent, '/api/v1/agent-api'],
+        'the group surface' => [ApiKeyScope::Group, '/api/v1/group-api'],
+        'the global surface' => [ApiKeyScope::Global, '/api/v1/global-api'],
+    ]);
 
     it('folds an attachment row into the user turn it belongs to', function (): void {
         $task = task(['user_prompt' => 'look']);
@@ -198,7 +221,7 @@ describe('AgentApiChatProjection', function (): void {
         ]);
         $task->taskHistory()->create(['sequence' => 2, 'role' => 'assistant', 'content' => 'a chart']);
 
-        $messages = projection()->messages((int) $task->id, null, 'https://spora.test');
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test', ApiKeyScope::Agent);
 
         expect($messages)->toHaveCount(2);
         expect($messages[0]['role'])->toBe('user');
@@ -219,7 +242,7 @@ describe('AgentApiChatProjection', function (): void {
             'attachments' => [['media_id' => 'm-1', 'kind' => 'image']],
         ]);
 
-        $messages = projection()->messages((int) $task->id, null, 'https://spora.test');
+        $messages = projection()->messages((int) $task->id, null, 'https://spora.test', ApiKeyScope::Agent);
 
         expect($messages)->toHaveCount(1);
         expect($messages[0]['role'])->toBe('attachment');
@@ -232,7 +255,7 @@ describe('AgentApiChatProjection', function (): void {
 
         $task->taskHistory()->create(['sequence' => 0, 'role' => 'user', 'content' => 'hi']);
 
-        expect(projection()->messages((int) $task->id, null, 'https://spora.test')[0]['attachments'])->toBeNull();
+        expect(projection()->messages((int) $task->id, null, 'https://spora.test', ApiKeyScope::Agent)[0]['attachments'])->toBeNull();
     });
 
     it('filters by since_sequence', function (): void {
@@ -241,6 +264,6 @@ describe('AgentApiChatProjection', function (): void {
         $task->taskHistory()->create(['sequence' => 0, 'role' => 'user', 'content' => 'first']);
         $task->taskHistory()->create(['sequence' => 1, 'role' => 'assistant', 'content' => 'done']);
 
-        expect(projection()->messages((int) $task->id, 0, 'https://spora.test'))->toHaveCount(1);
+        expect(projection()->messages((int) $task->id, 0, 'https://spora.test', ApiKeyScope::Agent))->toHaveCount(1);
     });
 });
