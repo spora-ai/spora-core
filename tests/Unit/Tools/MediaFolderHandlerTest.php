@@ -93,6 +93,22 @@ describe('MediaFolderHandler::create_folder', function (): void {
         expect($result->data['folder']['path'])->toBe('/Corporate');
     });
 
+    it('names the new folder\'s id, because the folder ops take it', function (): void {
+        // The agent that just created the folder is about to file an
+        // asset into it, and the id is what it files it by. The path is
+        // not a handle.
+        $principalId = createUserPrincipalPublic(706);
+
+        $result = folderHandlerFor($principalId)->run(
+            'create_folder',
+            $principalId,
+            ['name' => 'Corporate'],
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->content)->toContain((string) $result->data['folder']['id']);
+    });
+
     it('creates a folder under a parent', function (): void {
         $principalId = createUserPrincipalPublic(701);
         $parent = (new MediaFolderService())->create($principalId, 'Corporate');

@@ -89,6 +89,10 @@ final readonly class MediaFolderHandler
     /**
      * Create a folder in the principal's tree.
      *
+     * The id is in the answer: the folder ops take it, and the agent
+     * that just created the folder is about to file an asset into it.
+     * A path alone is not a handle — the id is.
+     *
      * @param  array<string, mixed> $arguments
      */
     private function createFolder(int $principalId, array $arguments): ToolResult
@@ -109,7 +113,7 @@ final readonly class MediaFolderHandler
         }
 
         return ToolResult::ok(
-            sprintf('Created the media folder %s.', $folder->path),
+            sprintf('Created the media folder %s (id %s).', $folder->path, (string) $folder->id),
             ['folder' => $this->folders->describe($folder)],
         );
     }

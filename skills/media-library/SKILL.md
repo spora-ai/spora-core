@@ -156,6 +156,7 @@ Every `media` op that produces or surfaces an asset names its id in the response
 | `create_derivative` | `Created derivative <id> of <parent_id>` |
 | `create_media` | the header line `Media asset <id>: <filename>` |
 | `list_folders` | one line per folder: `- <folder_id> <name> — <path>, N asset(s)` |
+| `create_folder` | `Created the media folder <path> (id <folder_id>)` |
 | `search_assets` | one line per asset: `- <asset_id> <filename> — <mime_type>, <bytes> bytes` |
 
 Always pass the id from the same op that returned it; do not assume the key is `asset_id` everywhere. Downstream calls — versions, source bytes, public URL, derivative renders, parent lookup, folder ops — take that same id. Keep the id verbatim in your memory and pass it back; do NOT re-issue a `search` to refind an asset id that was just handed back. `search` returns 24 rows at a time and you have no guarantee the asset you just saw is on the next page.
@@ -180,7 +181,7 @@ The tree is yours to shape: you may create a folder, rename one and delete one, 
 | `file_asset` | File an asset into a folder (`asset_id` + `folder_id`); omit `folder_id` to move it back into the root | auto |
 | `search_assets` | The assets inside one folder (`folder_id`) | auto |
 
-`list_folders` answers with one line per folder — `- <folder_id> <name> — <path>, N asset(s)` — and that id is what every other folder op takes. Call it first; there is no other way to learn a folder id.
+`list_folders` answers with one line per folder — `- <folder_id> <name> — <path>, N asset(s)` — and that id is what every other folder op takes. `create_folder` answers with the new folder's id too, so a folder you just created is one you can file into straight away. Call `list_folders` first when you have no other way to learn a folder id.
 
 A folder name is **one path segment, never a path**: `parent_id` names the folder to sit under, and a name carrying a separator is refused. A sibling name that is taken is refused too — pick another name rather than retrying.
 
