@@ -269,3 +269,71 @@ test('down puts the agent-scoped keys back', function (): void {
     expect($restored->id)->toBe(str_repeat('a', 32));
     expect((int) $restored->agent_id)->toBe(1);
 });
+
+test('down leaves behind the callback of a key the legacy table cannot hold', function (): void {
+    Capsule::table('users')->insert(['id' => 1, 'email' => 'a@example.com', 'name' => 'A']);
+    Capsule::table('groups')->insert(['id' => 1, 'name' => 'G']);
+    Capsule::table('agents')->insert(['id' => 1, 'principal_id' => 1, 'name' => 'Agent']);
+    Capsule::table('tasks')->insert(['id' => 1, 'agent_id' => 1, 'user_prompt' => 'hi', 'status' => 'QUEUED']);
+    Capsule::table('tasks')->insert(['id' => 2, 'agent_id' => 1, 'user_prompt' => 'hi', 'status' => 'QUEUED']);
+
+    $agentKeyId = str_repeat('a', 32);
+    $groupKeyId = str_repeat('c', 32);
+
+    Capsule::table('agent_api_keys')->insert([
+        'id' => $agentKeyId,
+        'agent_id' => 1,
+        'name' => 'legacy',
+        'secret_hash' => str_repeat('b', 64),
+        'created_at' => '2026-01-01 00:00:00',
+        'updated_at' => '2026-01-01 00:00:00',
+    ]);
+
+    Capsule::table('agent_api_callbacks')->insert([
+        'chat_id' => 1,
+        'key_id' => $agentKeyId,
+        'agent_id' => 1,
+        'url' => 'https://hooks.example.test/spora',
+        'pending_status' => 'COMPLETED',
+        'attempts' => 0,
+        'created_at' => '2026-01-01 00:00:00',
+        'updated_at' => '2026-01-01 00:00:00',
+    ]);
+
+    $migration = require __DIR__ . '/../../../database/migrations/0098_scoped_api_keys.php';
+    $migration->up();
+
+    Spora\Models\ApiKey::create([
+        'id' => $groupKeyId,
+        'scope' => 'group',
+        'agent_id' => null,
+        'group_id' => 1,
+        'name' => 'group key',
+        'secret_hash' => str_repeat('d', 64),
+    ]);
+
+    Spora\Models\ApiCallback::create([
+        'chat_id' => 2,
+        'key_id' => $groupKeyId,
+        'agent_id' => 1,
+        'url' => 'https://hooks.example.test/group',
+        'pending_status' => 'COMPLETED',
+    ]);
+
+    // The rollback has to finish: the legacy outbox points at the legacy key
+    // table, and the group key is not in it.
+    $migration->down();
+
+    expect(Capsule::schema()->hasTable('agent_api_keys'))->toBeTrue();
+    expect(Capsule::schema()->hasTable('agent_api_callbacks'))->toBeTrue();
+    expect(Capsule::schema()->hasTable('api_keys'))->toBeFalse();
+    expect(Capsule::schema()->hasTable('api_callbacks'))->toBeFalse();
+
+    $keys = Capsule::table('agent_api_keys')->get();
+    expect($keys)->toHaveCount(1);
+    expect($keys->first()->id)->toBe($agentKeyId);
+
+    $callbacks = Capsule::table('agent_api_callbacks')->get();
+    expect($callbacks)->toHaveCount(1);
+    expect($callbacks->first()->key_id)->toBe($agentKeyId);
+});

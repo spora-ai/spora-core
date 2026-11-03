@@ -28,6 +28,13 @@ use Illuminate\Database\Schema\Blueprint;
  *   5. drop `agent_api_callbacks` — nothing points at it
  *   6. drop `agent_api_keys` — nothing points at it any more
  *
+ * Every step guards itself rather than the rebuild as a whole. SQLite's
+ * transactional DDL makes the whole rebuild atomic there, but MySQL commits
+ * each `CREATE TABLE` on its own, so a run that dies half-way leaves the new
+ * tables behind and the old ones still populated. Guarding per step is what
+ * lets such a run be repeated: each step skips the work that is already done
+ * and finishes the work that is not.
+ *
  * `scope` is a plain string, not a database enum: SQLite and MySQL spell
  * CHECK constraints differently and the universe is three values. The
  * invariants (`agent` ⇒ `agent_id`, `group` ⇒ `group_id`, `global` ⇒ neither)
@@ -46,44 +53,39 @@ return new class extends Migration
 
     public function up(): void
     {
-        $schema = Capsule::schema();
+        $this->createKeysTable();
+        $this->copyKeys();
 
-        // The table work is skipped once it has happened; the settings
-        // rename is not, because it is idempotent on its own and a run that
-        // stopped between the two would otherwise leave the old name behind.
-        if (!$schema->hasTable(self::KEYS_TABLE)) {
-            $this->createKeysTable();
-            $this->copyKeys();
+        $this->createCallbacksTable();
+        $this->copyCallbacks();
 
-            $this->createCallbacksTable();
-            $this->copyCallbacks();
-
-            $this->dropLegacyTables();
-        }
+        $this->dropLegacyTables();
 
         $this->renameRateLimitSetting();
     }
 
     public function down(): void
     {
-        $schema = Capsule::schema();
+        $this->createLegacyKeysTable();
+        $this->copyAgentScopedKeysBack();
 
-        if (!$schema->hasTable(self::OLD_KEYS_TABLE)) {
-            $this->createLegacyKeysTable();
-            $this->copyAgentScopedKeysBack();
+        $this->createLegacyCallbacksTable();
+        $this->copyCallbacksBack();
 
-            $this->createLegacyCallbacksTable();
-            $this->copyCallbacksBack();
-
-            $this->dropScopedTables();
-        }
+        $this->dropScopedTables();
 
         $this->restoreRateLimitSetting();
     }
 
     private function createKeysTable(): void
     {
-        Capsule::schema()->create(self::KEYS_TABLE, static function (Blueprint $table): void {
+        $schema = Capsule::schema();
+
+        if ($schema->hasTable(self::KEYS_TABLE)) {
+            return;
+        }
+
+        $schema->create(self::KEYS_TABLE, static function (Blueprint $table): void {
             $table->string('id', 32)->primary();
             $table->string('scope', 10);
             $table->unsignedBigInteger('agent_id')->nullable();
@@ -106,17 +108,28 @@ return new class extends Migration
     /**
      * Every key that existed before this migration is agent-scoped: the
      * group and global scopes did not exist yet.
+     *
+     * A key that is already in the new table is left alone, so a run that
+     * died between creating the table and copying the rows can be repeated.
      */
     private function copyKeys(): void
     {
-        if (!Capsule::schema()->hasTable(self::OLD_KEYS_TABLE)) {
+        $schema = Capsule::schema();
+
+        if (!$schema->hasTable(self::KEYS_TABLE) || !$schema->hasTable(self::OLD_KEYS_TABLE)) {
             return;
         }
 
         Capsule::table(self::OLD_KEYS_TABLE)->orderBy('id')->chunk(200, static function ($rows): void {
             foreach ($rows as $row) {
+                $id = (string) $row->id;
+
+                if (Capsule::table(self::KEYS_TABLE)->where('id', $id)->exists()) {
+                    continue;
+                }
+
                 Capsule::table(self::KEYS_TABLE)->insert([
-                    'id'           => (string) $row->id,
+                    'id'           => $id,
                     'scope'        => 'agent',
                     'agent_id'     => $row->agent_id === null ? null : (int) $row->agent_id,
                     'group_id'     => null,
@@ -167,6 +180,13 @@ return new class extends Migration
         });
     }
 
+    /**
+     * The outbox rows, and only the ones whose key made it across.
+     *
+     * The new outbox points at `api_keys`, so a callback whose key was not
+     * copied has nothing to point at — and the foreign key would refuse the
+     * row.
+     */
     private function copyCallbacks(): void
     {
         $schema = Capsule::schema();
@@ -175,26 +195,33 @@ return new class extends Migration
             return;
         }
 
-        Capsule::table(self::OLD_CALLBACKS_TABLE)->orderBy('id')->chunk(200, static function ($rows): void {
-            foreach ($rows as $row) {
-                Capsule::table(self::CALLBACKS_TABLE)->insert([
-                    'id'               => (int) $row->id,
-                    'chat_id'         => (int) $row->chat_id,
-                    'key_id'          => (string) $row->key_id,
-                    'agent_id'        => (int) $row->agent_id,
-                    'url'             => (string) $row->url,
-                    'pending_status'  => $row->pending_status,
-                    'delivered_status' => $row->delivered_status,
-                    'attempts'        => (int) $row->attempts,
-                    'next_attempt_at' => $row->next_attempt_at,
-                    'last_status_code' => $row->last_status_code === null ? null : (int) $row->last_status_code,
-                    'last_error'      => $row->last_error,
-                    'delivered_at'    => $row->delivered_at,
-                    'created_at'      => $row->created_at,
-                    'updated_at'      => $row->updated_at,
-                ]);
-            }
-        });
+        Capsule::table(self::OLD_CALLBACKS_TABLE)
+            ->whereIn('key_id', Capsule::table(self::KEYS_TABLE)->select('id'))
+            ->orderBy('id')
+            ->chunk(200, static function ($rows): void {
+                foreach ($rows as $row) {
+                    if (Capsule::table(self::CALLBACKS_TABLE)->where('id', $row->id)->exists()) {
+                        continue;
+                    }
+
+                    Capsule::table(self::CALLBACKS_TABLE)->insert([
+                        'id'               => (int) $row->id,
+                        'chat_id'         => (int) $row->chat_id,
+                        'key_id'          => (string) $row->key_id,
+                        'agent_id'        => (int) $row->agent_id,
+                        'url'             => (string) $row->url,
+                        'pending_status'  => $row->pending_status,
+                        'delivered_status' => $row->delivered_status,
+                        'attempts'        => (int) $row->attempts,
+                        'next_attempt_at' => $row->next_attempt_at,
+                        'last_status_code' => $row->last_status_code === null ? null : (int) $row->last_status_code,
+                        'last_error'      => $row->last_error,
+                        'delivered_at'    => $row->delivered_at,
+                        'created_at'      => $row->created_at,
+                        'updated_at'      => $row->updated_at,
+                    ]);
+                }
+            });
     }
 
     private function dropLegacyTables(): void
@@ -250,7 +277,13 @@ return new class extends Migration
 
     private function createLegacyKeysTable(): void
     {
-        Capsule::schema()->create(self::OLD_KEYS_TABLE, static function (Blueprint $table): void {
+        $schema = Capsule::schema();
+
+        if ($schema->hasTable(self::OLD_KEYS_TABLE)) {
+            return;
+        }
+
+        $schema->create(self::OLD_KEYS_TABLE, static function (Blueprint $table): void {
             $table->string('id', 32)->primary();
             $table->unsignedBigInteger('agent_id');
             $table->string('name', 100);
@@ -271,7 +304,9 @@ return new class extends Migration
      */
     private function copyAgentScopedKeysBack(): void
     {
-        if (!Capsule::schema()->hasTable(self::KEYS_TABLE)) {
+        $schema = Capsule::schema();
+
+        if (!$schema->hasTable(self::KEYS_TABLE) || !$schema->hasTable(self::OLD_KEYS_TABLE)) {
             return;
         }
 
@@ -281,8 +316,14 @@ return new class extends Migration
             ->orderBy('id')
             ->chunk(200, static function ($rows): void {
                 foreach ($rows as $row) {
+                    $id = (string) $row->id;
+
+                    if (Capsule::table(self::OLD_KEYS_TABLE)->where('id', $id)->exists()) {
+                        continue;
+                    }
+
                     Capsule::table(self::OLD_KEYS_TABLE)->insert([
-                        'id'           => (string) $row->id,
+                        'id'           => $id,
                         'agent_id'     => (int) $row->agent_id,
                         'name'         => (string) $row->name,
                         'secret_hash'  => (string) $row->secret_hash,
@@ -325,6 +366,13 @@ return new class extends Migration
         });
     }
 
+    /**
+     * The outbox rows of the keys that were put back.
+     *
+     * A callback owed by a group or global key is left behind: its key was
+     * not restored — the legacy table has no room for a group id or a scope
+     * — and the legacy outbox points at the legacy key table.
+     */
     private function copyCallbacksBack(): void
     {
         $schema = Capsule::schema();
@@ -333,26 +381,33 @@ return new class extends Migration
             return;
         }
 
-        Capsule::table(self::CALLBACKS_TABLE)->orderBy('id')->chunk(200, static function ($rows): void {
-            foreach ($rows as $row) {
-                Capsule::table(self::OLD_CALLBACKS_TABLE)->insert([
-                    'id'               => (int) $row->id,
-                    'chat_id'         => (int) $row->chat_id,
-                    'key_id'          => (string) $row->key_id,
-                    'agent_id'        => (int) $row->agent_id,
-                    'url'             => (string) $row->url,
-                    'pending_status'  => $row->pending_status,
-                    'delivered_status' => $row->delivered_status,
-                    'attempts'        => (int) $row->attempts,
-                    'next_attempt_at' => $row->next_attempt_at,
-                    'last_status_code' => $row->last_status_code === null ? null : (int) $row->last_status_code,
-                    'last_error'      => $row->last_error,
-                    'delivered_at'    => $row->delivered_at,
-                    'created_at'      => $row->created_at,
-                    'updated_at'      => $row->updated_at,
-                ]);
-            }
-        });
+        Capsule::table(self::CALLBACKS_TABLE)
+            ->whereIn('key_id', Capsule::table(self::OLD_KEYS_TABLE)->select('id'))
+            ->orderBy('id')
+            ->chunk(200, static function ($rows): void {
+                foreach ($rows as $row) {
+                    if (Capsule::table(self::OLD_CALLBACKS_TABLE)->where('id', $row->id)->exists()) {
+                        continue;
+                    }
+
+                    Capsule::table(self::OLD_CALLBACKS_TABLE)->insert([
+                        'id'               => (int) $row->id,
+                        'chat_id'         => (int) $row->chat_id,
+                        'key_id'          => (string) $row->key_id,
+                        'agent_id'        => (int) $row->agent_id,
+                        'url'             => (string) $row->url,
+                        'pending_status'  => $row->pending_status,
+                        'delivered_status' => $row->delivered_status,
+                        'attempts'        => (int) $row->attempts,
+                        'next_attempt_at' => $row->next_attempt_at,
+                        'last_status_code' => $row->last_status_code === null ? null : (int) $row->last_status_code,
+                        'last_error'      => $row->last_error,
+                        'delivered_at'    => $row->delivered_at,
+                        'created_at'      => $row->created_at,
+                        'updated_at'      => $row->updated_at,
+                    ]);
+                }
+            });
     }
 
     private function dropScopedTables(): void
