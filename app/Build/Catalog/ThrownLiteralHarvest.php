@@ -181,11 +181,8 @@ final class ThrownLiteralHarvest implements Harvest
         }
 
         $after = $tokens[$this->tokens->nextSignificantIndex($tokens, $cursor + 1)] ?? null;
-        // `)` and `,` are single-character tokens, not array tokens.
-        if ($after !== ')' && $after !== ',') {
-            return null;
-        }
 
-        return $token;
+        // `)` and `,` are single-character tokens, not array tokens.
+        return ($after === ')' || $after === ',') ? $token : null;
     }
 }

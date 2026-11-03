@@ -157,6 +157,7 @@ use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Services\MediaArchive\MediaFolderPaths;
 use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
@@ -583,6 +584,8 @@ final class ContainerDefinitions
             },
 
             MediaFolderService::class => \DI\autowire(),
+
+            MediaFolderPaths::class => \DI\autowire(),
 
             \Spora\Services\MediaArchive\MediaArchiveRetention::class => static fn(): \Spora\Services\MediaArchive\MediaArchiveRetention => new \Spora\Services\MediaArchive\MediaArchiveRetention(),
 

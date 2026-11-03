@@ -11,7 +11,6 @@ use Spora\Models\MediaFolder;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
-use Spora\Services\Text\Utf8Sanitizer;
 
 /**
  * The Media Archive's folder tree.
@@ -21,14 +20,11 @@ use Spora\Services\Text\Utf8Sanitizer;
  * rather than as forbidden — the caller has no business knowing it
  * exists.
  *
- * Two uniqueness rules are owned here and mirrored by database indexes:
- *
- *   - sibling names are unique — enforced by UNIQUE `(principal_id, path)`,
- *     because two siblings with the same name produce the same path;
- *   - filenames are unique within a folder — enforced by UNIQUE
- *     `(folder_id, filename)`. Assets in the root have a `NULL` folder, and
- *     a SQL unique index does not compare `NULL`s, so the root is not
- *     constrained.
+ * A folder's name and path are decided by {@see MediaFolderPaths}; the
+ * filename rule is owned here: filenames are unique within a folder,
+ * enforced by UNIQUE `(folder_id, filename)`. Assets in the root have a
+ * `NULL` folder, and a SQL unique index does not compare `NULL`s, so the
+ * root is not constrained.
  *
  * Both rules are checked before the write, and a write's own constraint
  * violation is converted into {@see MediaFolderUniquenessException}, so a
@@ -36,13 +32,9 @@ use Spora\Services\Text\Utf8Sanitizer;
  */
 final class MediaFolderService
 {
-    private const PATH_SEPARATOR = '/';
-
-    /** The longest a folder name may be, matching the column width. */
-    private const NAME_MAX_LENGTH = 255;
-
-    /** The longest a folder path may be, matching the column width. */
-    private const PATH_MAX_LENGTH = 512;
+    public function __construct(
+        private readonly MediaFolderPaths $paths = new MediaFolderPaths(),
+    ) {}
 
     /**
      * The principal's folders, flat, ordered by path.
@@ -101,11 +93,11 @@ final class MediaFolderService
      */
     public function create(int $principalId, string $name, ?string $parentId = null): MediaFolder
     {
-        $name = $this->assertName($name);
+        $name = $this->paths->assertName($name);
         $parent = $this->parentFor($principalId, $parentId);
-        $path = $this->pathFor($parent, $name);
+        $path = $this->paths->pathFor($parent, $name);
 
-        $this->assertPathFree($principalId, $path, []);
+        $this->paths->assertFree($principalId, $path, []);
 
         $folder = new MediaFolder();
         $folder->id = self::generateUuid();
@@ -129,12 +121,12 @@ final class MediaFolderService
     public function rename(int $principalId, string $folderId, string $name): MediaFolder
     {
         $folder = $this->requireFolder($principalId, $folderId);
-        $name = $this->assertName($name);
+        $name = $this->paths->assertName($name);
         $parent = $folder->parent_id !== null
             ? $this->parentFor($principalId, (string) $folder->parent_id)
             : null;
 
-        $this->repath($folder, $this->pathFor($parent, $name), $name);
+        $this->repath($folder, $this->paths->pathFor($parent, $name), $name);
 
         return $folder;
     }
@@ -165,7 +157,7 @@ final class MediaFolderService
         // The parent changes before the path is rewritten, so the single
         // save in `repath()` persists both.
         $folder->parent_id = $parent?->id;
-        $this->repath($folder, $this->pathFor($parent, (string) $folder->name), (string) $folder->name);
+        $this->repath($folder, $this->paths->pathFor($parent, (string) $folder->name), (string) $folder->name);
 
         return $folder;
     }
@@ -348,74 +340,6 @@ final class MediaFolderService
     }
 
     /**
-     * @throws MediaFolderValidationException
-     */
-    private function assertName(string $name): string
-    {
-        $name = trim(Utf8Sanitizer::scrubString($name));
-
-        if ($name === '') {
-            throw new MediaFolderValidationException('A folder name is required.');
-        }
-        if (mb_strlen($name) > self::NAME_MAX_LENGTH) {
-            throw new MediaFolderValidationException(sprintf(
-                'A folder name may not exceed %d characters.',
-                self::NAME_MAX_LENGTH,
-            ));
-        }
-        // A name is one path segment, never a path: the library reads a
-        // theme's name as a single segment, and a separator in it would
-        // make the folder's path ambiguous.
-        if (str_contains($name, self::PATH_SEPARATOR)) {
-            throw new MediaFolderValidationException(
-                'A folder name may not contain a "/" — it is one path segment, not a path.',
-            );
-        }
-
-        return $name;
-    }
-
-    /**
-     * @throws MediaFolderValidationException
-     */
-    private function pathFor(?MediaFolder $parent, string $name): string
-    {
-        $prefix = $parent !== null ? (string) $parent->path : '';
-        $path = $prefix . self::PATH_SEPARATOR . $name;
-
-        if (mb_strlen($path) > self::PATH_MAX_LENGTH) {
-            throw new MediaFolderValidationException(sprintf(
-                'The folder path may not exceed %d characters.',
-                self::PATH_MAX_LENGTH,
-            ));
-        }
-
-        return $path;
-    }
-
-    /**
-     * @param list<string> $exceptIds Folder ids whose own path does not count as a collision.
-     * @throws MediaFolderUniquenessException
-     */
-    private function assertPathFree(int $principalId, string $path, array $exceptIds): void
-    {
-        $query = MediaFolder::query()
-            ->where('principal_id', $principalId)
-            ->where('path', $path);
-
-        if ($exceptIds !== []) {
-            $query->whereNotIn('id', $exceptIds);
-        }
-
-        if ($query->exists()) {
-            throw new MediaFolderUniquenessException(sprintf(
-                'A folder already exists at "%s".',
-                $path,
-            ));
-        }
-    }
-
-    /**
      * Rewrite a folder's path and the paths of its descendants.
      *
      * The descendants' paths are recomputed from their names under the
@@ -430,9 +354,9 @@ final class MediaFolderService
         $descendants = $this->descendantsWithPaths($folder, $path);
         $exceptIds = array_merge([(string) $folder->id], array_keys($descendants));
 
-        $this->assertPathFree($principalId, $path, $exceptIds);
+        $this->paths->assertFree($principalId, $path, $exceptIds);
         foreach ($descendants as $descendant) {
-            $this->assertPathFree($principalId, $descendant['path'], $exceptIds);
+            $this->paths->assertFree($principalId, $descendant['path'], $exceptIds);
         }
 
         $folder->name = $name;
@@ -467,7 +391,7 @@ final class MediaFolderService
         while ($stack !== []) {
             [$parentId, $parentPath] = array_pop($stack);
             foreach ($byParent[$parentId] ?? [] as $child) {
-                $childPath = $parentPath . self::PATH_SEPARATOR . (string) $child->name;
+                $childPath = $parentPath . MediaFolderPaths::SEPARATOR . (string) $child->name;
                 $descendants[(string) $child->id] = [
                     'folder' => $child,
                     'path'   => $childPath,

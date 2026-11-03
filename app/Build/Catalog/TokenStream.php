@@ -101,11 +101,8 @@ final class TokenStream
         }
 
         $after = $tokens[$this->nextSignificantIndex($tokens, $cursor + 1)] ?? null;
-        if ($after !== ',' && $after !== ')') {
-            return null;
-        }
 
-        return $literal;
+        return ($after === ',' || $after === ')') ? $literal : null;
     }
 
     /**

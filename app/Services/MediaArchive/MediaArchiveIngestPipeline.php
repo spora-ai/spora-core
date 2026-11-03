@@ -304,9 +304,10 @@ final class MediaArchiveIngestPipeline
             return;
         }
 
+        $fallback = $existing->filename;
         $filename = $request->filename !== null
             ? Utf8Sanitizer::scrubString($request->filename)
-            : ($existing->filename === null ? null : (string) $existing->filename);
+            : $fallback;
 
         $this->folders->fileTarget($principalId, $folderId, $filename, (string) $existing->id);
     }
