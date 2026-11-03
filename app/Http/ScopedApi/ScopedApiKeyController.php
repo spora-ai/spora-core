@@ -47,6 +47,14 @@ final class ScopedApiKeyController
 
     private const MSG_NOT_GLOBAL_ADMIN = 'Only a global admin can manage global API keys.';
 
+    /**
+     * The OpenAPI description of a 403, which is not the message the 403
+     * carries — the spec describes the refusal, the envelope says it.
+     */
+    private const DESC_CANNOT_MANAGE_GROUP = 'The caller cannot manage this group.';
+
+    private const DESC_NOT_GLOBAL_ADMIN = 'The caller is not a global admin.';
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly GroupService $groupService,
@@ -59,7 +67,7 @@ final class ScopedApiKeyController
         tags: ['Groups'],
     )]
     #[OA\Response(response: 200, description: 'Key metadata. Secrets are never returned.')]
-    #[OA\Response(response: 403, description: 'The caller cannot manage this group.')]
+    #[OA\Response(response: 403, description: self::DESC_CANNOT_MANAGE_GROUP)]
     public function groupIndex(Request $request): JsonResponse
     {
         $denied = $this->guardGroup($request);
@@ -91,7 +99,7 @@ final class ScopedApiKeyController
         properties: [new OA\Property(property: 'name', type: 'string', maxLength: 100)],
     ))]
     #[OA\Response(response: 201, description: 'The key, with its plaintext secret. Shown once.')]
-    #[OA\Response(response: 403, description: 'The caller cannot manage this group.')]
+    #[OA\Response(response: 403, description: self::DESC_CANNOT_MANAGE_GROUP)]
     #[OA\Response(response: 422, description: 'The name was missing or too long.')]
     public function groupStore(Request $request): JsonResponse
     {
@@ -129,7 +137,7 @@ final class ScopedApiKeyController
         tags: ['Groups'],
     )]
     #[OA\Response(response: 200, description: 'Revoked. Idempotent — the same body whether or not the key existed.')]
-    #[OA\Response(response: 403, description: 'The caller cannot manage this group.')]
+    #[OA\Response(response: 403, description: self::DESC_CANNOT_MANAGE_GROUP)]
     public function groupDestroy(Request $request): JsonResponse
     {
         $denied = $this->guardGroup($request);
@@ -158,7 +166,7 @@ final class ScopedApiKeyController
         tags: ['Global-api'],
     )]
     #[OA\Response(response: 200, description: 'Key metadata. Secrets are never returned.')]
-    #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
+    #[OA\Response(response: 403, description: self::DESC_NOT_GLOBAL_ADMIN)]
     public function globalIndex(): JsonResponse
     {
         $denied = $this->guardGlobal();
@@ -188,7 +196,7 @@ final class ScopedApiKeyController
         properties: [new OA\Property(property: 'name', type: 'string', maxLength: 100)],
     ))]
     #[OA\Response(response: 201, description: 'The key, with its plaintext secret. Shown once.')]
-    #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
+    #[OA\Response(response: 403, description: self::DESC_NOT_GLOBAL_ADMIN)]
     #[OA\Response(response: 422, description: 'The name was missing or too long.')]
     public function globalStore(Request $request): JsonResponse
     {
@@ -225,7 +233,7 @@ final class ScopedApiKeyController
         tags: ['Global-api'],
     )]
     #[OA\Response(response: 200, description: 'Revoked. Idempotent — the same body whether or not the key existed.')]
-    #[OA\Response(response: 403, description: 'The caller is not a global admin.')]
+    #[OA\Response(response: 403, description: self::DESC_NOT_GLOBAL_ADMIN)]
     public function globalDestroy(Request $request): JsonResponse
     {
         $denied = $this->guardGlobal();
