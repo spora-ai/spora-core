@@ -72,11 +72,7 @@ final readonly class ListMediaQuery
      * Mirrors {@see MediaAssetKind::ALL} — the upload endpoint refuses a
      * kind this list does not hold, so the two have to stay in step.
      */
-    public const ALLOWED_KINDS = [
-        MediaAssetKind::ASSET,
-        MediaAssetKind::TEMPLATE,
-        MediaAssetKind::EXAMPLE,
-    ];
+    public const ALLOWED_KINDS = MediaAssetKind::ALL;
     /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
      *        (`?types=image,document`). Null means no filter. When set,

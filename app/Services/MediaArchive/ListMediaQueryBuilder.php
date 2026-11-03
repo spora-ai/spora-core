@@ -45,7 +45,7 @@ final class ListMediaQueryBuilder
                 // separately released package, so its spelling is the one
                 // in the field and both are accepted — dropping the alias
                 // would silently break the released panel's plugin chip.
-                self::firstOf($params->get('plugin_slug'), $params->get('plugin')),
+                self::firstOf($params->all()['plugin_slug'] ?? null, $params->all()['plugin'] ?? null),
             ),
             toolName: self::parseString($params->get('tool_name')),
             from: self::parseDate($params->get('from')),
@@ -54,7 +54,7 @@ final class ListMediaQueryBuilder
                 // `search` is the spelling the Media Archive panel sends;
                 // `q` is core's documented name. Same reasoning as the
                 // plugin filter above.
-                self::firstOf($params->get('q'), $params->get('search')),
+                self::firstOf($params->all()['q'] ?? null, $params->all()['search'] ?? null),
             ),
             sort: self::parseSort($params->get('sort')),
             uploadSource: self::parseUploadSource($params->get('source')),

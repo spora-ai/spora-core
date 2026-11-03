@@ -129,11 +129,14 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - `principal`: the per-asset ops accept any asset whose
  *     `asset->user_id === $context->ownerUserId` (direct upload by the
  *     principal's owner user) or whose attached agent belongs to the
- *     calling agent's principal. `search` falls through to the listing
- *     controller's principal-aware path.
- *   - `user` (legacy): kept as a silent alias for `principal` so existing
- *     `agent_tool_settings` rows keep working without a DB migration.
- *   - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
+ *     calling agent's principal. `search` lists the rows the principal's
+ *     agents hold.
+ *   - `user` (legacy): the per-asset ops treat it as an alias for
+ *     `principal` so existing `agent_tool_settings` rows keep working
+ *     without a DB migration; the listing narrows to the caller user's
+ *     own rows.
+ *   - Admins (`AuthService::isAdmin()`) bypass the scope check on the
+ *     per-asset ops.
  */
 #[Tool(
     name: 'media',
@@ -363,7 +366,7 @@ final class MediaTool extends AbstractTool
         $principalId = $context !== null ? $context->principalId : 0;
 
         return match ($operation) {
-            'search'            => $this->search($arguments, $agentId, $userId),
+            'search'            => $this->search($arguments, $agentId, $userId, $context),
             'get_media'         => $this->getMedia($arguments, $agentId, $userId, $context),
             'get_public_url'    => $this->getPublicUrl($arguments, $agentId, $userId, $context),
             'get_embed_code'    => $this->getEmbedCode($arguments, $agentId, $userId, $context),
@@ -400,7 +403,9 @@ final class MediaTool extends AbstractTool
                 ? sprintf('Media list_derivatives(%s)', $assetId)
                 : sprintf('Media list_derivatives(%s, format=%s)', $assetId, $format),
             'create_derivative' => sprintf('Media create_derivative(%s, format=%s)', $assetId, $format),
-            'create_media'      => sprintf('Media create_media(%s, mime=%s)', $filename, $mime),
+            'create_media'      => $folderId === ''
+                ? sprintf('Media create_media(%s, mime=%s)', $filename, $mime)
+                : sprintf('Media create_media(%s, mime=%s, folder=%s)', $filename, $mime, $folderId),
             'list_folders'      => 'Media list_folders',
             'create_folder'     => sprintf('Media create_folder(%s)', $name),
             'rename_folder'     => sprintf('Media rename_folder(%s, name=%s)', $folderId, $name),
@@ -414,9 +419,20 @@ final class MediaTool extends AbstractTool
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function search(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function search(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         $scope = $this->resolveScope($agentId, $userId);
+
+        // The principal scope narrows the listing to the calling
+        // principal's rows. Without it the DTO carries no owner filter at
+        // all, and the listing answers with every row in the archive.
+        $principalIds = null;
+        if ($scope === 'principal') {
+            if ($context === null || !$context->isResolvable()) {
+                return ToolResult::fail('The principal scope cannot be resolved for this call.');
+            }
+            $principalIds = [$context->principalId];
+        }
 
         $limit  = (int) ($arguments['limit'] ?? 24);
         $offset = (int) ($arguments['offset'] ?? 0);
@@ -432,6 +448,7 @@ final class MediaTool extends AbstractTool
             mediaType: $mediaTypeFilter,
             agentId: $scope === 'agent' ? $agentId : null,
             userId: $scope === 'user' && $userId !== null ? $userId : null,
+            principalIds: $principalIds,
             pluginSlug: isset($arguments['plugin_slug']) ? (string) $arguments['plugin_slug'] : null,
             // `mime_type` is accepted for LLM ergonomics (the assistant
             // usually has it on hand from prior tool results) but is NOT

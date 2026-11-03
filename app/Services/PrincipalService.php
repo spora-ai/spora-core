@@ -301,6 +301,12 @@ final class PrincipalService
             return [];
         }
 
+        // The table arrives with migration 0097; a schema that predates
+        // it has no folders to depend on.
+        if (!Capsule::schema()->hasTable('media_folders')) {
+            return [];
+        }
+
         $ids = Capsule::table('media_folders')
             ->whereIn('principal_id', $principalIds)
             ->pluck('id')

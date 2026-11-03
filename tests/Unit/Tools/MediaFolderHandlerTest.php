@@ -296,6 +296,28 @@ describe('MediaFolderHandler::file_asset', function (): void {
         expect($result->content)->toContain('theme.yml');
     });
 
+    it('refuses a blank folder_id rather than reading it as the root', function (): void {
+        // The tool's own parameter description says the root is
+        // expressed by omitting the key. A blank value is a malformed
+        // id, and reading it as the root un-files the asset — a write
+        // the caller never asked for.
+        $principalId = createUserPrincipalPublic(640);
+        $service = new MediaFolderService();
+        $folder = $service->create($principalId, 'Corporate');
+        $asset = folderHandlerAsset($principalId, 'theme.yml');
+        $service->fileAsset($principalId, $asset, (string) $folder->id);
+
+        $result = folderHandlerFor($principalId)->run(
+            'file_asset',
+            $principalId,
+            ['asset_id' => $asset->id, 'folder_id' => ''],
+        );
+
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('folder_id');
+        expect((string) $asset->fresh()?->folder_id)->toBe((string) $folder->id);
+    });
+
     it('moves an asset back to the root when no folder is named', function (): void {
         $principalId = createUserPrincipalPublic(638);
         $folder = (new MediaFolderService())->create($principalId, 'Corporate');
@@ -314,6 +336,36 @@ describe('MediaFolderHandler::file_asset', function (): void {
 });
 
 describe('MediaFolderHandler::search_assets', function (): void {
+    it('pages with offset, and names the offset the next page starts at', function (): void {
+        // `offset` is a declared parameter the op used to ignore, so every
+        // asset past the first page was unreachable.
+        $principalId = createUserPrincipalPublic(641);
+        $service = new MediaFolderService();
+        $folder = $service->create($principalId, 'Corporate');
+        foreach (['a.md', 'b.md', 'c.md'] as $name) {
+            $service->fileAsset($principalId, folderHandlerAsset($principalId, $name), (string) $folder->id);
+        }
+
+        $handler = folderHandlerFor($principalId);
+
+        $first = $handler->run('search_assets', $principalId, [
+            'folder_id' => (string) $folder->id,
+            'limit'     => 2,
+        ]);
+        $second = $handler->run('search_assets', $principalId, [
+            'folder_id' => (string) $folder->id,
+            'limit'     => 2,
+            'offset'    => 2,
+        ]);
+
+        expect($first->success)->toBeTrue();
+        expect($first->data['items'])->toHaveCount(2);
+        expect($first->content)->toContain('Showing 2 of 3');
+        expect($second->success)->toBeTrue();
+        expect($second->data['items'])->toHaveCount(1);
+        expect($second->data['items'][0]['id'])->not->toBe($first->data['items'][0]['id']);
+    });
+
     it('lists the assets inside a folder', function (): void {
         $principalId = createUserPrincipalPublic(639);
         $service = new MediaFolderService();

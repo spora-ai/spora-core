@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-20-geaedcdd7"
+        "version": "0.32.0-34-g27c4d424"
     },
     "servers": [
         {
@@ -2873,7 +2873,17 @@
                     "Media"
                 ],
                 "summary": "Index MediaFolder",
-                "parameters": [],
+                "parameters": [
+                    {
+                        "name": "principal_id",
+                        "in": "query",
+                        "description": "The principal whose folders are listed. Must be one of the caller's visible principals; anything else is a 404. The array-bracket form `principal_id[]=…` is accepted; only the first value is honoured.",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."

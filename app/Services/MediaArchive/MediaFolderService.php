@@ -262,6 +262,8 @@ final class MediaFolderService
     public function fileAsset(int $principalId, MediaAsset $asset, ?string $folderId): MediaAsset
     {
         if ($folderId === null || $folderId === '') {
+            $this->assertRootNameFree($principalId, $asset);
+
             $asset->folder_id = null;
             $asset->save();
 
@@ -285,6 +287,39 @@ final class MediaFolderService
         }
 
         return $asset;
+    }
+
+    /**
+     * The root is a namespace too: the rule the UNIQUE `(folder_id,
+     * filename)` index cannot enforce is enforced here.
+     *
+     * A SQL unique index does not compare `NULL`s, so the root — whose
+     * rows carry no folder — is outside the index's reach.
+     *
+     * @throws MediaFolderUniquenessException
+     */
+    private function assertRootNameFree(int $principalId, MediaAsset $asset): void
+    {
+        $filename = $asset->filename;
+        if ($filename === null || $filename === '') {
+            return;
+        }
+
+        $taken = MediaAsset::query()
+            ->whereNull('folder_id')
+            ->where('principal_id', $principalId)
+            ->where('filename', $filename);
+
+        if ((string) $asset->id !== '') {
+            $taken->where('id', '!=', (string) $asset->id);
+        }
+
+        if ($taken->exists()) {
+            throw new MediaFolderUniquenessException(sprintf(
+                'The library root already holds a file named "%s".',
+                $filename,
+            ));
+        }
     }
 
     /**
@@ -324,23 +359,28 @@ final class MediaFolderService
      */
     private function repath(MediaFolder $folder, string $path, string $name): void
     {
-        $principalId = (int) $folder->principal_id;
-        $descendants = $this->descendantsWithPaths($folder, $path);
-        $exceptIds = array_merge([(string) $folder->id], array_keys($descendants));
+        // A folder and its descendants are rewritten as one unit: a write
+        // that fails half way through would leave a subtree whose paths
+        // no longer follow from its root.
+        Capsule::connection()->transaction(function () use ($folder, $path, $name): void {
+            $principalId = (int) $folder->principal_id;
+            $descendants = $this->descendantsWithPaths($folder, $path);
+            $exceptIds = array_merge([(string) $folder->id], array_keys($descendants));
 
-        $this->paths->assertFree($principalId, $path, $exceptIds);
-        foreach ($descendants as $descendant) {
-            $this->paths->assertFree($principalId, $descendant['path'], $exceptIds);
-        }
+            $this->paths->assertFree($principalId, $path, $exceptIds);
+            foreach ($descendants as $descendant) {
+                $this->paths->assertFree($principalId, $descendant['path'], $exceptIds);
+            }
 
-        $folder->name = $name;
-        $folder->path = $path;
-        $this->saveFolder($folder);
+            $folder->name = $name;
+            $folder->path = $path;
+            $this->saveFolder($folder);
 
-        foreach ($descendants as $descendant) {
-            $descendant['folder']->path = $descendant['path'];
-            $this->saveFolder($descendant['folder']);
-        }
+            foreach ($descendants as $descendant) {
+                $descendant['folder']->path = $descendant['path'];
+                $this->saveFolder($descendant['folder']);
+            }
+        });
     }
 
     /**

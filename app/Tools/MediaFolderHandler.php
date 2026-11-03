@@ -171,6 +171,21 @@ final readonly class MediaFolderHandler
             return $asset;
         }
 
+        return $this->fileInFolder($principalId, $asset, $arguments);
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function fileInFolder(int $principalId, MediaAsset $asset, array $arguments): ToolResult
+    {
+        $raw = $arguments['folder_id'] ?? null;
+        if ($raw !== null && (!is_string($raw) || trim($raw) === '')) {
+            return ToolResult::fail(
+                'folder_id must be a folder id, or omitted to move the asset into the root.',
+            );
+        }
+
         $folderId = $this->readId($arguments, 'folder_id');
 
         $failure = $this->fileFailure($principalId, $asset, $folderId);
@@ -205,12 +220,13 @@ final readonly class MediaFolderHandler
             return ToolResult::fail(self::MSG_FOLDER_NOT_FOUND);
         }
 
-        $limit = max(1, min(ListMediaQuery::PER_PAGE_MAX, (int) ($arguments['limit'] ?? 24)));
-        $page = $this->archive->list(new ListMediaQuery(
+        $limit  = max(1, min(ListMediaQuery::PER_PAGE_MAX, (int) ($arguments['limit'] ?? 24)));
+        $offset = max(0, (int) ($arguments['offset'] ?? 0));
+        $page   = $this->archive->list(new ListMediaQuery(
             folderId: $folderId,
             principalIds: [$principalId],
             sort: ListMediaQuery::SORT_CREATED_DESC,
-            page: 1,
+            page: intdiv($offset, $limit) + 1,
             perPage: $limit,
         ));
 
@@ -225,10 +241,11 @@ final readonly class MediaFolderHandler
         ])->all();
 
         return ToolResult::ok(
-            MediaToolPresenter::folderAssets($items, $page->total(), $folderId),
+            MediaToolPresenter::folderAssets($items, $page->total(), $folderId, $offset),
             [
                 'folder_id' => $folderId,
                 'total'     => $page->total(),
+                'offset'    => $offset,
                 'items'     => $items,
             ],
         );

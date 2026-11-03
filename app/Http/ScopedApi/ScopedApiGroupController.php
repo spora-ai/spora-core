@@ -258,6 +258,19 @@ final class ScopedApiGroupController
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
+            if ($e->folderIds !== []) {
+                return new JsonResponse(
+                    [
+                        'error' => [
+                            'code' => 'GROUP_HAS_MEDIA_FOLDERS',
+                            'message' => $e->getMessage(),
+                            'folder_ids' => $e->folderIds,
+                        ],
+                    ],
+                    Response::HTTP_CONFLICT,
+                );
+            }
+
             return new JsonResponse(
                 [
                     'error' => [

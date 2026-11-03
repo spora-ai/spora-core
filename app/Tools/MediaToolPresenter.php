@@ -79,12 +79,17 @@ final class MediaToolPresenter
      *
      * @param list<array<string, mixed>> $items
      */
-    public static function folderAssets(array $items, int $total, string $folderId): string
+    public static function folderAssets(array $items, int $total, string $folderId, int $offset = 0): string
     {
         $lines = [sprintf('Found %d asset(s) in folder %s.', $total, $folderId)];
 
         foreach ($items as $item) {
             $lines[] = self::assetLine($item);
+        }
+
+        $hint = self::moreHint(count($items), $total, $offset, 'search_assets');
+        if ($hint !== '') {
+            $lines[] = $hint;
         }
 
         return implode("\n", $lines);
@@ -169,16 +174,17 @@ final class MediaToolPresenter
      * here — without the difference the model reads "Found 102" as "102
      * rows follow" and pages from the end of the list it was given.
      */
-    private static function moreHint(int $shown, int $total, int $offset): string
+    private static function moreHint(int $shown, int $total, int $offset, string $op = 'search'): string
     {
         if ($shown === 0 || $shown + $offset >= $total) {
             return '';
         }
 
         return sprintf(
-            'Showing %d of %d — call `search` again with offset: %d for the next %d.',
+            'Showing %d of %d — call `%s` again with offset: %d for the next %d.',
             $shown,
             $total,
+            $op,
             $offset + $shown,
             $shown,
         );

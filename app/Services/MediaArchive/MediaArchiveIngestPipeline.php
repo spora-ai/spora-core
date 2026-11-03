@@ -14,6 +14,7 @@ use Spora\Services\AssetTooLargeException;
 use Spora\Services\Exceptions\PrincipalMaterialisationException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
 use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 
@@ -50,6 +51,7 @@ final class MediaArchiveIngestPipeline
     /**
      * @throws InvalidArgumentException When the hex or base64 payload cannot be decoded.
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     public function ingest(MediaIngestRequest $request): MediaAsset
@@ -131,6 +133,7 @@ final class MediaArchiveIngestPipeline
     /**
      * @throws InvalidArgumentException When the hex or base64 payload cannot be decoded.
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
@@ -147,6 +150,10 @@ final class MediaArchiveIngestPipeline
         if ($bytes === null) {
             $sniffed = $this->urlResolver->sniffForExternal($request, $effectiveUrl);
             $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
+
+            $existing = $this->existingRow($request, $url);
+
+            $this->assertFilable($request, $existing);
 
             return $this->persist(
                 $request,
@@ -165,7 +172,7 @@ final class MediaArchiveIngestPipeline
                     principalId: $request->principalId,
                     uploadSource: $request->uploadSource,
                 ),
-                $this->existingRow($request, $url),
+                $existing,
             );
         }
 
@@ -179,6 +186,7 @@ final class MediaArchiveIngestPipeline
      * empty/corrupt payload.
      *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
@@ -261,7 +269,9 @@ final class MediaArchiveIngestPipeline
 
         $principalId = $request->principalId;
         if ($principalId === null) {
-            throw new MediaFolderNotFoundException(
+            // Not a missing folder: the row has no tenant to file it
+            // in, which the caller can fix.
+            throw new MediaFolderValidationException(
                 'The asset has no principal, so it cannot be filed in a media folder.',
             );
         }
@@ -357,6 +367,7 @@ final class MediaArchiveIngestPipeline
      * @param MediaAsset|null $existing The row to refresh, or null for a fresh insert.
      *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function persist(MediaIngestRequest $request, PersistedAssetFields $fields, ?MediaAsset $existing): MediaAsset
@@ -408,6 +419,13 @@ final class MediaArchiveIngestPipeline
      */
     private function applyFieldsToExisting(MediaAsset $existing, PersistedAssetFields $fields): void
     {
+        // The row keeps its folder, but its filename may change, so the
+        // write has to go through the service that owns the rule: a
+        // concurrent writer that took the name in between is a domain
+        // error, not a raw constraint violation.
+        $principalId = $existing->principal_id === null ? null : (int) $existing->principal_id;
+        $folderId = $existing->folder_id === null ? null : (string) $existing->folder_id;
+
         $existing->fill([
             'mime_type' => $fields->sniffedMime,
             'media_type' => $fields->mediaType->value,
@@ -424,11 +442,19 @@ final class MediaArchiveIngestPipeline
             'principal_id' => $fields->principalId ?? $existing->principal_id,
             'upload_source' => $fields->uploadSource ?: ($existing->upload_source ?? 'tool'),
         ]);
-        $existing->save();
+
+        if ($principalId === null || $folderId === null || $folderId === '') {
+            $existing->save();
+
+            return;
+        }
+
+        $this->folders->fileAsset($principalId, $existing, $folderId);
     }
 
     /**
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function insertNew(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
@@ -516,6 +542,7 @@ final class MediaArchiveIngestPipeline
      * 500 where the rule says 422.
      *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function fileInFolder(MediaAsset $asset, MediaIngestRequest $request, bool $hasFolderColumn): MediaAsset

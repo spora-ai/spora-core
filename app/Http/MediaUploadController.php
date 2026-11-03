@@ -10,6 +10,7 @@ use Spora\Core\Config;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveRetention;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -77,6 +78,7 @@ final class MediaUploadController
         $isTemporary = $this->parseBool($request->request->get('is_temporary'));
         $folderId = $this->readString($request->request->get('folder_id'));
         $kind = $this->readString($request->request->get('kind'));
+        $kind = $kind !== null ? strtolower($kind) : null;
 
         $asset = $this->ingestChecked(new MediaIngestRequest(
             bytes: $bytes,
@@ -148,6 +150,15 @@ final class MediaUploadController
             return $this->error(
                 Response::HTTP_UNPROCESSABLE_ENTITY,
                 'FOLDER_FILENAME_TAKEN',
+                $e->getMessage(),
+            );
+        } catch (MediaFolderValidationException $e) {
+            // The upload named a folder but carries no principal, so
+            // it cannot be filed — a field the server refuses, not a
+            // folder that is missing.
+            return $this->error(
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'VALIDATION_ERROR',
                 $e->getMessage(),
             );
         }

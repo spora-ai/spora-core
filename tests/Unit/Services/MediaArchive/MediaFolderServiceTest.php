@@ -331,6 +331,19 @@ describe('MediaFolderService::fileAsset', function (): void {
         expect($asset->fresh()?->folder_id)->toBeNull();
     });
 
+    it('refuses a filename the root already holds', function (): void {
+        // The root is a namespace too. The UNIQUE `(folder_id,
+        // filename)` index cannot enforce it — a SQL unique index does
+        // not compare `NULL`s — so the service does.
+        $principalId = createUserPrincipalPublic(566);
+        $service = folderService();
+        $service->fileAsset($principalId, folderTestAsset($principalId, 'theme.yml'), null);
+        $second = folderTestAsset($principalId, 'theme.yml');
+
+        expect(fn() => $service->fileAsset($principalId, $second, null))
+            ->toThrow(MediaFolderUniquenessException::class);
+    });
+
     it('refuses a filename the folder already holds', function (): void {
         $principalId = createUserPrincipalPublic(563);
         $service = folderService();

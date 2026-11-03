@@ -16,6 +16,7 @@ use Spora\Models\MediaDerivative;
 use Spora\Models\MediaFolder;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -188,6 +189,7 @@ final class MediaArchiveService
      * @throws InvalidArgumentException When `hex`/`base64` decoding fails.
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
      */
     public function ingest(MediaIngestRequest $request): MediaAsset
     {

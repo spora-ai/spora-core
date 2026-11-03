@@ -229,7 +229,7 @@ Five ops ask the operator to approve each call, because each hands out durable s
 
 Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `list_folders`, `file_asset`, `search_assets` — is enabled and auto-approved, so there is no prompt to wait on and nothing to justify up front. `create_derivative` is a write too, but it only creates a row derived from a parent the calling agent owns, and its idempotency is a DB-enforced UNIQUE index.
 
-An operator can narrow any op's approval for a given agent in the dashboard, and can widen it onto an op that ships auto-approved — `search` and `file_asset` write and move rows, so an operator who does not want their agent renaming folders unattended will turn the folder mutations on for that agent. **Read the live state with `read_agent` (or `get_available_tools`) when you need to know which ops are gated on this install; the table above is the shipped default, not a promise about this agent.**
+An operator can narrow any op's approval for a given agent in the dashboard, and can widen it onto an op that ships auto-approved — `file_asset` moves a row between folders and `create_media` writes one with no natural key, so an operator who does not want their agent filing and renaming unattended will turn those ops on for that agent. **Read the live state with `read_agent` (or `get_available_tools`) when you need to know which ops are gated on this install; the table above is the shipped default, not a promise about this agent.**
 
 If a call does come back as an approval request, that is the gate working: make the call once, state in one line what asset and why ("render report.pdf to PNG for inline preview"), and do not retry it in a loop.
 

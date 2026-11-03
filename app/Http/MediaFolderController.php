@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Closure;
+use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaFolder;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
@@ -57,6 +58,13 @@ final class MediaFolderController
         private readonly PrincipalService $principalService,
     ) {}
 
+    #[OA\Parameter(
+        name: 'principal_id',
+        in: 'query',
+        required: false,
+        description: 'The principal whose folders are listed. Must be one of the caller\'s visible principals; anything else is a 404. The array-bracket form `principal_id[]=…` is accepted; only the first value is honoured.',
+        schema: new OA\Schema(type: 'integer'),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -67,7 +75,7 @@ final class MediaFolderController
         return $this->respond(function () use ($request, $userId): JsonResponse {
             $principalId = $this->resolvePrincipalId(
                 $userId,
-                $this->readPrincipalId($request->query->get('principal_id')),
+                $this->readPrincipalId($request->query->all()['principal_id'] ?? null),
                 null,
             );
 
@@ -284,6 +292,11 @@ final class MediaFolderController
 
     private function readPrincipalId(mixed $raw): ?int
     {
+        // The bracket form (`principal_id[]=…`) is the panel's convention
+        // for a repeated id, so the value arrives as an array.
+        if (is_array($raw)) {
+            $raw = reset($raw);
+        }
         if (is_int($raw)) {
             return $raw;
         }
