@@ -65,11 +65,11 @@ Want a **clean** markdown snippet only — no asset header, no extracted text? U
 
 `get_media`, `get_embed_code`, `create_media` and `create_derivative` all render the same asset identically. The type decides the shape:
 
-- **Image** — markdown image: `![quarterly-report.png](/api/v1/assets/0b8a…f31c.png)`
+- **Image** — a markdown image: the filename as the alt text, the asset url as the target.
 - **Audio** — an `<audio>` element: `<audio controls preload="metadata" src="/api/v1/assets/0b8a…f31c.mp3"></audio>`
 - **Video** — a `<video>` element, with the width and height when the archive knows them: `<video controls playsinline width="1280" height="720" src="/api/v1/assets/0b8a…f31c.mp4"></video>`
 - **Document** (`text/*` and `application/*` — Markdown, PDF, CSV, JSON, XML, YAML, HTML, plus anything a plugin's converter registers) — the download card below.
-- **Anything else** — a plain markdown link: `[notes](/api/v1/assets/0b8a…f31c)`
+- **Anything else** — a plain markdown link: the label in square brackets, the asset url as the target.
 
 Echo the block **verbatim** for all four shapes. The `src` / `href` is the session-authenticated `/api/v1/assets/<uuid>` route, so a click forces a download; to hand the user an externally shareable link, use `get_public_url`.
 
