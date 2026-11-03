@@ -124,7 +124,7 @@ it('leaves a ToolSetting label and its option labels in English and translates i
 
     expect($scope['label'])->toBe('Library scope')
         ->and($scope['options'])->toBe(['agent' => 'Only media created by this agent', 'principal' => 'All media owned by the calling agent\'s principal (direct uploads + every agent of the principal)'])
-        ->and($scope['description'])->toBe('Legt fest, welche Zeilen in media_assets das Tool lesen darf.');
+        ->and($scope['description'])->toBe('Legt fest, welche Zeilen in media_assets die Lese- und Schreiboperationen der Medien sehen. Die Ordneroperationen arbeiten auf dem Baum des Principals und ignorieren die Einstellung.');
 });
 
 it('translates an app display name and description', function (): void {

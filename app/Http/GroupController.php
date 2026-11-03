@@ -28,7 +28,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   GET    /api/v1/groups/{id}            — show one group
  *   POST   /api/v1/groups                 — create (admin-only); creator becomes owner + group-principal is materialised
  *   PATCH  /api/v1/groups/{id}            — update (admin-only)
- *   DELETE /api/v1/groups/{id}            — destroy (admin OR group owner); 409 if agents still reference the group-principal
+ *   DELETE /api/v1/groups/{id}            — destroy (admin OR group owner); 409 if agents or media folders still reference the group-principal
  *   GET    /api/v1/groups/{id}/agents     — list agents whose principal_id matches the group's group-principal
  *
  * DELETE is the one write that *isn't* AdminMiddleware-only — the
@@ -299,7 +299,9 @@ final class GroupController
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
-            return $this->conflictWithDependents($e->getMessage(), $e->agentIds);
+            return $e->folderIds !== []
+                ? $this->conflictWithFolderDependents($e->getMessage(), $e->folderIds)
+                : $this->conflictWithDependents($e->getMessage(), $e->agentIds);
         }
         return null;
     }
@@ -320,6 +322,29 @@ final class GroupController
                     'message' => $message,
                     'agent_ids' => $agentIds,
                     'reassign_endpoint' => \Spora\Core\RouteDefinitions::ROUTE_AGENTS_TRANSFER,
+                ],
+            ],
+            Response::HTTP_CONFLICT,
+        );
+    }
+
+    /**
+     * Build the 409 response when the group still owns media folders.
+     *
+     * A folder is not an agent: the transfer endpoint cannot re-target
+     * one, so the hint points at the folder route instead.
+     *
+     * @param  list<string> $folderIds
+     */
+    private function conflictWithFolderDependents(string $message, array $folderIds): JsonResponse
+    {
+        return new JsonResponse(
+            [
+                'error' => [
+                    'code'    => 'GROUP_HAS_MEDIA_FOLDERS',
+                    'message' => $message,
+                    'folder_ids' => $folderIds,
+                    'folders_endpoint' => \Spora\Core\RouteDefinitions::ROUTE_MEDIA_FOLDER_ITEM,
                 ],
             ],
             Response::HTTP_CONFLICT,

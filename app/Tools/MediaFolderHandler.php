@@ -22,8 +22,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  * sits at Sonar's per-class method budget.
  *
  * The tree belongs to the principal, so every operation is scoped to the
- * calling principal: a folder or an asset of another principal is
- * reported as missing rather than as forbidden.
+ * calling principal: a folder or an asset of another principal is never
+ * named as forbidden — the answer is an absent folder or an empty
+ * listing — so there is no oracle to probe with.
  *
  * The assistant may **discover** folders, **shape** them (create, rename,
  * delete) and **file** assets in them. It may not **re-parent** a folder:

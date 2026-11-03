@@ -167,6 +167,7 @@ final class MediaArchiveIngestPipeline
                     principalId: $request->principalId,
                     uploadSource: $request->uploadSource,
                 ),
+                $this->existingRow($request, $url),
             );
         }
 
@@ -192,6 +193,10 @@ final class MediaArchiveIngestPipeline
         // the asset as an image.
         $finalMime = $extracted->mime !== null && $extracted->mime !== '' ? $extracted->mime : $sniffed;
 
+        $existing = $this->existingRow($request, $sourceUrl);
+
+        $this->assertFilable($request, $existing);
+
         $reference = $this->storeAsset($bytes, $finalMime, $request->filename);
 
         $asset = $this->persist(
@@ -212,6 +217,7 @@ final class MediaArchiveIngestPipeline
                 principalId: $request->principalId,
                 uploadSource: $request->uploadSource,
             ),
+            $existing,
         );
 
         if ($reference->mode === 'data_url') {
@@ -226,6 +232,100 @@ final class MediaArchiveIngestPipeline
         }
 
         return $asset;
+    }
+
+    /**
+     * The folder rule, checked before the bytes are stored.
+     *
+     * The blob lands before the row, so a filing the folder rule refuses
+     * would leave a blob no row points at — and nothing sweeps it. The
+     * check runs against the filing the row will end up carrying: an
+     * idempotent re-ingest keeps the row's own folder and only refreshes
+     * its filename, so the rule is checked against that folder, with the
+     * row's own id excluded from the filename check.
+     *
+     * The rule is enforced again by {@see MediaFolderService::fileAsset()},
+     * which also converts a concurrent writer's constraint violation into
+     * the same domain error.
+     *
+     * A refresh is judged against the folder the row already carries, not
+     * against the request's: the request's `folder_id` does not move an
+     * existing row, so it is the row's own folder the new filename lands
+     * in.
+     *
+     * @param MediaAsset|null $existing The row the ingest would update, if any.
+     *
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
+    private function assertFilable(MediaIngestRequest $request, ?MediaAsset $existing): void
+    {
+        if ($existing !== null) {
+            $this->assertExistingRowFilable($existing, $request);
+
+            return;
+        }
+
+        if ($request->folderId === null || $request->folderId === '') {
+            return;
+        }
+
+        $principalId = $request->principalId;
+        if ($principalId === null) {
+            throw new MediaFolderNotFoundException(
+                'The asset has no principal, so it cannot be filed in a media folder.',
+            );
+        }
+
+        // The filename the row carries is the scrubbed one, not the raw
+        // request — the rule is checked against the string that lands.
+        $filename = $request->filename !== null
+            ? Utf8Sanitizer::scrubString($request->filename)
+            : null;
+
+        $this->folders->fileTarget($principalId, $request->folderId, $filename);
+    }
+
+    /**
+     * The rule for an idempotent re-ingest.
+     *
+     * The row keeps its own folder and only its filename is refreshed, so
+     * the rule is checked against that folder — with the row's own id
+     * excluded, or the row would collide with itself.
+     */
+    private function assertExistingRowFilable(MediaAsset $existing, MediaIngestRequest $request): void
+    {
+        $folderId = (string) ($existing->folder_id ?? '');
+        $principalId = $existing->principal_id === null ? null : (int) $existing->principal_id;
+
+        // A row without a principal never sat in a folder — the filing
+        // needs one — so there is no rule to check.
+        if ($folderId === '' || $principalId === null) {
+            return;
+        }
+
+        $filename = $request->filename !== null
+            ? Utf8Sanitizer::scrubString($request->filename)
+            : ($existing->filename === null ? null : (string) $existing->filename);
+
+        $this->folders->fileTarget($principalId, $folderId, $filename, (string) $existing->id);
+    }
+
+    /**
+     * The row an ingest would update, if the dedup key names one.
+     *
+     * The lookup happens once, before the bytes are stored:
+     * {@see findExisting()} has a side effect — it mints an
+     * `asset_token` for a row that has none — and the row the folder
+     * rule judges has to be the row the write touches.
+     */
+    private function existingRow(MediaIngestRequest $request, ?string $sourceUrl): ?MediaAsset
+    {
+        if ($request->toolCallId === null || $sourceUrl === null) {
+            return null;
+        }
+
+        return $this->findExisting($request->toolCallId, $sourceUrl);
     }
 
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
@@ -260,20 +360,24 @@ final class MediaArchiveIngestPipeline
     }
 
     /**
+     * The row the ingest writes to.
+     *
+     * Idempotent upsert on (tool_call_id, source_url). The dedup key is
+     * the upstream CDN URL the caller asked us to archive, not the
+     * opaque /api/v1/assets/<uuid> form we rewrite at insert time. The
+     * caller resolved the row before the bytes were stored, so it is
+     * handed down rather than looked up again here.
+     *
+     * @param MediaAsset|null $existing The row to refresh, or null for a fresh insert.
+     *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
      * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
-    private function persist(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
+    private function persist(MediaIngestRequest $request, PersistedAssetFields $fields, ?MediaAsset $existing): MediaAsset
     {
-        // Idempotent upsert on (tool_call_id, source_url). The dedup key
-        // is the upstream CDN URL the caller asked us to archive, not the
-        // opaque /api/v1/assets/<uuid> form we rewrite at insert time.
-        if ($request->toolCallId !== null && $fields->sourceUrl !== null) {
-            $existing = $this->findExisting($request->toolCallId, $fields->sourceUrl);
-            if ($existing !== null) {
-                $this->applyFieldsToExisting($existing, $fields);
-                return $existing;
-            }
+        if ($existing !== null) {
+            $this->applyFieldsToExisting($existing, $fields);
+            return $existing;
         }
 
         return $this->insertNew($request, $fields);

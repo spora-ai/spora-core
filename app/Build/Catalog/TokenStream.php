@@ -79,6 +79,11 @@ final class TokenStream
     }
 
     /**
+     * The format string of a `sprintf()` call.
+     *
+     * The format has to be a lone literal: a concatenated one
+     * (`'a' . 'b'`) is an expression, and half of it is not a message.
+     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return ?array{0: int, 1: string, 2: int}
      */
@@ -92,6 +97,11 @@ final class TokenStream
         $cursor = $this->nextSignificantIndex($tokens, $cursor + 1);
         $literal = $tokens[$cursor] ?? null;
         if (!is_array($literal) || $literal[0] !== T_CONSTANT_ENCAPSED_STRING) {
+            return null;
+        }
+
+        $after = $tokens[$this->nextSignificantIndex($tokens, $cursor + 1)] ?? null;
+        if ($after !== ',' && $after !== ')') {
             return null;
         }
 

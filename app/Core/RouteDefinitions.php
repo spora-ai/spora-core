@@ -63,6 +63,8 @@ use Spora\OpenApi\RouteSpecCollector;
 final class RouteDefinitions
 {
     public const ROUTE_MEDIA_ITEM = '/api/v1/media/{id}';
+    public const ROUTE_MEDIA_FOLDERS = '/api/v1/media/folders';
+    public const ROUTE_MEDIA_FOLDER_ITEM = '/api/v1/media/folders/{id}';
 
     public const ROUTE_AGENTS_ID = '/api/v1/agents/{id}';
     public const ROUTE_AGENTS_TRANSFER = '/api/v1/agents/{id}/transfer';
@@ -342,14 +344,15 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
 
         // Media folders — core owns the folder table, so core owns its
-        // CRUD. The operator creates, renames, moves and deletes folders;
-        // the agent may only file an asset into one (see
-        // `Spora\Tools\MediaFolderTool`). Which status a domain error
-        // becomes is the controller's decision, not the router's.
-        $r->addRoute('GET', '/api/v1/media/folders', [MediaFolderController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('POST', '/api/v1/media/folders', [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('PATCH', '/api/v1/media/folders/{id}', [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
-        $r->addRoute('DELETE', '/api/v1/media/folders/{id}', [MediaFolderController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        // CRUD. The folder operations live on the `media` tool
+        // (`Spora\Tools\MediaTool`): the assistant may create, rename and
+        // delete a folder — each one approval-gated — and file assets in
+        // one, but it may not re-parent a folder. Which status a domain
+        // error becomes is the controller's decision, not the router's.
+        $r->addRoute('GET', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'index'], [AuthMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_MEDIA_FOLDER_ITEM, [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_MEDIA_FOLDER_ITEM, [MediaFolderController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Public, token-gated media access. No auth middleware — the token
         // itself is the credential. The id is always a UUID shape; the

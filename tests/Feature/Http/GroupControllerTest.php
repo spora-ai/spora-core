@@ -328,7 +328,7 @@ describe('GroupController success paths', function (): void {
         simulateLoggedInSession($userId, 'gc5k@example.com');
         $group = $groupService->createGroup($userId, 'Busy');
         $ps->ensureGroupPrincipal((int) $group->id);
-        Illuminate\Database\Capsule\Manager::table('agents')->insert([
+        $agentId = (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
             'principal_id'           => (int) $ps->principalForGroup((int) $group->id)->id,
             'name'                   => 'Still Attached',
             'description'            => null,
@@ -342,9 +342,44 @@ describe('GroupController success paths', function (): void {
         $response = $controller->destroy($group->id);
         expect($response->getStatusCode())->toBe(409);
         $body = json_decode($response->getContent(), true);
-        expect($body['error']['code'])->toBe('GROUP_HAS_AGENTS');
-        expect($body['error']['agent_ids'])->not->toBeEmpty();
-        expect($body['error']['reassign_endpoint'])->toBe('/api/v1/agents/{id}/transfer');
+
+        // The whole envelope, byte for byte: a folder blocker was added
+        // next to the agent one, and the agent payload must not have
+        // drifted with it.
+        expect($body['error'])->toBe([
+            'code'              => 'GROUP_HAS_AGENTS',
+            'message'           => "Group {$group->id} cannot be deleted while it owns 1 agent(s).",
+            'agent_ids'         => [$agentId],
+            'reassign_endpoint' => '/api/v1/agents/{id}/transfer',
+        ]);
+    });
+
+    it('destroy returns 409 with the folder ids when the group still owns a media folder', function (): void {
+        // A folder is not an agent: the transfer endpoint cannot
+        // re-target one, so the hint points at the folder route and the
+        // agent payload is absent.
+        [$controller, $auth, $groupService, $ps] = makeGroupController();
+        $userId = bootAuth($auth, 'gc5l@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($userId, 'gc5l@example.com');
+        $group = $groupService->createGroup($userId, 'Curated');
+        $principal = $ps->ensureGroupPrincipal((int) $group->id);
+        $folder = (new Spora\Services\MediaArchive\MediaFolderService())->create(
+            (int) $principal->id,
+            'Corporate',
+        );
+
+        $response = $controller->destroy($group->id);
+        expect($response->getStatusCode())->toBe(409);
+        $body = json_decode($response->getContent(), true);
+
+        expect($body['error'])->toBe([
+            'code'             => 'GROUP_HAS_MEDIA_FOLDERS',
+            'message'          => "Group {$group->id} cannot be deleted while it owns 1 media folder(s).",
+            'folder_ids'       => [(string) $folder->id],
+            'folders_endpoint' => '/api/v1/media/folders/{id}',
+        ]);
+        expect($body['error'])->not->toHaveKey('agent_ids');
+        expect($body['error'])->not->toHaveKey('reassign_endpoint');
     });
 
     it('destroy returns 401 when no user is logged in', function (): void {
