@@ -279,6 +279,32 @@ describe('OpenAPI specification generation', function (): void {
         expect($content->properties[0]->items->properties[1]->enum)->toBe(['approve', 'reject']);
     });
 
+    it('documents the Agent API request bodies a caller has to send', function (): void {
+        $json = json_decode((string) json_encode(openApiTestSpec()), true);
+
+        // The `prompt` alias is accepted by `AgentApiChatController::requiredText()`
+        // but was absent from the spec, so the published request schema told a
+        // caller that a field the endpoint reads was not a field.
+        foreach (['/api/v1/agent-api/chats', '/api/v1/agent-api/chats/{chatId}/messages'] as $path) {
+            $properties = $json['paths'][$path]['post']['requestBody']['content']['application/json']['schema']['properties'];
+
+            expect($properties)->toHaveKey('text');
+            expect($properties)->toHaveKey('prompt');
+        }
+
+        // The upload answers 400 without a file, so the file part is required.
+        $upload = $json['paths']['/api/v1/agent-api/media']['post']['requestBody']['content']['multipart/form-data']['schema'];
+
+        expect($upload['required'])->toContain('file');
+
+        // The Agent API decides the same call shapes as the task API, so it
+        // documents the same decision fields rather than a bare "object".
+        $decisions = $json['paths']['/api/v1/agent-api/chats/{chatId}/approve']['post']['requestBody']['content']['application/json']['schema']['properties']['decisions'];
+
+        expect($decisions['items']['required'])->toContain('provider_call_id', 'decision');
+        expect($decisions['items']['properties']['decision']['enum'])->toBe(['approve', 'reject']);
+    });
+
     it('tags operations by the first /api/v1/ segment', function (): void {
         $spec = openApiTestSpec();
 

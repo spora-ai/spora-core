@@ -38,8 +38,25 @@ final class AgentApiChatActionController
 
     #[OA\Post(path: '/api/v1/agent-api/chats/{chatId}/approve', summary: 'Approve pending tool calls', tags: ['Agent-api'])]
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
+        type: 'object',
         required: ['decisions'],
-        properties: [new OA\Property(property: 'decisions', type: 'array', items: new OA\Items(type: 'object'))],
+        properties: [
+            new OA\Property(
+                property: 'decisions',
+                type: 'array',
+                minItems: 1,
+                items: new OA\Items(
+                    type: 'object',
+                    required: ['provider_call_id', 'decision'],
+                    properties: [
+                        new OA\Property(property: 'provider_call_id', type: 'string'),
+                        new OA\Property(property: 'decision', type: 'string', enum: ['approve', 'reject']),
+                        new OA\Property(property: 'arguments', type: 'object', description: 'Required when decision is approve.', additionalProperties: true),
+                        new OA\Property(property: 'reason', type: 'string', description: 'Optional when decision is reject.'),
+                    ],
+                ),
+            ),
+        ],
     ))]
     #[OA\Response(response: 202, description: 'Approval recorded; the chat is queued again.')]
     #[OA\Response(response: 404, description: AgentApiScope::ERR_NO_SUCH_CHAT)]
