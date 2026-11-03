@@ -307,8 +307,15 @@ final class MediaFolderService
 
         $taken = MediaAsset::query()
             ->whereNull('folder_id')
-            ->where('principal_id', $principalId)
             ->where('filename', $filename);
+
+        // A row with no principal is its own namespace, the same way the
+        // create path reads it.
+        if ($principalId > 0) {
+            $taken->where('principal_id', $principalId);
+        } else {
+            $taken->whereNull('principal_id');
+        }
 
         if ((string) $asset->id !== '') {
             $taken->where('id', '!=', (string) $asset->id);
