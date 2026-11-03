@@ -187,7 +187,7 @@ final class SettingDeclarations
                 section: 'access',
                 description: 'Mounts a per-group HTTP API so external tools can manage the agents and chats of one group. '
                     . self::WORKER_MODE_CAVEAT
-                    . 'A group\'s keys are minted by its owners and admins, under the group\'s Settings → API keys.',
+                    . 'A group\'s keys are minted by its owners and admins, under the group\'s Settings → Developer access.',
             ),
             new SettingDefinition(
                 key: 'SPORA_GLOBAL_API',
