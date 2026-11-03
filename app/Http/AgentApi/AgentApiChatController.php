@@ -85,10 +85,13 @@ final class AgentApiChatController
     }
 
     #[OA\Post(path: '/api/v1/agent-api/chats', summary: 'Start a chat with this agent', tags: ['Agent-api'])]
+    // `required` can name only one field, and `text` is the one the endpoint
+    // prefers; `prompt` is a fallback it also reads — see `requiredText()`.
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
         required: ['text'],
         properties: [
-            new OA\Property(property: 'text', type: 'string', description: 'The user message.'),
+            new OA\Property(property: 'text', type: 'string', description: 'The user message. `prompt` may be sent instead.'),
+            new OA\Property(property: 'prompt', type: 'string', description: 'Alias for `text`.'),
             new OA\Property(property: 'media_ids', type: 'array', items: new OA\Items(type: 'string')),
             new OA\Property(property: 'files', type: 'array', items: new OA\Items(type: 'object'), description: 'Inline attachments as data URLs.'),
             new OA\Property(property: 'callback_url', type: 'string', format: 'uri'),
@@ -239,10 +242,13 @@ final class AgentApiChatController
     }
 
     #[OA\Post(path: '/api/v1/agent-api/chats/{chatId}/messages', summary: 'Continue a chat', tags: ['Agent-api'])]
+    // The `text`/`prompt` pair is read by `requiredText()`; see the start
+    // endpoint for why the spec names `text` as the required one.
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
         required: ['text'],
         properties: [
-            new OA\Property(property: 'text', type: 'string'),
+            new OA\Property(property: 'text', type: 'string', description: 'The follow-up message. `prompt` may be sent instead.'),
+            new OA\Property(property: 'prompt', type: 'string', description: 'Alias for `text`.'),
             new OA\Property(property: 'media_ids', type: 'array', items: new OA\Items(type: 'string')),
             new OA\Property(property: 'additional_steps', type: 'integer'),
         ],

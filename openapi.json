@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-7-g2c1a70ca"
+        "version": "0.32.0-14-g4478ebf1"
     },
     "servers": [
         {
@@ -3522,7 +3522,11 @@
                                 ],
                                 "properties": {
                                     "text": {
-                                        "description": "The user message.",
+                                        "description": "The user message. `prompt` may be sent instead.",
+                                        "type": "string"
+                                    },
+                                    "prompt": {
+                                        "description": "Alias for `text`.",
                                         "type": "string"
                                     },
                                     "media_ids": {
@@ -3659,6 +3663,11 @@
                                 ],
                                 "properties": {
                                     "text": {
+                                        "description": "The follow-up message. `prompt` may be sent instead.",
+                                        "type": "string"
+                                    },
+                                    "prompt": {
+                                        "description": "Alias for `text`.",
                                         "type": "string"
                                     },
                                     "media_ids": {
@@ -3760,10 +3769,37 @@
                                     "decisions": {
                                         "type": "array",
                                         "items": {
+                                            "required": [
+                                                "provider_call_id",
+                                                "decision"
+                                            ],
+                                            "properties": {
+                                                "provider_call_id": {
+                                                    "type": "string"
+                                                },
+                                                "decision": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "approve",
+                                                        "reject"
+                                                    ]
+                                                },
+                                                "arguments": {
+                                                    "description": "Required when decision is approve.",
+                                                    "type": "object",
+                                                    "additionalProperties": true
+                                                },
+                                                "reason": {
+                                                    "description": "Optional when decision is reject.",
+                                                    "type": "string"
+                                                }
+                                            },
                                             "type": "object"
-                                        }
+                                        },
+                                        "minItems": 1
                                     }
-                                }
+                                },
+                                "type": "object"
                             }
                         }
                     }
@@ -3900,6 +3936,9 @@
                     "content": {
                         "multipart/form-data": {
                             "schema": {
+                                "required": [
+                                    "file"
+                                ],
                                 "properties": {
                                     "file": {
                                         "type": "string",
