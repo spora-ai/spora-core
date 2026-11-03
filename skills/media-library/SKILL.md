@@ -141,7 +141,7 @@ A folder name is **one path segment, never a path**: `parent_id` names the folde
 
 `file_asset` fails when the folder already holds a file with that name — pick another name or another folder rather than retrying. `search_assets` needs a `folder_id`; call `list_folders` first when you do not have one.
 
-All six are scoped to your principal: an asset or folder of another principal is reported as missing, so there is nothing to probe for.
+All six are scoped to your principal: another principal's folder or asset is never named as forbidden — the answer is an absent folder or an empty listing, and an empty listing is indistinguishable from an empty folder — so there is nothing to probe for.
 
 **You may not move a folder into another folder.** `MediaFolderService::move()` rewrites the path of a whole subtree, and there is no operation for it — create the folder under the parent you want instead.
 

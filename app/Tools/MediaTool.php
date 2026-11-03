@@ -162,7 +162,7 @@ use Spora\Tools\ValueObjects\ToolResult;
         'principal' => 'All media owned by the calling agent\'s principal '
                      . '(direct uploads + every agent of the principal)',
     ],
-    description: 'Controls which media_assets rows the tool can read.',
+    description: 'Controls which media_assets rows the media read/write operations see. The folder operations work on the principal\'s tree and ignore it.',
 )]
 #[ToolOperation(
     name: 'search',
