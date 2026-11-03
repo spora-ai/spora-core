@@ -151,7 +151,8 @@ final class ScopedApiChatController
     #[OA\Response(response: 404, description: ApiKeyChatAccess::ERR_NO_SUCH_CHAT)]
     public function messages(Request $request, int $chatId): JsonResponse
     {
-        $task = $this->loadChat(ApiKeyContext::fromRequest($request), $chatId);
+        $context = ApiKeyContext::fromRequest($request);
+        $task = $this->loadChat($context, $chatId);
 
         if ($task instanceof JsonResponse) {
             return $task;
@@ -163,6 +164,7 @@ final class ScopedApiChatController
                     (int) $task->id,
                     $this->queryInt($request, 'since_sequence'),
                     $this->config->getString('SPORA_APP_URL'),
+                    $context->scope,
                 ),
             ],
         ]);

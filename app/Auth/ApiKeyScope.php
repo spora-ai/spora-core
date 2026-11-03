@@ -33,6 +33,18 @@ enum ApiKeyScope: string
     case Global = 'global';
 
     /**
+     * The bearer surface a key of this scope drives.
+     *
+     * The route definitions build their paths on the scope's name —
+     * `/api/v1/agent-api`, `/api/v1/group-api`, `/api/v1/global-api` — so a
+     * URL handed to a caller names the surface that will accept it.
+     */
+    public function surfacePrefix(): string
+    {
+        return '/api/v1/' . $this->value . '-api';
+    }
+
+    /**
      * @throws InvalidArgumentException when the target does not match the scope
      */
     public function assertConsistent(?int $agentId, ?int $groupId): void

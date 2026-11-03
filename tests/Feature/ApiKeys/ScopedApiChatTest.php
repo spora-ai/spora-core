@@ -137,6 +137,30 @@ describe('chats on the group surface', function (): void {
         expect($response->getStatusCode())->toBe(202);
     });
 
+    it('points an attachment at the group surface', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-attachment');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = ScopedApiTestSupport::chatWithAttachment($group);
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+
+        $attachments = ScopedApiTestSupport::data($response)['messages'][0]['attachments'];
+
+        // The link has to name the surface the key drives: a group key
+        // cannot read an agent key's media, so an agent-api link is dead.
+        expect($attachments[0]['url'])->toContain('/api/v1/group-api/media/');
+    });
+
     it('404s a chat of another group rather than 403', function (): void {
         $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
         $group = AgentApiTestSupport::seedGroup('chat-other');
@@ -275,5 +299,28 @@ describe('chats on the global surface', function (): void {
 
         expect($response->getStatusCode())->toBe(200);
         expect(ScopedApiTestSupport::data($response)['chats'])->toBe([]);
+    });
+
+    it('points an attachment at the global surface', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('global-chat-attachment');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-chat');
+
+        $chatId = ScopedApiTestSupport::chatWithAttachment($group);
+
+        $response = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GLOBAL_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+
+        $attachments = ScopedApiTestSupport::data($response)['messages'][0]['attachments'];
+
+        // A global key reads the global surface's media, and only that one.
+        expect($attachments[0]['url'])->toContain('/api/v1/global-api/media/');
     });
 });

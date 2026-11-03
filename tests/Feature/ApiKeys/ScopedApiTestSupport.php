@@ -7,6 +7,8 @@ namespace Tests\Feature\ApiKeys;
 use Psr\Container\ContainerInterface;
 use Spora\Http\Middleware\GlobalApiKeyMiddleware;
 use Spora\Http\Middleware\GroupApiKeyMiddleware;
+use Spora\Models\Task;
+use Spora\Models\TaskHistory;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -134,5 +136,32 @@ final class ScopedApiTestSupport
     public static function pngBytes(): string
     {
         return "\x89PNG\r\n\x1a\n" . str_repeat("\0", 64);
+    }
+
+    /**
+     * A completed chat of one of the group's agents, carrying one
+     * attachment.
+     *
+     * @param array{agentIds: list<int>, principalId: int} $group
+     */
+    public static function chatWithAttachment(array $group, string $mediaId = 'm-1'): int
+    {
+        $chatId = (int) Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'look',
+            'final_response' => 'Here it is.',
+        ])->id;
+
+        TaskHistory::create([
+            'task_id' => $chatId,
+            'sequence' => 0,
+            'role' => 'user',
+            'content' => 'look',
+            'attachments' => [['media_id' => $mediaId, 'kind' => 'image']],
+        ]);
+
+        return $chatId;
     }
 }

@@ -305,7 +305,7 @@ describe('Agent API media', function (): void {
         // caller receives is the resolved URL, which is the part that can be
         // wrong even when the stored row looks fine.
         $messages = (new \Spora\Services\ApiKeys\ApiKeyChatProjection())
-            ->messages($chatId, null, 'https://spora.test');
+            ->messages($chatId, null, 'https://spora.test', \Spora\Auth\ApiKeyScope::Agent);
 
         $refs = $messages[0]['attachments'];
         expect($refs)->toHaveCount(1);
