@@ -47,6 +47,7 @@ final class AgentApiMediaController
                 mediaType: 'multipart/form-data',
                 schema: new OA\Schema(
                     type: 'object',
+                    required: ['file'],
                     properties: [
                         new OA\Property(property: 'file', type: 'string', format: 'binary'),
                     ],
