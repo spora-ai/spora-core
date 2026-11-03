@@ -27,15 +27,22 @@ use Spora\Tools\MediaTool;
  *   - `list_derivatives`  : enabled_by_default = true,  requires_approval_by_default = false
  *   - `create_derivative` : enabled_by_default = true,  requires_approval_by_default = false
  *   - `create_media`      : enabled_by_default = true,  requires_approval_by_default = true
- *   - The discriminator `enum` in the generated JSON schema lists all eight
- *     operations (the orchestrator narrows the enum per-agent).
- *   - All eight are enabled by default, so an agent with no override row sees
- *     the full matrix. Exactly two ask for approval, and each for a reason
- *     about durability rather than reads: `get_public_url` mints a link that
- *     outlives the session, and `create_media` is the one write with no
- *     natural key, so a retry duplicates the row and a loop spams the
- *     archive — nothing in the database stops either. The other six are reads
- *     or writes the agent could already make against assets it owns, and
+ *   - `list_folders`      : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `create_folder`     : enabled_by_default = true,  requires_approval_by_default = true
+ *   - `rename_folder`     : enabled_by_default = true,  requires_approval_by_default = true
+ *   - `delete_folder`     : enabled_by_default = true,  requires_approval_by_default = true
+ *   - `file_asset`        : enabled_by_default = true,  requires_approval_by_default = false
+ *   - `search_assets`     : enabled_by_default = true,  requires_approval_by_default = false
+ *   - The discriminator `enum` in the generated JSON schema lists all
+ *     fourteen operations (the orchestrator narrows the enum per-agent).
+ *   - All fourteen are enabled by default, so an agent with no override row
+ *     sees the full matrix. Exactly five ask for approval, and each for a
+ *     reason about durability rather than reads: `get_public_url` mints a
+ *     link that outlives the session, `create_media` is the one write with
+ *     no natural key, so a retry duplicates the row and a loop spams the
+ *     archive — nothing in the database stops either — and the three folder
+ *     mutations change a tree the operator curates. The rest are reads or
+ *     writes the agent could already make against assets it owns, and
  *     `create_derivative`'s idempotency is a DB-enforced UNIQUE index.
  *     Matches `enabledByDefault` in
  *     {@see ToolDefinitionBuilder::buildToolDefinitions()}.
@@ -108,9 +115,18 @@ describe('MediaTool attributes', function (): void {
         expect($tool->description)->toContain('media library');
     });
 
-    it('declares exactly the eight expected operations', function (): void {
+    it('declares exactly the fourteen expected operations', function (): void {
+        // The eight media operations and the six folder ones. The
+        // folders were a second tool (`media_folders`) until
+        // `create_media` grew a `folder_id` — the assistant had to know
+        // two tools to file one file.
         $names = array_map(static fn(ToolOperation $op) => $op->name, mediaToolOperations());
-        expect($names)->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'create_media']);
+        expect($names)->toBe([
+            'search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source',
+            'list_derivatives', 'create_derivative', 'create_media',
+            'list_folders', 'create_folder', 'rename_folder', 'delete_folder',
+            'file_asset', 'search_assets',
+        ]);
     });
 
     it('marks search as enabled by default and auto-approved', function (): void {
@@ -176,13 +192,35 @@ describe('MediaTool attributes', function (): void {
         expect(mediaToolOpByName('create_derivative')->requiresApprovalByDefault)->toBeFalse();
     });
 
-    it('gates on approval for get_public_url and create_media alone', function (): void {
+    it('marks the folder reads and the move as auto-approved', function (): void {
+        // Listing the tree, listing a folder's assets and filing an
+        // asset into a folder change nothing that is not already there.
+        foreach (['list_folders', 'search_assets', 'file_asset'] as $name) {
+            $op = mediaToolOpByName($name);
+            expect($op->enabledByDefault)->toBeTrue()
+                ->and($op->requiresApprovalByDefault)->toBeFalse();
+        }
+    });
+
+    it('marks the three folder mutations as requiring approval', function (): void {
+        // A new folder, a renamed path and a deleted folder are state
+        // the agent cannot undo, and they land in a tree the operator
+        // curates.
+        foreach (['create_folder', 'rename_folder', 'delete_folder'] as $name) {
+            $op = mediaToolOpByName($name);
+            expect($op->enabledByDefault)->toBeTrue()
+                ->and($op->requiresApprovalByDefault)->toBeTrue();
+        }
+    });
+
+    it('gates on approval for the writes the agent cannot undo', function (): void {
         // The invariant behind the per-op assertions above, stated once so a
         // future operation cannot quietly join the approval set: enabling an op
         // is cheap to undo from the dashboard, but an approval prompt nobody
         // expects is a stall on every turn. So the approval set stays exactly
         // the operations that create state the agent cannot undo — a link that
-        // outlives the session, or a row with no idempotency key.
+        // outlives the session, a row with no idempotency key, or a change
+        // to a structure the operator curates.
         $ops = mediaToolOperations();
 
         $approving = array_values(array_map(
@@ -190,7 +228,10 @@ describe('MediaTool attributes', function (): void {
             array_filter($ops, static fn(ToolOperation $op): bool => $op->requiresApprovalByDefault),
         ));
 
-        expect($approving)->toBe(['get_public_url', 'create_media']);
+        expect($approving)->toBe([
+            'get_public_url', 'create_media',
+            'create_folder', 'rename_folder', 'delete_folder',
+        ]);
     });
 
     it('enables every operation by default', function (): void {
@@ -231,19 +272,24 @@ describe('MediaTool attributes', function (): void {
 });
 
 describe('MediaTool parameter schema', function (): void {
-    it('synthesizes an "action" discriminator with the eight operations in its enum', function (): void {
+    it('synthesizes an "action" discriminator with the fourteen operations in its enum', function (): void {
         $tool = buildMediaToolForSchema();
 
         $schema = $tool->getParametersSchema();
         expect($schema['type'])->toBe('object');
         expect($schema['properties'])->toHaveKey('action');
         expect($schema['properties']['action']['type'])->toBe('string');
-        expect($schema['properties']['action']['enum'])->toBe(['search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'create_media']);
+        expect($schema['properties']['action']['enum'])->toBe([
+            'search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source',
+            'list_derivatives', 'create_derivative', 'create_media',
+            'list_folders', 'create_folder', 'rename_folder', 'delete_folder',
+            'file_asset', 'search_assets',
+        ]);
     });
 });
 
 describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
-    it('exposes all eight operations when no per-agent override exists', function (): void {
+    it('exposes all fourteen operations when no per-agent override exists', function (): void {
         // No AgentToolOperationOverride rows for this agent. Every op declares
         // `enabledByDefault: true`, so the full matrix is exposed — including
         // `get_public_url`, which is exposed but still asks for approval.
@@ -270,6 +316,12 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
             'list_derivatives',
             'create_derivative',
             'create_media',
+            'list_folders',
+            'create_folder',
+            'rename_folder',
+            'delete_folder',
+            'file_asset',
+            'search_assets',
         ]);
     });
 
@@ -326,6 +378,12 @@ describe('MediaTool wiring via ToolDefinitionBuilder', function (): void {
             'list_derivatives',
             'create_derivative',
             'create_media',
+            'list_folders',
+            'create_folder',
+            'rename_folder',
+            'delete_folder',
+            'file_asset',
+            'search_assets',
         ]);
     });
 

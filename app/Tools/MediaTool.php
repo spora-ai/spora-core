@@ -107,6 +107,29 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           lands. Operators who have decided they trust
  *                           their agent with this can drop it per-agent via
  *                           a `requiresApprovalByDefault` override.
+ *   - `list_folders`       — the principal's folders: `id`, `name`, `path`,
+ *                           `parent_id`, `asset_count`.
+ *   - `create_folder`      — create a folder in the principal's tree, under
+ *                           an optional parent. Sibling names are unique.
+ *                           Approval-gated by default: it adds a row to a
+ *                           tree the operator curates.
+ *   - `rename_folder`      — rename a folder; the path of the folder and of
+ *                           its subfolders follows. Approval-gated by
+ *                           default, like the other two mutations.
+ *   - `delete_folder`      — delete a folder. Its assets fall back to the
+ *                           root; its subfolders go with it. Approval-gated
+ *                           by default.
+ *   - `file_asset`         — file an asset into a folder, or back into the
+ *                           root. A folder already holding that filename
+ *                           refuses it.
+ *   - `search_assets`      — the assets inside one folder.
+ *
+ * The folder operations were a second tool (`media_folders`) until the
+ * media tool's own `create_media` grew a `folder_id`: the boundary was
+ * already crossed, so the assistant had to know two tools to file one
+ * file. They are one tool now, and the folder operations keep the
+ * principal's scope they always had — the tree belongs to the principal,
+ * not to the calling agent.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -124,7 +147,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, embed, share, and produce media library content (images, audio, video, documents). See the media-library skill for operation matrix, scope rules, and asset_id chaining.',
+    description: 'Search, retrieve, embed, share, and produce media library content (images, audio, video, documents), and organise it in folders. See the media-library skill for operation matrix, scope rules, and asset_id chaining.',
     category: 'data',
     icon: 'image',
     recommendsSkills: ['media-library'],
@@ -190,6 +213,45 @@ use Spora\Tools\ValueObjects\ToolResult;
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
+#[ToolOperation(
+    name: 'list_folders',
+    description: 'List the media folders of your principal — name, path and how many assets each holds.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'create_folder',
+    description: 'Create a media folder under an optional parent. Sibling names are unique, so a name that is taken here is refused.',
+    operatorDescription: 'Create a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'rename_folder',
+    description: 'Rename a media folder. The path of the folder and of its subfolders follows the new name.',
+    operatorDescription: 'Rename a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'delete_folder',
+    description: 'Delete a media folder. Its assets fall back to the root; its subfolders go with it.',
+    operatorDescription: 'Delete a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'file_asset',
+    description: 'File a media asset into a folder (or back into the root). Filenames are unique within a folder.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'search_assets',
+    description: 'List the assets inside one folder.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(
     name: 'mime_type',
@@ -209,7 +271,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, and create_derivative (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative'])]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, and file_asset (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset'])]
 #[ToolParameter(
     name: 'format',
     type: 'string',
@@ -243,7 +305,19 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(
     name: 'folder_id',
     type: 'string',
-    description: 'UUID of the media folder to file the new asset in, for `create_media`. Omit it to file the asset in the root. Filenames are unique within a folder — a name the folder already holds is refused. Ignored by every other op; use the `media_folders` tool to file an existing asset.',
+    description: 'UUID of the media folder. For `create_media`: the folder to file the new asset in — omit it to file the asset in the root. For `file_asset`: the folder to file the asset in — omit it to move it back into the root. For `search_assets`: the folder to list. Required for `search_assets`, `rename_folder` and `delete_folder`. Filenames are unique within a folder — a name the folder already holds is refused.',
+    required: ['search_assets', 'rename_folder', 'delete_folder'],
+)]
+#[ToolParameter(
+    name: 'name',
+    type: 'string',
+    description: 'The name of the folder for `create_folder` and `rename_folder`. One path segment, never a path — a name carrying a separator is refused.',
+    required: ['create_folder', 'rename_folder'],
+)]
+#[ToolParameter(
+    name: 'parent_id',
+    type: 'string',
+    description: 'UUID of the folder to create the new folder under, for `create_folder`. Omit it to create the folder in the root. A parent of another principal is refused.',
     required: false,
 )]
 final class MediaTool extends AbstractTool
@@ -278,6 +352,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaSourceReader $sourceReader,
         private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly MediaCreateHandler $createHandler,
+        private readonly MediaFolderHandler $folderHandler,
         private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
     ) {}
@@ -291,6 +366,11 @@ final class MediaTool extends AbstractTool
         $userId = $context?->ownerUserId;
         $operation = $this->getOperationName($arguments);
 
+        // The folder operations work on the principal's tree, which is
+        // not the calling agent's media — the scope setting below says
+        // nothing about it.
+        $principalId = $context !== null ? $context->principalId : 0;
+
         return match ($operation) {
             'search'            => $this->search($arguments, $agentId, $userId),
             'get_media'         => $this->getMedia($arguments, $agentId, $userId, $context),
@@ -303,7 +383,9 @@ final class MediaTool extends AbstractTool
             // handler extraction exists to keep this class under the
             // per-method budget, and a 21st method would undo it.
             'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
-            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, or create_media.'),
+            'list_folders', 'create_folder', 'rename_folder', 'delete_folder', 'file_asset', 'search_assets'
+                => $this->folderHandler->run($operation, $principalId, $arguments),
+            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, create_media, list_folders, create_folder, rename_folder, delete_folder, file_asset, or search_assets.'),
         };
     }
 
@@ -314,6 +396,8 @@ final class MediaTool extends AbstractTool
         $format   = (string) ($arguments['format'] ?? '');
         $filename = (string) ($arguments['filename'] ?? '');
         $mime     = (string) ($arguments['mime_type'] ?? '');
+        $folderId = (string) ($arguments['folder_id'] ?? '');
+        $name     = (string) ($arguments['name'] ?? '');
 
         return match ($op) {
             'search'            => 'Media library search',
@@ -326,6 +410,12 @@ final class MediaTool extends AbstractTool
                 : sprintf('Media list_derivatives(%s, format=%s)', $assetId, $format),
             'create_derivative' => sprintf('Media create_derivative(%s, format=%s)', $assetId, $format),
             'create_media'      => sprintf('Media create_media(%s, mime=%s)', $filename, $mime),
+            'list_folders'      => 'Media list_folders',
+            'create_folder'     => sprintf('Media create_folder(%s)', $name),
+            'rename_folder'     => sprintf('Media rename_folder(%s, name=%s)', $folderId, $name),
+            'delete_folder'     => sprintf('Media delete_folder(%s)', $folderId),
+            'file_asset'        => sprintf('Media file_asset(%s, folder=%s)', $assetId, $folderId),
+            'search_assets'     => sprintf('Media search_assets(folder=%s)', $folderId),
             default             => sprintf('Media %s', $op),
         };
     }

@@ -207,7 +207,7 @@ use Spora\Tools\CalculatorTool;
 use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\MediaCreateHandler;
 use Spora\Tools\MediaDerivativeHandler;
-use Spora\Tools\MediaFolderTool;
+use Spora\Tools\MediaFolderHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
@@ -780,7 +780,6 @@ final class ContainerDefinitions
                 AgentTool::class,
                 SkillTool::class,
                 MediaTool::class,
-                MediaFolderTool::class,
                 TodoTool::class,
                 AskUserQuestionTool::class,
                 ScheduleTool::class,
@@ -1647,13 +1646,14 @@ final class ContainerDefinitions
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),
                     $c->get(MediaCreateHandler::class),
+                    $c->get(MediaFolderHandler::class),
                     $c->get(Config::class),
                     $c->get(ToolConfigService::class),
                 );
             },
 
-            MediaFolderTool::class => static function (ContainerInterface $c): MediaFolderTool {
-                return new MediaFolderTool(
+            MediaFolderHandler::class => static function (ContainerInterface $c): MediaFolderHandler {
+                return new MediaFolderHandler(
                     $c->get(MediaFolderService::class),
                     $c->get(MediaArchiveService::class),
                 );

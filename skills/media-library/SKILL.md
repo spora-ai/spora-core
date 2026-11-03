@@ -1,19 +1,17 @@
 ---
 name: media-library
-description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library. Trigger on any of: 'show this asset', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, and the size/mime constraints that decide between inline-bytes and public-URL retrieval."
+description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library, and organise them in folders. Trigger on any of: 'show this asset', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', 'file this in a folder', 'create a folder for these documents', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, the size/mime constraints that decide between inline-bytes and public-URL retrieval, and how the folder tree is shaped."
 license: MIT
 compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
   author: spora-ai
   version: "1.0"
-allowed-tools: media media_folders
+allowed-tools: media
 ---
 
 # Media library
 
-Eight operations on a single `media` tool: `search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, and `create_media`. The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
-
-A second tool, `media_folders`, carries the folder surface: `list_folders`, `file_asset`, and `search_assets`. See "Folders" below.
+Fourteen operations on a single `media` tool: the eight that read and produce media (`search`, `get_media`, `get_embed_code`, `get_public_url`, `get_source`, `list_derivatives`, `create_derivative`, `create_media`) and the six that organise it in folders (`list_folders`, `create_folder`, `rename_folder`, `delete_folder`, `file_asset`, `search_assets`). The body of this skill is what the per-op `description:` lines on the tool no longer have room to say — pick the right op, chain `asset_id`s correctly, and respect the size/mime gates.
 
 ## Operation matrix
 
@@ -26,11 +24,17 @@ A second tool, `media_folders`, carries the folder surface: `list_folders`, `fil
 | `get_source` | true | false | Read text bytes or extracted markdown |
 | `list_derivatives` | true | false | Derivative rows for a parent asset |
 | `create_derivative` | true | false | Fresh derivative, idempotent on (parent, format, producer_plugin, producer_operation) |
-| `create_media` | true | false | New source asset from authored text, **not idempotent** |
+| `create_media` | true | **true** | New source asset from authored text, **not idempotent** |
+| `list_folders` | true | false | The principal's folders |
+| `create_folder` | true | **true** | A new folder in the principal's tree |
+| `rename_folder` | true | **true** | A renamed folder; the path follows |
+| `delete_folder` | true | **true** | A deleted folder; its assets fall back to the root |
+| `file_asset` | true | false | An asset filed into a folder, or back into the root |
+| `search_assets` | true | false | The assets inside one folder |
 
-All eight are on by default, so a `media` call needs no prior opt-in. `get_public_url` is the only op that asks the operator to approve each call — it is the one that mints a link which keeps working outside the session. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
+All fourteen are on by default, so a `media` call needs no prior opt-in. Five ops ask the operator to approve each call — `get_public_url`, `create_media`, `create_folder`, `rename_folder` and `delete_folder` — because each of them changes durable state the agent cannot undo. Every other op reads or writes a row the calling agent already owns, under the same `scope` rules as `get_media`.
 
-If a call to `get_public_url` comes back as an approval request rather than a URL, that is the gate working. Do not retry it in a loop, and do not try to route around it with `get_media` — the embed it returns is a session-authenticated `/api/v1/assets/<uuid>` path, not a shareable link.
+If a call to `get_public_url` comes back as an approval request rather than a URL, that is the gate working. Do not retry it in a loop, and do not try to route around it with `get_media` — the embed it returns is a session-authenticated `/api/v1/assets/<uuid>` path, not a shareable link. The same is true of `create_media` and of the three folder mutations: an approval request is the gate, not a failure.
 
 An operator can still disable an op or clear its approval per-agent in the dashboard; that narrows what you are offered without a code change.
 
@@ -122,17 +126,28 @@ Two specific chains worth memorising:
 
 The media library has folders. A folder belongs to the principal, carries a name and a path (`/Corporate`, `/Corporate/2026`), and holds assets. Two rules are enforced by the database: **sibling folders have unique names**, and **filenames are unique within a folder**.
 
-**You may not create, rename, move or delete folders.** The operator curates the tree — the folders API (`POST /api/v1/media/folders`) is theirs, not yours. What you may do is work inside the tree:
+The tree is yours to shape: you may create a folder, rename one and delete one, and you may file assets in it.
 
-| Op | What it does |
-| --- | --- |
-| `list_folders` | The principal's folders: `id`, `name`, `path`, `parent_id`, `asset_count` |
-| `file_asset` | File an asset into a folder (`asset_id` + `folder_id`); omit `folder_id` to move it back to the root |
-| `search_assets` | The assets inside one folder (`folder_id`) |
+| Op | What it does | Approval |
+| --- | --- | --- |
+| `list_folders` | The principal's folders: `id`, `name`, `path`, `parent_id`, `asset_count` | auto |
+| `create_folder` | Create a folder (`name`, optional `parent_id`) | **asks** |
+| `rename_folder` | Rename a folder (`folder_id` + `name`); the path of its subfolders follows | **asks** |
+| `delete_folder` | Delete a folder; its assets fall back to the root, its subfolders go with it | **asks** |
+| `file_asset` | File an asset into a folder (`asset_id` + `folder_id`); omit `folder_id` to move it back into the root | auto |
+| `search_assets` | The assets inside one folder (`folder_id`) | auto |
 
-`file_asset` fails when the folder already holds a file with that name — pick another name or another folder rather than retrying. `search_assets` needs a `folder_id`; call `list_folders` first when you do not have one. Both are scoped to your principal: an asset or folder of another principal is reported as missing, so there is nothing to probe for.
+A folder name is **one path segment, never a path**: `parent_id` names the folder to sit under, and a name carrying a separator is refused. A sibling name that is taken is refused too — pick another name rather than retrying.
+
+`file_asset` fails when the folder already holds a file with that name — pick another name or another folder rather than retrying. `search_assets` needs a `folder_id`; call `list_folders` first when you do not have one.
+
+All six are scoped to your principal: an asset or folder of another principal is reported as missing, so there is nothing to probe for.
+
+**You may not move a folder into another folder.** `MediaFolderService::move()` rewrites the path of a whole subtree, and there is no operation for it — create the folder under the parent you want instead.
 
 `create_media` takes an optional `folder_id` too, so a new asset can be filed as it is written. Same rule: a name the folder already holds is refused. Without a `folder_id` the asset lands in the root — file it afterwards with `file_asset` when it belongs to one.
+
+**A folder you need may not exist yet.** When the request names a folder the tree does not have, `create_folder` it first — under the parent the request implies — and then file the asset into it. The assistant can shape the tree; it is not limited to the folders the operator laid down before the task.
 
 ## Kinds
 
@@ -160,7 +175,13 @@ To iterate on the content, call `get_source` on the existing asset, edit, then `
 
 ## Approval
 
-Only `get_public_url` asks the operator to approve each call, because it is the one operation that hands out a durable public link to stored bytes. Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `create_media` — is enabled and auto-approved, so there is no prompt to wait on and nothing to justify up front. `create_derivative` and `create_media` are writes, but they only create rows derived from, or owned by, the calling agent, and both show up in the operator's media library.
+Five ops ask the operator to approve each call, because each hands out durable state the agent cannot undo:
+
+- `get_public_url` — a public link to stored bytes that keeps working outside the session.
+- `create_media` — a new source asset with no natural key, so a retry duplicates the row and a loop has no ceiling.
+- `create_folder`, `rename_folder`, `delete_folder` — a change to the tree the operator curates.
+
+Every other op — `search`, `get_media`, `get_embed_code`, `get_source`, `list_derivatives`, `create_derivative`, `list_folders`, `file_asset`, `search_assets` — is enabled and auto-approved, so there is no prompt to wait on and nothing to justify up front. `create_derivative` is a write too, but it only creates a row derived from a parent the calling agent owns, and its idempotency is a DB-enforced UNIQUE index.
 
 An operator can narrow any op's approval for a given agent in the dashboard. If a call does come back as an approval request, that is the gate working: make the call once, state in one line what asset and why ("render report.pdf to PNG for inline preview"), and do not retry it in a loop.
 

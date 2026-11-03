@@ -344,6 +344,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
+            makeMediaFolderHandlerForTest($ctx['service']),
             $config ?? new Spora\Core\Config(),
             $toolConfigService,
         );
@@ -396,7 +397,25 @@ if (!function_exists('buildMediaToolForSchema')) {
             $sourceReader,
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
+            makeMediaFolderHandlerForTest($ctx['service']),
             new Spora\Core\Config(),
+        );
+    }
+}
+
+if (!function_exists('makeMediaFolderHandlerForTest')) {
+    /**
+     * The folder handler for a test's MediaTool.
+     *
+     * The folder service needs no collaborators beyond the database, so
+     * the handler is built from the archive service the test already has.
+     */
+    function makeMediaFolderHandlerForTest(
+        Spora\Services\MediaArchive\MediaArchiveService $archive,
+    ): Spora\Tools\MediaFolderHandler {
+        return new Spora\Tools\MediaFolderHandler(
+            new Spora\Services\MediaArchive\MediaFolderService(),
+            $archive,
         );
     }
 }
