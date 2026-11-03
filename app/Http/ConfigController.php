@@ -47,6 +47,10 @@ final class ConfigController
             // section and the page's warning — hiding it would leave them no
             // way to see that the surface is answering 404 in that mode.
             'agent_api_enabled'     => $this->config->getBool('SPORA_AGENT_API'),
+            // The same, for the group's API keys section and the global
+            // keys page.
+            'group_api_enabled'     => $this->config->getBool('SPORA_GROUP_API'),
+            'global_api_enabled'    => $this->config->getBool('SPORA_GLOBAL_API'),
             // Pre-login the SPA has no user preference to fetch, so this is
             // the only thing telling it which language the instance is in.
             // Without it the first paint is English on a German install.

@@ -17,6 +17,7 @@ use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\AgentTemplates\AgentTemplateAgentCreator;
+use Spora\AgentTemplates\AgentTemplateAgentUpdater;
 use Spora\AgentTemplates\AgentTemplateExporter;
 use Spora\AgentTemplates\AgentTemplateImporter;
 use Spora\AgentTemplates\AgentTemplateScanner;
@@ -384,6 +385,7 @@ final class OrchestratorContainerBindings
                     $c->get(AgentTemplateScanner::class),
                     $c->get(AgentTemplateToolsApplier::class),
                     $c->get(AgentTemplateAgentCreator::class),
+                    $c->get(AgentTemplateAgentUpdater::class),
                     $c->get(AgentPictureService::class),
                 );
             },

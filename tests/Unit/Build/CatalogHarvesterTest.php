@@ -78,6 +78,16 @@ test('a helper with its own argument order still yields the message, not the cod
         ->and($harvested)->not->toContain('UNAUTHORIZED');
 });
 
+test('a message held in a class constant is still harvested', function (): void {
+    $harvested = array_keys((new CatalogHarvester(dirname(__DIR__, 3)))->harvest());
+
+    // A constant is how the code says a message once. It is not how it
+    // says it to nobody: the text still reaches an operator, so it still
+    // belongs in the catalogue.
+    expect($harvested)->toContain('You cannot manage API keys for this group.')
+        ->and($harvested)->toContain('No such group.');
+});
+
 test('the identity map maps every harvested message to itself', function (): void {
     $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
 

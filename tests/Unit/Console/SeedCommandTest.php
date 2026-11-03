@@ -49,6 +49,7 @@ function makeSeedTester(?Closure $authFactoryOverride = null): CommandTester
         ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH), settingsAwareContainer());
@@ -124,6 +125,7 @@ it('reports failure and exits with FAILURE when the factory throws', function ()
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     $command = new SeedCommand($db, $authFactory, $mailSync, $importer, new Paths(BASE_PATH), settingsAwareContainer());

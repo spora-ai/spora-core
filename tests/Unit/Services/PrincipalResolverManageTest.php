@@ -83,7 +83,7 @@ describe('PrincipalResolver::canManagePrincipal', function (): void {
     });
 });
 
-describe('AgentApiKey relations', function (): void {
+describe('ApiKey relations', function (): void {
     uses(CreatesPrincipal::class);
 
     it('resolves its agent and its creator', function (): void {
@@ -98,7 +98,7 @@ describe('AgentApiKey relations', function (): void {
             'is_active' => true,
         ]);
 
-        [$key] = (new \Spora\Auth\AgentApiKeyIssuer())->issue((int) $agent->id, 'rel', $userId);
+        [$key] = (new \Spora\Auth\ApiKeyIssuer())->issue(\Spora\Auth\ApiKeyScope::Agent, 'rel', (int) $agent->id, null, $userId);
 
         expect($key->agent->id)->toBe($agent->id);
         expect($key->createdBy->id)->toBe($userId);
@@ -116,7 +116,7 @@ describe('AgentApiKey relations', function (): void {
             'is_active' => true,
         ]);
 
-        [$key] = (new \Spora\Auth\AgentApiKeyIssuer())->issue((int) $agent->id, 'nc', $userId);
+        [$key] = (new \Spora\Auth\ApiKeyIssuer())->issue(\Spora\Auth\ApiKeyScope::Agent, 'nc', (int) $agent->id, null, $userId);
         expect($key->createdBy->id)->toBe($userId);
 
         // `created_by` is `ON DELETE SET NULL`, so a revoked operator leaves
@@ -139,7 +139,7 @@ describe('AgentApiKey relations', function (): void {
             'user_prompt' => 'hi',
         ]);
 
-        $callback = \Spora\Models\AgentApiCallback::create([
+        $callback = \Spora\Models\ApiCallback::create([
             'chat_id' => $task->id,
             'key_id' => $keyRow->id,
             'agent_id' => $seed['agentId'],
@@ -160,20 +160,20 @@ describe('AgentApiKey relations', function (): void {
             'status' => 'COMPLETED',
             'user_prompt' => 'hi',
         ]);
-        \Spora\Models\AgentApiCallback::create([
+        \Spora\Models\ApiCallback::create([
             'chat_id' => $task->id,
             'key_id' => $keyRow->id,
             'agent_id' => $seed['agentId'],
             'url' => 'https://hooks.example.test/spora',
         ]);
 
-        expect(\Spora\Models\AgentApiCallback::where('key_id', $keyRow->id)->count())->toBe(1);
+        expect(\Spora\Models\ApiCallback::where('key_id', $keyRow->id)->count())->toBe(1);
 
         $keyRow->delete();
 
         // The dispatcher would otherwise keep trying to deliver to a
         // credential the operator has revoked.
-        expect(\Spora\Models\AgentApiCallback::where('key_id', $keyRow->id)->count())->toBe(0);
+        expect(\Spora\Models\ApiCallback::where('key_id', $keyRow->id)->count())->toBe(0);
     });
 
     it('drops an agent\'s keys with the agent', function (): void {
@@ -183,6 +183,6 @@ describe('AgentApiKey relations', function (): void {
         \Spora\Models\Agent::findOrFail($seed['agentId'])->delete();
 
         // A deleted agent must not leave a live credential behind.
-        expect(\Spora\Models\AgentApiKey::where('id', $keyRow->id)->count())->toBe(0);
+        expect(\Spora\Models\ApiKey::where('id', $keyRow->id)->count())->toBe(0);
     });
 });

@@ -121,6 +121,56 @@ final class AgentTemplateValidator
     }
 
     /**
+     * Validate a payload that names only the fields a caller wants to
+     * change.
+     *
+     * The same unknown-key, type and range checks as {@see self::validate()},
+     * minus the "this field is required" ones: an update carries what it
+     * changes and nothing else, so `{"agent": {"system_prompt": "…"}}` has
+     * to be a usable payload. A field that *is* present is still checked in
+     * full — only its absence stops being an error.
+     *
+     * @param array<string, mixed> $raw
+     */
+    public function validatePartial(array $raw): ValidationResult
+    {
+        $result = new ValidationResult();
+
+        if ($raw === []) {
+            $result->addError([
+                'code'     => 'EMPTY_PAYLOAD',
+                'severity' => 'error',
+                'message'  => 'Template payload is empty.',
+            ]);
+            return $result;
+        }
+
+        $this->validateTopLevelKeys($raw, $result);
+        $this->validateStringField($raw, 'id', self::ID_PATTERN, $result, false);
+        $this->validateStringField($raw, 'name', null, $result, false);
+        $this->validateStringField($raw, 'version', self::VERSION_PATTERN, $result, false);
+
+        if (array_key_exists('agent', $raw)) {
+            if (!is_array($raw['agent'])) {
+                $result->addError([
+                    'code'     => 'AGENT_INVALID',
+                    'severity' => 'error',
+                    'message'  => "Field 'agent' must be an object.",
+                    'path'     => 'agent',
+                ]);
+            } else {
+                $this->validateAgentBlock($raw['agent'], $result);
+            }
+        }
+
+        $this->validateTools($raw, $result);
+        $this->validateRequiredPlugins($raw, $result);
+        $this->metadataValidator->validate($raw, $result);
+
+        return $result;
+    }
+
+    /**
      * @param array<string, mixed> $raw
      */
     private function validateTopLevelKeys(array $raw, ValidationResult $result): void

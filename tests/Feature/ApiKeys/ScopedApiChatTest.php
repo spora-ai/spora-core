@@ -1,0 +1,326 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\ApiKeys;
+
+use Spora\Http\ScopedApi\ScopedApiChatController;
+use Spora\Models\Task;
+use Tests\Feature\AgentApi\AgentApiTestSupport;
+
+/**
+ * The chat surface of the scoped API.
+ *
+ * A group key drives the chats of its group's agents; a chat outside the
+ * group's reach is a 404, never a 403 — a caller must not be able to probe
+ * which chat ids exist.
+ */
+describe('chats on the group surface', function (): void {
+    it('starts a chat with one of the group\'s agents', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-start');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'store',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . '/chats',
+                ['agent_id' => $group['agentIds'][0], 'text' => 'Hello there.'],
+            ),
+        );
+
+        expect($response->getStatusCode())->toBe(202);
+
+        $chat = ScopedApiTestSupport::data($response)['chat'];
+        expect($chat['agent_id'])->toBe($group['agentIds'][0]);
+        expect(Task::find($chat['id']))->not->toBeNull();
+    });
+
+    it('lists the chats of the group\'s agents', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-list');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'QUEUED',
+            'user_prompt' => 'hi',
+        ]);
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'index',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . '/chats', [], 'GET'),
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+        expect(count(ScopedApiTestSupport::data($response)['chats']))->toBe(1);
+    });
+
+    it('reads the status, the messages and the transcript of a chat', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-read');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = (int) Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'hi',
+            'final_response' => 'Hello.',
+        ])->id;
+
+        $status = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'status',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/status", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($status->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($status)['chat']['answer'])->toBe('Hello.');
+
+        $messages = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($messages->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($messages))->toHaveKey('messages');
+
+        $transcript = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'transcript',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/transcript", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($transcript->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($transcript)['chat']['id'])->toBe($chatId);
+    });
+
+    it('continues a chat', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-continue');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = (int) Task::create([
+            'agent_id' => $group['agentIds'][0],
+            'principal_id' => $group['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'hi',
+            'final_response' => 'Hello.',
+        ])->id;
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'continueChat',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages",
+                ['text' => 'And another thing?'],
+            ),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(202);
+    });
+
+    it('points an attachment at the group surface', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-attachment');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $chatId = ScopedApiTestSupport::chatWithAttachment($group);
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+
+        $attachments = ScopedApiTestSupport::data($response)['messages'][0]['attachments'];
+
+        // The link has to name the surface the key drives: a group key
+        // cannot read an agent key's media, so an agent-api link is dead.
+        expect($attachments[0]['url'])->toContain('/api/v1/group-api/media/');
+    });
+
+    it('404s a chat of another group rather than 403', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-other');
+        $other = AgentApiTestSupport::seedGroup('chat-other-2');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $theirChat = Task::create([
+            'agent_id' => $other['agentIds'][0],
+            'principal_id' => $other['principalId'],
+            'status' => 'QUEUED',
+            'user_prompt' => 'hi',
+        ]);
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'status',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GROUP_PREFIX . '/chats/1/status', [], 'GET'),
+            [(int) $theirChat->id],
+        );
+
+        expect($response->getStatusCode())->toBe(404);
+        expect(ScopedApiTestSupport::errorCode($response))->toBe('NOT_FOUND');
+    });
+
+    it('404s an agent outside the group\'s reach when starting a chat', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-agent-outside');
+        $other = AgentApiTestSupport::seedGroup('chat-agent-outside-2');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'store',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . '/chats',
+                ['agent_id' => $other['agentIds'][0], 'text' => 'Hello there.'],
+            ),
+        );
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+
+    it('refuses a chat without an agent', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-no-agent');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'store',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . '/chats',
+                ['text' => 'Hello there.'],
+            ),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+    });
+
+    it('does not let a group key drive a personal agent', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('chat-personal');
+        $personal = AgentApiTestSupport::seedAgent('chat-personal-agent');
+        [, $key] = AgentApiTestSupport::mintGroupKey($group['groupId'], 'chat');
+
+        $response = ScopedApiTestSupport::callGroup(
+            $container,
+            ScopedApiChatController::class,
+            'store',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GROUP_PREFIX . '/chats',
+                ['agent_id' => $personal['agentId'], 'text' => 'Hello there.'],
+            ),
+        );
+
+        expect($response->getStatusCode())->toBe(404);
+    });
+});
+
+describe('chats on the global surface', function (): void {
+    it('reaches the chats of every group-owned agent', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $first = AgentApiTestSupport::seedGroup('global-chat-a');
+        $second = AgentApiTestSupport::seedGroup('global-chat-b');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-chat');
+
+        Task::create([
+            'agent_id' => $first['agentIds'][0],
+            'principal_id' => $first['principalId'],
+            'status' => 'QUEUED',
+            'user_prompt' => 'hi',
+        ]);
+
+        Task::create([
+            'agent_id' => $second['agentIds'][0],
+            'principal_id' => $second['principalId'],
+            'status' => 'QUEUED',
+            'user_prompt' => 'hi',
+        ]);
+
+        $response = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiChatController::class,
+            'index',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GLOBAL_PREFIX . '/chats', [], 'GET'),
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+        expect(count(ScopedApiTestSupport::data($response)['chats']))->toBe(2);
+    });
+
+    it('does not reach the chats of a personal agent', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $personal = AgentApiTestSupport::seedAgent('global-chat-personal');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-chat');
+
+        Task::create([
+            'agent_id' => $personal['agentId'],
+            'principal_id' => $personal['principalId'],
+            'status' => 'QUEUED',
+            'user_prompt' => 'hi',
+        ]);
+
+        $response = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiChatController::class,
+            'index',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GLOBAL_PREFIX . '/chats', [], 'GET'),
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+        expect(ScopedApiTestSupport::data($response)['chats'])->toBe([]);
+    });
+
+    it('points an attachment at the global surface', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('global-chat-attachment');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-chat');
+
+        $chatId = ScopedApiTestSupport::chatWithAttachment($group);
+
+        $response = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiChatController::class,
+            'messages',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GLOBAL_PREFIX . "/chats/{$chatId}/messages", [], 'GET'),
+            [$chatId],
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+
+        $attachments = ScopedApiTestSupport::data($response)['messages'][0]['attachments'];
+
+        // A global key reads the global surface's media, and only that one.
+        expect($attachments[0]['url'])->toContain('/api/v1/global-api/media/');
+    });
+});

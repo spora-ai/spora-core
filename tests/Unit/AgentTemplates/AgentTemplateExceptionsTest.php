@@ -31,6 +31,7 @@ test('AgentTemplateImporter throws AgentTemplateNotFoundException on unknown tem
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     expect(fn() => $importer->applyTemplate(1, 'does-not-exist-anywhere'))

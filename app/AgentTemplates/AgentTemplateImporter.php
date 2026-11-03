@@ -45,6 +45,7 @@ final class AgentTemplateImporter
         private readonly AgentTemplateScanner $scanner,
         private readonly AgentTemplateToolsApplier $toolsApplier,
         private readonly AgentTemplateAgentCreator $agentCreator,
+        private readonly AgentTemplateAgentUpdater $agentUpdater,
         private readonly ?AgentPictureService $pictureService = null,
     ) {}
 
@@ -75,6 +76,50 @@ final class AgentTemplateImporter
     {
         $template = new AgentTemplate(raw: $raw, source: 'uploaded');
         return $this->apply($userId, $template, $principalId);
+    }
+
+    /**
+     * Apply a template to an agent that already exists.
+     *
+     * The merge counterpart of {@see self::importPayload()}: only the
+     * columns the payload names are written, and a tool named in the
+     * payload is upserted while a tool it does not name is left alone. The
+     * caller is expected to have validated the payload via
+     * {@see AgentTemplateValidator::validatePartial()}.
+     *
+     * @throws AgentImportFailedException when the agent disappears mid-update.
+     */
+    public function applyToAgent(int $agentId, AgentTemplate $template): ImportResult
+    {
+        $warnings = $template->warnings();
+        $registeredTools = $this->toolConfig->getRegisteredToolClasses();
+
+        $this->collectPluginWarnings($template, $warnings);
+
+        [$toolsEnabled] = Capsule::connection()->transaction(
+            function () use ($agentId, $template, $registeredTools, &$warnings): array {
+                $this->agentUpdater->update($agentId, $template);
+
+                $toolsEnabled = array_key_exists('tools', $template->raw())
+                    ? $this->toolsApplier->applyTools($agentId, $template, $registeredTools, $warnings)
+                    : [];
+
+                return [$toolsEnabled];
+            },
+        );
+
+        $agent = Agent::find($agentId);
+        if ($agent === null) {
+            throw new AgentImportFailedException("Agent {$agentId} disappeared mid-update.");
+        }
+
+        $this->applyPictureMetadata($agentId, $template, $warnings);
+
+        return new ImportResult(
+            agent: $agent,
+            toolsEnabled: $toolsEnabled,
+            warnings: $warnings,
+        );
     }
 
     /**

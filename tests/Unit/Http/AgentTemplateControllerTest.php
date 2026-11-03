@@ -40,6 +40,7 @@ function makeController(): AgentTemplateController
         $scanner,
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
     $exporter = new AgentTemplateExporter($plugins, $toolConfig, new Spora\Services\ToolConfigSchemaInspector());
     $agentService = new AgentService();

@@ -125,7 +125,7 @@ final class EnvelopeLiteralHarvest implements Harvest
     private function errorLiteralAt(array $tokens, int $index, array $token, array $constants, array $messageIndex): ?array
     {
         if ($this->startsHelperCall($tokens, $index)) {
-            return $this->stringArgument($tokens, $index, $messageIndex[$token[1]]);
+            return $this->stringArgument($tokens, $index, $messageIndex[$token[1]], $constants);
         }
 
         if ($token[0] !== T_CONSTANT_ENCAPSED_STRING || trim($token[1], "'\"") !== 'message') {
@@ -192,13 +192,14 @@ final class EnvelopeLiteralHarvest implements Harvest
 
     /**
      * One argument of the helper call starting at `$index`, when it is a
-     * bare string literal or a `sprintf(...)` whose format string is the
-     * message.
+     * bare string literal, a class constant, or a `sprintf(...)` whose
+     * format string is the message.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
+     * @param array<string, string>                           $constants
      * @return ?array{0: string, 1: int} message, line
      */
-    private function stringArgument(array $tokens, int $index, int $position): ?array
+    private function stringArgument(array $tokens, int $index, int $position, array $constants): ?array
     {
         if ($position < 0) {
             return null;
@@ -209,7 +210,7 @@ final class EnvelopeLiteralHarvest implements Harvest
             return null;
         }
 
-        return $this->literalArgument($argument);
+        return $this->literalArgument($argument, $constants);
     }
 
     /**
@@ -268,20 +269,29 @@ final class EnvelopeLiteralHarvest implements Harvest
     /**
      * The string literal an argument contributes, if it has one.
      *
-     * A bare literal is one. So is `sprintf('format %s', …)` — the format
-     * string *is* the message, with placeholders the translation keeps. A
-     * concatenation is not: `'a' . $b` has no whole message to key on.
+     * A bare literal is one. So is a class constant declared in the same
+     * file — the extractor reads one file at a time, so a constant from
+     * another file is out of scope. So is `sprintf('format %s', …)` — the
+     * format string *is* the message, with placeholders the translation
+     * keeps. A concatenation is not: `'a' . $b` has no whole message to
+     * key on.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $argument
+     * @param array<string, string>                           $constants
      * @return ?array{0: string, 1: int} message, line
      */
-    private function literalArgument(array $argument): ?array
+    private function literalArgument(array $argument, array $constants): ?array
     {
         $significant = $this->significantTokens($argument);
         $first = $significant[0] ?? null;
 
         if (is_array($first) && $first[0] === T_CONSTANT_ENCAPSED_STRING) {
             return [$this->tokens->decode($first[1]), $first[2]];
+        }
+
+        $constant = $this->constants->resolveSelfConstant($significant, $constants);
+        if ($constant !== null) {
+            return $constant;
         }
 
         $format = $this->sprintfFormatArgument($significant);

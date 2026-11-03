@@ -13,19 +13,24 @@ use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
-use Spora\Auth\AgentApiKeyIssuer;
+use Spora\Auth\ApiKeyIssuer;
+use Spora\Auth\ApiKeyScope;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Models\Agent;
-use Spora\Models\AgentApiCallback;
-use Spora\Models\AgentApiKey;
+use Spora\Models\ApiCallback;
+use Spora\Models\ApiKey;
 use Spora\Models\LLMDriverConfiguration;
-use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
-use Spora\Services\AgentApi\AgentApiChatProjection;
+use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
+use Spora\Services\ApiKeys\ApiKeyChatProjection;
+use Spora\Services\GroupService;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -76,7 +81,9 @@ final class AgentApiTestSupport
 
         $container->set(Config::class, new Config([
             'SPORA_AGENT_API' => '1',
-            'SPORA_AGENT_API_RATE_LIMIT_MAX' => (string) $rateLimitMax,
+            'SPORA_GROUP_API' => '1',
+            'SPORA_GLOBAL_API' => '1',
+            'SPORA_API_RATE_LIMIT_MAX' => (string) $rateLimitMax,
             'SPORA_APP_ENV' => 'testing',
             // The logger factory does `constant(Level::class . '::' . $level)`
             // against this, so it has to be present or resolution throws.
@@ -120,6 +127,13 @@ final class AgentApiTestSupport
      * A user with a personal principal and an agent wired to a global LLM
      * config, which is the minimum for `startTask` to resolve ownership.
      *
+     * A decoy agent is created first, and the real one is given the same
+     * principal. Without it the agent ids and the principal ids would line
+     * up — one user, one principal and one agent each, so the nth agent
+     * carries the nth principal id — and a rule that filtered on the wrong
+     * column would then match by coincidence. The decoy shifts the agent
+     * ids out of the principal id space.
+     *
      * @return array{userId: int, principalId: int, agentId: int}
      */
     public static function seedAgent(string $suffix = 'a'): array
@@ -129,6 +143,14 @@ final class AgentApiTestSupport
 
         $principalId = createUserPrincipalPublic($userId);
         $llm = self::llmConfig($suffix);
+
+        Agent::create([
+            'principal_id' => $principalId,
+            'name' => "Agent API {$suffix} decoy",
+            'llm_driver_config_id' => $llm->id,
+            'max_steps' => 10,
+            'is_active' => true,
+        ]);
 
         $agent = Agent::create([
             'principal_id' => $principalId,
@@ -152,11 +174,99 @@ final class AgentApiTestSupport
     }
 
     /**
-     * @return array{0: AgentApiKey, 1: string} the row and the plaintext key
+     * A driver that answers anything with one canned response.
+     *
+     * The scoped surfaces' CRUD tests never run a chat, so they only need a
+     * driver the container can resolve — not one with a script.
+     */
+    public static function llm(string $content = 'ok'): ScriptedLlmDriver
+    {
+        return new ScriptedLlmDriver(
+            new LLMResponse(content: $content, toolCalls: [], inputTokens: 1, outputTokens: 1, completionId: 'scoped'),
+        );
+    }
+
+    /**
+     * @return array{0: ApiKey, 1: string} the row and the plaintext key
      */
     public static function mintKey(int $agentId, string $name = 'ci'): array
     {
-        return (new AgentApiKeyIssuer())->issue($agentId, $name);
+        return (new ApiKeyIssuer())->issue(ApiKeyScope::Agent, $name, $agentId);
+    }
+
+    /**
+     * @return array{0: ApiKey, 1: string} the row and the plaintext key
+     */
+    public static function mintGroupKey(int $groupId, string $name = 'ci', ?int $createdBy = null): array
+    {
+        return (new ApiKeyIssuer())->issue(ApiKeyScope::Group, $name, null, $groupId, $createdBy);
+    }
+
+    /**
+     * @return array{0: ApiKey, 1: string} the row and the plaintext key
+     */
+    public static function mintGlobalKey(string $name = 'ci', ?int $createdBy = null): array
+    {
+        return (new ApiKeyIssuer())->issue(ApiKeyScope::Global, $name, null, null, $createdBy);
+    }
+
+    /**
+     * A group with an owner, a group-principal and — optionally — agents.
+     *
+     * The group surface needs a group whose principal owns agents; the
+     * reach rule is written in terms of the principal, not the group row.
+     *
+     * `$ownerUserId` names the group's owner. A fresh user is created when
+     * it is null, which is the usual case for a test that only needs a
+     * group to exist.
+     *
+     * @return array{userId: int, groupId: int, principalId: int, agentIds: list<int>}
+     */
+    public static function seedGroup(string $suffix = 'g', int $agentCount = 1, ?int $ownerUserId = null): array
+    {
+        $auth = bootAuthLayer();
+        static $seq = 0;
+        $seq++;
+
+        if ($ownerUserId === null) {
+            $ownerUserId = $auth->register(
+                "apikey-group-{$suffix}-{$seq}@example.com",
+                'Password1!',
+                "ApiKey Group {$suffix}",
+            );
+        }
+
+        // The user-principal has to exist before a chat can be started for
+        // the group: `TaskService::startTask()` resolves the caller's
+        // principals, and a user without one has none.
+        createUserPrincipalPublic($ownerUserId);
+
+        $groupService = new GroupService(new PrincipalService(new PrincipalResolver()));
+        $group = $groupService->createGroup($ownerUserId, "ApiKey Group {$suffix}", 'a group for the scoped API');
+
+        $principal = (new PrincipalService(new PrincipalResolver()))->principalForGroup((int) $group->id);
+        $principalId = $principal === null ? 0 : (int) $principal->id;
+
+        $agentIds = [];
+        $llm = self::llmConfig($suffix);
+
+        for ($i = 0; $i < $agentCount; $i++) {
+            $agent = Agent::create([
+                'principal_id' => $principalId,
+                'name' => "Group Agent {$suffix} {$i}",
+                'llm_driver_config_id' => $llm->id,
+                'max_steps' => 10,
+                'is_active' => true,
+            ]);
+            $agentIds[] = (int) $agent->id;
+        }
+
+        return [
+            'userId' => $ownerUserId,
+            'groupId' => (int) $group->id,
+            'principalId' => $principalId,
+            'agentIds' => $agentIds,
+        ];
     }
 
     /**
@@ -220,7 +330,7 @@ final class AgentApiTestSupport
      */
     public static function skipBackoff(int $callbackId): void
     {
-        $row = Capsule::table('agent_api_callbacks')->where('id', $callbackId)->first();
+        $row = Capsule::table('api_callbacks')->where('id', $callbackId)->first();
 
         if ($row === null || $row->next_attempt_at === null) {
             throw new RuntimeException(
@@ -229,7 +339,7 @@ final class AgentApiTestSupport
             );
         }
 
-        Capsule::table('agent_api_callbacks')
+        Capsule::table('api_callbacks')
             ->where('id', $callbackId)
             ->update(['next_attempt_at' => gmdate('Y-m-d H:i:s', time() - 60)]);
     }
@@ -243,8 +353,8 @@ final class AgentApiTestSupport
      */
     public static function dispatchDue(\Psr\Container\ContainerInterface $container): int
     {
-        /** @var AgentApiCallbackDispatcher $dispatcher */
-        $dispatcher = $container->get(AgentApiCallbackDispatcher::class);
+        /** @var ApiKeyCallbackDispatcher $dispatcher */
+        $dispatcher = $container->get(ApiKeyCallbackDispatcher::class);
 
         return $dispatcher->dispatchDue();
     }
@@ -253,9 +363,9 @@ final class AgentApiTestSupport
      * One row per chat, so a test that starts a chat with a callback can find
      * it back without guessing an id.
      */
-    public static function callbackFor(int $chatId): AgentApiCallback
+    public static function callbackFor(int $chatId): ApiCallback
     {
-        $row = AgentApiCallback::where('chat_id', $chatId)->first();
+        $row = ApiCallback::where('chat_id', $chatId)->first();
 
         if ($row === null) {
             throw new RuntimeException("No callback recorded for chat {$chatId}.");
@@ -299,9 +409,9 @@ final class AgentApiTestSupport
         return $container->get(MediaArchiveService::class);
     }
 
-    public static function projection(): AgentApiChatProjection
+    public static function projection(): ApiKeyChatProjection
     {
-        return new AgentApiChatProjection();
+        return new ApiKeyChatProjection();
     }
 
     public static function auth(): AuthService

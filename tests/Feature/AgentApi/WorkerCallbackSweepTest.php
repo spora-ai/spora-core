@@ -11,7 +11,7 @@ use RuntimeException;
 use Spora\Console\Commands\WorkerRunCommand;
 use Spora\Console\WorkerLoopOptions;
 use Spora\Drivers\ValueObjects\LLMResponse;
-use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
+use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Spora\Services\MercurePublisherInterface;
 use Tests\Fixtures\StubInputTool;
 
@@ -150,8 +150,8 @@ describe('WorkerRunCommand callback sweep', function (): void {
 
         // `dispatchDue()` is called from inside the worker loop, so anything
         // it let out would take the agent loop with it.
-        expect($broken->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(0);
-        expect($broken->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(0);
+        expect($broken->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(0);
+        expect($broken->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(0);
     });
 
     it('builds a command whose container knows the dispatcher', function (): void {
@@ -166,12 +166,12 @@ describe('WorkerRunCommand callback sweep', function (): void {
         // A container that cannot build the dispatcher must still yield a
         // usable command, so a trimmed runtime is not left without a worker.
         $bare = Mockery::mock(\Psr\Container\ContainerInterface::class);
-        $bare->allows('has')->with(AgentApiCallbackDispatcher::class)->andReturn(false);
+        $bare->allows('has')->with(ApiKeyCallbackDispatcher::class)->andReturn(false);
         $bare->allows('get')->andReturnNull();
 
-        expect($container->has(AgentApiCallbackDispatcher::class))->toBeTrue();
+        expect($container->has(ApiKeyCallbackDispatcher::class))->toBeTrue();
         expect($container->has(MercurePublisherInterface::class))->toBeTrue();
-        expect($bare->has(AgentApiCallbackDispatcher::class))->toBeFalse();
+        expect($bare->has(ApiKeyCallbackDispatcher::class))->toBeFalse();
     });
 });
 
