@@ -41,6 +41,7 @@ function makeSeeder(): DatabaseSeeder
         ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     return new DatabaseSeeder($authService, $mailTemplateSync, $importer);

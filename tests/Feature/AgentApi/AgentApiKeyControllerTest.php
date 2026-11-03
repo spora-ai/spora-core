@@ -10,7 +10,7 @@ use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\Exceptions\UnauthenticatedException;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Models\Agent;
-use Spora\Models\AgentApiKey;
+use Spora\Models\ApiKey;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
 use Tests\Concerns\CreatesPrincipal;
@@ -94,7 +94,7 @@ describe('Agent API key management', function (): void {
 
         // Nothing in the response but the create carries the secret, and the
         // row holds only a digest of it.
-        $key = AgentApiKey::findOrFail($payload['data']['key']['id']);
+        $key = ApiKey::findOrFail($payload['data']['key']['id']);
         expect($key->secret_hash)->not->toContain($payload['data']['secret']);
 
         $listed = AgentApiTestSupport::decode(callKeyAdmin('index', $agentId));
@@ -130,7 +130,7 @@ describe('Agent API key management', function (): void {
         $response = callKeyAdmin('store', $agentId, []);
 
         expect($response->getStatusCode())->toBe(422);
-        expect(AgentApiKey::where('agent_id', $agentId)->count())->toBe(0);
+        expect(ApiKey::where('agent_id', $agentId)->count())->toBe(0);
     });
 
     it('rejects a name over the column limit rather than truncating it', function (): void {
@@ -149,7 +149,7 @@ describe('Agent API key management', function (): void {
         $response = callKeyAdmin('destroy', $agentId, [], ['keyId' => $key->id]);
 
         expect($response->getStatusCode())->toBe(200);
-        expect(AgentApiKey::find($key->id))->toBeNull();
+        expect(ApiKey::find($key->id))->toBeNull();
     });
 
     it('answers with a body rather than 204 No Content', function (): void {
@@ -193,7 +193,7 @@ describe('Agent API key management', function (): void {
         // scoped by agent, so a key id is not a way to reach across agents.
         expect($response->getStatusCode())->toBe(200);
         expect(AgentApiTestSupport::decode($response)['data']['revoked'])->toBeTrue();
-        expect(AgentApiKey::find($theirKey->id))->not->toBeNull();
+        expect(ApiKey::find($theirKey->id))->not->toBeNull();
     });
 
     it('refuses an unauthenticated caller', function (): void {
@@ -217,7 +217,7 @@ describe('Agent API key management', function (): void {
 
         expect($response->getStatusCode())->toBe(403);
         expect(AgentApiTestSupport::decode($response)['error']['code'])->toBe('FORBIDDEN');
-        expect(AgentApiKey::where('agent_id', $agentId)->count())->toBe(0);
+        expect(ApiKey::where('agent_id', $agentId)->count())->toBe(0);
     });
 
     it('404s for an agent that does not exist', function (): void {

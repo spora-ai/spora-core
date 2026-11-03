@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Spora\Http\AgentApi;
 
 use OpenApi\Attributes as OA;
-use Spora\Auth\AgentApiKeyIssuer;
+use Spora\Auth\ApiKeyIssuer;
+use Spora\Auth\ApiKeyScope;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\Agent;
-use Spora\Models\AgentApiKey;
+use Spora\Models\ApiKey;
 use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -41,7 +42,7 @@ final class AgentApiKeyController
     public function __construct(
         private readonly AuthService $authService,
         private readonly PrincipalResolver $principalResolver,
-        private readonly AgentApiKeyIssuer $issuer,
+        private readonly ApiKeyIssuer $issuer,
     ) {}
 
     #[OA\Get(
@@ -60,11 +61,14 @@ final class AgentApiKeyController
         }
 
         $agentId = (int) $request->attributes->get('agentId', 0);
-        $keys = AgentApiKey::where('agent_id', $agentId)->orderByDesc('created_at')->get();
+        $keys = ApiKey::where('scope', ApiKeyScope::Agent->value)
+            ->where('agent_id', $agentId)
+            ->orderByDesc('created_at')
+            ->get();
 
         return new JsonResponse([
             'data' => [
-                'keys' => $keys->map(fn(AgentApiKey $key): array => $this->present($key))->all(),
+                'keys' => $keys->map(fn(ApiKey $key): array => $this->present($key))->all(),
             ],
         ]);
     }
@@ -96,7 +100,13 @@ final class AgentApiKeyController
             return $name;
         }
 
-        [$key, $plaintext] = $this->issuer->issue($agentId, $name, $this->authService->currentUserId());
+        [$key, $plaintext] = $this->issuer->issue(
+            ApiKeyScope::Agent,
+            $name,
+            $agentId,
+            null,
+            $this->authService->currentUserId(),
+        );
 
         return new JsonResponse(
             ['data' => ['key' => $this->present($key), 'secret' => $plaintext]],
@@ -148,7 +158,10 @@ final class AgentApiKeyController
         // Content-Length, and Vite's dev proxy turns exactly that into
         // `502 No Content` on the way through. A normal bodied response also
         // gives the caller something to log.
-        AgentApiKey::where('agent_id', $agentId)->where('id', $keyId)->delete();
+        ApiKey::where('scope', ApiKeyScope::Agent->value)
+            ->where('agent_id', $agentId)
+            ->where('id', $keyId)
+            ->delete();
 
         return new JsonResponse([
             'data' => [
@@ -159,16 +172,18 @@ final class AgentApiKeyController
     }
 
     /**
-     * @return array{id: string, agent_id: int, name: string, last_used_at: ?string, created_at: ?string}
+     * @return array{id: string, scope: string, agent_id: ?int, group_id: ?int, name: string, last_used_at: ?string, created_at: ?string}
      */
-    private function present(AgentApiKey $key): array
+    private function present(ApiKey $key): array
     {
         return [
-            'id' => $key->id,
-            'agent_id' => (int) $key->agent_id,
-            'name' => $key->name,
+            'id'           => $key->id,
+            'scope'        => (string) $key->scope,
+            'agent_id'     => $key->agent_id === null ? null : (int) $key->agent_id,
+            'group_id'     => $key->group_id === null ? null : (int) $key->group_id,
+            'name'         => $key->name,
             'last_used_at' => $key->last_used_at?->toIso8601String(),
-            'created_at' => $key->created_at?->toIso8601String(),
+            'created_at'   => $key->created_at?->toIso8601String(),
         ];
     }
 

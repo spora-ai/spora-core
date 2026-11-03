@@ -419,6 +419,7 @@ test('export() then importPayload() round-trips on the same loader with zero PLU
         ),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 
     $validation = (new Spora\AgentTemplates\AgentTemplateValidator())->validate($payload);
@@ -578,6 +579,7 @@ function makeTestToolImporter(): AgentTemplateImporter
         new Spora\AgentTemplates\AgentTemplateScanner(),
         new Spora\AgentTemplates\AgentTemplateToolsApplier($toolConfig),
         new Spora\AgentTemplates\AgentTemplateAgentCreator(),
+        new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
     );
 }
 

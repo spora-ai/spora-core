@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Spora\Services\AgentApi;
+namespace Spora\Services\ApiKeys;
 
 use Illuminate\Support\Carbon;
 use Psr\Log\LoggerInterface;
-use Spora\Models\AgentApiCallback;
+use Spora\Models\ApiCallback;
 use Spora\Models\Task;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -28,7 +28,7 @@ use Throwable;
  * `delivered_status` is what the receiver last acknowledged, and the two
  * only diverge while a POST is outstanding.
  */
-final class AgentApiCallbackDispatcher
+final class ApiKeyCallbackDispatcher
 {
     public const MAX_ATTEMPTS = 6;
 
@@ -65,7 +65,7 @@ final class AgentApiCallbackDispatcher
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
-        private readonly AgentApiChatProjection $projection,
+        private readonly ApiKeyChatProjection $projection,
         private readonly CallbackSecretResolver $secrets,
         private readonly LoggerInterface $logger,
     ) {}
@@ -82,7 +82,7 @@ final class AgentApiCallbackDispatcher
         $delivered = 0;
 
         try {
-            $rows = AgentApiCallback::whereNotNull('next_attempt_at')
+            $rows = ApiCallback::whereNotNull('next_attempt_at')
                 ->where('next_attempt_at', '<=', gmdate('Y-m-d H:i:s'))
                 ->orderBy('id')
                 ->limit(self::BATCH_LIMIT)
@@ -112,7 +112,7 @@ final class AgentApiCallbackDispatcher
         return $delivered;
     }
 
-    private function processRow(AgentApiCallback $row): bool
+    private function processRow(ApiCallback $row): bool
     {
         $task = Task::find($row->chat_id);
 
@@ -131,7 +131,7 @@ final class AgentApiCallbackDispatcher
         return $this->deliverSettled($row, $task);
     }
 
-    private function deliverSettled(AgentApiCallback $row, Task $task): bool
+    private function deliverSettled(ApiCallback $row, Task $task): bool
     {
         $status = (string) $task->status;
 
@@ -161,7 +161,7 @@ final class AgentApiCallbackDispatcher
      * them, for as long as they ran. Deferring is what lets a settled row
      * reach the front.
      */
-    private function defer(AgentApiCallback $row): void
+    private function defer(ApiCallback $row): void
     {
         $row->next_attempt_at = Carbon::now('UTC')->addSeconds(self::SETTLE_POLL_SECONDS);
         $row->save();
@@ -177,14 +177,14 @@ final class AgentApiCallbackDispatcher
      * Disarming those drops that delivery silently, so they stay armed on a
      * slow cadence instead.
      */
-    private function armOrDisarm(AgentApiCallback $row, string $status): void
+    private function armOrDisarm(ApiCallback $row, string $status): void
     {
-        $row->next_attempt_at = in_array($status, AgentApiChatProjection::BLOCKED_STATUSES, true)
+        $row->next_attempt_at = in_array($status, ApiKeyChatProjection::BLOCKED_STATUSES, true)
             ? Carbon::now('UTC')->addSeconds(self::BLOCKED_POLL_SECONDS)
             : null;
     }
 
-    private function deliver(AgentApiCallback $row, Task $task): bool
+    private function deliver(ApiCallback $row, Task $task): bool
     {
         $response = $this->post($row, $task);
 
@@ -211,7 +211,7 @@ final class AgentApiCallbackDispatcher
      * has already been deleted or its failure recorded, because either way
      * there is no status code for {@see self::deliver()} to judge.
      */
-    private function post(AgentApiCallback $row, Task $task): ?ResponseInterface
+    private function post(ApiCallback $row, Task $task): ?ResponseInterface
     {
         $secret = $this->secrets->for($row->key_id);
 
@@ -252,7 +252,7 @@ final class AgentApiCallbackDispatcher
         }
     }
 
-    private function recordSuccess(AgentApiCallback $row, Task $task, int $statusCode): void
+    private function recordSuccess(ApiCallback $row, Task $task, int $statusCode): void
     {
         $row->delivered_status = $row->pending_status;
         $this->armOrDisarm($row, (string) $task->status);
@@ -270,7 +270,7 @@ final class AgentApiCallbackDispatcher
         ]);
     }
 
-    private function recordFailure(AgentApiCallback $row, ?int $statusCode, string $error): void
+    private function recordFailure(ApiCallback $row, ?int $statusCode, string $error): void
     {
         $attempts = (int) $row->attempts + 1;
         $row->attempts = $attempts;

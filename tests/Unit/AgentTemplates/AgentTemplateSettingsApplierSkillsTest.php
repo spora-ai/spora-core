@@ -54,6 +54,7 @@ function importerWithSkillRegistry(?SkillProviderRegistry $skills): array
                 new AgentTemplateSettingsApplier($toolConfig, $skills),
             ),
             new AgentTemplateAgentCreator(),
+            new Spora\AgentTemplates\AgentTemplateAgentUpdater(),
         ),
         $toolConfig,
     ];

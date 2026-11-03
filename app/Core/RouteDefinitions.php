@@ -109,6 +109,7 @@ final class RouteDefinitions
         self::registerMediaRoutes($r);
         SpeechRouteDefinitions::register($r);
         AgentApiRouteDefinitions::register($r, $config);
+        ScopedApiRouteDefinitions::register($r, $config);
         self::registerTemplateRoutes($r);
         self::registerSkillRoutes($r);
         SearchRouteDefinitions::register($r);

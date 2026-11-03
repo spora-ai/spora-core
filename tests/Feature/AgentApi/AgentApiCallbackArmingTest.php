@@ -9,9 +9,9 @@ use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
-use Spora\Models\AgentApiCallback;
+use Spora\Models\ApiCallback;
 use Spora\Models\Task;
-use Spora\Services\AgentApi\AgentApiCallbackDispatcher;
+use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Tests\Fixtures\StubOutputTool;
 
 /**
@@ -27,7 +27,7 @@ describe('Agent API callback arming', function (): void {
     /**
      * A chat with a callback row, driven to `$status`.
      *
-     * @return array{0: \Psr\Container\ContainerInterface, 1: RecordingHttpClient, 2: int, 3: AgentApiCallback, 4: string}
+     * @return array{0: \Psr\Container\ContainerInterface, 1: RecordingHttpClient, 2: int, 3: ApiCallback, 4: string}
      */
     function chatWithCallback(string $suffix, bool $blockOnTool = false): array
     {
@@ -87,7 +87,7 @@ describe('Agent API callback arming', function (): void {
 
         // No skipBackoff(): the row was armed at creation and has not been
         // deferred by an earlier sweep.
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(1);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(1);
         expect($http->requests)->toHaveCount(1);
         expect(json_decode($http->body(0), true)['status'])->toBe('COMPLETED');
     });
@@ -95,7 +95,7 @@ describe('Agent API callback arming', function (): void {
     it('defers an unsettled row instead of leaving it due', function (): void {
         [$container, $http, , $callback] = chatWithCallback('arm3');
 
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(0);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(0);
         expect($http->requests)->toBe([]);
 
         // Deferring is not housekeeping — it is what stops the sweep's
@@ -109,7 +109,7 @@ describe('Agent API callback arming', function (): void {
         [$container, $http, $chatId, $callback] = chatWithCallback('arm4');
 
         AgentApiTestSupport::runToCompletion($container, $chatId);
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(1);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(1);
 
         // COMPLETED cannot change, so the row must stop being read — a
         // delivered terminal row that stays armed is a permanent query.
@@ -119,7 +119,7 @@ describe('Agent API callback arming', function (): void {
 
         // No skipBackoff() here: the disarm is the subject of the assertion,
         // and the sweep should not even reach the row.
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(0);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(0);
         expect($http->requests)->toHaveCount(1);
     });
 
@@ -129,7 +129,7 @@ describe('Agent API callback arming', function (): void {
         AgentApiTestSupport::runToCompletion($container, $chatId);
         expect(Task::findOrFail($chatId)->status)->toBe('PENDING_APPROVAL');
 
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(1);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(1);
         expect(json_decode($http->body(0), true)['status'])->toBe('PENDING_APPROVAL');
 
         // A blocked chat can be approved, so the row must stay armed. This is
@@ -155,7 +155,7 @@ describe('Agent API callback arming', function (): void {
         AgentApiTestSupport::runToCompletion($container, $chatId);
         AgentApiTestSupport::skipBackoff((int) $callback->id);
 
-        expect($container->get(AgentApiCallbackDispatcher::class)->dispatchDue())->toBe(1);
+        expect($container->get(ApiKeyCallbackDispatcher::class)->dispatchDue())->toBe(1);
         expect($http->requests)->toHaveCount(2);
         expect(json_decode($http->body(1), true)['status'])->toBe('COMPLETED');
     });
