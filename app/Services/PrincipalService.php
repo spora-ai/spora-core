@@ -286,8 +286,6 @@ final class PrincipalService
     }
 
     /**
-     * The media folders the given principals own.
-     *
      * A folder is a metadata container the operator curates freely, so a
      * principal that owns one cannot be deleted before the folder is
      * gone — the same shape as the agent guard. `media_folders.principal_id`

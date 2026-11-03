@@ -27,8 +27,7 @@ use Spora\Tools\ValueObjects\ToolResult;
  * the same answer a row that does not exist gets — so there is no oracle
  * to probe with.
  *
- * The assistant may **discover** folders, **shape** them (create, rename,
- * delete) and **file** assets in them. It may not **re-parent** a folder:
+ * It may not **re-parent** a folder:
  * `MediaFolderService::move()` rewrites the path of a whole subtree, and
  * a new folder's `parent_id` covers what the assistant needs.
  */
@@ -49,11 +48,6 @@ final readonly class MediaFolderHandler
     ) {}
 
     /**
-     * Run one folder operation.
-     *
-     * The operation name is the tool's own — the same string the
-     * assistant sends — so the tool hands it over unchanged.
-     *
      * @param  array<string, mixed> $arguments
      */
     public function run(string $operation, int $principalId, array $arguments = []): ToolResult
@@ -79,9 +73,6 @@ final readonly class MediaFolderHandler
     {
         $folders = $this->folders->listForPrincipal($principalId);
 
-        // The folder ids are what the folder ops take, and the data
-        // channel never reaches the model — so the rows go into the
-        // content too.
         return ToolResult::ok(
             MediaToolPresenter::folders($folders),
             ['folders' => $folders],
@@ -89,8 +80,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * Create a folder in the principal's tree.
-     *
      * The id is in the answer: the folder ops take it, and the agent
      * that just created the folder is about to file an asset into it.
      * A path alone is not a handle — the id is.
@@ -121,9 +110,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * Rename a folder. The path of the folder and of its descendants
-     * follows the new name.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function renameFolder(int $principalId, array $arguments): ToolResult
@@ -151,9 +137,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * Delete a folder. Its assets are not deleted — they fall back to
-     * the root, which is what the folder's deletion means for them.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function deleteFolder(int $principalId, array $arguments): ToolResult
@@ -179,8 +162,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * File an asset into a folder, or back into the root.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function fileAsset(int $principalId, array $arguments): ToolResult
@@ -206,8 +187,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * The assets inside one folder.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function searchAssets(int $principalId, array $arguments): ToolResult
@@ -256,8 +235,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * The refusal for a missing argument, or null when they are all there.
-     *
      * One check for a list of parameters, so the operation methods stay
      * under the 3-return ceiling the house style sets.
      *
@@ -307,8 +284,6 @@ final readonly class MediaFolderHandler
     }
 
     /**
-     * The id the operation names, or `null` for the root.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function readId(array $arguments, string $key): ?string

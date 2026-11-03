@@ -79,8 +79,6 @@ final class TokenStream
     }
 
     /**
-     * The format string of a `sprintf()` call.
-     *
      * The format has to be a lone literal: a concatenated one
      * (`'a' . 'b'`) is an expression, and half of it is not a message.
      *

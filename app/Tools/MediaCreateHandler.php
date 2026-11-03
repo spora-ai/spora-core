@@ -80,8 +80,7 @@ final readonly class MediaCreateHandler
     /**
      * The two gates that run against what actually landed in the row:
      * the MIME the bytes sniffed to, and the name the row ended up
-     * with. Both are answered by the row, not by the call — the
-     * declared mime and the declared filename are hints.
+     * with.
      */
     private function judge(MediaAsset $asset, int $agentId): ToolResult
     {
@@ -166,8 +165,6 @@ final readonly class MediaCreateHandler
     }
 
     /**
-     * The folder the new asset is filed in, or null for the root.
-     *
      * @param  array<string, mixed> $arguments
      */
     private function readFolderId(array $arguments): ?string

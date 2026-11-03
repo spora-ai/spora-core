@@ -41,11 +41,9 @@ final class MediaArchiveIngestPipeline
         private readonly AssetStore $assetStore,
         private readonly MediaDerivativeService $derivatives,
         private readonly PrincipalService $principalService,
-        // The folder tree owns the "one filename per folder" rule, so the
-        // ingest writes through it rather than around it. The default
-        // instance keeps the constructor callable with the arguments it
-        // took before folders existed — plugins build this pipeline in
-        // their own test harnesses.
+        // The default instance keeps the constructor callable with the
+        // arguments it took before folders existed — plugins build this
+        // pipeline in their own test harnesses.
         private readonly MediaFolderService $folders = new MediaFolderService(),
     ) {}
 
@@ -238,20 +236,11 @@ final class MediaArchiveIngestPipeline
      * The folder rule, checked before the bytes are stored.
      *
      * The blob lands before the row, so a filing the folder rule refuses
-     * would leave a blob no row points at — and nothing sweeps it. The
-     * check runs against the filing the row will end up carrying: an
-     * idempotent re-ingest keeps the row's own folder and only refreshes
-     * its filename, so the rule is checked against that folder, with the
-     * row's own id excluded from the filename check.
+     * would leave a blob no row points at — and nothing sweeps it.
      *
      * The rule is enforced again by {@see MediaFolderService::fileAsset()},
      * which also converts a concurrent writer's constraint violation into
      * the same domain error.
-     *
-     * A refresh is judged against the folder the row already carries, not
-     * against the request's: the request's `folder_id` does not move an
-     * existing row, so it is the row's own folder the new filename lands
-     * in.
      *
      * @param MediaAsset|null $existing The row the ingest would update, if any.
      *
@@ -361,13 +350,9 @@ final class MediaArchiveIngestPipeline
     }
 
     /**
-     * The row the ingest writes to.
-     *
      * Idempotent upsert on (tool_call_id, source_url). The dedup key is
      * the upstream CDN URL the caller asked us to archive, not the
-     * opaque /api/v1/assets/<uuid> form we rewrite at insert time. The
-     * caller resolved the row before the bytes were stored, so it is
-     * handed down rather than looked up again here.
+     * opaque /api/v1/assets/<uuid> form we rewrite at insert time.
      *
      * @param MediaAsset|null $existing The row to refresh, or null for a fresh insert.
      *

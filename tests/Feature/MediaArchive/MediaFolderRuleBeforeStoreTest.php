@@ -45,9 +45,6 @@ function localStoreArchive(string $storageDir): MediaArchiveService
     ));
 }
 
-/**
- * A temp storage dir for the store to write into, removed after the test.
- */
 function folderRuleTmpDir(): string
 {
     $dir = sys_get_temp_dir() . '/spora-folder-rule-' . bin2hex(random_bytes(4));

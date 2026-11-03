@@ -66,10 +66,8 @@ final readonly class ListMediaQuery
     public const OWNERSHIP_MINE = 'mine';
 
     /**
-     * The `kind` filter's vocabulary. The mark is advisory — it selects
-     * rows, it never refuses one — so the set is closed only for the
-     * filter's own sake: an unknown value is dropped by the builder and
-     * the listing stays unfiltered.
+     * The `kind` filter's vocabulary. An unknown value is dropped by the
+     * builder and the listing stays unfiltered.
      *
      * Mirrors {@see MediaAssetKind::ALL} — the upload endpoint refuses a
      * kind this list does not hold, so the two have to stay in step.
@@ -138,8 +136,7 @@ final readonly class ListMediaQuery
         public bool $includeTemporary = false,
         /**
          * Restricts the listing to the assets filed in this folder. Null =
-         * no filter. A folder outside the caller's principals yields no
-         * rows rather than somebody else's.
+         * no filter.
          */
         public ?string $folderId = null,
         /**

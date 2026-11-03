@@ -9,12 +9,9 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\MediaTool;
 
 /**
- * The folder operations live on the media tool.
- *
- * They were a second tool (`media_folders`) until `create_media` grew a
- * `folder_id`: the assistant had to know two tools — and two parameter
- * vocabularies — to file one file. The split also drew a line that was
- * already crossed, so the line was where the incoherence was.
+ * The folder operations live on the media tool, not on a second one: one
+ * tool, one parameter vocabulary, and a folder id that means the same
+ * thing wherever it is passed.
  */
 it('declares the folder operations on the media tool', function (): void {
     $kernel = new Kernel();

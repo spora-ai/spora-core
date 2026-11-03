@@ -27,9 +27,8 @@ final class MediaToolPresenter
     /**
      * The library's assets, one line each.
      *
-     * The count is the number of matches, not the number of rows: a
-     * `search` that returns 24 of 102 says so, and the paging hint
-     * names the offset that continues it.
+     * The count is the number of matches, not the number of rows, and
+     * the paging hint names the offset that continues it.
      *
      * @param list<array<string, mixed>> $items
      */

@@ -405,8 +405,6 @@ if (!function_exists('buildMediaToolForSchema')) {
 
 if (!function_exists('makeMediaFolderHandlerForTest')) {
     /**
-     * The folder handler for a test's MediaTool.
-     *
      * The folder service needs no collaborators beyond the database, so
      * the handler is built from the archive service the test already has.
      */

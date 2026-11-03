@@ -345,11 +345,8 @@ final class RouteDefinitions
         $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
 
         // Media folders — core owns the folder table, so core owns its
-        // CRUD. The folder operations live on the `media` tool
-        // (`Spora\Tools\MediaTool`): the assistant may create, rename and
-        // delete a folder — each one approval-gated — and file assets in
-        // one, but it may not re-parent a folder. Which status a domain
-        // error becomes is the controller's decision, not the router's.
+        // CRUD. Which status a domain error becomes is the controller's
+        // decision, not the router's.
         $r->addRoute('GET', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'index'], [AuthMiddleware::class]);
         $r->addRoute('POST', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_MEDIA_FOLDER_ITEM, [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);

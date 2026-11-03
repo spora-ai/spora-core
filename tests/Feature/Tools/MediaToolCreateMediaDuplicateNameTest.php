@@ -7,17 +7,8 @@ use Spora\Models\MediaAsset;
 /**
  * `create_media` and the "one filename per folder" rule.
  *
- * The archive's rule is that filenames are unique within a folder, and
- * the folder ops enforce it: `file_asset` refuses a name the folder
- * already holds. `create_media` did not, so two calls with the same
- * name left two rows that no folder would ever accept — the second one
- * could not be filed anywhere, and there was no way to rename an asset.
- *
- * The gap lives in the root. The rule is backed by a UNIQUE
- * `(folder_id, filename)` index, and a SQL unique index does not
- * compare NULLs — so the root, whose rows carry a NULL folder, is
- * unconstrained by it. A `create_media` that names a folder is already
- * covered (the ingest writes it through the folder service).
+ * The rule and the gap it leaves live in `MediaCreateHandler`'s
+ * duplicate-name gate; these tests pin the behaviour.
  */
 it('refuses a second create_media with a filename the root already holds', function (): void {
     $agentId = seedMediaToolAgent();

@@ -41,12 +41,9 @@ use Symfony\Component\HttpFoundation\Response;
  * a producer failure leaves the upload intact.
  *
  * `folder_id` files the upload in a folder of the target principal and
- * `kind` marks it. The mark is advisory: a mark the operator chose is
- * stored as given, and a value outside the mark's vocabulary is refused
- * with a 400 before the bytes reach the AssetStore. The folder is
- * checked against the target principal and against the folder's filename
- * rule, so an upload that would collide is a 422 rather than a database
- * error.
+ * `kind` marks it. The folder is checked against the target principal
+ * and against the folder's filename rule, so an upload that would
+ * collide is a 422 rather than a database error.
  */
 final class MediaUploadController
 {
@@ -156,7 +153,6 @@ final class MediaUploadController
         }
     }
 
-    /** A non-empty string from the form, or null. */
     private function readString(mixed $raw): ?string
     {
         if (!is_string($raw)) {
@@ -167,7 +163,6 @@ final class MediaUploadController
         return $value === '' ? null : $value;
     }
 
-    /** A numeric id from the form, or null. */
     private function readId(mixed $raw): ?int
     {
         if (!is_string($raw) || !ctype_digit($raw)) {
@@ -178,10 +173,9 @@ final class MediaUploadController
     }
 
     /**
-     * A value outside the vocabulary is refused, before the bytes reach
+     * A value outside the vocabulary is refused before the bytes reach
      * the AssetStore: the listing's filter could never select the row
-     * again. A mark inside the vocabulary is stored as given — the mark
-     * is advisory and never refuses an asset.
+     * again.
      */
     private function checkKindAllowed(?string $kind): ?JsonResponse
     {

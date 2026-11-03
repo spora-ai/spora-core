@@ -23,8 +23,6 @@ use Spora\Tools\ValueObjects\ToolResult;
 /**
  * Built-in tool for reading and producing media library content.
  *
- * Eight operations:
- *
  *   - `search`            — paginated list of `media_assets` rows (auto-approved read).
  *                           Derivatives are filtered out — the LLM fetches a
  *                           derivative via `get_media` on its parent id.
@@ -123,13 +121,6 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           root. A folder already holding that filename
  *                           refuses it.
  *   - `search_assets`      — the assets inside one folder.
- *
- * The folder operations were a second tool (`media_folders`) until the
- * media tool's own `create_media` grew a `folder_id`: the boundary was
- * already crossed, so the assistant had to know two tools to file one
- * file. They are one tool now, and the folder operations keep the
- * principal's scope they always had — the tree belongs to the principal,
- * not to the calling agent.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -456,9 +447,6 @@ final class MediaTool extends AbstractTool
         $paginator = $this->archive->list($query);
         $items     = $paginator->getCollection()->map(fn(MediaAsset $a): array => $this->summarizeAsset($a))->all();
 
-        // The rows go into the content, not only into `$data`: the data
-        // channel never reaches the model, so a count on its own leaves
-        // the agent without a single asset id to act on.
         return ToolResult::ok(
             MediaToolPresenter::assets($items, $paginator->total(), ($page - 1) * $perPage),
             [

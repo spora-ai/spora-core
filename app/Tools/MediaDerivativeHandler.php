@@ -98,9 +98,6 @@ final readonly class MediaDerivativeHandler
             ));
         }
 
-        // The rows go into the content: the data channel never reaches
-        // the model, so a count on its own leaves the agent without the
-        // derivative ids it needs for a follow-up call.
         return ToolResult::ok(
             MediaToolPresenter::derivatives($rows, $parent->id, $formatFilter),
             [

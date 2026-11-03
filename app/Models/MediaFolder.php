@@ -16,10 +16,9 @@ use Spora\Models\Concerns\HasStringColumnLengthValidation;
  * enclosing folder (null for a top-level one) and `path` carries the
  * folder's path from the tenant root (`/Corporate`, `/Corporate/2026`).
  *
- * The UNIQUE `(principal_id, path)` index is what makes sibling names
- * unique — the same name may exist under two different parents, but two
- * siblings with one name collide. `path` is therefore the identity a
- * rename or a move rewrites, together with the paths of every descendant.
+ * `path` is the identity a rename or a move rewrites, together with the
+ * paths of every descendant. The same name may exist under two
+ * different parents; two siblings with one name collide.
  *
  * @property string                $id
  * @property int                   $principal_id

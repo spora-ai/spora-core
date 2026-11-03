@@ -20,13 +20,14 @@ use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
  * rather than as forbidden — the caller has no business knowing it
  * exists.
  *
- * A folder's name and path are decided by {@see MediaFolderPaths}; the
- * filename rule is owned here: filenames are unique within a folder,
- * enforced by UNIQUE `(folder_id, filename)`. Assets in the root have a
- * `NULL` folder, and a SQL unique index does not compare `NULL`s, so the
- * root is not constrained.
+ * A folder's name and path are decided by {@see MediaFolderPaths}, which
+ * also owns the sibling-name rule; the filename rule is owned here:
+ * filenames are unique within a folder, enforced by UNIQUE
+ * `(folder_id, filename)`. Assets in the root have a `NULL` folder, and
+ * a SQL unique index does not compare `NULL`s, so the root is not
+ * constrained.
  *
- * Both rules are checked before the write, and a write's own constraint
+ * Each rule is checked before the write, and a write's own constraint
  * violation is converted into {@see MediaFolderUniquenessException}, so a
  * caller never sees a raw database exception.
  */
@@ -37,8 +38,6 @@ final class MediaFolderService
     ) {}
 
     /**
-     * The principal's folders, flat, ordered by path.
-     *
      * `asset_count` counts the assets filed directly in the folder; the
      * assets of a subfolder are counted in that subfolder.
      *
@@ -71,8 +70,6 @@ final class MediaFolderService
     }
 
     /**
-     * The wire shape of one folder.
-     *
      * @return array{id: string, name: string, path: string, parent_id: string|null, asset_count: int}
      */
     public function describe(MediaFolder $folder): array
@@ -85,8 +82,6 @@ final class MediaFolderService
     }
 
     /**
-     * Create a folder under `$parentId` (the root when it is null).
-     *
      * @throws MediaFolderNotFoundException When the parent is not the principal's.
      * @throws MediaFolderUniquenessException When a sibling already has that name.
      * @throws MediaFolderValidationException When the name is not a usable folder name.
@@ -111,8 +106,7 @@ final class MediaFolderService
     }
 
     /**
-     * Rename a folder. The folder's path and the paths of its descendants
-     * change with it.
+     * The folder's path and the paths of its descendants change with it.
      *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
      * @throws MediaFolderUniquenessException When a sibling already has that name.
@@ -132,8 +126,6 @@ final class MediaFolderService
     }
 
     /**
-     * Move a folder under `$parentId` (the root when it is null).
-     *
      * @throws MediaFolderNotFoundException When the folder or the parent is not the principal's.
      * @throws MediaFolderUniquenessException When a sibling already has that name.
      * @throws MediaFolderValidationException When the move would put the folder inside itself.
@@ -163,8 +155,6 @@ final class MediaFolderService
     }
 
     /**
-     * Rename a folder and move it, as one operation.
-     *
      * The two writes share a transaction, so a move that collides with a
      * sibling rolls the rename back: the caller never sees a 422 next to
      * a folder that was renamed anyway.
@@ -185,8 +175,7 @@ final class MediaFolderService
     }
 
     /**
-     * Delete a folder. Its subfolders go with it; its assets fall back to
-     * the root.
+     * Its subfolders go with it; its assets fall back to the root.
      *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
      */
@@ -217,12 +206,6 @@ final class MediaFolderService
     }
 
     /**
-     * The folder an asset may be filed in.
-     *
-     * Throws when the folder is not the principal's, or when the folder
-     * already holds an asset with that filename — the rule the UNIQUE
-     * `(folder_id, filename)` index enforces.
-     *
      * @param string $exceptAssetId The asset being moved, so that filing an
      *        asset into the folder it already sits in is not a conflict.
      *
@@ -273,9 +256,6 @@ final class MediaFolderService
     }
 
     /**
-     * File an asset into a folder, or back into the root when `$folderId`
-     * is null.
-     *
      * @throws MediaFolderNotFoundException When the folder is not the principal's.
      * @throws MediaFolderUniquenessException When the folder already holds an asset with that filename.
      */
@@ -308,8 +288,6 @@ final class MediaFolderService
     }
 
     /**
-     * The folder, or a "not found" domain error.
-     *
      * @throws MediaFolderNotFoundException
      */
     private function requireFolder(int $principalId, string $folderId): MediaFolder
@@ -326,8 +304,6 @@ final class MediaFolderService
     }
 
     /**
-     * The parent folder, or null for the root.
-     *
      * @throws MediaFolderNotFoundException
      */
     private function parentFor(int $principalId, ?string $parentId): ?MediaFolder
@@ -340,8 +316,6 @@ final class MediaFolderService
     }
 
     /**
-     * Rewrite a folder's path and the paths of its descendants.
-     *
      * The descendants' paths are recomputed from their names under the
      * new root path rather than patched, so a rename or a move can never
      * leave a stale segment behind.
@@ -459,8 +433,8 @@ final class MediaFolderService
 
     /**
      * Generate a UUIDv4 string without the `ramsey/uuid` dependency —
-     * mirrors {@see MediaArchiveIngestPipeline::generateUuid()} so the
-     * folder ids and the asset ids share the same canonical format.
+     * the same layout as the asset ids, so both share one canonical
+     * format.
      */
     private static function generateUuid(): string
     {

@@ -371,14 +371,6 @@ final class MediaArchiveService
     }
 
     /**
-     * Scope the listing by folder.
-     *
-     * Two filters live here and they are exclusive: a folder id names
-     * one folder, the `unfiled` flag names the assets filed in none. The
-     * folder is the more specific one, so it wins when a DTO carries
-     * both — a caller that named a folder and asked for the unfiled
-     * rows at once gets the folder's rows.
-     *
      * Both are an extra AND on top of the ownership scope, never a
      * replacement for it.
      */
@@ -395,8 +387,6 @@ final class MediaArchiveService
     }
 
     /**
-     * Scope the listing to one folder.
-     *
      * A folder outside the caller's principals yields no rows rather than
      * somebody else's: a probe for a foreign folder id must not be able
      * to confirm that the folder exists.
@@ -415,8 +405,6 @@ final class MediaArchiveService
     }
 
     /**
-     * The principals the listing is scoped to.
-     *
      * @return list<int>
      */
     private function scopePrincipalIds(ListMediaQuery $query): array

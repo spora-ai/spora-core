@@ -33,11 +33,11 @@ use Spora\Tools\MediaTool;
  *   - `delete_folder`     : enabled_by_default = true,  requires_approval_by_default = true
  *   - `file_asset`        : enabled_by_default = true,  requires_approval_by_default = false
  *   - `search_assets`     : enabled_by_default = true,  requires_approval_by_default = false
- *   - The discriminator `enum` in the generated JSON schema lists all
- *     fourteen operations (the orchestrator narrows the enum per-agent).
- *   - All fourteen are enabled by default, so an agent with no override row
- *     sees the full matrix. Exactly five ask for approval, and each for a
- *     reason about durability rather than reads: `get_public_url` mints a
+ *   - The discriminator `enum` in the generated JSON schema lists every
+ *     operation (the orchestrator narrows the enum per-agent).
+ *   - All are enabled by default, so an agent with no override row sees
+ *     the full matrix. The ones that ask for approval do so for a reason
+ *     about durability rather than reads: `get_public_url` mints a
  *     link that outlives the session, `create_media` is the one write with
  *     no natural key, so a retry duplicates the row and a loop spams the
  *     archive — nothing in the database stops either — and the three folder
@@ -116,10 +116,6 @@ describe('MediaTool attributes', function (): void {
     });
 
     it('declares exactly the fourteen expected operations', function (): void {
-        // The eight media operations and the six folder ones. The
-        // folders were a second tool (`media_folders`) until
-        // `create_media` grew a `folder_id` — the assistant had to know
-        // two tools to file one file.
         $names = array_map(static fn(ToolOperation $op) => $op->name, mediaToolOperations());
         expect($names)->toBe([
             'search', 'get_media', 'get_public_url', 'get_embed_code', 'get_source',

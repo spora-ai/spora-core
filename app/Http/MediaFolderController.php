@@ -168,12 +168,6 @@ final class MediaFolderController
     }
 
     /**
-     * Run the folder operation and map its domain errors onto HTTP.
-     *
-     * The uniqueness rule is reported as a 422 and a field the server
-     * refuses as a 422 too — neither reaches the caller as a database
-     * exception.
-     *
      * @param Closure(): JsonResponse $operation
      */
     private function respond(Closure $operation): JsonResponse
@@ -215,8 +209,6 @@ final class MediaFolderController
     }
 
     /**
-     * The patch as one operation.
-     *
      * A patch that renames *and* moves is a single write: the service
      * owns the transaction, so a move that collides with a sibling rolls
      * the rename back and the caller never sees a 422 next to a folder
@@ -240,12 +232,6 @@ final class MediaFolderController
     }
 
     /**
-     * The principal the request acts on.
-     *
-     * A named principal must be one the caller can act for. A request
-     * that names a folder and no principal acts on the folder's own
-     * principal.
-     *
      * @throws MediaFolderNotFoundException
      */
     private function resolvePrincipalId(int $userId, ?int $named, ?string $folderId): int
@@ -267,8 +253,6 @@ final class MediaFolderController
     }
 
     /**
-     * The principal a folder belongs to, when the caller may act for it.
-     *
      * @param list<int> $visible
      * @throws MediaFolderNotFoundException
      */
@@ -284,8 +268,6 @@ final class MediaFolderController
     }
 
     /**
-     * The principals the caller can act for.
-     *
      * @return list<int>
      */
     private function visiblePrincipalIds(int $userId): array
@@ -315,8 +297,6 @@ final class MediaFolderController
     /**
      * The parent folder id from the request body.
      *
-     * `null` is a valid value — it moves the folder to the root — so an
-     * unusable value needs its own sentinel to be told apart from it.
      * An absent key and an explicit `null` both mean the root.
      */
     private function readParentId(array $body): ?string

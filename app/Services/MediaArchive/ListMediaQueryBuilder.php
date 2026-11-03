@@ -211,8 +211,6 @@ final class ListMediaQueryBuilder
     }
 
     /**
-     * Parse `?folder_id=` into the folder the listing is scoped to.
-     *
      * The array-bracket form (`?folder_id[]=…`) is accepted because the
      * Media Archive panel's convention for a repeated id is the
      * bracket form (`principal_id[]`); a multi-select folder filter would
@@ -233,8 +231,6 @@ final class ListMediaQueryBuilder
     }
 
     /**
-     * Parse `?kind=` into the advisory mark the listing is scoped to.
-     *
      * An unknown value is dropped silently — mirroring the typo tolerance
      * of the other filters — so the listing stays unfiltered instead of
      * failing.

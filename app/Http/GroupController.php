@@ -329,8 +329,6 @@ final class GroupController
     }
 
     /**
-     * Build the 409 response when the group still owns media folders.
-     *
      * A folder is not an agent: the transfer endpoint cannot re-target
      * one, so the hint points at the folder route instead.
      *

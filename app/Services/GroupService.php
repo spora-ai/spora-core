@@ -354,8 +354,8 @@ final class GroupService
      * Pre-flight: refuse if any agent still references the group's
      * principal, or if the group owns a media folder (a folder is a
      * container the operator curates; `media_folders.principal_id` is
-     * `ON DELETE RESTRICT`). The caller surfaces a 409 with a
-     * `reassign_endpoint` hint to the operator.
+     * `ON DELETE RESTRICT`). The caller surfaces a 409 with a hint
+     * naming the endpoint that can unblock each kind of dependent.
      *
      * @throws GroupMembershipRuleException When the caller is not admin
      *         and is not the group owner
