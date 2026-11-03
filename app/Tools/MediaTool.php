@@ -454,14 +454,18 @@ final class MediaTool extends AbstractTool
         );
 
         $paginator = $this->archive->list($query);
+        $items     = $paginator->getCollection()->map(fn(MediaAsset $a): array => $this->summarizeAsset($a))->all();
 
+        // The rows go into the content, not only into `$data`: the data
+        // channel never reaches the model, so a count on its own leaves
+        // the agent without a single asset id to act on.
         return ToolResult::ok(
-            "Found {$paginator->total()} media asset(s).",
+            MediaToolPresenter::assets($items, $paginator->total(), ($page - 1) * $perPage),
             [
                 'total'  => $paginator->total(),
                 'limit'  => $perPage,
                 'offset' => ($page - 1) * $perPage,
-                'items'  => $paginator->getCollection()->map(fn(MediaAsset $a): array => $this->summarizeAsset($a))->all(),
+                'items'  => $items,
             ],
         );
     }
@@ -513,6 +517,7 @@ final class MediaTool extends AbstractTool
             ? trim((string) $asset->prompt)
             : null;
         $extractedText = $this->derivativeHandler->readTextDerivative($asset);
+        $derivativeRows = $this->serializer->derivativeRowsFor($asset);
 
         if ($prompt !== null) {
             $content .= "\n\nPrompt: " . $prompt;
@@ -522,9 +527,18 @@ final class MediaTool extends AbstractTool
             $content .= "\n\nCall `get_source` to read the full extracted text.";
         }
 
+        // The derivative graph is how the model walks parent → child
+        // without a second round-trip, and it only reaches the model
+        // through the content — `derivatives[]` in the data channel is
+        // the operator's copy.
+        $derivatives = MediaToolPresenter::assetDerivatives($derivativeRows);
+        if ($derivatives !== '') {
+            $content .= "\n\n" . $derivatives;
+        }
+
         return ToolResult::ok(
             $content,
-            $this->describeAsset($asset, $mediaType, $assetUrl, $extractedText),
+            $this->describeAsset($asset, $mediaType, $assetUrl, $extractedText, $derivativeRows),
         );
     }
 
@@ -857,17 +871,21 @@ final class MediaTool extends AbstractTool
      *
      * Derivative enrichment:
      *  - `derivatives[]` is empty for non-parents; for parents it
-     *    reuses {@see MediaAssetSerializer::derivativeRowsFor()} so the
-     *    LLM-visible row shape is byte-for-byte identical to the
-     *    operator dashboard's VersionsStrip (label, asset_url,
-     *    producer_plugin, producer_operation, created_at). The `md`
-     *    entry is what `get_source` and the chat-attachment path read.
+     *    carries the rows {@see MediaAssetSerializer::derivativeRowsFor()}
+     *    produced, so the LLM-visible row shape is byte-for-byte
+     *    identical to the operator dashboard's VersionsStrip (label,
+     *    asset_url, producer_plugin, producer_operation, created_at).
+     *    The `md` entry is what `get_source` and the chat-attachment
+     *    path read. The rows are passed in rather than looked up again
+     *    because the same list is written into the content, and the
+     *    query behind it is not free.
      *  - `parent_id` is null for non-derivatives; for derivatives it
      *    is the parent asset's id (one-shot reverse lookup on
      *    `media_derivatives.derivative_id`), so the LLM can fetch the
      *    parent via `get_media(asset_id: parent_id)` if it wants the
      *    wider context.
      *
+     * @param  list<array<string, mixed>> $derivativeRows
      * @return array<string, mixed>
      */
     private function describeAsset(
@@ -875,6 +893,7 @@ final class MediaTool extends AbstractTool
         MediaType $mediaType,
         string $assetUrl,
         ?string $extractedText = null,
+        array $derivativeRows = [],
     ): array {
         return [
             'id'               => $asset->id,
@@ -892,7 +911,7 @@ final class MediaTool extends AbstractTool
             'asset_url'        => $assetUrl,
             'public_url'       => $this->ensurePublicUrl($asset),
             'parent_id'        => $this->derivatives->parentOf($asset->id),
-            'derivatives'      => $this->serializer->derivativeRowsFor($asset),
+            'derivatives'      => $derivativeRows,
             'created_at'       => $asset->created_at?->toIso8601String(),
         ];
     }

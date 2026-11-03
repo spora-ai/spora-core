@@ -77,8 +77,11 @@ final readonly class MediaFolderHandler
     {
         $folders = $this->folders->listForPrincipal($principalId);
 
+        // The folder ids are what the folder ops take, and the data
+        // channel never reaches the model — so the rows go into the
+        // content too.
         return ToolResult::ok(
-            sprintf('Found %d media folder(s).', count($folders)),
+            MediaToolPresenter::folders($folders),
             ['folders' => $folders],
         );
     }
@@ -217,19 +220,22 @@ final readonly class MediaFolderHandler
             perPage: $limit,
         ));
 
+        $items = $page->getCollection()->map(fn($asset): array => [
+            'id'         => $asset->id,
+            'filename'   => $asset->filename,
+            'media_type' => $asset->media_type,
+            'mime_type'  => $asset->mime_type,
+            'byte_size'  => $asset->byte_size,
+            'kind'       => $asset->kind,
+            'created_at' => $asset->created_at?->toIso8601String(),
+        ])->all();
+
         return ToolResult::ok(
-            sprintf('Found %d asset(s) in folder %s.', $page->total(), $folderId),
+            MediaToolPresenter::folderAssets($items, $page->total(), $folderId),
             [
                 'folder_id' => $folderId,
                 'total'     => $page->total(),
-                'items'     => $page->getCollection()->map(fn($asset): array => [
-                    'id'        => $asset->id,
-                    'filename'  => $asset->filename,
-                    'media_type' => $asset->media_type,
-                    'mime_type' => $asset->mime_type,
-                    'kind'      => $asset->kind,
-                    'created_at' => $asset->created_at?->toIso8601String(),
-                ])->all(),
+                'items'     => $items,
             ],
         );
     }
