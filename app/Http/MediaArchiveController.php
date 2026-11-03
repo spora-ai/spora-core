@@ -61,6 +61,27 @@ final class MediaArchiveController
         description: 'Repeatable principal id to scope the listing by. Intersected with the caller\'s visible principals server-side; out-of-scope ids are silently dropped. Used by the Media Archive plugin\'s `ALL / My Media / Group X` chip row. Use the `principal_id[]=…` array-bracket form so repeated keys are preserved through PHP parse_str.',
         schema: new OA\Schema(type: 'array', items: new OA\Items(type: 'integer')),
     )]
+    #[OA\Parameter(
+        name: 'folder_id',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing to one folder. An exact match: a parent folder does not include the assets filed in its subfolders. The folder is intersected with the principal scope, so a folder owned outside it yields no rows. The array-bracket form `folder_id[]=…` is accepted; only the first value is honoured.',
+        schema: new OA\Schema(type: 'string'),
+    )]
+    #[OA\Parameter(
+        name: 'unfiled',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing to the assets filed in no folder. Ignored when `folder_id` is present — the folder filter is the more specific of the two.',
+        schema: new OA\Schema(type: 'boolean'),
+    )]
+    #[OA\Parameter(
+        name: 'kind',
+        in: 'query',
+        required: false,
+        description: 'Scope the listing by the asset\'s kind. The mark is advisory — a value outside the vocabulary is dropped and the listing stays unfiltered.',
+        schema: new OA\Schema(type: 'string', enum: ['asset', 'template', 'example']),
+    )]
     public function index(Request $request): JsonResponse
     {
         $userId = $this->auth->currentUserId();
@@ -118,8 +139,10 @@ final class MediaArchiveController
 
     /**
      * Tiny DTO rebuilder so {@see applyPrincipalScope()} stays under the
-     * 3-return brain-overload ceiling. The other fields are passed
-     * through verbatim — the controller only ever replaces principalIds.
+     * 3-return brain-overload ceiling. Every other field is passed
+     * through verbatim — the controller only ever replaces principalIds,
+     * and a field left out here would silently fall back to its
+     * constructor default.
      */
     private function withPrincipalIds(ListMediaQuery $query, ?array $principalIds): ListMediaQuery
     {
@@ -139,6 +162,9 @@ final class MediaArchiveController
             agentOwnerUserId: $query->agentOwnerUserId,
             principalIds: $principalIds,
             includeTemporary: $query->includeTemporary,
+            folderId: $query->folderId,
+            unfiled: $query->unfiled,
+            kind: $query->kind,
             page: $query->page,
             perPage: $query->perPage,
         );

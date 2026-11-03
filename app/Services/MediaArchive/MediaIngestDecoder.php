@@ -23,6 +23,8 @@ final class MediaIngestDecoder
      * Resolve an ingest request's inline source to raw bytes. Returns
      * null when the request is URL-driven (no inline payload present),
      * so the caller can branch to the URL pipeline.
+     *
+     * @throws InvalidArgumentException When the hex or base64 payload cannot be decoded.
      */
     public function decodeInline(MediaIngestRequest $request): ?string
     {

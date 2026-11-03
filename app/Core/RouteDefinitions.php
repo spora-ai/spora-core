@@ -30,6 +30,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaFolderController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -62,6 +63,8 @@ use Spora\OpenApi\RouteSpecCollector;
 final class RouteDefinitions
 {
     public const ROUTE_MEDIA_ITEM = '/api/v1/media/{id}';
+    public const ROUTE_MEDIA_FOLDERS = '/api/v1/media/folders';
+    public const ROUTE_MEDIA_FOLDER_ITEM = '/api/v1/media/folders/{id}';
 
     public const ROUTE_AGENTS_ID = '/api/v1/agents/{id}';
     public const ROUTE_AGENTS_TRANSFER = '/api/v1/agents/{id}/transfer';
@@ -340,6 +343,14 @@ final class RouteDefinitions
         // `/api/v1/media/allowed-types` in core.
         $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/derivatives', [MediaDerivativeController::class, 'create'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
+
+        // Media folders — core owns the folder table, so core owns its
+        // CRUD. Which status a domain error becomes is the controller's
+        // decision, not the router's.
+        $r->addRoute('GET', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'index'], [AuthMiddleware::class]);
+        $r->addRoute('POST', self::ROUTE_MEDIA_FOLDERS, [MediaFolderController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('PATCH', self::ROUTE_MEDIA_FOLDER_ITEM, [MediaFolderController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('DELETE', self::ROUTE_MEDIA_FOLDER_ITEM, [MediaFolderController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Public, token-gated media access. No auth middleware — the token
         // itself is the credential. The id is always a UUID shape; the

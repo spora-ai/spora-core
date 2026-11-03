@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
+use Illuminate\Database\Schema\Builder;
+use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Services\AssetTooLargeException;
 use Spora\Services\Exceptions\PrincipalMaterialisationException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
 use Spora\Services\PrincipalService;
 use Spora\Services\Text\Utf8Sanitizer;
 
@@ -37,8 +42,18 @@ final class MediaArchiveIngestPipeline
         private readonly AssetStore $assetStore,
         private readonly MediaDerivativeService $derivatives,
         private readonly PrincipalService $principalService,
+        // The default instance keeps the constructor callable with the
+        // arguments it took before folders existed — plugins build this
+        // pipeline in their own test harnesses.
+        private readonly MediaFolderService $folders = new MediaFolderService(),
     ) {}
 
+    /**
+     * @throws InvalidArgumentException When the hex or base64 payload cannot be decoded.
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
     public function ingest(MediaIngestRequest $request): MediaAsset
     {
         // Precedence: caller-supplied principal_id → agent's principal →
@@ -115,6 +130,12 @@ final class MediaArchiveIngestPipeline
         $asset->save();
     }
 
+    /**
+     * @throws InvalidArgumentException When the hex or base64 payload cannot be decoded.
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
     private function ingestFresh(MediaIngestRequest $request): MediaAsset
     {
         $inline = $this->decoder->decodeInline($request);
@@ -129,6 +150,10 @@ final class MediaArchiveIngestPipeline
         if ($bytes === null) {
             $sniffed = $this->urlResolver->sniffForExternal($request, $effectiveUrl);
             $mediaType = $request->mediaType ?? MediaType::fromMime($sniffed);
+
+            $existing = $this->existingRow($request, $url);
+
+            $this->assertFilable($request, $existing);
 
             return $this->persist(
                 $request,
@@ -147,6 +172,7 @@ final class MediaArchiveIngestPipeline
                     principalId: $request->principalId,
                     uploadSource: $request->uploadSource,
                 ),
+                $existing,
             );
         }
 
@@ -158,6 +184,10 @@ final class MediaArchiveIngestPipeline
      * `/api/v1/assets/<uuid>` URL is in place when the bytes land —
      * concurrent readers never see a row with a URL that resolves to an
      * empty/corrupt payload.
+     *
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
      */
     private function ingestFromBytes(MediaIngestRequest $request, string $bytes, ?string $sourceUrl): MediaAsset
     {
@@ -168,6 +198,10 @@ final class MediaArchiveIngestPipeline
         // `getimagesize` can correct `finfo`'s guess when the caller labelled
         // the asset as an image.
         $finalMime = $extracted->mime !== null && $extracted->mime !== '' ? $extracted->mime : $sniffed;
+
+        $existing = $this->existingRow($request, $sourceUrl);
+
+        $this->assertFilable($request, $existing);
 
         $reference = $this->storeAsset($bytes, $finalMime, $request->filename);
 
@@ -189,6 +223,7 @@ final class MediaArchiveIngestPipeline
                 principalId: $request->principalId,
                 uploadSource: $request->uploadSource,
             ),
+            $existing,
         );
 
         if ($reference->mode === 'data_url') {
@@ -203,6 +238,94 @@ final class MediaArchiveIngestPipeline
         }
 
         return $asset;
+    }
+
+    /**
+     * The folder rule, checked before the bytes are stored.
+     *
+     * The blob lands before the row, so a filing the folder rule refuses
+     * would leave a blob no row points at — and nothing sweeps it.
+     *
+     * The rule is enforced again by {@see MediaFolderService::fileAsset()},
+     * which also converts a concurrent writer's constraint violation into
+     * the same domain error.
+     *
+     * @param MediaAsset|null $existing The row the ingest would update, if any.
+     *
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
+    private function assertFilable(MediaIngestRequest $request, ?MediaAsset $existing): void
+    {
+        if ($existing !== null) {
+            $this->assertExistingRowFilable($existing, $request);
+
+            return;
+        }
+
+        if ($request->folderId === null || $request->folderId === '') {
+            return;
+        }
+
+        $principalId = $request->principalId;
+        if ($principalId === null) {
+            // Not a missing folder: the row has no tenant to file it
+            // in, which the caller can fix.
+            throw new MediaFolderValidationException(
+                'The asset has no principal, so it cannot be filed in a media folder.',
+            );
+        }
+
+        // The filename the row carries is the scrubbed one, not the raw
+        // request — the rule is checked against the string that lands.
+        $filename = $request->filename !== null
+            ? Utf8Sanitizer::scrubString($request->filename)
+            : null;
+
+        $this->folders->fileTarget($principalId, $request->folderId, $filename);
+    }
+
+    /**
+     * The rule for an idempotent re-ingest.
+     *
+     * The row keeps its own folder and only its filename is refreshed, so
+     * the rule is checked against that folder — with the row's own id
+     * excluded, or the row would collide with itself.
+     */
+    private function assertExistingRowFilable(MediaAsset $existing, MediaIngestRequest $request): void
+    {
+        $folderId = (string) ($existing->folder_id ?? '');
+        $principalId = $existing->principal_id === null ? null : (int) $existing->principal_id;
+
+        // A row without a principal never sat in a folder — the filing
+        // needs one — so there is no rule to check.
+        if ($folderId === '' || $principalId === null) {
+            return;
+        }
+
+        $fallback = $existing->filename;
+        $filename = $request->filename !== null
+            ? Utf8Sanitizer::scrubString($request->filename)
+            : $fallback;
+
+        $this->folders->fileTarget($principalId, $folderId, $filename, (string) $existing->id);
+    }
+
+    /**
+     * The row an ingest would update, if the dedup key names one.
+     *
+     * The lookup happens once, before the bytes are stored:
+     * {@see findExisting()} has a side effect — it mints an
+     * `asset_token` for a row that has none — and the row the folder
+     * rule judges has to be the row the write touches.
+     */
+    private function existingRow(MediaIngestRequest $request, ?string $sourceUrl): ?MediaAsset
+    {
+        if ($request->toolCallId === null || $sourceUrl === null) {
+            return null;
+        }
+
+        return $this->findExisting($request->toolCallId, $sourceUrl);
     }
 
     private function storeAsset(string $bytes, string $mime, ?string $filename): AssetReference
@@ -236,17 +359,22 @@ final class MediaArchiveIngestPipeline
         return $reference;
     }
 
-    private function persist(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
+    /**
+     * Idempotent upsert on (tool_call_id, source_url). The dedup key is
+     * the upstream CDN URL the caller asked us to archive, not the
+     * opaque /api/v1/assets/<uuid> form we rewrite at insert time.
+     *
+     * @param MediaAsset|null $existing The row to refresh, or null for a fresh insert.
+     *
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
+    private function persist(MediaIngestRequest $request, PersistedAssetFields $fields, ?MediaAsset $existing): MediaAsset
     {
-        // Idempotent upsert on (tool_call_id, source_url). The dedup key
-        // is the upstream CDN URL the caller asked us to archive, not the
-        // opaque /api/v1/assets/<uuid> form we rewrite at insert time.
-        if ($request->toolCallId !== null && $fields->sourceUrl !== null) {
-            $existing = $this->findExisting($request->toolCallId, $fields->sourceUrl);
-            if ($existing !== null) {
-                $this->applyFieldsToExisting($existing, $fields);
-                return $existing;
-            }
+        if ($existing !== null) {
+            $this->applyFieldsToExisting($existing, $fields);
+            return $existing;
         }
 
         return $this->insertNew($request, $fields);
@@ -280,8 +408,24 @@ final class MediaArchiveIngestPipeline
         return $row;
     }
 
+    /**
+     * Refresh the row of an idempotent re-ingest.
+     *
+     * The filing (`folder_id`) and the mark (`kind`) are deliberately not
+     * refreshed: they are the operator's curation of an asset that
+     * already exists, and a re-ingest of the same source must not undo
+     * it. A caller that wants to move an asset files it through
+     * {@see MediaFolderService::fileAsset()}.
+     */
     private function applyFieldsToExisting(MediaAsset $existing, PersistedAssetFields $fields): void
     {
+        // The row keeps its folder, but its filename may change, so the
+        // write has to go through the service that owns the rule: a
+        // concurrent writer that took the name in between is a domain
+        // error, not a raw constraint violation.
+        $principalId = $existing->principal_id === null ? null : (int) $existing->principal_id;
+        $folderId = $existing->folder_id === null ? null : (string) $existing->folder_id;
+
         $existing->fill([
             'mime_type' => $fields->sniffedMime,
             'media_type' => $fields->mediaType->value,
@@ -298,9 +442,21 @@ final class MediaArchiveIngestPipeline
             'principal_id' => $fields->principalId ?? $existing->principal_id,
             'upload_source' => $fields->uploadSource ?: ($existing->upload_source ?? 'tool'),
         ]);
-        $existing->save();
+
+        if ($principalId === null || $folderId === null || $folderId === '') {
+            $existing->save();
+
+            return;
+        }
+
+        $this->folders->fileAsset($principalId, $existing, $folderId);
     }
 
+    /**
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
     private function insertNew(MediaIngestRequest $request, PersistedAssetFields $fields): MediaAsset
     {
         $asset = new MediaAsset();
@@ -325,11 +481,27 @@ final class MediaArchiveIngestPipeline
         $ext  = MediaArchiveService::extensionForMime($fields->sniffedMime);
         $asset->asset_url = MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $asset->id . ($ext !== null ? '.' . $ext : '');
 
-        // Probe the schema so pre-#137 fixtures and partial migrations
-        // (no user_id, no asset_token, etc.) keep working. New columns
-        // land here as the schema grows.
-        $table = $asset->getTable();
         $schema = $asset->getConnection()->getSchemaBuilder();
+        $table = $asset->getTable();
+        $this->applyOptionalColumns($asset, $request, $fields, $schema, $table);
+
+        return $this->fileInFolder($asset, $request, $schema->hasColumn($table, 'folder_id'));
+    }
+
+    /**
+     * The columns that only exist from a later migration on.
+     *
+     * The schema is probed so pre-#137 fixtures and partial migrations
+     * (no user_id, no asset_token, etc.) keep working. New columns land
+     * here as the schema grows.
+     */
+    private function applyOptionalColumns(
+        MediaAsset $asset,
+        MediaIngestRequest $request,
+        PersistedAssetFields $fields,
+        Builder $schema,
+        string $table,
+    ): void {
         $optionalFields = [
             'user_id'            => fn() => $fields->userId ?? $request->userId,
             'principal_id'       => fn() => $fields->principalId ?? $request->principalId,
@@ -347,17 +519,49 @@ final class MediaArchiveIngestPipeline
             // `isTemporary=false`, so the probe keeps both old and new
             // schemas happy.
             'is_temporary'       => fn() => $request->isTemporary,
+            // Kind (migration 0097) — same probe: a pre-0097 schema has
+            // no such column.
+            'kind'               => fn() => $request->kind ?? MediaAssetKind::ASSET,
         ];
         foreach ($optionalFields as $column => $valueFn) {
             if ($schema->hasColumn($table, $column)) {
                 $asset->{$column} = $valueFn();
             }
         }
+
         if ($request->publicAccessToken !== null && $request->publicAccessToken !== ''
             && $schema->hasColumn($table, 'public_access_token')) {
             $asset->public_access_token = $request->publicAccessToken;
         }
-        $asset->save();
+    }
+
+    /**
+     * The folder write goes through the folder service, which owns the
+     * "one filename per folder" rule. Writing `folder_id` straight
+     * onto the row would land on the raw unique index and answer a
+     * 500 where the rule says 422.
+     *
+     * @throws MediaFolderNotFoundException When the folder is not the principal's.
+     * @throws MediaFolderValidationException When the asset has no principal to file it in.
+     * @throws MediaFolderUniquenessException When the folder already holds that filename.
+     */
+    private function fileInFolder(MediaAsset $asset, MediaIngestRequest $request, bool $hasFolderColumn): MediaAsset
+    {
+        $folderId = $hasFolderColumn ? $request->folderId : null;
+
+        if ($folderId === null || $folderId === '') {
+            $asset->save();
+
+            return $asset;
+        }
+
+        $principalId = $request->principalId;
+        if ($principalId === null) {
+            throw new MediaFolderNotFoundException(
+                'The asset has no principal, so it cannot be filed in a media folder.',
+            );
+        }
+        $this->folders->fileAsset($principalId, $asset, $folderId);
 
         return $asset;
     }

@@ -352,12 +352,15 @@ final class GroupService
      * bulk-import paths) can't delete groups they don't control.
      *
      * Pre-flight: refuse if any agent still references the group's
-     * principal; the caller surfaces a 409 with a `reassign_endpoint`
-     * hint to the operator.
+     * principal, or if the group owns a media folder (a folder is a
+     * container the operator curates; `media_folders.principal_id` is
+     * `ON DELETE RESTRICT`). The caller surfaces a 409 with a hint
+     * naming the endpoint that can unblock each kind of dependent.
      *
      * @throws GroupMembershipRuleException When the caller is not admin
      *         and is not the group owner
      * @throws PrincipalHasDependentsException When the group still owns agents
+     *         or media folders
      */
     public function deleteGroup(int $groupId, int $callerUserId, bool $isAdmin = false): void
     {
@@ -383,6 +386,15 @@ final class GroupService
             );
         }
 
+        $folderIds = $this->principalService->dependentMediaFolderIds([(int) $principal->id]);
+        if ($folderIds !== []) {
+            throw new PrincipalHasDependentsException(
+                "Group {$groupId} cannot be deleted while it owns " . count($folderIds) . ' media folder(s).',
+                [],
+                $folderIds,
+            );
+        }
+
         // Re-check the dependent count + lock the group row inside a
         // transaction so two parallel deletes (e.g. one from the
         // operator UI and one from a cron-driven cleanup) can't both
@@ -398,6 +410,17 @@ final class GroupService
                     throw new PrincipalHasDependentsException(
                         "Group {$groupId} cannot be deleted while it owns agents (race detected).",
                         [],
+                    );
+                }
+                $folderRecheck = Capsule::table('media_folders')
+                    ->where('principal_id', $principal->id)
+                    ->pluck('id')
+                    ->all();
+                if ($folderRecheck !== []) {
+                    throw new PrincipalHasDependentsException(
+                        "Group {$groupId} cannot be deleted while it owns media folders (race detected).",
+                        [],
+                        array_map(static fn($id): string => (string) $id, $folderRecheck),
                     );
                 }
                 Capsule::table('principals')->where('id', $principal->id)->delete();

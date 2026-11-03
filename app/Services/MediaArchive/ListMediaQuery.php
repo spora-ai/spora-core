@@ -66,6 +66,14 @@ final readonly class ListMediaQuery
     public const OWNERSHIP_MINE = 'mine';
 
     /**
+     * The `kind` filter's vocabulary. An unknown value is dropped by the
+     * builder and the listing stays unfiltered.
+     *
+     * Mirrors {@see MediaAssetKind::ALL} — the upload endpoint refuses a
+     * kind this list does not hold, so the two have to stay in step.
+     */
+    public const ALLOWED_KINDS = MediaAssetKind::ALL;
+    /**
      * @param list<MediaType>|null $mediaTypes Multi-value media-type filter
      *        (`?types=image,document`). Null means no filter. When set,
      *        takes precedence over the singular `$mediaType` so the picker
@@ -122,6 +130,26 @@ final readonly class ListMediaQuery
          * `?include_temporary=true`.
          */
         public bool $includeTemporary = false,
+        /**
+         * Restricts the listing to the assets filed in this folder. Null =
+         * no filter.
+         */
+        public ?string $folderId = null,
+        /**
+         * Restricts the listing to the assets filed in no folder. False =
+         * no filter.
+         *
+         * Mutually exclusive with `$folderId`: the folder filter is the
+         * more specific one, so it wins when a DTO carries both. The
+         * builder keeps the two apart from the wire; the service repeats
+         * the rule so a directly constructed DTO behaves the same.
+         */
+        public bool $unfiled = false,
+        /**
+         * Restricts the listing to the assets carrying this advisory mark.
+         * Null = no filter.
+         */
+        public ?string $kind = null,
         public int $page = 1,
         public int $perPage = self::PER_PAGE_DEFAULT,
     ) {}
@@ -160,6 +188,9 @@ final readonly class ListMediaQuery
             'agentOwnerUserId' => $this->agentOwnerUserId,
             'principalIds'     => $this->principalIds,
             'includeTemporary' => $this->includeTemporary,
+            'folderId'         => $this->folderId,
+            'unfiled'          => $this->unfiled,
+            'kind'             => $this->kind,
         ];
     }
 

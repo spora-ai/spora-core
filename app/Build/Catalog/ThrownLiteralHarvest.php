@@ -159,7 +159,10 @@ final class ThrownLiteralHarvest implements Harvest
      * The literal that is the whole first argument of the call.
      *
      * A concatenation (`'a' . $b`) is not a whole message — only a
-     * literal that ends the argument is one.
+     * literal that ends the argument is one. A `sprintf('format', …)` is
+     * one too: the format string *is* the message, with the placeholders
+     * the translation keeps, and the runtime matches the rendered message
+     * against the template.
      *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return ?array{0: int, 1: string, 2: int}
@@ -167,17 +170,19 @@ final class ThrownLiteralHarvest implements Harvest
     private function argumentLiteral(array $tokens, int $open): ?array
     {
         $cursor = $this->tokens->nextSignificantIndex($tokens, $open + 1);
-        $literal = $tokens[$cursor] ?? null;
-        if (!is_array($literal) || $literal[0] !== T_CONSTANT_ENCAPSED_STRING) {
+        $token = $tokens[$cursor] ?? null;
+
+        if (is_array($token) && $token[0] === T_STRING && strtolower($token[1]) === 'sprintf') {
+            return $this->tokens->sprintfFormat($tokens, $cursor);
+        }
+
+        if (!is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING) {
             return null;
         }
 
         $after = $tokens[$this->tokens->nextSignificantIndex($tokens, $cursor + 1)] ?? null;
-        // `)` and `,` are single-character tokens, not array tokens.
-        if ($after !== ')' && $after !== ',') {
-            return null;
-        }
 
-        return $literal;
+        // `)` and `,` are single-character tokens, not array tokens.
+        return ($after === ')' || $after === ',') ? $token : null;
     }
 }

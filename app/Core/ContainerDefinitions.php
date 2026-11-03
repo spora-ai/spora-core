@@ -76,6 +76,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaFolderController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
 use Spora\Http\Middleware\AdminMiddleware;
@@ -156,6 +157,8 @@ use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Services\MediaArchive\MediaFolderPaths;
+use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\MediaArchive\MediaIngestDecoder;
 use Spora\Services\MediaArchive\MetadataExtractor;
 use Spora\Services\MediaArchive\MimeSniffer;
@@ -210,6 +213,7 @@ use Spora\Tools\CalculatorTool;
 use Spora\Tools\HttpTimeoutResolver;
 use Spora\Tools\MediaCreateHandler;
 use Spora\Tools\MediaDerivativeHandler;
+use Spora\Tools\MediaFolderHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
 use Spora\Tools\ReadUrlTool;
@@ -575,8 +579,13 @@ final class ContainerDefinitions
                     $c->get(MediaDerivativeService::class),
                     $c->has(PrincipalService::class) ? $c->get(PrincipalService::class) : null,
                     $c->has(MediaAssetResolver::class) ? $c->get(MediaAssetResolver::class) : null,
+                    $c->has(PrincipalResolver::class) ? $c->get(PrincipalResolver::class) : null,
                 );
             },
+
+            MediaFolderService::class => \DI\autowire(),
+
+            MediaFolderPaths::class => \DI\autowire(),
 
             \Spora\Services\MediaArchive\MediaArchiveRetention::class => static fn(): \Spora\Services\MediaArchive\MediaArchiveRetention => new \Spora\Services\MediaArchive\MediaArchiveRetention(),
 
@@ -595,6 +604,7 @@ final class ContainerDefinitions
                     $c->get(AssetStore::class),
                     $c->get(MediaDerivativeService::class),
                     $c->get(PrincipalService::class),
+                    $c->get(MediaFolderService::class),
                 );
             },
 
@@ -1161,6 +1171,15 @@ final class ContainerDefinitions
                 );
             },
 
+            MediaFolderController::class => static function (ContainerInterface $c): MediaFolderController {
+                return new MediaFolderController(
+                    $c->get(MediaFolderService::class),
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalResolver::class),
+                    $c->get(PrincipalService::class),
+                );
+            },
+
             MediaResolveController::class => static function (ContainerInterface $c): MediaResolveController {
                 return new MediaResolveController(
                     $c->get(MediaArchiveService::class),
@@ -1662,8 +1681,16 @@ final class ContainerDefinitions
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),
                     $c->get(MediaCreateHandler::class),
+                    $c->get(MediaFolderHandler::class),
                     $c->get(Config::class),
                     $c->get(ToolConfigService::class),
+                );
+            },
+
+            MediaFolderHandler::class => static function (ContainerInterface $c): MediaFolderHandler {
+                return new MediaFolderHandler(
+                    $c->get(MediaFolderService::class),
+                    $c->get(MediaArchiveService::class),
                 );
             },
 

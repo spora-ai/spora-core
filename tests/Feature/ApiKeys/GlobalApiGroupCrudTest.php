@@ -133,6 +133,36 @@ describe('group CRUD on the global surface', function (): void {
         expect(Group::find($group['groupId']))->not->toBeNull();
     });
 
+    it('refuses to delete a group that still owns a media folder', function (): void {
+        // A folder is not an agent: the transfer endpoint cannot re-target
+        // one, so the answer names the folder route and the agent payload
+        // is absent.
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('global-delete-folders', 0);
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-delete-folders');
+
+        $folder = (new \Spora\Services\MediaArchive\MediaFolderService())->create(
+            $group['principalId'],
+            'Corporate',
+        );
+
+        $response = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiGroupController::class,
+            'destroy',
+            ScopedApiTestSupport::bearer($key, ScopedApiTestSupport::GLOBAL_PREFIX . '/groups/1', [], 'DELETE'),
+            [$group['groupId']],
+        );
+
+        expect($response->getStatusCode())->toBe(409);
+        $body = json_decode($response->getContent(), true);
+
+        expect($body['error']['code'])->toBe('GROUP_HAS_MEDIA_FOLDERS');
+        expect($body['error']['folder_ids'])->toBe([(string) $folder->id]);
+        expect($body['error'])->not->toHaveKey('agent_ids');
+        expect(Group::find($group['groupId']))->not->toBeNull();
+    });
+
     it('deletes a group that owns no agents', function (): void {
         $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
         $group = AgentApiTestSupport::seedGroup('global-delete', 0);

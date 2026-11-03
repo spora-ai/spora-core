@@ -38,12 +38,15 @@ use Spora\Services\MediaArchive\MediaType;
  * @property string|null                            $payload
  * @property string|null                            $upload_source
  * @property bool                                   $is_temporary
+ * @property string|null                            $folder_id
+ * @property string|null                            $kind
  * @property \Carbon\Carbon|null                    $created_at
  * @property \Carbon\Carbon|null                    $updated_at
  * @property Agent|null                             $agent
  * @property Task|null                              $task
  * @property User|null                              $user
  * @property Principal|null                         $principal
+ * @property MediaFolder|null                       $folder
  *
  * Note: the @property docblock above mirrors {@see self::COLUMNS} plus
  * the Eloquent-managed `created_at`/`updated_at` and the relationship
@@ -90,6 +93,8 @@ final class MediaAsset extends Model
         'migrated_from_inline_data_url',
         'upload_source',
         'is_temporary',
+        'folder_id',
+        'kind',
     ];
 
     /**
@@ -111,6 +116,8 @@ final class MediaAsset extends Model
         'metadata'                       => 'array',
         'migrated_from_inline_data_url'  => 'boolean',
         'is_temporary'                   => 'boolean',
+        'folder_id'                      => 'string',
+        'kind'                           => 'string',
     ];
 
     /** @var string */
@@ -146,6 +153,11 @@ final class MediaAsset extends Model
     public function principal(): BelongsTo
     {
         return $this->belongsTo(Principal::class);
+    }
+
+    public function folder(): BelongsTo
+    {
+        return $this->belongsTo(MediaFolder::class, 'folder_id');
     }
 
     /**
@@ -192,6 +204,7 @@ final class MediaAsset extends Model
         'asset_token'         => 64,
         'public_access_token' => 64,
         'upload_source'       => 16,
+        'kind'                => 16,
     ];
 
     /** @return array{0: string, 1: string} */

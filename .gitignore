@@ -113,5 +113,6 @@ Thumbs.db
 
 /.worktrees/
 spora-core-worktrees/
+/.wt/
 
 /tmp/

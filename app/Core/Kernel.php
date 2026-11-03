@@ -25,6 +25,8 @@ use Spora\Models\User;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\Exceptions\CatalogUnavailableException;
 use Spora\Services\Exceptions\MalformedCatalogException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Settings\SettingsRegistry;
@@ -335,6 +337,17 @@ final class Kernel implements KernelInterface
             $e instanceof MediaNotOwnedException => new JsonResponse(
                 ['error' => ['code' => 'FORBIDDEN', 'message' => $this->trans($e->getMessage())]],
                 Response::HTTP_FORBIDDEN,
+            ),
+            // The media folder rules are domain rules, so a path that lets
+            // them escape still answers with the status the rule asks for
+            // instead of a 500.
+            $e instanceof MediaFolderUniquenessException => new JsonResponse(
+                ['error' => ['code' => 'NOT_UNIQUE', 'message' => $this->trans($e->getMessage())]],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            ),
+            $e instanceof MediaFolderNotFoundException => new JsonResponse(
+                ['error' => ['code' => 'NOT_FOUND', 'message' => $this->trans($e->getMessage())]],
+                Response::HTTP_NOT_FOUND,
             ),
             default => null,
         };

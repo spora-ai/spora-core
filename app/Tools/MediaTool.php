@@ -23,8 +23,6 @@ use Spora\Tools\ValueObjects\ToolResult;
 /**
  * Built-in tool for reading and producing media library content.
  *
- * Eight operations:
- *
  *   - `search`            — paginated list of `media_assets` rows (auto-approved read).
  *                           Derivatives are filtered out — the LLM fetches a
  *                           derivative via `get_media` on its parent id.
@@ -107,6 +105,22 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           lands. Operators who have decided they trust
  *                           their agent with this can drop it per-agent via
  *                           a `requiresApprovalByDefault` override.
+ *   - `list_folders`       — the principal's folders: `id`, `name`, `path`,
+ *                           `parent_id`, `asset_count`.
+ *   - `create_folder`      — create a folder in the principal's tree, under
+ *                           an optional parent. Sibling names are unique.
+ *                           Approval-gated by default: it adds a row to a
+ *                           tree the operator curates.
+ *   - `rename_folder`      — rename a folder; the path of the folder and of
+ *                           its subfolders follows. Approval-gated by
+ *                           default, like the other two mutations.
+ *   - `delete_folder`      — delete a folder. Its assets fall back to the
+ *                           root; its subfolders go with it. Approval-gated
+ *                           by default.
+ *   - `file_asset`         — file an asset into a folder, or back into the
+ *                           root. A folder already holding that filename
+ *                           refuses it.
+ *   - `search_assets`      — the assets inside one folder.
  *
  * Scope behavior (`scope` setting, default `agent`):
  *
@@ -115,16 +129,19 @@ use Spora\Tools\ValueObjects\ToolResult;
  *   - `principal`: the per-asset ops accept any asset whose
  *     `asset->user_id === $context->ownerUserId` (direct upload by the
  *     principal's owner user) or whose attached agent belongs to the
- *     calling agent's principal. `search` falls through to the listing
- *     controller's principal-aware path.
- *   - `user` (legacy): kept as a silent alias for `principal` so existing
- *     `agent_tool_settings` rows keep working without a DB migration.
- *   - Admins (`AuthService::isAdmin()`) bypass scope and see all rows.
+ *     calling agent's principal. `search` lists the rows the principal's
+ *     agents hold.
+ *   - `user` (legacy): the per-asset ops treat it as an alias for
+ *     `principal` so existing `agent_tool_settings` rows keep working
+ *     without a DB migration; the listing narrows to the caller user's
+ *     own rows.
+ *   - Admins (`AuthService::isAdmin()`) bypass the scope check on the
+ *     per-asset ops.
  */
 #[Tool(
     name: 'media',
     displayName: 'Media Library',
-    description: 'Search, retrieve, embed, share, and produce media library content (images, audio, video, documents). See the media-library skill for operation matrix, scope rules, and asset_id chaining.',
+    description: 'Search, retrieve, embed, share, and produce media library content (images, audio, video, documents), and organise it in folders. See the media-library skill for operation matrix, scope rules, and asset_id chaining.',
     category: 'data',
     icon: 'image',
     recommendsSkills: ['media-library'],
@@ -139,7 +156,7 @@ use Spora\Tools\ValueObjects\ToolResult;
         'principal' => 'All media owned by the calling agent\'s principal '
                      . '(direct uploads + every agent of the principal)',
     ],
-    description: 'Controls which media_assets rows the tool can read.',
+    description: 'Controls which media_assets rows the media read/write operations see. The folder operations work on the principal\'s tree and ignore it.',
 )]
 #[ToolOperation(
     name: 'search',
@@ -190,6 +207,45 @@ use Spora\Tools\ValueObjects\ToolResult;
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
+#[ToolOperation(
+    name: 'list_folders',
+    description: 'List the media folders of your principal — name, path and how many assets each holds.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'create_folder',
+    description: 'Create a media folder under an optional parent. Sibling names are unique, so a name that is taken here is refused.',
+    operatorDescription: 'Create a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'rename_folder',
+    description: 'Rename a media folder. The path of the folder and of its subfolders follows the new name.',
+    operatorDescription: 'Rename a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'delete_folder',
+    description: 'Delete a media folder. Its assets fall back to the root; its subfolders go with it.',
+    operatorDescription: 'Delete a media folder',
+    enabledByDefault: true,
+    requiresApprovalByDefault: true,
+)]
+#[ToolOperation(
+    name: 'file_asset',
+    description: 'File a media asset into a folder (or back into the root). Filenames are unique within a folder.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'search_assets',
+    description: 'List the assets inside one folder.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
 #[ToolParameter(name: 'plugin_slug', type: 'string', description: 'Filter by media_assets.plugin_slug.', required: false)]
 #[ToolParameter(
     name: 'mime_type',
@@ -209,7 +265,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 #[ToolParameter(name: 'task_id', type: 'integer', description: 'Filter by media_assets.task_id.', required: false)]
 #[ToolParameter(name: 'limit', type: 'integer', description: 'Maximum items to return (default 24, capped at 100).', required: false, default: 24)]
 #[ToolParameter(name: 'offset', type: 'integer', description: 'Items to skip (default 0).', required: false, default: 0)]
-#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, and create_derivative (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative'])]
+#[ToolParameter(name: 'asset_id', type: 'string', description: 'UUID of the media asset. Required for get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, and file_asset (search ignores it).', required: ['get_media', 'get_public_url', 'get_embed_code', 'get_source', 'list_derivatives', 'create_derivative', 'file_asset'])]
 #[ToolParameter(
     name: 'format',
     type: 'string',
@@ -238,6 +294,24 @@ use Spora\Tools\ValueObjects\ToolResult;
     name: 'prompt',
     type: 'string',
     description: 'Provenance for `create_media` — persisted on `media_assets.prompt` and read back by `get_media`. Ignored by every other op.',
+    required: false,
+)]
+#[ToolParameter(
+    name: 'folder_id',
+    type: 'string',
+    description: 'UUID of the media folder. For `create_media`: the folder to file the new asset in — omit it to file the asset in the root. For `file_asset`: the folder to file the asset in — omit it to move it back into the root. For `search_assets`: the folder to list. Required for `search_assets`, `rename_folder` and `delete_folder`. Filenames are unique within a folder — a name the folder already holds is refused.',
+    required: ['search_assets', 'rename_folder', 'delete_folder'],
+)]
+#[ToolParameter(
+    name: 'name',
+    type: 'string',
+    description: 'The name of the folder for `create_folder` and `rename_folder`. One path segment, never a path — a name carrying a separator is refused.',
+    required: ['create_folder', 'rename_folder'],
+)]
+#[ToolParameter(
+    name: 'parent_id',
+    type: 'string',
+    description: 'UUID of the folder to create the new folder under, for `create_folder`. Omit it to create the folder in the root. A parent of another principal is refused.',
     required: false,
 )]
 final class MediaTool extends AbstractTool
@@ -272,6 +346,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaSourceReader $sourceReader,
         private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly MediaCreateHandler $createHandler,
+        private readonly MediaFolderHandler $folderHandler,
         private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
     ) {}
@@ -285,8 +360,13 @@ final class MediaTool extends AbstractTool
         $userId = $context?->ownerUserId;
         $operation = $this->getOperationName($arguments);
 
+        // The folder operations work on the principal's tree, which is
+        // not the calling agent's media — the scope setting below says
+        // nothing about it.
+        $principalId = $context !== null ? $context->principalId : 0;
+
         return match ($operation) {
-            'search'            => $this->search($arguments, $agentId, $userId),
+            'search'            => $this->search($arguments, $agentId, $userId, $context),
             'get_media'         => $this->getMedia($arguments, $agentId, $userId, $context),
             'get_public_url'    => $this->getPublicUrl($arguments, $agentId, $userId, $context),
             'get_embed_code'    => $this->getEmbedCode($arguments, $agentId, $userId, $context),
@@ -297,7 +377,9 @@ final class MediaTool extends AbstractTool
             // handler extraction exists to keep this class under the
             // per-method budget, and a 21st method would undo it.
             'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
-            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, or create_media.'),
+            'list_folders', 'create_folder', 'rename_folder', 'delete_folder', 'file_asset', 'search_assets'
+                => $this->folderHandler->run($operation, $principalId, $arguments),
+            default             => ToolResult::fail('Invalid action. Must be search, get_media, get_public_url, get_embed_code, get_source, list_derivatives, create_derivative, create_media, list_folders, create_folder, rename_folder, delete_folder, file_asset, or search_assets.'),
         };
     }
 
@@ -308,6 +390,8 @@ final class MediaTool extends AbstractTool
         $format   = (string) ($arguments['format'] ?? '');
         $filename = (string) ($arguments['filename'] ?? '');
         $mime     = (string) ($arguments['mime_type'] ?? '');
+        $folderId = (string) ($arguments['folder_id'] ?? '');
+        $name     = (string) ($arguments['name'] ?? '');
 
         return match ($op) {
             'search'            => 'Media library search',
@@ -319,7 +403,15 @@ final class MediaTool extends AbstractTool
                 ? sprintf('Media list_derivatives(%s)', $assetId)
                 : sprintf('Media list_derivatives(%s, format=%s)', $assetId, $format),
             'create_derivative' => sprintf('Media create_derivative(%s, format=%s)', $assetId, $format),
-            'create_media'      => sprintf('Media create_media(%s, mime=%s)', $filename, $mime),
+            'create_media'      => $folderId === ''
+                ? sprintf('Media create_media(%s, mime=%s)', $filename, $mime)
+                : sprintf('Media create_media(%s, mime=%s, folder=%s)', $filename, $mime, $folderId),
+            'list_folders'      => 'Media list_folders',
+            'create_folder'     => sprintf('Media create_folder(%s)', $name),
+            'rename_folder'     => sprintf('Media rename_folder(%s, name=%s)', $folderId, $name),
+            'delete_folder'     => sprintf('Media delete_folder(%s)', $folderId),
+            'file_asset'        => sprintf('Media file_asset(%s, folder=%s)', $assetId, $folderId),
+            'search_assets'     => sprintf('Media search_assets(folder=%s)', $folderId),
             default             => sprintf('Media %s', $op),
         };
     }
@@ -327,9 +419,20 @@ final class MediaTool extends AbstractTool
     /**
      * @param  array<string, mixed> $arguments
      */
-    private function search(array $arguments, int $agentId, ?int $userId): ToolResult
+    private function search(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         $scope = $this->resolveScope($agentId, $userId);
+
+        // The principal scope narrows the listing to the calling
+        // principal's rows. Without it the DTO carries no owner filter at
+        // all, and the listing answers with every row in the archive.
+        $principalIds = null;
+        if ($scope === 'principal') {
+            if ($context === null || !$context->isResolvable()) {
+                return ToolResult::fail('The principal scope cannot be resolved for this call.');
+            }
+            $principalIds = [$context->principalId];
+        }
 
         $limit  = (int) ($arguments['limit'] ?? 24);
         $offset = (int) ($arguments['offset'] ?? 0);
@@ -345,6 +448,7 @@ final class MediaTool extends AbstractTool
             mediaType: $mediaTypeFilter,
             agentId: $scope === 'agent' ? $agentId : null,
             userId: $scope === 'user' && $userId !== null ? $userId : null,
+            principalIds: $principalIds,
             pluginSlug: isset($arguments['plugin_slug']) ? (string) $arguments['plugin_slug'] : null,
             // `mime_type` is accepted for LLM ergonomics (the assistant
             // usually has it on hand from prior tool results) but is NOT
@@ -358,14 +462,15 @@ final class MediaTool extends AbstractTool
         );
 
         $paginator = $this->archive->list($query);
+        $items     = $paginator->getCollection()->map(fn(MediaAsset $a): array => $this->summarizeAsset($a))->all();
 
         return ToolResult::ok(
-            "Found {$paginator->total()} media asset(s).",
+            MediaToolPresenter::assets($items, $paginator->total(), ($page - 1) * $perPage),
             [
                 'total'  => $paginator->total(),
                 'limit'  => $perPage,
                 'offset' => ($page - 1) * $perPage,
-                'items'  => $paginator->getCollection()->map(fn(MediaAsset $a): array => $this->summarizeAsset($a))->all(),
+                'items'  => $items,
             ],
         );
     }
@@ -417,6 +522,7 @@ final class MediaTool extends AbstractTool
             ? trim((string) $asset->prompt)
             : null;
         $extractedText = $this->derivativeHandler->readTextDerivative($asset);
+        $derivativeRows = $this->serializer->derivativeRowsFor($asset);
 
         if ($prompt !== null) {
             $content .= "\n\nPrompt: " . $prompt;
@@ -426,9 +532,18 @@ final class MediaTool extends AbstractTool
             $content .= "\n\nCall `get_source` to read the full extracted text.";
         }
 
+        // The derivative graph is how the model walks parent → child
+        // without a second round-trip, and it only reaches the model
+        // through the content — `derivatives[]` in the data channel is
+        // the operator's copy.
+        $derivatives = MediaToolPresenter::assetDerivatives($derivativeRows);
+        if ($derivatives !== '') {
+            $content .= "\n\n" . $derivatives;
+        }
+
         return ToolResult::ok(
             $content,
-            $this->describeAsset($asset, $mediaType, $assetUrl, $extractedText),
+            $this->describeAsset($asset, $mediaType, $assetUrl, $extractedText, $derivativeRows),
         );
     }
 
@@ -761,17 +876,21 @@ final class MediaTool extends AbstractTool
      *
      * Derivative enrichment:
      *  - `derivatives[]` is empty for non-parents; for parents it
-     *    reuses {@see MediaAssetSerializer::derivativeRowsFor()} so the
-     *    LLM-visible row shape is byte-for-byte identical to the
-     *    operator dashboard's VersionsStrip (label, asset_url,
-     *    producer_plugin, producer_operation, created_at). The `md`
-     *    entry is what `get_source` and the chat-attachment path read.
+     *    carries the rows {@see MediaAssetSerializer::derivativeRowsFor()}
+     *    produced, so the LLM-visible row shape is byte-for-byte
+     *    identical to the operator dashboard's VersionsStrip (label,
+     *    asset_url, producer_plugin, producer_operation, created_at).
+     *    The `md` entry is what `get_source` and the chat-attachment
+     *    path read. The rows are passed in rather than looked up again
+     *    because the same list is written into the content, and the
+     *    query behind it is not free.
      *  - `parent_id` is null for non-derivatives; for derivatives it
      *    is the parent asset's id (one-shot reverse lookup on
      *    `media_derivatives.derivative_id`), so the LLM can fetch the
      *    parent via `get_media(asset_id: parent_id)` if it wants the
      *    wider context.
      *
+     * @param  list<array<string, mixed>> $derivativeRows
      * @return array<string, mixed>
      */
     private function describeAsset(
@@ -779,6 +898,7 @@ final class MediaTool extends AbstractTool
         MediaType $mediaType,
         string $assetUrl,
         ?string $extractedText = null,
+        array $derivativeRows = [],
     ): array {
         return [
             'id'               => $asset->id,
@@ -796,7 +916,7 @@ final class MediaTool extends AbstractTool
             'asset_url'        => $assetUrl,
             'public_url'       => $this->ensurePublicUrl($asset),
             'parent_id'        => $this->derivatives->parentOf($asset->id),
-            'derivatives'      => $this->serializer->derivativeRowsFor($asset),
+            'derivatives'      => $derivativeRows,
             'created_at'       => $asset->created_at?->toIso8601String(),
         ];
     }

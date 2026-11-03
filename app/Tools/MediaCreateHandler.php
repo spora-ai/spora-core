@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
+use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -72,7 +74,27 @@ final readonly class MediaCreateHandler
 
         return $stored instanceof ToolResult
             ? $stored
-            : $this->judgeSniffed($stored, $agentId);
+            : $this->judge($stored, $agentId);
+    }
+
+    /**
+     * The two gates that run against what actually landed in the row:
+     * the MIME the bytes sniffed to, and the name the row ended up
+     * with.
+     */
+    private function judge(MediaAsset $asset, int $agentId): ToolResult
+    {
+        $sniffed = $this->judgeSniffed($asset, $agentId);
+        if (!$sniffed->success) {
+            return $sniffed;
+        }
+
+        $duplicate = $this->judgeDuplicateName($asset);
+        if ($duplicate !== null) {
+            return $duplicate;
+        }
+
+        return $sniffed;
     }
 
     /** The two byte-only checks, split out so `create()` reads as its four stages. */
@@ -127,6 +149,12 @@ final readonly class MediaCreateHandler
                 toolName: 'create_media',
                 prompt: $prompt === '' ? null : $prompt,
                 uploadSource: 'tool',
+                folderId: $this->readFolderId($arguments),
+            ));
+        } catch (MediaFolderNotFoundException | MediaFolderUniquenessException $e) {
+            return ToolResult::fail(sprintf(
+                '`create_media` could not file the document: %s',
+                $e->getMessage(),
             ));
         } catch (Throwable $e) {
             return ToolResult::fail(sprintf(
@@ -134,6 +162,20 @@ final readonly class MediaCreateHandler
                 $e->getMessage(),
             ));
         }
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     */
+    private function readFolderId(array $arguments): ?string
+    {
+        $raw = $arguments['folder_id'] ?? null;
+        if (!is_string($raw)) {
+            return null;
+        }
+        $value = trim($raw);
+
+        return $value === '' ? null : $value;
     }
 
     /**
@@ -175,6 +217,71 @@ final readonly class MediaCreateHandler
             '`create_media` does not accept mime_type "%s". Allowed: %s.',
             $mime,
             $this->allowedMimeList($agentId),
+        ));
+    }
+
+    /**
+     * The refusal for a name the target namespace already holds, or null
+     * when the name is free.
+     *
+     * The archive's rule is "filenames are unique within a folder", and
+     * the folder ops enforce it: `file_asset` refuses a name the folder
+     * holds. `create_media` did not, so two calls with the same name
+     * left two rows that no folder would ever accept — the second one
+     * could not be filed anywhere.
+     *
+     * The root is where the gap lives. The rule is backed by a UNIQUE
+     * `(folder_id, filename)` index, and a SQL unique index does not
+     * compare NULLs — so the root, whose rows carry a NULL folder, is
+     * unconstrained by it. A `create_media` with a `folder_id` is
+     * already covered (the ingest writes it through the folder service);
+     * the root is the case that needs the service's help.
+     *
+     * The namespace is read back off the stored row rather than
+     * recomputed: the archive resolved the principal and the folder,
+     * and a second resolution here would be a second answer to the same
+     * question.
+     */
+    private function judgeDuplicateName(MediaAsset $asset): ?ToolResult
+    {
+        $filename = (string) ($asset->filename ?? '');
+        if ($filename === '') {
+            return null;
+        }
+
+        $query = MediaAsset::query()
+            ->where('filename', $filename)
+            ->where('id', '!=', $asset->id);
+
+        if ($asset->folder_id === null || $asset->folder_id === '') {
+            $query->whereNull('folder_id');
+        } else {
+            $query->where('folder_id', $asset->folder_id);
+        }
+
+        if ($asset->principal_id === null) {
+            $query->whereNull('principal_id');
+        } else {
+            $query->where('principal_id', $asset->principal_id);
+        }
+
+        if (!$query->exists()) {
+            return null;
+        }
+
+        // The row that was just written is the duplicate, not the one
+        // that was already there: it is the one the operator did not
+        // ask for, and it is the one the retry recipe can find again.
+        $this->archive->delete($asset->id);
+
+        return ToolResult::fail(sprintf(
+            '`create_media` refused: %s already holds a file named "%s". Filenames are unique within a folder, '
+            . 'and the root counts as one. Call `search` and look for the newest row with that filename — '
+            . 'it is the asset your earlier call created — or store this one under a different filename.',
+            $asset->folder_id === null
+                ? 'the library root'
+                : sprintf('the folder "%s"', (string) $asset->folder_id),
+            $filename,
         ));
     }
 

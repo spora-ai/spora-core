@@ -258,19 +258,44 @@ final class ScopedApiGroupController
         } catch (GroupMembershipRuleException $e) {
             return $this->forbidden('FORBIDDEN', $e->getMessage());
         } catch (PrincipalHasDependentsException $e) {
+            return $this->conflictWithDependents($e);
+        }
+
+        return null;
+    }
+
+    /**
+     * The 409 for a group that still owns something.
+     *
+     * A folder is not an agent: the transfer endpoint cannot re-target
+     * one, so the answer names the folder route and the agent payload
+     * is absent.
+     */
+    private function conflictWithDependents(PrincipalHasDependentsException $e): JsonResponse
+    {
+        if ($e->folderIds !== []) {
             return new JsonResponse(
                 [
                     'error' => [
-                        'code' => 'GROUP_HAS_AGENTS',
+                        'code' => 'GROUP_HAS_MEDIA_FOLDERS',
                         'message' => $e->getMessage(),
-                        'agent_ids' => $e->agentIds,
+                        'folder_ids' => $e->folderIds,
                     ],
                 ],
                 Response::HTTP_CONFLICT,
             );
         }
 
-        return null;
+        return new JsonResponse(
+            [
+                'error' => [
+                    'code' => 'GROUP_HAS_AGENTS',
+                    'message' => $e->getMessage(),
+                    'agent_ids' => $e->agentIds,
+                ],
+            ],
+            Response::HTTP_CONFLICT,
+        );
     }
 
     /**

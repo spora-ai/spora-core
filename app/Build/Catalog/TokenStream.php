@@ -79,6 +79,9 @@ final class TokenStream
     }
 
     /**
+     * The format has to be a lone literal: a concatenated one
+     * (`'a' . 'b'`) is an expression, and half of it is not a message.
+     *
      * @param list<array{0: int, 1: string, 2: int}|string> $tokens
      * @return ?array{0: int, 1: string, 2: int}
      */
@@ -95,7 +98,9 @@ final class TokenStream
             return null;
         }
 
-        return $literal;
+        $after = $tokens[$this->nextSignificantIndex($tokens, $cursor + 1)] ?? null;
+
+        return ($after === ',' || $after === ')') ? $literal : null;
     }
 
     /**

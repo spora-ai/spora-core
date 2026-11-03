@@ -167,6 +167,50 @@ describe('MediaTool::search', function (): void {
         }
     });
 
+    it('scope=principal scopes the listing to the principal\'s rows', function (): void {
+        // The listing used to carry no owner filter at all under
+        // `scope=principal`, so it answered with every row in the archive.
+        $callerUserId = 33333;
+        $otherUserId  = 44444;
+        $callerPrincipalId = createUserPrincipalPublic($callerUserId);
+        $otherPrincipalId  = createUserPrincipalPublic($otherUserId);
+
+        $ownAgent = Agent::create([
+            'principal_id' => $callerPrincipalId,
+            'name'         => 'mp-principal-scope-own',
+            'max_steps'    => 10,
+            'is_active'    => 1,
+        ]);
+        $otherAgent = Agent::create([
+            'principal_id' => $otherPrincipalId,
+            'name'         => 'mp-principal-scope-other',
+            'max_steps'    => 10,
+            'is_active'    => 1,
+        ]);
+        seedMediaAsset(agentId: $ownAgent->id, userId: $callerUserId);
+        seedMediaAsset(agentId: $otherAgent->id, userId: $otherUserId);
+
+        $config = Mockery::mock(ToolConfigService::class);
+        $config->allows('getEffectiveSettings')->andReturn(['scope' => 'principal']);
+
+        $context = new PrincipalContext(
+            principalId: $callerPrincipalId,
+            type: Spora\Models\Principal::TYPE_USER,
+            ownerUserId: $callerUserId,
+            runnerUserId: $callerUserId,
+        );
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolNonAdminAuth(), $config);
+        try {
+            $result = $tool->execute(['action' => 'search'], agentId: $ownAgent->id, context: $context);
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['total'])->toBe(1);
+        } finally {
+            $restore();
+        }
+    });
+
     it('includes media from prior tasks (cross-task scope)', function (): void {
         $agentA = seedMediaToolAgent();
         seedMediaAsset(agentId: $agentA, userId: 99, idOverride: '11111111-1111-1111-1111-111111111111');

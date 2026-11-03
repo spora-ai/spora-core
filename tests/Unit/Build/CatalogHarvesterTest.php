@@ -138,9 +138,49 @@ test('a message thrown as an exception argument is harvested', function (): void
     // into the error envelope, and the router translates what lands there.
     // The literal sits in `app/Services`, which the envelope harvest never
     // reads, so only the thrown-message harvest can reach it.
+    //
+    // The locator is asserted down to the file: the line moves with every
+    // edit above it, and the file is what the harvest is about.
     expect($harvested)->toHaveKey('Hex payload has odd length.')
         ->and(implode(' ', $harvested['Hex payload has odd length.']))
-            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:76');
+            ->toContain('app/Services/MediaArchive/MediaIngestDecoder.php:');
+});
+
+test('the locator of a thrown message carries the line it is written on', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // The file alone says which harvest found the message; the line says
+    // where to look. A locator that drops the line still passes a
+    // `toContain('file:')` assertion — a message read off the wrong line
+    // of the right file would slip through — so the shape is pinned
+    // separately: `<file>:<digits>`.
+    $locators = $harvested['Hex payload has odd length.'] ?? [];
+
+    expect($locators)->not->toBeEmpty();
+
+    foreach ($locators as $locator) {
+        expect($locator)
+            ->toMatch('#^app/Services/MediaArchive/MediaIngestDecoder\.php:\d+$#');
+    }
+});
+
+test('a message thrown through sprintf is harvested by its format string', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // The format string *is* the message: the placeholders stay in the
+    // translation, and the runtime matches the rendered message against
+    // the template. Without this the thrown copy of the folder rule would
+    // never reach the catalogue.
+    expect($harvested)->toHaveKey('The folder "%s" already holds a file named "%s".');
+});
+
+test('a plain literal throw is still harvested after the sprintf rule', function (): void {
+    $harvested = (new CatalogHarvester(dirname(__DIR__, 3)))->harvest();
+
+    // The sprintf rule must not narrow the harvest: a throw whose first
+    // argument is a bare literal is harvested exactly as before.
+    expect($harvested)->toHaveKey('A folder name is required.')
+        ->and($harvested)->toHaveKey('Hex payload has odd length.');
 });
 
 test('a sprintf in an envelope position is harvested by its format string', function (): void {
@@ -150,7 +190,7 @@ test('a sprintf in an envelope position is harvested by its format string', func
     // translation, and the runtime fills them in.
     expect($harvested)->toHaveKey('MIME type "%s" is not in the upload allowlist.')
         ->and(implode(' ', $harvested['MIME type "%s" is not in the upload allowlist.']))
-            ->toContain('app/Http/MediaUploadController.php:118');
+            ->toContain('app/Http/MediaUploadController.php:');
 });
 
 test('an approval prompt is harvested as the format string it was built with', function (): void {
