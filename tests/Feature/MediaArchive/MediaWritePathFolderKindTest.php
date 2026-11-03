@@ -223,7 +223,7 @@ describe('the upload endpoint', function (): void {
         expect($body['error']['message'])->toContain('theme.md');
     });
 
-    it('answers 422 for a folder of another principal', function (): void {
+    it('answers 404 for a folder of another principal', function (): void {
         $ownerId = createUserPrincipalPublic(626);
         [, $controller, $auth] = writePathService();
         $userId = bootAuth($auth, 'wp-foreign@example.com', 'Password1!');
@@ -237,7 +237,31 @@ describe('the upload endpoint', function (): void {
 
         $response = $controller->store($request);
 
-        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['error']['code'])->toBe('NOT_FOUND');
+        expect((string) $response->getContent())->not->toContain('UNKNOWN_FOLDER');
+    });
+
+    it('answers 404 for a folder that does not exist', function (): void {
+        // A folder that is not there and a folder of another principal
+        // are the same answer: the caller has no business telling the two
+        // apart, and neither is a field the upload can name.
+        [, $controller, $auth] = writePathService();
+        $userId = bootAuth($auth, 'wp-missing-folder@example.com', 'Password1!');
+        $principalId = (new PrincipalService(new PrincipalResolver()))->ensureUserPrincipal($userId)->id;
+
+        $request = writePathUploadRequest('theme.md', '# hello', [
+            'principal_id' => (string) $principalId,
+            'folder_id'    => '11111111-2222-4333-8444-555555555555',
+        ]);
+
+        $response = $controller->store($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+        $body = json_decode((string) $response->getContent(), true);
+        expect($body['error']['code'])->toBe('NOT_FOUND');
+        expect((string) $response->getContent())->not->toContain('UNKNOWN_FOLDER');
     });
 
     it('answers 400 for a kind outside the vocabulary and stores nothing', function (): void {

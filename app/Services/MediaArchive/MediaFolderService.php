@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services\MediaArchive;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Illuminate\Database\QueryException;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaFolder;
@@ -167,6 +168,28 @@ final class MediaFolderService
         $this->repath($folder, $this->pathFor($parent, (string) $folder->name), (string) $folder->name);
 
         return $folder;
+    }
+
+    /**
+     * Rename a folder and move it, as one operation.
+     *
+     * The two writes share a transaction, so a move that collides with a
+     * sibling rolls the rename back: the caller never sees a 422 next to
+     * a folder that was renamed anyway.
+     *
+     * @throws MediaFolderNotFoundException When the folder or the parent is not the principal's.
+     * @throws MediaFolderUniquenessException When a sibling already has that name.
+     * @throws MediaFolderValidationException When the name is not a usable folder name, or the move would put the folder inside itself.
+     */
+    public function renameAndMove(int $principalId, string $folderId, string $name, ?string $parentId): MediaFolder
+    {
+        return Capsule::connection()->transaction(
+            function () use ($principalId, $folderId, $name, $parentId): MediaFolder {
+                $this->rename($principalId, $folderId, $name);
+
+                return $this->move($principalId, $folderId, $parentId);
+            },
+        );
     }
 
     /**

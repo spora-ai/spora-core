@@ -13,6 +13,7 @@ use Spora\OpenApi\RouteSpecCollector;
 use Spora\Services\MediaArchive\MediaFolderService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 
 defined('MEDIA_FOLDER_PASSWORD') || define('MEDIA_FOLDER_PASSWORD', 'Password1!');
@@ -49,6 +50,16 @@ function folderRequest(string $method, string $uri, array $body = []): Request
 }
 
 /**
+ * The error envelope of a refused request.
+ *
+ * @return array{error: array{code: string, message: string}}
+ */
+function folderErrorOf(JsonResponse $response): array
+{
+    return (array) json_decode((string) $response->getContent(), true);
+}
+
+/**
  * @return list<array<string, mixed>>
  */
 function mediaFolderRouteRows(): array
@@ -71,13 +82,17 @@ afterEach(function (): void {
 });
 
 describe('the folders routes', function (): void {
-    it('registers the four folder routes behind auth and CSRF', function (): void {
+    it('registers the four folder routes, CSRF on the writes only', function (): void {
         $rows = mediaFolderRouteRows();
 
         expect($rows)->toHaveCount(4);
 
         foreach ($rows as $row) {
-            expect($row['middleware'])->toBe([AuthMiddleware::class, CsrfMiddleware::class]);
+            $expected = $row['method'] === 'GET'
+                ? [AuthMiddleware::class]
+                : [AuthMiddleware::class, CsrfMiddleware::class];
+
+            expect($row['middleware'])->toBe($expected);
         }
 
         $paths = array_map(static fn(array $row): string => $row['method'] . ' ' . $row['route'], $rows);
@@ -146,24 +161,59 @@ describe('POST /api/v1/media/folders', function (): void {
         expect($response->getStatusCode())->toBe(422);
     });
 
-    it('answers 400 for a name carrying a path separator', function (): void {
+    it('answers 422 for a name carrying a path separator', function (): void {
         [$controller, $auth] = buildFolderController();
         $callerId = bootAuth($auth, 'mf-slash@example.com', MEDIA_FOLDER_PASSWORD);
 
         simulateLoggedInSession($callerId, 'mf-slash@example.com');
         $response = $controller->store(folderRequest('POST', '/api/v1/media/folders', ['name' => 'a/b']));
 
-        expect($response->getStatusCode())->toBe(400);
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
     });
 
-    it('answers 400 when the name is missing', function (): void {
+    it('answers 422 when the name is missing', function (): void {
         [$controller, $auth] = buildFolderController();
         $callerId = bootAuth($auth, 'mf-noname@example.com', MEDIA_FOLDER_PASSWORD);
 
         simulateLoggedInSession($callerId, 'mf-noname@example.com');
         $response = $controller->store(folderRequest('POST', '/api/v1/media/folders', []));
 
-        expect($response->getStatusCode())->toBe(400);
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a name that is not a string', function (): void {
+        [$controller, $auth] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-noname-type@example.com', MEDIA_FOLDER_PASSWORD);
+
+        simulateLoggedInSession($callerId, 'mf-noname-type@example.com');
+        $response = $controller->store(folderRequest('POST', '/api/v1/media/folders', ['name' => 42]));
+
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a parent_id that is neither a string nor null', function (): void {
+        [$controller, $auth] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-badparent@example.com', MEDIA_FOLDER_PASSWORD);
+
+        simulateLoggedInSession($callerId, 'mf-badparent@example.com');
+        $response = $controller->store(folderRequest('POST', '/api/v1/media/folders', [
+            'name'      => 'Corporate',
+            'parent_id' => 42,
+        ]));
+
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('parent_id');
     });
 });
 
@@ -220,7 +270,7 @@ describe('PATCH /api/v1/media/folders/{id}', function (): void {
         expect($response->getStatusCode())->toBe(404);
     });
 
-    it('answers 400 when the patch carries nothing to change', function (): void {
+    it('answers 422 when the patch carries nothing to change', function (): void {
         [$controller, $auth, $principalService] = buildFolderController();
         $callerId = bootAuth($auth, 'mf-nopatch@example.com', MEDIA_FOLDER_PASSWORD);
         $principalId = $principalService->ensureUserPrincipal($callerId)->id;
@@ -232,7 +282,83 @@ describe('PATCH /api/v1/media/folders/{id}', function (): void {
             folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, []),
         );
 
-        expect($response->getStatusCode())->toBe(400);
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
+        expect($error['message'])->toContain('parent_id');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a name that is not a string', function (): void {
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-badname-type@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+        simulateLoggedInSession($callerId, 'mf-badname-type@example.com');
+        $response = $controller->update(
+            (string) $folder->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, ['name' => 42]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a parent_id that is neither a string nor null', function (): void {
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-badparent-type@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+        simulateLoggedInSession($callerId, 'mf-badparent-type@example.com');
+        $response = $controller->update(
+            (string) $folder->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, ['parent_id' => 42]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('parent_id');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a name that is too long', function (): void {
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-longname@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $folder = (new MediaFolderService())->create($principalId, 'Corporate');
+
+        simulateLoggedInSession($callerId, 'mf-longname@example.com');
+        $response = $controller->update(
+            (string) $folder->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $folder->id, ['name' => str_repeat('a', 256)]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+        $error = folderErrorOf($response)['error'];
+        expect($error['code'])->toBe('VALIDATION_ERROR');
+        expect($error['message'])->toContain('name');
+    });
+
+    it('answers 422 VALIDATION_ERROR for a move that would put the folder inside itself', function (): void {
+        [$controller, $auth, $principalService] = buildFolderController();
+        $callerId = bootAuth($auth, 'mf-inside@example.com', MEDIA_FOLDER_PASSWORD);
+        $principalId = $principalService->ensureUserPrincipal($callerId)->id;
+        $service = new MediaFolderService();
+        $parent = $service->create($principalId, 'Parent');
+        $child = $service->create($principalId, 'Child', (string) $parent->id);
+
+        simulateLoggedInSession($callerId, 'mf-inside@example.com');
+        $response = $controller->update(
+            (string) $parent->id,
+            folderRequest('PATCH', '/api/v1/media/folders/' . $parent->id, ['parent_id' => (string) $child->id]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+        expect(folderErrorOf($response)['error']['code'])->toBe('VALIDATION_ERROR');
     });
 
     it('rolls the rename back when the move that follows it collides', function (): void {

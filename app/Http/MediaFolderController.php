@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Spora\Http;
 
 use Closure;
-use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Auth\AuthService;
 use Spora\Models\MediaFolder;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
@@ -35,8 +34,8 @@ use Symfony\Component\HttpFoundation\Response;
  * A folder outside the caller's visible principals is a **404**, not a
  * 403: the caller has no business knowing that it exists.
  *
- * Auth and CSRF are enforced by the route's middleware; the controller
- * does not duplicate the check.
+ * Auth is enforced by the route's middleware, and CSRF on the writes;
+ * the controller does not duplicate the check.
  */
 final class MediaFolderController
 {
@@ -93,11 +92,11 @@ final class MediaFolderController
         return $this->respond(function () use ($body, $userId): JsonResponse {
             $name = $body['name'] ?? null;
             if (!is_string($name)) {
-                return $this->error('BAD_REQUEST', 'name is required.', Response::HTTP_BAD_REQUEST);
+                return $this->unprocessable('VALIDATION_ERROR', 'name is required.');
             }
             $parentId = $this->readParentId($body);
             if ($parentId === self::INVALID_PARENT) {
-                return $this->error('BAD_REQUEST', 'parent_id must be a string or null.', Response::HTTP_BAD_REQUEST);
+                return $this->unprocessable('VALIDATION_ERROR', 'parent_id must be a string or null.');
             }
 
             $principalId = $this->resolvePrincipalId(
@@ -130,10 +129,9 @@ final class MediaFolderController
             $renames = array_key_exists('name', $body);
             $moves = array_key_exists('parent_id', $body);
             if (!$renames && !$moves) {
-                return $this->error(
-                    'BAD_REQUEST',
+                return $this->unprocessable(
+                    'VALIDATION_ERROR',
                     'Send "name" to rename the folder, "parent_id" to move it.',
-                    Response::HTTP_BAD_REQUEST,
                 );
             }
 
@@ -172,8 +170,9 @@ final class MediaFolderController
     /**
      * Run the folder operation and map its domain errors onto HTTP.
      *
-     * The uniqueness rule is reported as a 422 and a malformed request as
-     * a 400 — neither reaches the caller as a database exception.
+     * The uniqueness rule is reported as a 422 and a field the server
+     * refuses as a 422 too — neither reaches the caller as a database
+     * exception.
      *
      * @param Closure(): JsonResponse $operation
      */
@@ -200,39 +199,29 @@ final class MediaFolderController
             return $this->unprocessable('NOT_UNIQUE', $e->getMessage());
         }
 
-        return $this->error('BAD_REQUEST', $e->getMessage(), Response::HTTP_BAD_REQUEST);
+        return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
     }
 
     private function invalidField(array $body): ?JsonResponse
     {
         if (array_key_exists('name', $body) && !is_string($body['name'] ?? null)) {
-            return $this->error('BAD_REQUEST', 'name must be a string.', Response::HTTP_BAD_REQUEST);
+            return $this->unprocessable('VALIDATION_ERROR', 'name must be a string.');
         }
         if (array_key_exists('parent_id', $body) && $this->readParentId($body) === self::INVALID_PARENT) {
-            return $this->error('BAD_REQUEST', 'parent_id must be a string or null.', Response::HTTP_BAD_REQUEST);
+            return $this->unprocessable('VALIDATION_ERROR', 'parent_id must be a string or null.');
         }
 
         return null;
     }
 
     /**
-     * The rename and the move, as one operation.
+     * The patch as one operation.
      *
-     * The two writes share a transaction, so a move that collides with a
-     * sibling rolls the rename back: the caller never sees a 422 next to
-     * a folder that was renamed anyway.
+     * A patch that renames *and* moves is a single write: the service
+     * owns the transaction, so a move that collides with a sibling rolls
+     * the rename back and the caller never sees a 422 next to a folder
+     * that was renamed anyway.
      */
-    private function renameAndMove(int $principalId, string $id, string $name, ?string $parentId): MediaFolder
-    {
-        return Capsule::connection()->transaction(
-            function () use ($principalId, $id, $name, $parentId): MediaFolder {
-                $this->folders->rename($principalId, $id, $name);
-
-                return $this->folders->move($principalId, $id, $parentId);
-            },
-        );
-    }
-
     private function applyPatch(int $principalId, string $id, array $body): MediaFolder
     {
         $renames = array_key_exists('name', $body);
@@ -241,7 +230,7 @@ final class MediaFolderController
         $parentId = $this->readParentId($body);
 
         if ($renames && $moves) {
-            return $this->renameAndMove($principalId, $id, $name, $parentId);
+            return $this->folders->renameAndMove($principalId, $id, $name, $parentId);
         }
         if ($renames) {
             return $this->folders->rename($principalId, $id, $name);

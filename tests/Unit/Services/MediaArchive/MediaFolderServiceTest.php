@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\MediaArchive;
 
+use Closure;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaFolder;
@@ -40,6 +41,32 @@ function folderTestAsset(int $principalId, string $filename): MediaAsset
     $asset->save();
 
     return $asset;
+}
+
+/**
+ * The SQL the closure's queries produced.
+ *
+ * The uniqueness check is a query the service builds and runs, and only
+ * the emitted SQL says whether the exclusion clause was part of it: on
+ * SQLite and MySQL `id != ''` is an ordinary string comparison that
+ * still matches the row, so the outcome is the same with and without the
+ * clause. Only MariaDB's native `uuid` column makes the empty
+ * comparison NULL — and that job is advisory. The SQL is therefore what
+ * the rule is pinned on, on every engine.
+ */
+function folderQueriesFor(Closure $operation): string
+{
+    $connection = Capsule::connection();
+    $connection->flushQueryLog();
+    $connection->enableQueryLog();
+
+    try {
+        $operation();
+    } finally {
+        $connection->disableQueryLog();
+    }
+
+    return implode("\n", array_column($connection->getQueryLog(), 'query'));
 }
 
 describe('MediaFolderService::create', function (): void {
@@ -383,6 +410,80 @@ describe('MediaFolderService::fileTarget', function (): void {
             'theme.yml',
             (string) $asset->id,
         )->id)->toBe((string) $folder->id);
+    });
+});
+
+describe('MediaFolderService::fileTarget — the exclusion clause', function (): void {
+    it('emits no id exclusion when there is nothing to exclude', function (): void {
+        // The check must not carry `id != ''` when it excludes nothing:
+        // MariaDB stores `media_assets.id` in its native `uuid` type, and
+        // that type compares as NULL against a string that is not a UUID
+        // — so the predicate matched *no row* there and the check
+        // silently passed, while the write landed on the raw unique
+        // index (a 500 where the rule says 422). On SQLite and MySQL the
+        // same predicate is an ordinary string comparison, so the outcome
+        // is the same either way and only the emitted SQL tells the two
+        // apart.
+        $principalId = createUserPrincipalPublic(577);
+        $service = folderService();
+        $folder = $service->create($principalId, 'Corporate');
+
+        $sql = folderQueriesFor(function () use ($service, $principalId, $folder): void {
+            $service->fileTarget($principalId, (string) $folder->id, 'theme.yml');
+        });
+
+        expect($sql)->not->toMatch('/[`"]?id[`"]?\s*(!=|<>)/');
+    });
+
+    it('emits the id exclusion when an asset is excluded', function (): void {
+        $principalId = createUserPrincipalPublic(578);
+        $service = folderService();
+        $folder = $service->create($principalId, 'Corporate');
+        $asset = folderTestAsset($principalId, 'theme.yml');
+
+        $sql = folderQueriesFor(function () use ($service, $principalId, $folder, $asset): void {
+            $service->fileTarget($principalId, (string) $folder->id, 'theme.yml', (string) $asset->id);
+        });
+
+        expect($sql)->toMatch('/[`"]?id[`"]?\s*!=\s*\?/');
+    });
+});
+
+describe('MediaFolderService::renameAndMove', function (): void {
+    it('rolls the rename back when the move that follows it collides', function (): void {
+        // The rename and the move are one operation. The rename lands on
+        // `/Existing`, the move would put it on `/Parent/Existing` — a
+        // path a sibling already holds. The caller must never see a 422
+        // next to a folder that was renamed anyway.
+        $principalId = createUserPrincipalPublic(581);
+        $service = folderService();
+        $parent = $service->create($principalId, 'Parent');
+        $service->create($principalId, 'Existing', (string) $parent->id);
+        $folder = $service->create($principalId, 'Child');
+
+        expect(fn() => $service->renameAndMove(
+            $principalId,
+            (string) $folder->id,
+            'Existing',
+            (string) $parent->id,
+        ))->toThrow(MediaFolderUniquenessException::class);
+
+        $unchanged = MediaFolder::query()->find($folder->id);
+        expect((string) $unchanged?->name)->toBe('Child');
+        expect((string) $unchanged?->path)->toBe('/Child');
+    });
+
+    it('renames and moves a folder in one call', function (): void {
+        $principalId = createUserPrincipalPublic(582);
+        $service = folderService();
+        $parent = $service->create($principalId, 'Parent');
+        $folder = $service->create($principalId, 'Child');
+
+        $service->renameAndMove($principalId, (string) $folder->id, 'Renamed', (string) $parent->id);
+
+        $moved = MediaFolder::query()->find($folder->id);
+        expect((string) $moved?->name)->toBe('Renamed');
+        expect((string) $moved?->path)->toBe('/Parent/Renamed');
     });
 });
 

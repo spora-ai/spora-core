@@ -143,8 +143,8 @@ final class MediaUploadController
             // see it. The same answer covers a folder that does not
             // exist — the caller has no business telling the two apart.
             return $this->error(
-                Response::HTTP_UNPROCESSABLE_ENTITY,
-                'UNKNOWN_FOLDER',
+                Response::HTTP_NOT_FOUND,
+                'NOT_FOUND',
                 'That folder does not exist.',
             );
         } catch (MediaFolderUniquenessException $e) {
