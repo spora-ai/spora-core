@@ -77,17 +77,11 @@ final class MediaEmbedController
     public function show(string $id): Response
     {
         $asset = MediaAsset::query()->find($id);
-        if ($asset === null || !$this->access->canRead($asset)) {
-            return $this->notFound();
-        }
-
-        $mime = (string) ($asset->mime_type ?? '');
-
-        // The format must be one the operator permits *and* one that has
-        // something to embed. Checking the mime here rather than trusting
-        // the row's `media_type` column: the column is a coarse bucket, and
-        // the mime is what the browser will parse.
-        if (!MediaScriptableTypes::isScriptable($mime) || !$this->activeTypes->allowActiveTypes()) {
+        // Three refusals, one answer: no such asset, not readable by the
+        // caller, and not a format the operator permitted all return the
+        // same 404. A caller who cannot see the asset must not be able to
+        // tell that apart from one that does not exist.
+        if ($asset === null || !$this->access->canRead($asset) || !$this->embeddable($asset)) {
             return $this->notFound();
         }
 
@@ -107,6 +101,20 @@ final class MediaEmbedController
         $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
+    }
+
+    /**
+     * Whether the asset is one the embed surface may serve.
+     *
+     * The format must be one the operator permits *and* one that has
+     * something to embed. Checking the mime here rather than trusting the
+     * row's `media_type` column: the column is a coarse bucket, and the
+     * mime is what the browser will parse.
+     */
+    private function embeddable(MediaAsset $asset): bool
+    {
+        $mime = (string) ($asset->mime_type ?? '');
+        return MediaScriptableTypes::isScriptable($mime) && $this->activeTypes->allowActiveTypes();
     }
 
     private function notFound(): JsonResponse
