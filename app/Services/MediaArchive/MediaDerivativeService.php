@@ -12,6 +12,7 @@ use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Services\AssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\Exceptions\DerivativeMimeNotAllowedException;
 use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalService;
@@ -71,10 +72,39 @@ final class MediaDerivativeService
         private readonly ContainerInterface $container,
         ?DerivativePayloadStore $payloads = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?MediaActiveTypesPolicy $activeTypes = null,
     ) {
         $this->payloads = $payloads ?? new DerivativePayloadStore(
             defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
         );
+    }
+
+    /**
+     * Refuse a producer output the operator has not permitted.
+     *
+     * The upload gate refuses these formats already; this is the same rule
+     * applied to the path that never consulted it. It is a narrow check —
+     * only the script-capable types are gated here — because the producers
+     * are first-party or operator-installed code whose other output types
+     * (a PDF derivative, a PNG thumbnail) the archive has always accepted.
+     *
+     * @throws DerivativeMimeNotAllowedException
+     */
+    private function assertCreationPermitted(string $mime): void
+    {
+        if (!MediaScriptableTypes::isScriptable($mime)) {
+            return;
+        }
+
+        if ($this->activeTypes?->permitsCreationOf($mime) ?? false) {
+            return;
+        }
+
+        throw new DerivativeMimeNotAllowedException(sprintf(
+            'The producer emitted "%s", which the operator has not permitted. '
+                . 'Enable "Allow HTML and SVG" in the media settings to allow it.',
+            $mime,
+        ));
     }
 
     /**
@@ -475,6 +505,8 @@ final class MediaDerivativeService
         ?int $userId,
         ?PrincipalContext $context,
     ): MediaAsset {
+        $this->assertCreationPermitted($output->mime);
+
         $reference = $this->assetStore->store($output->bytes, $output->mime, $this->filenameFor($parent, $format));
 
         $now = Carbon::now();

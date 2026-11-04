@@ -319,7 +319,9 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
         ?Spora\Auth\AuthService $auth = null,
         ?Spora\Services\ToolConfigService $toolConfigService = null,
         ?Spora\Core\Config $config = null,
+        ?Spora\Services\MediaArchive\MediaActiveTypesPolicy $activeTypes = null,
     ): array {
+        $activeTypes ??= new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config());
         // Reuse the same builder that MediaArchiveServiceTest uses so we get a
         // fully-wired service (asset store, resolver, converters, decoder).
         $ctx = makeMediaArchiveService();
@@ -333,9 +335,15 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
         $serializer = new Spora\Services\MediaArchive\MediaAssetSerializer(
             includeDerivatives: true,
             derivatives: $derivatives,
+            activeTypes: $activeTypes,
         );
         $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
-        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives, $sourceReader);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler(
+            $serializer,
+            $derivatives,
+            $sourceReader,
+            $activeTypes,
+        );
         $tool = new Spora\Tools\MediaTool(
             $ctx['service'],
             $auth ?? makeMediaToolNonAdminAuth(),
@@ -343,7 +351,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $derivatives,
             $sourceReader,
             $derivativeHandler,
-            makeMediaCreateHandlerForTest($ctx['service']),
+            makeMediaCreateHandlerForTest($ctx['service'], $activeTypes),
             makeMediaFolderHandlerForTest($ctx['service']),
             $config ?? new Spora\Core\Config(),
             $toolConfigService,
@@ -387,7 +395,12 @@ if (!function_exists('buildMediaToolForSchema')) {
             derivatives: $derivatives,
         );
         $sourceReader = new Spora\Tools\MediaSourceReader($database, $local);
-        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler($serializer, $derivatives, $sourceReader);
+        $derivativeHandler = new Spora\Tools\MediaDerivativeHandler(
+            $serializer,
+            $derivatives,
+            $sourceReader,
+            new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config()),
+        );
 
         return new Spora\Tools\MediaTool(
             $ctx['service'],
@@ -433,6 +446,7 @@ if (!function_exists('makeMediaCreateHandlerForTest')) {
      */
     function makeMediaCreateHandlerForTest(
         Spora\Services\MediaArchive\MediaArchiveService $archive,
+        ?Spora\Services\MediaArchive\MediaActiveTypesPolicy $activeTypes = null,
     ): Spora\Tools\MediaCreateHandler {
         $security = new Spora\Core\SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
         $llmService = new Spora\Services\LLMConfigService($security, [
@@ -448,7 +462,9 @@ if (!function_exists('makeMediaCreateHandlerForTest')) {
                 ),
                 new Spora\Drivers\DriverFactory(new Psr\Log\NullLogger(), $llmService, 60),
                 [],
+                $activeTypes ?? new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config()),
             ),
+            $activeTypes ?? new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config()),
         );
     }
 }

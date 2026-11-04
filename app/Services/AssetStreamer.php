@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaScriptableTypes;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -53,10 +54,10 @@ final class AssetStreamer
             $response = new StreamedResponse(static function () use ($bytes): void {
                 echo $bytes;
             }, 200, [
-                'Content-Type' => $mime,
-                'Content-Length' => (string) strlen($bytes),
-                'Cache-Control' => self::CACHE_HEADER,
-            ]);
+                'Content-Type'    => $mime,
+                'Content-Length'  => (string) strlen($bytes),
+                'Cache-Control'   => self::CACHE_HEADER,
+            ] + MediaScriptableTypes::headersFor($mime));
             $this->applyContentDisposition($response, $asset, $disposition);
 
             return $response;
@@ -66,6 +67,7 @@ final class AssetStreamer
         $mime = (string) $payload['mime'];
         $response = new BinaryFileResponse($path, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', self::CACHE_HEADER);
+        $response->headers->add(MediaScriptableTypes::headersFor($mime));
         $this->applyContentDisposition($response, $asset, $disposition);
 
         return $response;
@@ -90,9 +92,5 @@ final class AssetStreamer
             'Content-Disposition',
             sprintf('%s; filename="%s"', $disposition, $name === '' ? 'download' : addcslashes($name, '"\\')),
         );
-        // `nosniff` because this route can serve `inline`: without it the
-        // browser may re-type the bytes, and an inline response is rendered
-        // in the Spora origin.
-        $response->headers->set('X-Content-Type-Options', 'nosniff');
     }
 }

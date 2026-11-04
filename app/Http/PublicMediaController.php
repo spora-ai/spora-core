@@ -9,6 +9,7 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AssetStorageException;
 use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\MediaScriptableTypes;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -116,7 +117,7 @@ final class PublicMediaController
             'Content-Length'  => (string) strlen($bytes),
             'Cache-Control'   => 'private, max-age=86400',
             'Referrer-Policy' => 'no-referrer',
-        ]);
+        ] + MediaScriptableTypes::headersFor($mime));
     }
 
     private function buildFileResponse(string $mime, string $path): Response
@@ -134,6 +135,7 @@ final class PublicMediaController
         $response = new BinaryFileResponse($realPath, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', 'private, max-age=86400');
         $response->headers->set('Referrer-Policy', 'no-referrer');
+        $response->headers->add(MediaScriptableTypes::headersFor($mime));
 
         return $response;
     }

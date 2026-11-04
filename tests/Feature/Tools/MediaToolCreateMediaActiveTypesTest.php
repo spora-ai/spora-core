@@ -1,0 +1,144 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature\Tools;
+
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
+
+/**
+ * The operator's script-capable toggle, seen through `create_media`.
+ *
+ * `text/html` was in the static text allowlist until this toggle existed,
+ * which meant any install could have a `<script>` payload stored as HTML and
+ * served back. The toggle moves it behind an explicit opt-in.
+ */
+afterEach(function (): void {
+    Capsule::table('media_assets')->delete();
+});
+
+it('refuses an HTML payload while the operator has not permitted it', function (): void {
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(makeMediaToolAdminAuth());
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'page.html',
+                'mime_type' => 'text/html',
+                'content'   => '<!DOCTYPE html><html><body><script>alert(1)</script></body></html>',
+            ],
+            agentId: $agentId,
+        );
+
+        expect($result->success)->toBeFalse();
+        expect(Capsule::table('media_assets')->count())->toBe(0);
+    } finally {
+        $restore();
+    }
+});
+
+it('accepts an HTML payload once the operator has permitted it', function (): void {
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'page.html',
+                'mime_type' => 'text/html',
+                'content'   => '<!DOCTYPE html><html><body><h1>Hello</h1></body></html>',
+            ],
+            agentId: $agentId,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['mime_type'])->toBe('text/html');
+        expect(Capsule::table('media_assets')->count())->toBe(1);
+    } finally {
+        $restore();
+    }
+});
+
+it('describes the embed only for a permitted script-capable asset', function (): void {
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'page.html',
+                'mime_type' => 'text/html',
+                'content'   => '<!DOCTYPE html><html><body><h1>Hello</h1></body></html>',
+            ],
+            agentId: $agentId,
+        );
+
+        expect($result->data['embed'])->toBeArray();
+        expect($result->data['embed']['url'])->toContain('/embed');
+        expect($result->data['embed']['mime'])->toBe('text/html');
+        // The embed-script toggle is separate, and off here.
+        expect($result->data['embed']['scripts'])->toBeFalse();
+    } finally {
+        $restore();
+    }
+});
+
+it('describes no embed for an ordinary asset', function (): void {
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'notes.md',
+                'mime_type' => 'text/markdown',
+                'content'   => '# Notes',
+            ],
+            agentId: $agentId,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['embed'])->toBeNull();
+    } finally {
+        $restore();
+    }
+});
+
+/**
+ * A policy with the operator's script-capable toggle at a chosen value.
+ */
+function mediaActiveTypesPolicy(bool $activeTypes, bool $embedScripts = false): MediaActiveTypesPolicy
+{
+    return new MediaActiveTypesPolicy(new Config(
+        [
+            'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => $activeTypes,
+            'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => $embedScripts,
+        ],
+        [
+            'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => Config::SOURCE_ENV,
+            'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => Config::SOURCE_ENV,
+        ],
+    ));
+}

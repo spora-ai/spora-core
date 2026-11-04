@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Config;
 use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\MediaAsset;
@@ -12,6 +13,7 @@ use Spora\Services\DatabaseAssetStore;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\ImageDerivativeFormat;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -33,7 +35,7 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
-function makeDerivativeServiceFixture(): array
+function makeDerivativeServiceFixture(?MediaActiveTypesPolicy $activeTypes = null): array
 {
     $tmp = sys_get_temp_dir() . '/spora-deriv-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -49,7 +51,7 @@ function makeDerivativeServiceFixture(): array
 
     $principalService = new PrincipalService(new PrincipalResolver());
     $container = MediaArchiveTestSupport::buildProducerContainer();
-    $service = new MediaDerivativeService($assetStore, $principalService, $container);
+    $service = new MediaDerivativeService($assetStore, $principalService, $container, null, null, $activeTypes);
 
     return ['service' => $service, 'tmp' => $tmp];
 }
@@ -132,7 +134,9 @@ test('MediaDerivativeService::create refreshes the existing derivative on a re-r
 });
 
 test('different (format, plugin, operation) triples create distinct derivatives', function (): void {
-    ['service' => $service] = makeDerivativeServiceFixture();
+    // SVG is one of the three formats here because a producer can emit it;
+    // the operator has to permit it first.
+    ['service' => $service] = makeDerivativeServiceFixture(activeTypesEnabled());
     $parent = seedDerivativeParent();
     MediaDerivativeProducerDiscovery::add(FakeDerivativeProducer::class);
 
@@ -144,6 +148,21 @@ test('different (format, plugin, operation) triples create distinct derivatives'
     expect($png->id)->not->toBe($svg->id);
     expect(Capsule::table('media_derivatives')->count())->toBe(3);
 });
+
+/**
+ * A policy with the operator's script-capable toggle on.
+ *
+ * A producer can emit SVG, and the derivative service refuses it unless the
+ * operator has permitted the format — see
+ * {@see \Spora\Services\MediaArchive\MediaDerivativeService}.
+ */
+function activeTypesEnabled(): MediaActiveTypesPolicy
+{
+    return new MediaActiveTypesPolicy(new Config(
+        ['SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES' => true],
+        ['SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES' => Config::SOURCE_ENV],
+    ));
+}
 
 test('deleting the parent cascades to the media_derivatives link row', function (): void {
     ['service' => $service] = makeDerivativeServiceFixture();

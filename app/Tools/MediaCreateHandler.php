@@ -7,6 +7,7 @@ namespace Spora\Tools;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaIngestRequest;
@@ -42,6 +43,7 @@ final readonly class MediaCreateHandler
     public function __construct(
         private MediaArchiveService $archive,
         private MediaAllowedTypesService $allowedTypes,
+        private MediaActiveTypesPolicy $activeTypes,
     ) {}
 
     /**
@@ -353,6 +355,11 @@ final readonly class MediaCreateHandler
                 'filename'  => $asset->filename,
                 'mime_type' => $asset->mime_type,
                 'byte_size' => $asset->byte_size,
+                // Present only for a script-capable asset the operator has
+                // permitted. The chat renders it as a live embed; the
+                // server decides whether it exists and whether its scripts
+                // may run, so the client cannot widen either.
+                'embed'     => $this->activeTypes->describeEmbed($asset),
             ],
         );
     }
