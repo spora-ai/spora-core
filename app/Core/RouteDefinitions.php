@@ -30,6 +30,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaEmbedController;
 use Spora\Http\MediaFolderController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
@@ -343,6 +344,14 @@ final class RouteDefinitions
         // `/api/v1/media/allowed-types` in core.
         $r->addRoute('POST', self::ROUTE_MEDIA_ITEM . '/derivatives', [MediaDerivativeController::class, 'create'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/derivatives/options', [MediaDerivativeOptionsController::class, 'index'], [AuthMiddleware::class]);
+
+        // The embed route — live HTML/SVG for the chat widget. The one
+        // route that may serve script-capable bytes with scripting
+        // permitted, and it is authenticated for that reason: a
+        // script-enabled page reachable by anyone with a link would make
+        // the operator's domain a phishing host. The plain asset URL
+        // stays inert, so this cannot be reached through a share link.
+        $r->addRoute('GET', self::ROUTE_MEDIA_ITEM . '/embed', [MediaEmbedController::class, 'show'], [AuthMiddleware::class]);
 
         // Media folders — core owns the folder table, so core owns its
         // CRUD. Which status a domain error becomes is the controller's

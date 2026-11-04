@@ -12,6 +12,7 @@ use ReflectionClass;
 use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Services\AssetStore;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
@@ -125,8 +126,11 @@ final class MediaArchiveTestSupport
      * production does, and what the `data_url` / `local` assertions in
      * the derivative tests rely on.
      */
-    public static function buildDerivativeService(AssetStore $assetStore, ?LoggerInterface $logger = null): MediaDerivativeService
-    {
+    public static function buildDerivativeService(
+        AssetStore $assetStore,
+        ?LoggerInterface $logger = null,
+        ?MediaActiveTypesPolicy $activeTypes = null,
+    ): MediaDerivativeService {
         $container = self::buildProducerContainer();
         MediaDerivativeProducerDiscovery::add(\Spora\Services\MediaArchive\Producers\ImageDerivativeProducer::class);
         MediaDerivativeProducerDiscovery::add(PdfToMarkdownProducer::class);
@@ -137,6 +141,7 @@ final class MediaArchiveTestSupport
             $container,
             null,
             $logger ?? new NullLogger(),
+            $activeTypes,
         );
     }
 

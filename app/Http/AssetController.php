@@ -9,6 +9,8 @@ use Spora\Models\MediaAsset;
 use Spora\Services\AssetStreamer;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaArchiveService;
+use Spora\Services\MediaArchive\MediaAssetAccess;
+use Spora\Services\MediaArchive\MediaScriptableTypes;
 use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -70,6 +72,11 @@ final class AssetController
         if ($resolved !== null) {
             $response = new BinaryFileResponse($resolved['path'], 200, ['Content-Type' => $resolved['mime']]);
             $response->headers->set('Cache-Control', AssetStreamer::CACHE_HEADER);
+            // The legacy path bypasses {@see AssetStreamer}, so the serving
+            // headers are applied here too — a rule that holds on one path
+            // and not another is not a rule.
+            $response->headers->add(MediaScriptableTypes::headersFor($resolved['mime']));
+
             return $response;
         }
 
@@ -97,62 +104,23 @@ final class AssetController
      */
     private function streamOwnedAsset(MediaAsset $asset): Response
     {
-        if (!$this->canAccessAsset($asset)) {
+        if (!$this->access()->canRead($asset)) {
             return $this->notFound();
         }
         return $this->streamAsset($asset);
     }
 
     /**
-     * Admins bypass; everyone else must either own the asset directly
-     * (`user_id == me`) or be able to act as one of the agent's
-     * principals (`PrincipalResolver::isVisibleTo`). The visibility
-     * check widens to any principal-membership row so plain group
-     * members can read the asset bytes of their group's agents —
-     * matching the scoping `MediaArchiveService::list()` applies, so
-     * the URL the listing endpoint surfaces always resolves.
+     * The ownership union, shared with the embed route.
+     *
+     * {@see MediaAssetAccess} owns the definition — admins bypass, and
+     * everyone else must own the row directly or own an agent that
+     * produced it — so "may read this" has one answer rather than two that
+     * can drift.
      */
-    private function canAccessAsset(MediaAsset $asset): bool
+    private function access(): MediaAssetAccess
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null) {
-            return false;
-        }
-        return $this->auth->isAdmin() || $this->ownsAsset($asset, $userId);
-    }
-
-    /**
-     * Single arm of the ownership union: does the given user own this row
-     * directly (uploaded it themselves) or own the agent that produced it?
-     * Split out so {@see canAccessAsset()} stays under the SonarQube
-     * 3-return brain-overload ceiling.
-     */
-    private function ownsAsset(MediaAsset $asset, int $userId): bool
-    {
-        if ($this->ownsDirectly($asset, $userId)) {
-            return true;
-        }
-        return $this->ownsViaAgent($asset, $userId);
-    }
-
-    private function ownsDirectly(MediaAsset $asset, int $userId): bool
-    {
-        return $asset->user_id !== null && (int) $asset->user_id === $userId;
-    }
-
-    /**
-     * Resolve the asset's agent and ask the principal resolver whether
-     * the caller can act as any of that agent's principals. Direct-
-     * uploaded assets (no `agent_id`) fall through to false here; the
-     * direct-ownership arm above covers them.
-     */
-    private function ownsViaAgent(MediaAsset $asset, int $userId): bool
-    {
-        if ($asset->agent_id === null) {
-            return false;
-        }
-        $resolver = $this->resolver ?? new PrincipalResolver();
-        return $resolver->isVisibleTo((int) $asset->agent_id, $userId);
+        return new MediaAssetAccess($this->auth, $this->resolver);
     }
 
     private function streamAsset(MediaAsset $asset): Response

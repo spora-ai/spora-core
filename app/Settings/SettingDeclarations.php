@@ -436,7 +436,23 @@ final class SettingDeclarations
                 default: ['png', 'jpeg', 'webp'],
                 section: 'media',
                 transform: 'image_types',
-                description: 'Image formats offered as attachments. SVG is always rejected and cannot be enabled here.',
+                description: 'Raster image formats offered as attachments. SVG is not a raster format — see "Allow HTML and SVG".',
+            ),
+            new SettingDefinition(
+                key: 'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES',
+                label: 'Allow HTML and SVG',
+                type: SettingDefinition::TYPE_TOGGLE,
+                default: false,
+                section: 'media',
+                description: 'Permits HTML and SVG assets to be created and embedded. Served inert unless scripts are also allowed.',
+            ),
+            new SettingDefinition(
+                key: 'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS',
+                label: 'Allow scripts in embeds',
+                type: SettingDefinition::TYPE_TOGGLE,
+                default: false,
+                section: 'media',
+                description: 'Lets embedded HTML and SVG run their scripts. They stay sandboxed away from your session and data.',
             ),
         ];
     }

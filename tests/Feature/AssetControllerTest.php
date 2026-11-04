@@ -211,6 +211,39 @@ test('GET /api/v1/assets/{filename} returns 404 for a forged HMAC token (legacy 
     }
 });
 
+test('the legacy token path carries the serving headers too', function (): void {
+    // The legacy `<hmac>.<random>.<ext>` form bypasses {@see \Spora\Services\AssetStreamer}
+    // entirely — the controller builds its own response. A rule that holds
+    // on one path and not another is not a rule, so this path applies the
+    // same headers: `nosniff` on every response, and `sandbox` on a
+    // script-capable one.
+    [$router, , $tmp, $restore] = assetTestSetup();
+    $assetsDir = $tmp . '/assets';
+
+    try {
+        @mkdir($assetsDir, 0755, recursive: true);
+
+        // The token the store would have minted for this extension today.
+        // `svg` is in the extension→MIME map, so the legacy path derives
+        // `image/svg+xml` from the filename — which is the script-capable
+        // type the sandbox policy is about.
+        $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        $hmac = substr(hash_hmac('sha256', 'svg|' . gmdate('Ymd'), $security->masterKey()), 0, 32);
+        $token = $hmac . '.' . str_repeat('b', 16);
+        file_put_contents($assetsDir . "/{$token}.svg", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+        $request = Request::create("/api/v1/assets/{$token}.svg", 'GET');
+        $response = $router->dispatch($request);
+
+        expect($response->getStatusCode())->toBe(200);
+        expect($response->headers->get('X-Content-Type-Options'))->toBe('nosniff');
+        expect($response->headers->get('Content-Security-Policy'))->toBe('sandbox');
+    } finally {
+        assetTestTeardown($tmp);
+        $restore();
+    }
+});
+
 test('GET /api/v1/assets/{uuid}.{ext} resolves to the same row as {uuid}', function (): void {
     // Browsers fetch the asset URL with an `.ext` suffix so the saved
     // filename has the right extension. The controller strips the suffix

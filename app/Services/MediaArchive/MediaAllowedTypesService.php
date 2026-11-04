@@ -11,10 +11,10 @@ use Throwable;
 /**
  * Computes the dynamic set of MIME types accepted by the upload UI.
  *
- * Four sources, combined:
+ * Five sources, combined:
  *
  *  1. Static text allowlist — file types an LLM can read directly
- *     (TXT, MD, CSV, JSON, HTML, XML, YAML). Always allowed, and
+ *     (TXT, MD, CSV, JSON, XML, YAML). Always allowed, and
  *     independent of source 3: a text source is its own text, so it
  *     needs no derivative — {@see \Spora\Agents\AttachmentRowRenderer}
  *     inlines the raw bytes whenever they fit the budget.
@@ -58,6 +58,12 @@ use Throwable;
  *     config.php or `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env var.
  *     An empty list explicitly disables image uploads.
  *
+ *  5. The script-capable formats — HTML and SVG are allowed **only** when
+ *     the operator enables `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES`. A
+ *     browser parses both as documents with an execution model, so they
+ *     are governed by an explicit opt-in rather than being always-on
+ *     (HTML) or always-off (SVG, which the raster image list excludes).
+ *
  * The result drives the upload UI's `<input type="file" accept>`
  * attribute (the frontend fetches `/api/v1/media/allowed-types` to
  * populate it) and the server-side allowlist check in
@@ -78,12 +84,17 @@ final class MediaAllowedTypesService
      * the bytes are stored once and inlined directly into the prompt
      * when they fit {@see \Spora\Agents\AttachmentRowRenderer}'s inline
      * budget, which is why this list is self-sufficient.
+     *
+     * `text/html` is deliberately absent. A browser parses it as a
+     * document with an execution model, so it is not in the same class
+     * as the prose formats here — it is governed by the operator's
+     * `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` toggle and joined to the
+     * allowlist from there.
      */
     public const TEXT_MIME_TYPES = [
         'text/plain',
         'text/markdown',
         'text/csv',
-        'text/html',
         'application/json',
         'application/xml',
         'text/xml',
@@ -112,6 +123,31 @@ final class MediaAllowedTypesService
     ];
 
     /**
+     * The operator's decision about the script-capable formats.
+     *
+     * Null when the service was built without one — the state of the
+     * archive before the operator's toggle existed, and the state of every
+     * test that does not care about it. Absent a policy, the script-capable
+     * formats are not permitted, which is the safe reading.
+     */
+    private readonly ?MediaActiveTypesPolicy $activeTypes;
+
+    /**
+     * The script-capable formats an operator may create.
+     *
+     * Narrower than {@see MediaScriptableTypes::SCRIPTABLE_MIME_TYPES},
+     * which is the *serving* vocabulary: it decides what the sandbox
+     * policy covers, and covering a format nothing produces costs nothing
+     * but a line of the serving list. Offering one for upload is a
+     * separate decision — an operator who turns on "Allow HTML and SVG"
+     * asked for HTML and SVG, not for XHTML.
+     */
+    public const CREATION_MIME_TYPES = [
+        'text/html',
+        'image/svg+xml',
+    ];
+
+    /**
      * @param list<string>|null $imageExtensions Resolved image extensions
      *        (e.g. `['png', 'jpeg', 'webp']`). null falls back to the
      *        built-in default. An empty array disables images entirely.
@@ -121,8 +157,15 @@ final class MediaAllowedTypesService
         private readonly MediaDerivativeService $derivatives,
         private readonly DriverFactory $driverFactory,
         ?array $imageExtensions = null,
+        ?MediaActiveTypesPolicy $activeTypes = null,
     ) {
         $this->imageExtensions = self::normalizeImageExtensions($imageExtensions);
+        $this->activeTypes = $activeTypes;
+    }
+
+    private function permitsActiveTypes(): bool
+    {
+        return $this->activeTypes?->allowActiveTypes() ?? false;
     }
 
     /** @var list<string> */
@@ -153,6 +196,15 @@ final class MediaAllowedTypesService
         }
         foreach (self::AUDIO_MIME_TYPES as $mime) {
             $set[strtolower($mime)] = true;
+        }
+        if ($this->permitsActiveTypes()) {
+            // The script-capable list, straight from the class that owns
+            // it. Two copies of it would be two answers to "which formats
+            // carry script", and the serving boundary would have to be kept
+            // in step with this gate by hand.
+            foreach (self::CREATION_MIME_TYPES as $mime) {
+                $set[strtolower($mime)] = true;
+            }
         }
         foreach ($this->derivatives->producerSourceMimeTypes() as $mime) {
             $set[strtolower($mime)] = true;
@@ -226,8 +278,10 @@ final class MediaAllowedTypesService
      * - lowercased, whitespace-trimmed, leading dots stripped
      * - `jpg` → `jpeg` (canonical MIME `image/jpeg`)
      * - SVG variants (`svg`, `svg+xml`, `image/svg+xml`) are excluded; the
-     *   picker only offers raster types. They remain rejected server-side
-     *   even if an operator explicitly configures them.
+     *   picker only offers raster types, and this list is the operator's
+     *   *image* policy. SVG is not a raster image — it is a script-capable
+     *   format, and `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` is what governs
+     *   it.
      * - duplicates collapsed to the first occurrence
      * - order preserved
      *

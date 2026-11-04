@@ -236,6 +236,8 @@ final class ConfigFactory
             'media_archive.max_promote_bytes' => 'SPORA_MEDIA_ARCHIVE_MAX_PROMOTE_BYTES',
             'media_archive.ffprobe_enabled'  => 'SPORA_MEDIA_ARCHIVE_FFPROBE_ENABLED',
             'media_archive.allowed_image_types' => 'SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES',
+            'media_archive.allow_active_types' => 'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES',
+            'media_archive.allow_embed_scripts' => 'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS',
             'notifications.email_enabled'    => 'SPORA_NOTIFICATIONS_EMAIL_ENABLED',
             'mail.driver'                    => 'SPORA_MAIL_DRIVER',
             'mail.host'                      => 'SPORA_MAIL_HOST',

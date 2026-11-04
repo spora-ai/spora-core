@@ -21,9 +21,24 @@ use Spora\Services\Text\Utf8Sanitizer;
  */
 final class MediaAssetSerializer
 {
+    /**
+     * @param bool $includeDerivatives Whether to load each asset's
+     *        derivative rows. The list loop passes `false` to avoid the
+     *        N+1 — the detail page (single asset) is the natural consumer
+     *        that always includes them.
+     * @param MediaDerivativeService|null $derivatives The service whose
+     *        `listFor()` supplies the derivative rows. Null yields an empty
+     *        `derivatives[]`.
+     * @param MediaActiveTypesPolicy $activeTypes The operator's decision
+     *        about the script-capable formats. Required rather than
+     *        optional: it decides whether the `embed` field is populated,
+     *        and a serializer built without it would report "no embed" on
+     *        some surfaces and "an embed" on others for the same asset.
+     */
     public function __construct(
         private readonly bool $includeDerivatives = true,
         private readonly ?MediaDerivativeService $derivatives = null,
+        private readonly ?MediaActiveTypesPolicy $activeTypes = null,
     ) {}
 
     /**
@@ -63,6 +78,11 @@ final class MediaAssetSerializer
             'kind'                => $asset->kind,
             'public_access_token' => $asset->public_access_token,
             'public_url'          => $this->buildPublicUrl($asset, $baseUrl),
+            // The embed descriptor for a script-capable asset the operator
+            // has permitted, or null. The client renders it; the server
+            // decides whether it exists and whether its scripts may run,
+            // so the client cannot widen either.
+            'embed_descriptor'    => $this->activeTypes?->describeEmbed($asset),
             'derivatives'         => $this->loadDerivatives($asset),
             'created_at'          => $asset->created_at?->toIso8601String(),
             'updated_at'          => $asset->updated_at?->toIso8601String(),
@@ -145,6 +165,10 @@ final class MediaAssetSerializer
                 'producer_plugin'    => $row['producer_plugin'],
                 'producer_operation' => $row['producer_operation'],
                 'created_at'         => $row['created_at'],
+                // The embed descriptor for a script-capable derivative —
+                // a Typst SVG render, say. The server decides whether it
+                // exists and whether its scripts may run.
+                'embed_descriptor'   => $this->activeTypes?->describeEmbed($derivative),
             ];
         }
         return $out;

@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-34-g27c4d424"
+        "version": "0.32.0-6-ga6233706"
     },
     "servers": [
         {
@@ -2858,6 +2858,37 @@
                 "responses": {
                     "default": {
                         "description": "JSON envelope: `{data: ...}` on success, `{error: {code, message}}` on error."
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/media/{id}/embed": {
+            "get": {
+                "tags": [
+                    "Media"
+                ],
+                "summary": "Fetch a media asset as live, embeddable content",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The asset bytes, sandboxed. The CSP header carries the operator's script policy."
+                    },
+                    "404": {
+                        "description": "No such asset, not readable by the caller, or not a format the operator permitted."
                     }
                 },
                 "security": [

@@ -12,6 +12,7 @@ use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Services\AssetStore;
 use Spora\Services\LocalAssetStore;
+use Spora\Services\MediaArchive\Exceptions\DerivativeMimeNotAllowedException;
 use Spora\Services\MediaArchive\Exceptions\NoDerivativeProducerException;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalService;
@@ -71,6 +72,7 @@ final class MediaDerivativeService
         private readonly ContainerInterface $container,
         ?DerivativePayloadStore $payloads = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?MediaActiveTypesPolicy $activeTypes = null,
     ) {
         $this->payloads = $payloads ?? new DerivativePayloadStore(
             defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3),
@@ -326,6 +328,9 @@ final class MediaDerivativeService
      * Create or refresh a derivative. The bytes on the new `media_assets`
      * row are written via {@see AssetStore} (local-mode or data-url mode,
      * same as a regular upload).
+     *
+     * @throws DerivativeMimeNotAllowedException When the producer emitted a
+     *         script-capable type the operator has not permitted.
      */
     public function create(
         MediaAsset $parent,
@@ -336,6 +341,30 @@ final class MediaDerivativeService
         ?int $userId = null,
         ?PrincipalContext $context = null,
     ): MediaAsset {
+        // The gate is before the branch, because both arms write:
+        // `createNew()` mints the row and `refresh()` rewrites the bytes
+        // *and* the mime on an existing one. A gate inside only
+        // `createNew()` would leave the re-render path able to set a
+        // script-capable mime on a row the operator never permitted.
+        //
+        // The check is narrow — only the script-capable types are gated —
+        // because the producers are first-party or operator-installed code
+        // whose other output types (a PDF derivative, a PNG thumbnail) the
+        // archive has always accepted. The upload gate refuses these
+        // formats already; this is the same rule applied to the path that
+        // never consulted it.
+        $mime = $output->mime;
+        if (
+            MediaScriptableTypes::isScriptable($mime)
+            && !($this->activeTypes?->permitsCreationOf($mime) ?? false)
+        ) {
+            throw new DerivativeMimeNotAllowedException(sprintf(
+                'The producer emitted "%s", which the operator has not permitted. '
+                    . 'Enable "Allow HTML and SVG" in the media settings to allow it.',
+                $mime,
+            ));
+        }
+
         $existing = $this->findExisting($parent, $format, $producerPlugin, $producerOperation);
         if ($existing !== null) {
             return $this->refresh($existing, $output);
@@ -466,6 +495,12 @@ final class MediaDerivativeService
         return $derivativeId !== null ? MediaAsset::query()->find((string) $derivativeId) : null;
     }
 
+    /**
+     * Mint the row and write the bytes.
+     *
+     * The script-capable gate runs in {@see self::create()}, which is the
+     * only caller — a second caller would have to gate for itself.
+     */
     private function createNew(
         MediaAsset $parent,
         DerivativeOutput $output,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Tools;
 
 use Spora\Models\MediaAsset;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\PrincipalContext;
@@ -39,6 +40,7 @@ final readonly class MediaDerivativeHandler
         private MediaAssetSerializer $serializer,
         private MediaDerivativeService $derivatives,
         private MediaSourceReader $sourceReader,
+        private MediaActiveTypesPolicy $activeTypes,
     ) {}
 
     /**
@@ -244,6 +246,9 @@ final readonly class MediaDerivativeHandler
                 'asset_url'     => $derivativeUrl,
                 'plugin_slug'   => $derivative->plugin_slug,
                 'tool_name'     => $derivative->tool_name,
+                // Present only for a script-capable derivative the operator
+                // has permitted — a Typst SVG render, say.
+                'embed_descriptor' => $this->activeTypes->describeEmbed($derivative),
             ],
         );
     }

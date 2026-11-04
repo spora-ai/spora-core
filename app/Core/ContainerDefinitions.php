@@ -76,6 +76,7 @@ use Spora\Http\MediaAllowedTypesController;
 use Spora\Http\MediaArchiveController;
 use Spora\Http\MediaDerivativeController;
 use Spora\Http\MediaDerivativeOptionsController;
+use Spora\Http\MediaEmbedController;
 use Spora\Http\MediaFolderController;
 use Spora\Http\MediaResolveController;
 use Spora\Http\MediaUploadController;
@@ -148,10 +149,12 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\Mail\MailTemplateSyncService;
 use Spora\Services\MailTemplateServiceInterface;
 use Spora\Services\MediaArchive\DerivativePayloadStore;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaAllowedTypesService;
 use Spora\Services\MediaArchive\MediaArchiveIngestPipeline;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaArchiveUrlResolver;
+use Spora\Services\MediaArchive\MediaAssetAccess;
 use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaAssetResolver;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
@@ -632,6 +635,10 @@ final class ContainerDefinitions
                 => new PdfMarkdownExtractor(
                     $c->get(\Iamgerwin\PdfToMarkdownParser\PdfToMarkdownParser::class),
                 ),
+            MediaActiveTypesPolicy::class => static function (ContainerInterface $c): MediaActiveTypesPolicy {
+                return new MediaActiveTypesPolicy($c->get(Config::class));
+            },
+
             MediaAllowedTypesService::class => static function (ContainerInterface $c): MediaAllowedTypesService {
                 // A TYPE_LIST setting: the registry coerces every layer to
                 // `array<string>`, which `Config::get()` — `mixed` by
@@ -643,6 +650,19 @@ final class ContainerDefinitions
                     $c->get(MediaDerivativeService::class),
                     $c->get(DriverFactory::class),
                     $allowedImageTypes,
+                    $c->get(MediaActiveTypesPolicy::class),
+                );
+            },
+
+            MediaAssetAccess::class => static function (ContainerInterface $c): MediaAssetAccess {
+                return new MediaAssetAccess($c->get(AuthService::class), new PrincipalResolver());
+            },
+
+            MediaEmbedController::class => static function (ContainerInterface $c): MediaEmbedController {
+                return new MediaEmbedController(
+                    $c->get(AssetStreamer::class),
+                    $c->get(MediaAssetAccess::class),
+                    $c->get(MediaActiveTypesPolicy::class),
                 );
             },
         ];
@@ -1153,7 +1173,7 @@ final class ContainerDefinitions
                 return new MediaArchiveController(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(false),
+                    new MediaAssetSerializer(false, null, $c->get(MediaActiveTypesPolicy::class)),
                     $c->get(PrincipalResolver::class),
                 );
             },
@@ -1167,7 +1187,7 @@ final class ContainerDefinitions
                     $c->get(PrincipalResolver::class),
                     $c->get(MimeSniffer::class),
                     $c->get(Config::class),
-                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class), $c->get(MediaActiveTypesPolicy::class)),
                 );
             },
 
@@ -1186,7 +1206,10 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     // The chat list doesn't need the derivatives strip;
                     // that's a Media Archive detail-page concern.
-                    new MediaAssetSerializer(includeDerivatives: false),
+                    new MediaAssetSerializer(
+                        includeDerivatives: false,
+                        activeTypes: $c->get(MediaActiveTypesPolicy::class),
+                    ),
                 );
             },
 
@@ -1203,6 +1226,7 @@ final class ContainerDefinitions
                     $c,
                     $c->get(DerivativePayloadStore::class),
                     $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
+                    $c->get(MediaActiveTypesPolicy::class),
                 );
             },
 
@@ -1210,7 +1234,7 @@ final class ContainerDefinitions
                 return new MediaDerivativeController(
                     $c->get(MediaDerivativeService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class), $c->get(MediaActiveTypesPolicy::class)),
                 );
             },
 
@@ -1663,9 +1687,10 @@ final class ContainerDefinitions
             MediaDerivativeHandler::class => static function (ContainerInterface $c): MediaDerivativeHandler {
                 $derivatives = $c->get(MediaDerivativeService::class);
                 return new MediaDerivativeHandler(
-                    new MediaAssetSerializer(true, $derivatives),
+                    new MediaAssetSerializer(true, $derivatives, $c->get(MediaActiveTypesPolicy::class)),
                     $derivatives,
                     $c->get(MediaSourceReader::class),
+                    $c->get(MediaActiveTypesPolicy::class),
                 );
             },
 
@@ -1676,7 +1701,7 @@ final class ContainerDefinitions
                 return new MediaTool(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(true, $derivatives),
+                    new MediaAssetSerializer(true, $derivatives, $c->get(MediaActiveTypesPolicy::class)),
                     $derivatives,
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),
