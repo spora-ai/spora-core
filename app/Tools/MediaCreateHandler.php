@@ -359,7 +359,7 @@ final readonly class MediaCreateHandler
                 // permitted. The chat renders it as a live embed; the
                 // server decides whether it exists and whether its scripts
                 // may run, so the client cannot widen either.
-                'embed'     => $this->activeTypes->describeEmbed($asset),
+                'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
             ],
         );
     }

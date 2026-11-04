@@ -248,7 +248,7 @@ final readonly class MediaDerivativeHandler
                 'tool_name'     => $derivative->tool_name,
                 // Present only for a script-capable derivative the operator
                 // has permitted — a Typst SVG render, say.
-                'embed'         => $this->activeTypes->describeEmbed($derivative),
+                'embed_descriptor' => $this->activeTypes->describeEmbed($derivative),
             ],
         );
     }

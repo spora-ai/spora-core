@@ -47,6 +47,12 @@ final class MediaScriptableTypes
      * The list is a closed one on purpose. A type that is not named here is
      * served as an ordinary file, so adding a type is a decision with
      * consequences — not an oversight that fails safe.
+     *
+     * This is the *serving* vocabulary: it decides what the sandbox policy
+     * covers. What may be *created* is a narrower question, answered by
+     * {@see MediaAllowedTypesService::CREATION_MIME_TYPES} — a producer
+     * that emits a MIME nobody can produce is still served safely, but
+     * offering it for upload is a separate decision.
      */
     public const SCRIPTABLE_MIME_TYPES = [
         'text/html',

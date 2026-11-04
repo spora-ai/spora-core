@@ -11,10 +11,10 @@ use Throwable;
 /**
  * Computes the dynamic set of MIME types accepted by the upload UI.
  *
- * Four sources, combined:
+ * Five sources, combined:
  *
  *  1. Static text allowlist — file types an LLM can read directly
- *     (TXT, MD, CSV, JSON, HTML, XML, YAML). Always allowed, and
+ *     (TXT, MD, CSV, JSON, XML, YAML). Always allowed, and
  *     independent of source 3: a text source is its own text, so it
  *     needs no derivative — {@see \Spora\Agents\AttachmentRowRenderer}
  *     inlines the raw bytes whenever they fit the budget.
@@ -133,6 +133,21 @@ final class MediaAllowedTypesService
     private readonly ?MediaActiveTypesPolicy $activeTypes;
 
     /**
+     * The script-capable formats an operator may create.
+     *
+     * Narrower than {@see MediaScriptableTypes::SCRIPTABLE_MIME_TYPES},
+     * which is the *serving* vocabulary: it decides what the sandbox
+     * policy covers, and covering a format nothing produces costs nothing
+     * but a line of the serving list. Offering one for upload is a
+     * separate decision — an operator who turns on "Allow HTML and SVG"
+     * asked for HTML and SVG, not for XHTML.
+     */
+    public const CREATION_MIME_TYPES = [
+        'text/html',
+        'image/svg+xml',
+    ];
+
+    /**
      * @param list<string>|null $imageExtensions Resolved image extensions
      *        (e.g. `['png', 'jpeg', 'webp']`). null falls back to the
      *        built-in default. An empty array disables images entirely.
@@ -187,7 +202,7 @@ final class MediaAllowedTypesService
             // it. Two copies of it would be two answers to "which formats
             // carry script", and the serving boundary would have to be kept
             // in step with this gate by hand.
-            foreach (MediaScriptableTypes::SCRIPTABLE_MIME_TYPES as $mime) {
+            foreach (self::CREATION_MIME_TYPES as $mime) {
                 $set[strtolower($mime)] = true;
             }
         }
@@ -263,8 +278,10 @@ final class MediaAllowedTypesService
      * - lowercased, whitespace-trimmed, leading dots stripped
      * - `jpg` → `jpeg` (canonical MIME `image/jpeg`)
      * - SVG variants (`svg`, `svg+xml`, `image/svg+xml`) are excluded; the
-     *   picker only offers raster types. They remain rejected server-side
-     *   even if an operator explicitly configures them.
+     *   picker only offers raster types, and this list is the operator's
+     *   *image* policy. SVG is not a raster image — it is a script-capable
+     *   format, and `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` is what governs
+     *   it.
      * - duplicates collapsed to the first occurrence
      * - order preserved
      *

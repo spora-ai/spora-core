@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-4-g053a21a8"
+        "version": "0.32.0-6-ga6233706"
     },
     "servers": [
         {
@@ -2874,14 +2874,6 @@
                 ],
                 "summary": "Fetch a media asset as live, embeddable content",
                 "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
                     {
                         "name": "id",
                         "in": "path",

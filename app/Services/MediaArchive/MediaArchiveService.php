@@ -94,6 +94,11 @@ final class MediaArchiveService
             // appending, because a hinted `text/markdown` was never a key
             // this map held — so the skill's advice and the code disagreed.
             'text/markdown'    => 'md',
+            // HTML, so an operator who permits the script-capable formats
+            // gets a `.html` in the upload picker's `accept` attribute.
+            // Without it the server accepts the upload and the picker
+            // never offers the type.
+            'text/html'        => 'html',
             // Word OOXML. In the static map, not only on the byte path, so
             // `sniffFromExtension()` and the URL branch agree with the
             // sniffer. Neither static map entry is load-bearing on its own:
@@ -137,6 +142,7 @@ final class MediaArchiveService
             'txt'      => 'text/plain',
             'typ'      => 'text/x-typst',
             'md'       => 'text/markdown',
+            'html'     => 'text/html',
             'markdown' => 'text/markdown',
             'docx'     => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];

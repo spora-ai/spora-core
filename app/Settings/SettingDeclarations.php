@@ -436,7 +436,7 @@ final class SettingDeclarations
                 default: ['png', 'jpeg', 'webp'],
                 section: 'media',
                 transform: 'image_types',
-                description: 'Image formats offered as attachments. SVG is always rejected and cannot be enabled here.',
+                description: 'Raster image formats offered as attachments. SVG is not a raster format — see "Allow HTML and SVG".',
             ),
             new SettingDefinition(
                 key: 'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES',

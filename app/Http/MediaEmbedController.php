@@ -48,7 +48,11 @@ use Symfony\Component\HttpFoundation\Response;
  *     framed document has an unreadable response.
  *  3. Every write needs an `X-CSRF-Token`, which lives in the session and
  *     is readable only from the app's own origin. The session cookie is
- *     `SameSite=Lax`, so a cross-origin request does not carry it either.
+ *     `SameSite=Lax` — PHP's default, not a setting this application
+ *     establishes — so a cross-origin request does not carry it either.
+ *     Mechanisms 1 and 2 hold regardless of the cookie's `SameSite`: the
+ *     opaque origin is what denies `document.cookie`, and the missing CORS
+ *     headers are what make the response unreadable.
  *
  * There is no bridge: the embedded document cannot `postMessage` the app to
  * trigger actions. A bridge would need a message contract and an action
@@ -67,7 +71,6 @@ final class MediaEmbedController
         path: '/api/v1/media/{id}/embed',
         summary: 'Fetch a media asset as live, embeddable content',
         tags: ['Media'],
-        parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
     )]
     #[OA\Response(response: 200, description: 'The asset bytes, sandboxed. The CSP header carries the operator\'s script policy.')]
     #[OA\Response(response: 404, description: 'No such asset, not readable by the caller, or not a format the operator permitted.')]

@@ -89,11 +89,11 @@ it('describes the embed only for a permitted script-capable asset', function ():
             agentId: $agentId,
         );
 
-        expect($result->data['embed'])->toBeArray();
-        expect($result->data['embed']['url'])->toContain('/embed');
-        expect($result->data['embed']['mime'])->toBe('text/html');
+        expect($result->data['embed_descriptor'])->toBeArray();
+        expect($result->data['embed_descriptor']['url'])->toContain('/embed');
+        expect($result->data['embed_descriptor']['mime'])->toBe('text/html');
         // The embed-script toggle is separate, and off here.
-        expect($result->data['embed']['scripts'])->toBeFalse();
+        expect($result->data['embed_descriptor']['scripts'])->toBeFalse();
     } finally {
         $restore();
     }
@@ -120,7 +120,7 @@ it('describes no embed for an ordinary asset', function (): void {
         );
 
         expect($result->success)->toBeTrue();
-        expect($result->data['embed'])->toBeNull();
+        expect($result->data['embed_descriptor'])->toBeNull();
     } finally {
         $restore();
     }

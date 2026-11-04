@@ -12,6 +12,7 @@ use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Tests\Support\MediaArchiveTestSupport;
+use Tests\Support\ShiftingMimeDerivativeProducer;
 use Tests\Support\SvgDerivativeProducer;
 
 /**
@@ -34,6 +35,7 @@ beforeEach(function (): void {
 
 afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
+    ShiftingMimeDerivativeProducer::reset();
 });
 
 test('a producer emitting SVG does not create a row while active types are off', function (): void {
@@ -57,6 +59,38 @@ test('a producer emitting SVG creates a row once active types are on', function 
 
     expect($derivative->mime_type)->toBe('image/svg+xml');
     expect(MediaAsset::query()->where('mime_type', 'image/svg+xml')->count())->toBe(1);
+});
+
+test('a re-render cannot rewrite an existing derivative into a script-capable one', function (): void {
+    // The gate sits in `create()`, which both arms of the create-or-refresh
+    // decision go through. A gate inside only the create-new arm would let
+    // a re-render rewrite an existing row's mime and bytes — and the row's
+    // mime is what the serving boundary reads.
+    //
+    // Reaching the refresh arm needs the same natural key
+    // `(parent_id, format, producer_plugin, producer_operation)` to answer
+    // twice with different bytes, so the producer shifts its output type.
+    ShiftingMimeDerivativeProducer::configure(['text/markdown']);
+    MediaDerivativeProducerDiscovery::reset();
+    MediaDerivativeProducerDiscovery::add(ShiftingMimeDerivativeProducer::class);
+
+    $service = buildSvgDerivativeService(activeTypes: false);
+    $parent = seedSvgParentAsset();
+
+    // The first render creates the row, as markdown.
+    $created = $service->createFromRequest($parent, 'render');
+    expect($created->mime_type)->toBe('text/markdown');
+
+    // The same natural key now answers with SVG — the refresh arm.
+    ShiftingMimeDerivativeProducer::configure(['image/svg+xml']);
+
+    expect(fn() => $service->createFromRequest($parent, 'render'))
+        ->toThrow(DerivativeMimeNotAllowedException::class);
+
+    // The row still holds the mime it was created with.
+    expect(MediaAsset::query()->where('id', $created->id)->first()?->mime_type)
+        ->toBe('text/markdown');
+    expect(MediaAsset::query()->where('mime_type', 'image/svg+xml')->count())->toBe(0);
 });
 
 test('a producer emitting an ordinary format is unaffected by the toggle', function (): void {

@@ -83,6 +83,11 @@ final class MediaActiveTypesPolicy
      * computed here, so the header the route sends and the attribute the
      * client sets cannot disagree.
      *
+     * The key is `embed_descriptor`, not `embed`: `get_embed_code` puts a
+     * *markdown string* under `embed`, and a shared key would make the
+     * client's "is this an object?" test the only thing distinguishing the
+     * two.
+     *
      * @return array{url: string, mime: string, scripts: bool}|null
      */
     public function describeEmbed(MediaAsset $asset): ?array

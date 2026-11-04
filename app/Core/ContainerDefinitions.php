@@ -1234,7 +1234,7 @@ final class ContainerDefinitions
                 return new MediaDerivativeController(
                     $c->get(MediaDerivativeService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class)),
+                    new MediaAssetSerializer(true, $c->get(MediaDerivativeService::class), $c->get(MediaActiveTypesPolicy::class)),
                 );
             },
 
@@ -1687,7 +1687,7 @@ final class ContainerDefinitions
             MediaDerivativeHandler::class => static function (ContainerInterface $c): MediaDerivativeHandler {
                 $derivatives = $c->get(MediaDerivativeService::class);
                 return new MediaDerivativeHandler(
-                    new MediaAssetSerializer(true, $derivatives),
+                    new MediaAssetSerializer(true, $derivatives, $c->get(MediaActiveTypesPolicy::class)),
                     $derivatives,
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaActiveTypesPolicy::class),
@@ -1701,7 +1701,7 @@ final class ContainerDefinitions
                 return new MediaTool(
                     $c->get(MediaArchiveService::class),
                     $c->get(AuthService::class),
-                    new MediaAssetSerializer(true, $derivatives),
+                    new MediaAssetSerializer(true, $derivatives, $c->get(MediaActiveTypesPolicy::class)),
                     $derivatives,
                     $c->get(MediaSourceReader::class),
                     $c->get(MediaDerivativeHandler::class),

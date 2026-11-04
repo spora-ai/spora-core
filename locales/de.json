@@ -144,7 +144,7 @@
   "Hex payload is not valid hex.": "Die Hex-Nutzdaten sind kein gültiges Hex.",
   "Housekeeping rate limit exceeded.": "Das Rate-Limit für die Wartungsaufgabe wurde überschritten.",
   "How outbound mail is delivered. Sendmail is the default because it is what an unconfigured install has always done.": "Wie ausgehende E-Mails zugestellt werden. Sendmail ist die Voreinstellung, weil eine nicht konfigurierte Installation schon immer so gearbeitet hat.",
-  "Image formats offered as attachments. SVG is always rejected and cannot be enabled here.": "Bildformate, die als Anhänge angeboten werden. SVG wird immer abgelehnt und kann hier nicht aktiviert werden.",
+  "Raster image formats offered as attachments. SVG is not a raster format — see \"Allow HTML and SVG\".": "Raster-Bildformate, die als Anhänge angeboten werden. SVG ist kein Rasterformat — siehe „HTML und SVG erlauben“.",
   "ImageDerivativeProducer: MediaAsset %s has empty data_url payload": "ImageDerivativeProducer: Das MediaAsset %s hat eine leere data_url-Nutzlast",
   "ImageDerivativeProducer: MediaAsset %s has no asset_token": "ImageDerivativeProducer: Das MediaAsset %s hat kein asset_token",
   "ImageDerivativeProducer: MediaAsset %s local file unreadable: %s": "ImageDerivativeProducer: Die lokale Datei des MediaAssets %s ist nicht lesbar: %s",

@@ -366,6 +366,13 @@ final class MediaDerivativeService
         ?int $userId = null,
         ?PrincipalContext $context = null,
     ): MediaAsset {
+        // Before the branch, because both arms write: `createNew()` mints the
+        // row and `refresh()` rewrites the bytes *and* the mime on an
+        // existing one. A gate inside only `createNew()` would leave the
+        // re-render path able to set a script-capable mime on a row the
+        // operator never permitted.
+        $this->assertCreationPermitted($output->mime);
+
         $existing = $this->findExisting($parent, $format, $producerPlugin, $producerOperation);
         if ($existing !== null) {
             return $this->refresh($existing, $output);

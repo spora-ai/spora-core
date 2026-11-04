@@ -29,6 +29,7 @@ function legacyReadPaths(): array
         'media_archive.fetch_timeout_seconds', 'media_archive.allowed_image_types',
         'media_archive.promote_external', 'media_archive.max_promote_bytes',
         'media_archive.ffprobe_enabled',
+        'media_archive.allow_active_types', 'media_archive.allow_embed_scripts',
         'asset_store.mode', 'asset_store.auto_threshold_bytes', 'asset_store.max_bytes',
         // `SystemMailer` reads the flat shape; the nested `mail` block an
         // older deployment carries in its `config.php` was read by nothing.
