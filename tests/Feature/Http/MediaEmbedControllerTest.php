@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Mockery;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
@@ -164,6 +165,30 @@ test('the route 404s for a non-script-capable asset', function (): void {
         publicAccessToken: null,
         uploadSource: 'upload',
     ));
+
+    $resp = $controller->show($asset->id);
+
+    expect($resp->getStatusCode())->toBe(404);
+});
+
+test('the route 404s when the storage layer has no payload for the asset', function (): void {
+    // A row whose bytes are gone — an external-mode asset, or a local row
+    // whose file was swept. The route must not serve a body it does not
+    // have, and must not 500.
+    [$service, $controller] = buildEmbedController(activeTypes: true, embedScripts: true);
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: '<script>alert(1)</script>',
+        mime: 'text/html',
+        filename: 'page.html',
+        userId: 1,
+        publicAccessToken: null,
+        uploadSource: 'upload',
+    ));
+
+    // Strip the payload so the store refuses the read.
+    Capsule::table('media_assets')->where('id', $asset->id)->update([
+        'storage_mode' => 'external',
+    ]);
 
     $resp = $controller->show($asset->id);
 
