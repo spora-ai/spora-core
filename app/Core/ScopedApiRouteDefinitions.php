@@ -48,8 +48,11 @@ use Spora\OpenApi\RouteSpecCollector;
  *     global key is not a group key.
  *   - `/api/v1/groups/{groupId}/api-keys*` and `/api/v1/global-api-keys*`
  *     are the ordinary admin stack (`AuthMiddleware` + `CsrfMiddleware`),
- *     because that is where an operator mints keys. Always registered, so
- *     a key can be revoked even on an instance whose scope is switched off.
+ *     because that is where an operator mints keys. Listing and revoking are
+ *     always registered, so a key can be revoked even on an instance whose
+ *     scope is switched off. Minting is registered only while the scope is
+ *     on: a credential for a surface that does not exist is one nobody asked
+ *     for, and it would come alive the moment the scope was switched on.
  *
  * Endpoints (the group surface):
  *
@@ -103,19 +106,24 @@ final class ScopedApiRouteDefinitions
         $admin = [AuthMiddleware::class, CsrfMiddleware::class];
         $keys = ScopedApiKeyController::class;
 
+        // Listing and revoking are always mounted, so a key stays revocable
+        // whatever its scope's toggle says. Minting is not: it follows the
+        // scope, because a credential for a surface that does not exist is
+        // one nobody asked for, and a dormant key comes alive — to every
+        // group owner who minted one — the moment the scope is switched on.
         $r->addRoute('GET', '/api/v1/groups/{groupId}/api-keys', [$keys, 'groupIndex'], $admin);
-        $r->addRoute('POST', '/api/v1/groups/{groupId}/api-keys', [$keys, 'groupStore'], $admin);
         $r->addRoute('DELETE', '/api/v1/groups/{groupId}/api-keys/{keyId}', [$keys, 'groupDestroy'], $admin);
         $r->addRoute('GET', '/api/v1/global-api-keys', [$keys, 'globalIndex'], $admin);
-        $r->addRoute('POST', '/api/v1/global-api-keys', [$keys, 'globalStore'], $admin);
         $r->addRoute('DELETE', '/api/v1/global-api-keys/{keyId}', [$keys, 'globalDestroy'], $admin);
 
         if (self::enabled($r, $config, 'SPORA_GROUP_API')) {
+            $r->addRoute('POST', '/api/v1/groups/{groupId}/api-keys', [$keys, 'groupStore'], $admin);
             self::registerScopedSurface($r, self::GROUP_PREFIX, GroupApiKeyMiddleware::class);
             $r->addRoute('GET', self::GROUP_PREFIX . '/group', [ScopedApiGroupController::class, 'ownGroup'], [GroupApiKeyMiddleware::class]);
         }
 
         if (self::enabled($r, $config, 'SPORA_GLOBAL_API')) {
+            $r->addRoute('POST', '/api/v1/global-api-keys', [$keys, 'globalStore'], $admin);
             self::registerScopedSurface($r, self::GLOBAL_PREFIX, GlobalApiKeyMiddleware::class);
             $groups = ScopedApiGroupController::class;
             $r->addRoute('GET', self::GLOBAL_PREFIX . '/groups', [$groups, 'index'], [GlobalApiKeyMiddleware::class]);

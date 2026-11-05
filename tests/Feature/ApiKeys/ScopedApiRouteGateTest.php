@@ -106,6 +106,31 @@ describe('scoped API routing', function (): void {
         }
     });
 
+    it('never demands a CSRF token on a bearer surface', function (): void {
+        // The bearer key is the only credential these surfaces accept: no
+        // session cookie, no CSRF token, no fallback to one. A write without
+        // a token therefore answers 401. A 403 would mean `CsrfMiddleware`
+        // had been added to the stack — and an integrator would have no way
+        // to satisfy it, because there is no session to take a token from.
+        $router = ScopedApiRouteGateSupport::router();
+
+        foreach ([
+            ['POST', '/api/v1/group-api/agents'],
+            ['POST', '/api/v1/group-api/chats'],
+            ['POST', '/api/v1/group-api/chats/7/messages'],
+            ['POST', '/api/v1/group-api/chats/7/approve'],
+            ['POST', '/api/v1/group-api/media'],
+            ['POST', '/api/v1/global-api/agents'],
+            ['POST', '/api/v1/global-api/chats'],
+            ['POST', '/api/v1/global-api/chats/7/answer'],
+            ['POST', '/api/v1/global-api/media'],
+            ['POST', '/api/v1/global-api/groups'],
+        ] as [$method, $path]) {
+            expect($router->dispatch(Request::create($path, $method))->getStatusCode())
+                ->toBe(401, "{$method} {$path} must not answer 403 CSRF_TOKEN_MISSING");
+        }
+    });
+
     it('does not treat a literal action segment as a chat id', function (): void {
         // FastRoute matches in registration order, so a catch-all ahead of
         // the literal `status` route would answer it. Asserting the literal
@@ -172,16 +197,39 @@ describe('the scope toggles', function (): void {
         expect($router->dispatch(Request::create('/api/v1/group-api/chats', 'GET'))->getStatusCode())->toBe(401);
     });
 
-    it('keeps the key-management endpoints mounted with the scopes off', function (): void {
+    it('keeps listing and revoking mounted with the scopes off', function (): void {
         // An operator who enables a toggle gets a working section; one who
-        // has not must still be able to list keys they minted earlier, so
-        // the admin surface is not gated.
+        // has not must still be able to list and revoke the keys they minted
+        // earlier, so those routes are not gated.
         $router = ScopedApiRouteGateSupport::router(['SPORA_GROUP_API' => '0', 'SPORA_GLOBAL_API' => '0']);
 
-        expect(fn() => $router->dispatch(Request::create('/api/v1/groups/3/api-keys', 'GET')))
-            ->toThrow(UnauthenticatedException::class);
-        expect(fn() => $router->dispatch(Request::create('/api/v1/global-api-keys', 'GET')))
-            ->toThrow(UnauthenticatedException::class);
+        foreach ([
+            ['GET', '/api/v1/groups/3/api-keys'],
+            ['DELETE', '/api/v1/groups/3/api-keys/deadbeef'],
+            ['GET', '/api/v1/global-api-keys'],
+            ['DELETE', '/api/v1/global-api-keys/deadbeef'],
+        ] as [$method, $path]) {
+            expect(fn() => $router->dispatch(Request::create($path, $method)))
+                ->toThrow(UnauthenticatedException::class);
+        }
+    });
+
+    it('answers 405 for minting with the scopes off', function (): void {
+        // Minting follows the toggle, the way the surface the key drives
+        // does: a credential for an API that is not there is one nobody
+        // asked for, and it would come alive — to every group owner who
+        // minted one — the moment the scope was switched on.
+        //
+        // 405 rather than 404: the paths are still mounted for listing and
+        // revoking, and a 404 would claim the endpoints do not exist when
+        // two of their three methods do. Nothing is leaked by it either —
+        // the 401 on `GET` already says the path is there.
+        $router = ScopedApiRouteGateSupport::router(['SPORA_GROUP_API' => '0', 'SPORA_GLOBAL_API' => '0']);
+
+        expect($router->dispatch(Request::create('/api/v1/groups/3/api-keys', 'POST'))->getStatusCode())
+            ->toBe(405);
+        expect($router->dispatch(Request::create('/api/v1/global-api-keys', 'POST'))->getStatusCode())
+            ->toBe(405);
     });
 
     it('answers 404 in client-worker mode even with the scopes on', function (): void {

@@ -38,8 +38,12 @@ use Spora\OpenApi\RouteSpecCollector;
  *     to one.
  *   - `/api/v1/agents/{agentId}/api-keys*` is the ordinary admin stack
  *     (`AuthMiddleware` + `CsrfMiddleware`), because that is where an
- *     operator mints keys. Always registered, so the SPA's tab has
- *     something to call even on an instance with the feature off.
+ *     operator mints keys. Listing and revoking are always registered, so
+ *     the SPA's tab has something to call — and a key stays revocable —
+ *     even on an instance with the feature off. Minting is registered only
+ *     while the feature is on: a credential for a surface that does not
+ *     exist is one nobody asked for, and it would come alive the moment the
+ *     feature was switched on.
  *
  * Endpoints (the external surface):
  *
@@ -74,12 +78,16 @@ final class AgentApiRouteDefinitions
         $keys = AgentApiKeyController::class;
 
         $r->addRoute('GET', '/api/v1/agents/{agentId}/api-keys', [$keys, 'index'], $admin);
-        $r->addRoute('POST', '/api/v1/agents/{agentId}/api-keys', [$keys, 'store'], $admin);
         $r->addRoute('DELETE', '/api/v1/agents/{agentId}/api-keys/{keyId}', [$keys, 'destroy'], $admin);
 
         if (!self::isEnabled($r, $config)) {
             return;
         }
+
+        // Minting follows the toggle, like the surface the key drives: a
+        // credential for an API that is not there is one nobody asked for,
+        // and it would come alive the moment the feature was switched on.
+        $r->addRoute('POST', '/api/v1/agents/{agentId}/api-keys', [$keys, 'store'], $admin);
 
         $bearer = [AgentApiKeyMiddleware::class];
 
