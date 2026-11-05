@@ -386,10 +386,13 @@ final class SettingsRegistry
      * Whitespace is trimmed; tokens are lowercased; `jpg`/`jpeg` collapse to
      * `jpeg`; order and duplicates collapse to the first occurrence.
      *
-     * SVG is rejected. This is a security control, not a formatting rule:
-     * the result is the allowlist behind `MediaAllowedTypesService`, which
-     * `MediaDerivativeService` calls the deliberate surface for images. An
-     * unrendered SVG served from that allowlist is script execution.
+     * SVG is rejected. This list is the operator's *image* policy, and SVG
+     * is not a raster format — it is a script-capable one, which
+     * `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` governs: that toggle permits
+     * HTML and SVG assets to be created and embedded, and they are served
+     * inert unless scripts are also allowed. The serving boundary sandboxes
+     * a script-capable response either way, so the exclusion is not what
+     * keeps SVG from executing; it keeps the two policies apart.
      *
      * @return list<string>
      */
