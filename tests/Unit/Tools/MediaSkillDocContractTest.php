@@ -11,8 +11,9 @@ use Spora\Tools\MediaTool;
  *
  * The skill is the only place the model is told what the tool does, so
  * a drift between the two is a drift in the model's understanding of
- * its own tools. The drifts this file exists for were found by a
- * skill-review agent exercising the tool against a live build:
+ * its own tools. Two of the drifts this file exists for were found by a
+ * skill-review agent exercising the tool against a live build; the third
+ * by reading the skill against the allowlist:
  *
  *   - the approval table named the operations that ask for approval, and
  *     the platform's answer depended on whether the agent had a stored
