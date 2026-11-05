@@ -17,18 +17,17 @@ use Tests\Fixtures\StubOutputTool;
 
 /**
  * End-to-end for the scoped API: mint a key, start a chat through the real
- * HTTP surface, let the real orchestrator run it, then read the answer back.
+ * bearer middleware, let the real orchestrator run it, then read the answer
+ * back.
  *
- * The scoped counterpart of `AgentApiEndToEndTest`. That file pins the agent
- * surface; this one pins the group and global surfaces, which drive the same
- * machinery through a different reach rule — a chat of another group is a
- * `404` there, and the callback is signed with a different key's digest.
+ * The scoped counterpart of `AgentApiEndToEndTest`: that file pins the agent
+ * surface, this one the group and global surfaces, which reach the same
+ * machinery under a different rule — a chat of another group is a `404`, and
+ * the callback is signed with the digest of the key that started the chat.
  *
- * Two scenarios, because they are the two shapes an integrator hits. A: the
- * chat runs to completion and the callback fires once. B: the chat parks on an
- * approval the caller has to give, which means it settles *twice* — and a
- * callback must therefore be delivered twice. A dispatcher that fired only on
- * the terminal transition would pass A and fail B.
+ * A chat that parks on an approval settles *twice*, so a callback has to be
+ * delivered twice: a dispatcher that fired only on the terminal transition
+ * would pass the completing chat and fail the approved one.
  *
  * The container is the real `ContainerDefinitions::all()` graph, so the DI
  * wiring is under test too; only the LLM driver and the HTTP client are
@@ -222,8 +221,7 @@ describe('scoped API end-to-end', function (): void {
 
         // The second settle is a different status, so it is a new delivery.
         // The row stayed armed through the blocked phase rather than being
-        // disarmed after the first delivery — that is what makes a second
-        // settlement reachable at all.
+        // disarmed after the first — that is what makes a second reachable.
         AgentApiTestSupport::skipBackoff((int) $callback->id);
 
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);

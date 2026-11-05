@@ -387,12 +387,10 @@ final class SettingsRegistry
      * `jpeg`; order and duplicates collapse to the first occurrence.
      *
      * SVG is rejected. This list is the operator's *image* policy, and SVG
-     * is not a raster format — it is a script-capable one, which
-     * `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` governs: that toggle permits
-     * HTML and SVG assets to be created and embedded, and they are served
-     * inert unless scripts are also allowed. The serving boundary sandboxes
-     * a script-capable response either way, so the exclusion is not what
-     * keeps SVG from executing; it keeps the two policies apart.
+     * is a script-capable format rather than a raster one — it belongs to
+     * `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES`. The serving boundary
+     * sandboxes a script-capable response either way, so the exclusion
+     * keeps the two policies apart; it is not what stops SVG executing.
      *
      * @return list<string>
      */

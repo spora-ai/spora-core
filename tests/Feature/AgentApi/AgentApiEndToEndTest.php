@@ -427,9 +427,8 @@ describe('Agent API authorisation', function (): void {
 
         // The second authenticated request takes the last slot and the third
         // is over the limit. The three calls land inside one second, so this
-        // also pins that a same-second burst is counted: every hit has a row
-        // of its own since migration 0095, and the old composite key made a
-        // burst of one count as one.
+        // also pins that a same-second burst is counted: every hit has had a
+        // row of its own since migration 0095 gave them one.
         expect($send()->getStatusCode())->toBe(200);
         expect(RatelimitHit::where('key', $bucket)->count())->toBe(2);
 

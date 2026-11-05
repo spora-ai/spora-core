@@ -147,11 +147,8 @@ describe('the media-library skill matches the media tool', function (): void {
     });
 
     it('names exactly the text mimes the allowlist covers', function (): void {
-        // The skill listed `text/html` among the text mimes after the
-        // operator toggle took it off the static allowlist, so it taught
-        // the model to store a format the gate refuses. The enumeration
-        // is compared with the allowlist's own list rather than with a
-        // second copy of it written here.
+        // The enumeration is compared with the allowlist's own list rather
+        // than with a second copy of it written here.
         $body      = mediaSkillBody();
         $paragraph = substr($body, (int) strpos($body, '**The mime allowlist is the operator'));
 

@@ -215,10 +215,7 @@ describe('the scope toggles', function (): void {
     });
 
     it('answers 405 for minting with the scopes off', function (): void {
-        // Minting follows the toggle, the way the surface the key drives
-        // does: a credential for an API that is not there is one nobody
-        // asked for, and it would come alive — to every group owner who
-        // minted one — the moment the scope was switched on.
+        // Minting follows the scope's toggle — see `ScopedApiRouteDefinitions`.
         //
         // 405 rather than 404: the paths are still mounted for listing and
         // revoking, and a 404 would claim the endpoints do not exist when

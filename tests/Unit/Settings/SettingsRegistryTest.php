@@ -98,13 +98,10 @@ it('passes a text setting through unchanged', function (): void {
 });
 
 /**
- * `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` is the image half of the
- * allowlist behind `MediaAllowedTypesService`, and SVG is a script-capable
- * format rather than a raster one — `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES`
- * is what governs it, so naming it here would put it on the wrong policy.
- * The exclusion used to live in `ConfigMerger::parseImageTypesCsv()`;
- * `coerceImageTypes()` inherited it when ConfigMerger was deleted, and this
- * is what keeps it there.
+ * The rationale for rejecting SVG is in
+ * `SettingsRegistry::coerceImageTypes()`; the rule was inherited from
+ * `ConfigMerger::parseImageTypesCsv()`, so this is the guard against it
+ * being dropped.
  */
 it('rejects SVG however the allowlist spells it', function (string $raw): void {
     $registry = settingsRegistryFixture();

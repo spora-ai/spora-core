@@ -49,10 +49,9 @@ use Spora\OpenApi\RouteSpecCollector;
  *   - `/api/v1/groups/{groupId}/api-keys*` and `/api/v1/global-api-keys*`
  *     are the ordinary admin stack (`AuthMiddleware` + `CsrfMiddleware`),
  *     because that is where an operator mints keys. Listing and revoking are
- *     always registered, so a key can be revoked even on an instance whose
+ *     always registered, so a key stays revocable even on an instance whose
  *     scope is switched off. Minting is registered only while the scope is
- *     on: a credential for a surface that does not exist is one nobody asked
- *     for, and it would come alive the moment the scope was switched on.
+ *     on.
  *
  * Endpoints (the group surface):
  *
@@ -106,17 +105,16 @@ final class ScopedApiRouteDefinitions
         $admin = [AuthMiddleware::class, CsrfMiddleware::class];
         $keys = ScopedApiKeyController::class;
 
-        // Listing and revoking are always mounted, so a key stays revocable
-        // whatever its scope's toggle says. Minting is not: it follows the
-        // scope, because a credential for a surface that does not exist is
-        // one nobody asked for, and a dormant key comes alive — to every
-        // group owner who minted one — the moment the scope is switched on.
         $r->addRoute('GET', '/api/v1/groups/{groupId}/api-keys', [$keys, 'groupIndex'], $admin);
         $r->addRoute('DELETE', '/api/v1/groups/{groupId}/api-keys/{keyId}', [$keys, 'groupDestroy'], $admin);
         $r->addRoute('GET', '/api/v1/global-api-keys', [$keys, 'globalIndex'], $admin);
         $r->addRoute('DELETE', '/api/v1/global-api-keys/{keyId}', [$keys, 'globalDestroy'], $admin);
 
         if (self::enabled($r, $config, 'SPORA_GROUP_API')) {
+            // Minting follows the scope, like the surface the key drives: a
+            // credential for a surface that does not exist is one nobody asked
+            // for, and it would come alive the moment the scope is switched
+            // on.
             $r->addRoute('POST', '/api/v1/groups/{groupId}/api-keys', [$keys, 'groupStore'], $admin);
             self::registerScopedSurface($r, self::GROUP_PREFIX, GroupApiKeyMiddleware::class);
             $r->addRoute('GET', self::GROUP_PREFIX . '/group', [ScopedApiGroupController::class, 'ownGroup'], [GroupApiKeyMiddleware::class]);

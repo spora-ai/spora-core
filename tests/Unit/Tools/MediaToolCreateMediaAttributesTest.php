@@ -85,9 +85,8 @@ it('warns the LLM that create_media is not idempotent in the op description', fu
 
 it('offers HTML only together with the operator toggle that permits it', function (): void {
     // `text/html` left the static allowlist when the operator toggle
-    // replaced it, so a description that lists it among the formats the
-    // op stores teaches the model to send a payload the gate refuses.
-    // Dropping HTML passes; offering it without the toggle does not.
+    // replaced it, so a description that lists it teaches the model to send
+    // a payload the gate refuses.
     //
     // `[^)]*` keeps the check inside the parenthetical the format list
     // is written in, so a toggle named in another sentence cannot vouch

@@ -41,9 +41,7 @@ use Spora\OpenApi\RouteSpecCollector;
  *     operator mints keys. Listing and revoking are always registered, so
  *     the SPA's tab has something to call — and a key stays revocable —
  *     even on an instance with the feature off. Minting is registered only
- *     while the feature is on: a credential for a surface that does not
- *     exist is one nobody asked for, and it would come alive the moment the
- *     feature was switched on.
+ *     while the feature is on.
  *
  * Endpoints (the external surface):
  *
