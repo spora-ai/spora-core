@@ -167,6 +167,52 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->toContain('Not every binary document has an `md` derivative');
     });
 
+    it('documents the live embed for a script-capable asset', function (): void {
+        // The skill is the only thing the model reads about this. Without a
+        // section on it, the model has no way to know that a script-capable
+        // asset can become a live widget at all, that the decision is the
+        // operator's, or that the widget does not travel through the
+        // assistant's message.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('script-capable')
+            ->and($body)->toContain('text/html')
+            ->and($body)->toContain('image/svg+xml')
+            ->and($body)->toContain('live embed')
+            ->and($body)->toContain('off by default');
+    });
+
+    it('tells the model that the widget does not travel through the assistant message', function (): void {
+        // The overclaim that sent a report-writing agent hunting for a
+        // fenced ```html block: the assistant's message is sanitised, so raw
+        // HTML there is stripped or shown as text and never played.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('sanitised')
+            ->and($body)->toContain('never played');
+    });
+
+    it('says the filename decides whether an asset is a widget', function (): void {
+        // The archive honours the extension, so the model's choice of
+        // filename is the choice of whether the asset is a document or a
+        // live frame. A Markdown report that merely mentions HTML must not
+        // become a widget.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('filename is the intent')
+            ->and($body)->toContain('`.html`')
+            ->and($body)->toContain('`.md`');
+    });
+
+    it('does not promise that every document is played live', function (): void {
+        // The two operator switches are off by default and unreadable from
+        // a tool call, so a skill that promises a live widget teaches the
+        // model to make a promise it cannot keep.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('never promise the operator a live widget');
+    });
+
     it('says that the ids come back in the response text', function (): void {
         // The structured data never reaches the model, so a skill that
         // points the model at `items[].id` points it at nothing.

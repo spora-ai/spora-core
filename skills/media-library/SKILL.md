@@ -57,7 +57,7 @@ If a call to `get_public_url` comes back as an approval request rather than a UR
 
 Walk the intent through this decision tree in prose, not as a flowchart.
 
-Want to **show** a previously-created asset in chat? Use `get_media`. The response is a markdown embed (image / audio / video / link) preceded by a one-line header (`Media asset <id>: <filename>`) and followed by the extracted text preview. Echo the embed block verbatim so the chat UI renders inline; drop the header line and the extracted-text block from your final reply. A parent asset also gets a **Derivatives of this asset:** section listing each render with its own id and url — that is how you walk parent → child without a second call.
+Want to **show** a previously-created asset in chat? Use `get_media`. The response is a markdown embed (image / audio / video / link) preceded by a one-line header (`Media asset <id>: <filename>`) and followed by the extracted text preview. Echo the embed block verbatim so the chat UI renders it as an element; drop the header line and the extracted-text block from your final reply. A parent asset also gets a **Derivatives of this asset:** section listing each render with its own id and url — that is how you walk parent → child without a second call.
 
 Want a **clean** markdown snippet only — no asset header, no extracted text? Use `get_embed_code`. Same embed, but the response is the bare markdown string. Use this when the parent is composing a structured reply that should not carry the asset's prose context.
 
@@ -84,6 +84,24 @@ The `document` bucket no longer embeds as a bare markdown link. It embeds as a s
 Those class names are Tailwind utilities, and they are the whole styling mechanism — spora-frontend registers this exact list with `@source inline(...)` because the string is built in PHP that Tailwind's scanner never reads. A class that is not on that list renders as an unstyled card with no error anywhere. So treat the markup above as fixed: do not rename a class, drop one as "noise", or add one. If the card ever needs a new utility, it has to be added to both files in the same change.
 
 This is one `MediaType::Document` render, not a per-op or per-producer format. **Echo the whole block verbatim.** Do not rewrite the label, rename the file, or hand-roll a markdown link in its place. The filename and the `href` are the entire contract; the `div`/`span` elements around them are presentational and there is no icon element to reproduce and no `aria-hidden` attribute for you to add. If you need prose *about* the document, write it above or below the card — it carries nothing beyond the filename and the file size. The size is omitted when the archive does not know it, and there is no MIME: the extension on the filename already says what the file is.
+
+### A script-capable asset can render as a live widget
+
+Two MIME types are **script-capable**: `text/html` and `image/svg+xml`. A browser parses both as a *document* rather than a picture, so both can carry script. Every other type renders as the shape above.
+
+The chat may render a script-capable asset as a **live embed** — an iframe showing the asset — instead of the download card. Whether it does is the operator's decision, and it is two decisions: they have to permit script-capable assets at all, and they have a second switch for whether an embed may run script. Both are off by default and neither is readable from a tool call, so **never promise the operator a live widget** — produce the asset, say what it is, and let the chat render it as the operator has configured it.
+
+Two things follow from where that decision is made:
+
+- **The markdown you echo is not what decides it.** The card stays the card. The chat reads the tool result's structured data and renders the embed itself — and that structured data never reaches you, so you cannot inspect it or influence it.
+- **Do not paste the asset's own markup into your final message.** The assistant's message is sanitised before it is rendered, so raw HTML there is stripped or shown as text — never played. Echo the *card*, which is sanitiser-safe, and write about the asset in words. The widget itself is rendered by the tool's own bubble, out of data you never see.
+
+The **filename is the intent**, and the archive honours it. An asset named `page.html` is a document; an asset named `report.md` is Markdown, even when its body carries enough markup that the byte sniffer would have called it HTML. So:
+
+- A **widget** — a dashboard, a chart, an interactive page — is a `.html` file.
+- A **report** is a `.md` file, and it stays a document.
+
+The embed is served from the session, so the frame needs the operator to be signed in. A share link minted with `get_public_url` opens the asset itself, not the embed.
 
 Want to **browse the archive**? Use `search`. Filters: `mime_type` (bucketed by mime prefix — see below), `plugin_slug` (exact match), `limit` (default 24, capped at 100), `offset`. **`task_id` is currently reserved-but-unused on `search`; don't rely on it as a filter.** **`search` does not filter by filename or free text** — it lists the library's assets, newest first, so the rows to look at are the first ones. **Derivatives are filtered out of `search`** — `search` returns only "primary" assets, so the listing is not drowned by PNG/PDF/SVG renders of the same source. To fetch a derivative of a known parent, call `get_media(asset_id: <parent_id>)` and read the derivative lines; do NOT call `search` to re-locate the derivative.
 
