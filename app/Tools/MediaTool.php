@@ -517,7 +517,11 @@ final class MediaTool extends AbstractTool
         $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
 
         $content = "Media asset {$asset->id}: " . ($asset->filename ?? '(no filename)') . "\n\n" . $embed
-            . "\n\nEcho the markdown block above verbatim so the chat UI renders the asset inline."
+            // "as an element", not "inline": a document renders as a card and
+            // an image as a picture, and neither is played. "Inline" reads as
+            // "played", which is how an agent ends up telling the operator
+            // that a widget is running when the message carries a card.
+            . "\n\nEcho the markdown block above verbatim so the chat UI renders it as an element."
             . ' For a clean embed snippet without this header, call `get_embed_code`.'
             . ' For a shareable external link, call `get_public_url` (approval-gated).';
 
