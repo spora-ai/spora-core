@@ -98,12 +98,10 @@ it('passes a text setting through unchanged', function (): void {
 });
 
 /**
- * `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` is the allowlist behind
- * `MediaAllowedTypesService`, which the derivative pipeline treats as the
- * deliberate surface for images. An SVG served from it is script execution in
- * the operator's own origin. The exclusion used to live in
- * `ConfigMerger::parseImageTypesCsv()`; `coerceImageTypes()` inherited it when
- * ConfigMerger was deleted, and this is what keeps it there.
+ * The rationale for rejecting SVG is in
+ * `SettingsRegistry::coerceImageTypes()`; the rule was inherited from
+ * `ConfigMerger::parseImageTypesCsv()`, so this is the guard against it
+ * being dropped.
  */
 it('rejects SVG however the allowlist spells it', function (string $raw): void {
     $registry = settingsRegistryFixture();

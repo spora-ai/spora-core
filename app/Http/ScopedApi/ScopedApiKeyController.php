@@ -22,8 +22,9 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Session-authenticated and CSRF-protected, like the rest of the admin: this
  * is the surface an operator uses, and it lives behind the same
- * authentication as the rest of the admin. Always registered, so a key can
- * be revoked even on an instance whose scope is switched off.
+ * authentication as the rest of the admin. Which of these endpoints are
+ * mounted depends on the scope's toggle — see
+ * {@see \Spora\Core\ScopedApiRouteDefinitions}.
  *
  * The plaintext key is returned exactly once, by the store methods. There is
  * no endpoint that can return it again, and the row stores only a SHA-256

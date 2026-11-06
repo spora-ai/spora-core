@@ -355,7 +355,7 @@ describe('Agent API authorisation', function (): void {
         $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
         $container->set(Config::class, new Config([
             'SPORA_AGENT_API' => '1',
-            'SPORA_AGENT_API_RATE_LIMIT_MAX' => '2',
+            'SPORA_API_RATE_LIMIT_MAX' => '2',
             'SPORA_LOG_LEVEL' => 'error',
         ]));
 
@@ -397,7 +397,7 @@ describe('Agent API authorisation', function (): void {
         $container = AgentApiTestSupport::container($llm, null, [new StubInputTool()]);
         $container->set(Config::class, new Config([
             'SPORA_AGENT_API' => '1',
-            'SPORA_AGENT_API_RATE_LIMIT_MAX' => '2',
+            'SPORA_API_RATE_LIMIT_MAX' => '2',
             'SPORA_LOG_LEVEL' => 'error',
         ]));
 
@@ -408,14 +408,6 @@ describe('Agent API authorisation', function (): void {
             jsonRequest('GET', '/api/v1/agent-api/chats', [], ['Authorization' => 'Bearer ' . $plaintext]),
         );
 
-        // One hit is recorded per call. `DbRateLimiter` cannot count a
-        // second hit inside the same second — `ratelimit_hits` is keyed
-        // `(key, hit_at)` at second resolution, so a same-second burst
-        // collides, fails open, and goes uncounted. That is pre-existing and
-        // affects `/tick` identically; see the backlog item
-        // `2026-10-18-db-rate-limiter-same-second-collision.md`. What this
-        // test pins is that a *rejected* request records no hit, which is the
-        // half the Agent API owns.
         expect($send()->getStatusCode())->toBe(200);
         expect(RatelimitHit::where('key', $bucket)->count())->toBe(1);
 
@@ -432,6 +424,18 @@ describe('Agent API authorisation', function (): void {
 
         expect($wrong->getStatusCode())->toBe(401);
         expect(RatelimitHit::where('key', $bucket)->count())->toBe(1);
+
+        // The second authenticated request takes the last slot and the third
+        // is over the limit. A burst inside one second counts as the hits it
+        // made: every hit has had a row of its own since migration 0095 gave
+        // them one.
+        expect($send()->getStatusCode())->toBe(200);
+        expect(RatelimitHit::where('key', $bucket)->count())->toBe(2);
+
+        $limited = $send();
+
+        expect($limited->getStatusCode())->toBe(429);
+        expect($limited->headers->get('Retry-After'))->not->toBeNull();
     });
 
     it('stamps last_used_at when a key authenticates', function (): void {

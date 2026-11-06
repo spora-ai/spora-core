@@ -12,7 +12,8 @@ use Spora\Tools\MediaTool;
  * The skill is the only place the model is told what the tool does, so
  * a drift between the two is a drift in the model's understanding of
  * its own tools. Two of the drifts this file exists for were found by a
- * skill-review agent exercising the tool against a live build:
+ * skill-review agent exercising the tool against a live build; the third
+ * by reading the skill against the allowlist:
  *
  *   - the approval table named the operations that ask for approval, and
  *     the platform's answer depended on whether the agent had a stored
@@ -20,6 +21,9 @@ use Spora\Tools\MediaTool;
  *   - the skill pointed at `list_derivatives` as the way to discover
  *     the supported derivative formats, which is an op that lists the
  *     derivatives an asset *already has*.
+ *   - the skill listed `text/html` among the always-allowed text mimes
+ *     after the operator toggle took it off the static allowlist, so it
+ *     taught the model to store a format the gate refuses.
  *
  * The behavioural half of each is covered elsewhere; what nothing
  * asserted was that the *documentation* matched it. That is the gap
@@ -141,6 +145,27 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->toContain('image/png')
             ->and($body)->toContain('image/jpeg')
             ->and($body)->toContain('image/webp');
+    });
+
+    it('names exactly the text mimes the allowlist covers', function (): void {
+        // The enumeration is compared with the allowlist's own list rather
+        // than with a second copy of it written here.
+        $body      = mediaSkillBody();
+        $paragraph = substr($body, (int) strpos($body, '**The mime allowlist is the operator'));
+
+        preg_match('/the text mimes \(([^)]*)\)/', $paragraph, $matches);
+        $named = array_map(
+            static fn(string $token): string => trim($token, " `\n"),
+            explode(',', $matches[1] ?? ''),
+        );
+
+        expect($named)->toBe(MediaAllowedTypesService::TEXT_MIME_TYPES);
+    });
+
+    it('names the operator toggle that governs the script-capable formats', function (): void {
+        // Whether `text/html` may exist is the operator's decision, and
+        // the model has to know whose decision it is before it offers one.
+        expect(mediaSkillBody())->toContain('SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES');
     });
 
     it('says that the allowlist does not make create_media a binary uploader', function (): void {

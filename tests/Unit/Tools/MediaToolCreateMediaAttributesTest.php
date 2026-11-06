@@ -83,6 +83,18 @@ it('warns the LLM that create_media is not idempotent in the op description', fu
         ->toContain('asset_id');
 });
 
+it('offers HTML only together with the operator toggle that permits it', function (): void {
+    // `text/html` left the static allowlist when the operator toggle
+    // replaced it, so a description that lists it teaches the model to send
+    // a payload the gate refuses.
+    //
+    // `[^)]*` keeps the check inside the parenthetical the format list
+    // is written in, so a toggle named in another sentence cannot vouch
+    // for an unqualified HTML.
+    expect(createMediaOperation()->description)
+        ->not->toMatch('/\bHTML\b(?![^)]*SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES)/');
+});
+
 it('requires content and filename for create_media only', function (): void {
     expect(createMediaParameter('content')->required)->toBe(['create_media']);
     expect(createMediaParameter('filename')->required)->toBe(['create_media']);

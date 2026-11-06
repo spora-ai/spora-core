@@ -87,12 +87,13 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           costs a render rather than granting access, and
  *                           the row is operator-visible in the dashboard.
  *   - `create_media`       — store LLM-authored text (Markdown, plain text,
- *                           CSV, JSON, XML, YAML, HTML) as a new source
- *                           asset. The only write that needs no existing
- *                           parent, so it is the primitive every text-parent
- *                           derivative producer builds on. The declared
- *                           `mime_type` is a hint: the byte ingest path
- *                           re-sniffs, and a row that lands on a
+ *                           CSV, JSON, XML, YAML, HTML where the operator has
+ *                           enabled `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES`)
+ *                           as a new source asset. The only write that needs
+ *                           no existing parent, so it is the primitive every
+ *                           text-parent derivative producer builds on. The
+ *                           declared `mime_type` is a hint: the byte ingest
+ *                           path re-sniffs, and a row that lands on a
  *                           non-allowlisted MIME is deleted and rejected.
  *                           **Not idempotent** — a retry creates a second
  *                           asset, so reuse the returned `asset_id`.
@@ -202,7 +203,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'create_media',
-    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML, HTML). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
+    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML; HTML only where the operator has enabled SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
     operatorDescription: 'Create a text media asset',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
