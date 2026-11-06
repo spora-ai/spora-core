@@ -8,6 +8,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\Config;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeService;
@@ -348,6 +349,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly MediaCreateHandler $createHandler,
         private readonly MediaFolderHandler $folderHandler,
+        private readonly MediaActiveTypesPolicy $activeTypes,
         private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
     ) {}
@@ -605,6 +607,9 @@ final class MediaTool extends AbstractTool
                 'asset_url'  => $assetUrl,
                 'media_type' => $mediaType->value,
                 'embed'      => $embed,
+                // Same descriptor `get_media` carries: the op returns the
+                // same markdown, so it owes the chat the same live frame.
+                'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
             ],
         );
     }
@@ -918,6 +923,11 @@ final class MediaTool extends AbstractTool
             'public_url'       => $this->ensurePublicUrl($asset),
             'parent_id'        => $this->derivatives->parentOf($asset->id),
             'derivatives'      => $derivativeRows,
+            // The embed descriptor for a script-capable asset the operator
+            // has permitted, or null. Without it the chat has nothing to
+            // render a live frame from, and the operator gets a download
+            // card for a widget the asset could have been.
+            'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
             'created_at'       => $asset->created_at?->toIso8601String(),
         ];
     }
