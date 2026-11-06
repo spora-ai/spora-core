@@ -168,7 +168,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders inline. A script-capable asset (text/html, image/svg+xml) the operator has permitted can be shown LIVE: link its embed route, /api/v1/media/<asset_id>/embed, on a line of its own, and the chat renders it as a running frame in your reply.',
+    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders inline. A script-capable asset (text/html, image/svg+xml) the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -204,7 +204,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'create_media',
-    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML; HTML only where the operator has enabled SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id. A script-capable asset the operator has permitted can be shown LIVE: link its embed route, /api/v1/media/<asset_id>/embed, on a line of its own, and the chat renders it as a running frame in your reply.',
+    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML; HTML only where the operator has enabled SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id. A script-capable asset the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
     operatorDescription: 'Create a text media asset',
     enabledByDefault: true,
     requiresApprovalByDefault: true,

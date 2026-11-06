@@ -346,11 +346,19 @@ jobs:
             # anchored: ](a.md), ](a.md "A Title"), ](a.md#frag). The
             # capture class has to admit the title, so the title comes back
             # with it and is stripped below.
+            #
+            # Fenced code blocks are dropped first. A link written inside
+            # one is syntax the reader copies — an example of the shape,
+            # not a link this file depends on — and its target is not a
+            # file in the repository. Without this, no document could show
+            # a link example at all: the `media-library` skill has to
+            # teach the model the exact link that asks for a live embed.
             targets=()
             while IFS= read -r target; do
               targets+=("$target")
             done < <(
-              grep -ohE '\]\([^)]+\)' "$file" \
+              awk '/^[[:space:]]*```/{fence = !fence; next} !fence' "$file" \
+                | grep -ohE '\]\([^)]+\)' \
                 | sed -E 's/^\]\((.*)\)$/\1/' \
                 | sed -E 's/[[:space:]]+"[^"]*"$//' \
                 | sed -E 's/#.*$//' \

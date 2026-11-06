@@ -92,13 +92,13 @@ Two MIME types are **script-capable**: `text/html` and `image/svg+xml`. Both can
 A script-capable asset has **two** renderings, and they are not in the same place:
 
 - **In the tool's own bubble**, the chat shows the asset as a **live embed** — an iframe, next to the markdown the tool returned. The chat reads the tool result's structured data to do that, and that structured data never reaches you, so you cannot inspect it or influence it.
-- **In your own message**, you ask for the same live embed by **linking its embed route**. The link is the filename in square brackets, followed by the embed route in parentheses, on a line of its own:
+- **In your own message**, you ask for the same live embed by **linking its embed route** — a markdown link, on a line of its own:
 
-  ```text
-  [test-dashboard.html] → /api/v1/media/<asset_id>/embed
+  ```markdown
+  [test-dashboard.html](/api/v1/media/<asset_id>/embed)
   ```
 
-  Written out, the link text is `test-dashboard.html` and its target is `/api/v1/media/<asset_id>/embed` — the angle brackets stand for the asset id you were given. The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
+  The link text is the filename and the target is the embed route, with the asset id where the angle brackets are. The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
 
   The target is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
 
