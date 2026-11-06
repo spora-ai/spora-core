@@ -126,6 +126,38 @@ it('describes no embed for an ordinary asset', function (): void {
     }
 });
 
+it('stores a Markdown report as Markdown even when its body is markup-dense', function (): void {
+    // `finfo` reports prose carrying enough markup as HTML, and HTML is
+    // script-capable — so a Markdown report that happened to contain a
+    // table was stored as a document and offered to the chat as a live
+    // frame. The filename is the author's intent, and it wins.
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $result = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'report.md',
+                'mime_type' => 'text/markdown',
+                'content'   => "# Report\n\n<table><tr><td>Day</td></tr></table>\n<span>done</span>\n",
+            ],
+            agentId: $agentId,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['mime_type'])->toBe('text/markdown');
+        expect($result->data['embed_descriptor'])->toBeNull();
+    } finally {
+        $restore();
+    }
+});
+
 /**
  * A policy with the operator's script-capable toggle at a chosen value.
  */

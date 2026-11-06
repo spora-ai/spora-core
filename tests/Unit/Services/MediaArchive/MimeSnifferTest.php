@@ -54,6 +54,32 @@ describe('MimeSniffer::sniffFromBytes', function (): void {
         expect($sniffer->sniffFromBytes('%PDF-1.4', 'source.md'))->toBe('application/pdf');
     });
 
+    it('keeps a Markdown file Markdown even when finfo guesses HTML', function (): void {
+        // `finfo` reports prose carrying enough markup as HTML: a Markdown
+        // report with a table and a span in it sniffs as `text/html`. The
+        // bytes do not say "this is a document a browser will parse" — they
+        // say "this is prose with some tags" — so the extension has to be
+        // able to overrule the guess.
+        //
+        // It matters because HTML is script-capable: without the overrule a
+        // report nobody meant as a widget is stored as a document and
+        // offered to the chat as a live frame.
+        $sniffer = makeSniffer();
+        $report = "# Report\n\n<table><tr><td>Day</td></tr></table>\n<span>done</span>\n";
+
+        expect($sniffer->sniffFromBytes($report, 'report.md'))->toBe('text/markdown');
+        expect($sniffer->sniffFromBytes($report, 'report.markdown'))->toBe('text/markdown');
+        // The same bytes without the extension are still what the bytes
+        // look like.
+        expect($sniffer->sniffFromBytes($report, 'report'))->toBe('text/html');
+        // An HTML document named as one stays a document — the overrule is
+        // for the extension that says otherwise, not a blanket distrust of
+        // the verdict.
+        expect($sniffer->sniffFromBytes('<html><body><h1>Hi</h1></body></html>', 'page.html'))->toBe('text/html');
+        // A positive detection of another format still wins.
+        expect($sniffer->sniffFromBytes('%PDF-1.4', 'source.md'))->toBe('application/pdf');
+    });
+
     it('does not upgrade text/plain into a type the extension cannot justify', function (): void {
         // The Typst upgrade was written as a single `=== TYPST_MIME` check.
         // Widening it to "whatever the extension says" would have turned any

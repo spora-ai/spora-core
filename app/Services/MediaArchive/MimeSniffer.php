@@ -66,6 +66,16 @@ final class MimeSniffer
     private const string MARKDOWN_MIME = 'text/markdown';
 
     /**
+     * HTML MIME.
+     *
+     * Named because the sniffer has to recognise this verdict to overrule
+     * it: `finfo` reports prose carrying enough markup as HTML, and a
+     * filename saying "markdown" is the author's intent where the bytes
+     * are only a guess.
+     */
+    private const string HTML_MIME = 'text/html';
+
+    /**
      * Magic-byte signatures indexed by their canonical MIME type. The
      * structure is `MIME => list<list<signature>>`. Each MIME has a list
      * of alternative signature *groups*; every signature inside one group
@@ -180,12 +190,24 @@ final class MimeSniffer
 
         $detected = $this->sniffPrefix($prefix);
 
-        // A filename refines a generic `text/plain` verdict, but only ever
-        // upward into a *more specific* text format — never sideways, and
-        // never off `text/plain` at all. `.md` beats prose on both counts:
-        // the bytes cannot tell Markdown from a plain-text log, and a
+        // A filename refines a *prose-shaped* verdict — `text/plain` or
+        // `text/html` — into one of the two formats the bytes cannot tell
+        // apart from prose. `.md` beats prose on both counts: the bytes
+        // cannot distinguish Markdown from a plain-text log, and a
         // caller-supplied extension is the only signal available.
-        if ($detected === 'text/plain' && $filename !== null) {
+        //
+        // `text/html` belongs in that set because `finfo` *guesses* it from
+        // prose that happens to carry enough markup: a Markdown report with
+        // a table in it sniffs as HTML. The bytes do not say "this is a
+        // document a browser will parse" — they say "this is prose with
+        // some tags" — and the guess decides it, so the extension has to
+        // be able to overrule it. It matters because HTML is script-capable:
+        // without the overrule, a report the author never meant as a widget
+        // is stored as a document and offered to the chat as a live frame.
+        //
+        // It never overrides a positive detection of a different format: a
+        // file starting with `%PDF-` is a PDF whatever it is called.
+        if (($detected === 'text/plain' || $detected === self::HTML_MIME) && $filename !== null) {
             $byExtension = $this->sniffFromExtension($filename);
             if ($byExtension === self::TYPST_MIME || $byExtension === self::MARKDOWN_MIME) {
                 $detected = $byExtension;
