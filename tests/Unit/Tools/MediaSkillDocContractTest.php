@@ -279,6 +279,20 @@ describe('the media-library skill matches the media tool', function (): void {
         expect($body)->not->toContain('parses both as a *document* rather than a picture');
     });
 
+    it('teaches the model to ask for the live embed with a link', function (): void {
+        // The operator was seeing a download button where a widget should
+        // have been: the frame only ever rendered in the tool bubble, which
+        // is collapsed. The link is the model's way of asking for it in the
+        // message — and it is a reference, so the model never sees the
+        // asset's bytes.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('/api/v1/media/<asset_id>/embed')
+            ->and($body)->toContain('A link is the whole request')
+            ->and($body)->toContain('embed route')
+            ->and($body)->toContain('/api/v1/assets/<id>.html');
+    });
+
     it('says the filename decides whether an asset is a widget', function (): void {
         // The archive honours the extension, so the model's choice of
         // filename is the choice of whether the asset is a document or a
