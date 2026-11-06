@@ -92,15 +92,15 @@ Two MIME types are **script-capable**: `text/html` and `image/svg+xml`. Both can
 A script-capable asset has **two** renderings, and they are not in the same place:
 
 - **In the tool's own bubble**, the chat shows the asset as a **live embed** — an iframe, next to the markdown the tool returned. The chat reads the tool result's structured data to do that, and that structured data never reaches you, so you cannot inspect it or influence it.
-- **In your own message**, you ask for the same live embed by **linking its embed route**:
+- **In your own message**, you ask for the same live embed by **linking its embed route**. The link is the filename in square brackets, followed by the embed route in parentheses, on a line of its own:
 
-  ```markdown
-  [test-dashboard.html](/api/v1/media/<asset_id>/embed)
+  ```text
+  [test-dashboard.html] → /api/v1/media/<asset_id>/embed
   ```
 
-  Put the link on its own line and the chat renders it as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
+  Written out, the link text is `test-dashboard.html` and its target is `/api/v1/media/<asset_id>/embed` — the angle brackets stand for the asset id you were given. The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
 
-  The link is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
+  The target is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
 
   Whether the frame may run script is the operator's decision, made twice over, and both switches are off by default and unreadable from a tool call — so **never promise the operator a live widget**. Write the link, and let the chat render it as the operator has configured it. If the operator has not permitted it, the link stays a link and the operator can still open it.
 
