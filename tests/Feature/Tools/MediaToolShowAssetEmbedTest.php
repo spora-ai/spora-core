@@ -99,6 +99,79 @@ it('describes the embed on get_embed_code for a permitted script-capable asset',
     }
 });
 
+it('hands the model the exact line that shows the asset live', function (): void {
+    // A model told to *compose* the route gets it wrong, and a model told
+    // in prose writes the prose. The tool spells the line out, so the model
+    // copies it.
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $created = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'dashboard.html',
+                'mime_type' => 'text/html',
+                'content'   => '<!DOCTYPE html><html><body><h1>Hi</h1></body></html>',
+            ],
+            agentId: $agentId,
+        );
+        $assetId = $created->data['asset_id'];
+
+        $shown = $tool->execute(
+            [
+                'action'  => 'get_media',
+                'asset_id' => $assetId,
+            ],
+            agentId: $agentId,
+        );
+
+        expect($shown->content)
+            ->toContain("[dashboard.html](/api/v1/media/{$assetId}/embed)");
+    } finally {
+        $restore();
+    }
+});
+
+it('hands the model no live line for an ordinary asset', function (): void {
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $created = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'notes.md',
+                'mime_type' => 'text/markdown',
+                'content'   => '# Notes',
+            ],
+            agentId: $agentId,
+        );
+
+        $shown = $tool->execute(
+            [
+                'action'  => 'get_media',
+                'asset_id' => $created->data['asset_id'],
+            ],
+            agentId: $agentId,
+        );
+
+        expect($shown->content)->not->toContain('/embed');
+    } finally {
+        $restore();
+    }
+});
+
 it('describes no embed on get_media for an ordinary asset', function (): void {
     $agentId = seedMediaToolAgent();
     ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(

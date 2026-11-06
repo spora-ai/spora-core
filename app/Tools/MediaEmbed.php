@@ -225,6 +225,49 @@ final class MediaEmbed
         return str_replace(["\r", "\n"], '', $value);
     }
 
+    /**
+     * The line a model echoes to show a script-capable asset **live**.
+     *
+     * The asset's bytes never reach the model, so the request to show it is
+     * a reference: a markdown link to the embed route. The chat renders
+     * that link as the live asset, in place, in the operator's own message.
+     *
+     * The link is what the model copies, so it has to be the exact thing —
+     * a model told to *construct* the route gets it wrong, and a model told
+     * in prose writes the prose.
+     *
+     * Empty for an asset that is not script-capable, or one the operator has
+     * not permitted: there is nothing to show live.
+     *
+     * @param array{url: string, mime: string, scripts: bool}|null $descriptor
+     */
+    public static function liveEmbedLink(MediaAsset $asset, ?array $descriptor): string
+    {
+        if ($descriptor === null) {
+            return '';
+        }
+
+        $name = self::escapeMarkdownLinkText((string) ($asset->filename ?? '') ?: $asset->id);
+
+        return "\n\nTo show this asset live in your reply, echo this line as well:\n\n"
+            . "[{$name}]({$descriptor['url']})\n";
+    }
+
+    /**
+     * The characters that would end a markdown link's text or target early.
+     *
+     * A filename is the operator's, so it may hold any of them; the link
+     * has to survive the round trip through the model's message.
+     */
+    private static function escapeMarkdownLinkText(string $value): string
+    {
+        return str_replace(
+            ['\\', '[', ']', '(', ')'],
+            ['\\\\', '\\[', '\\]', '\\(', '\\)'],
+            $value,
+        );
+    }
+
     /** Binary units the card's meta span renders; 1024-based like the rest of the archive's size reporting. */
     private static function formatBytes(int $bytes): string
     {

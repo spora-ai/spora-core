@@ -98,7 +98,9 @@ A script-capable asset has **two** renderings, and they are not in the same plac
   [test-dashboard.html](/api/v1/media/<asset_id>/embed)
   ```
 
-  The link text is the filename and the target is the embed route, with the asset id where the angle brackets are. The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
+  **The tool hands you that line.** `create_media` and `get_media` end their result with it for a script-capable asset the operator has permitted, so echo it as it stands rather than composing the route yourself. A model that composes the route gets it wrong, and a model told in prose writes the prose.
+
+  The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
 
   The target is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
 

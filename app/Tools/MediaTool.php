@@ -523,7 +523,11 @@ final class MediaTool extends AbstractTool
             // that a widget is running when the message carries a card.
             . "\n\nEcho the markdown block above verbatim so the chat UI renders it as an element."
             . ' For a clean embed snippet without this header, call `get_embed_code`.'
-            . ' For a shareable external link, call `get_public_url` (approval-gated).';
+            . ' For a shareable external link, call `get_public_url` (approval-gated).'
+            // The line that shows the asset live, for a script-capable one
+            // the operator has permitted. The model copies it rather than
+            // composing the route, so it is spelled out here.
+            . MediaEmbed::liveEmbedLink($asset, $this->activeTypes->describeEmbed($asset));
 
         $prompt = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
             ? trim((string) $asset->prompt)

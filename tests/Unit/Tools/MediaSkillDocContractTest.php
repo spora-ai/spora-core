@@ -279,6 +279,16 @@ describe('the media-library skill matches the media tool', function (): void {
         expect($body)->not->toContain('parses both as a *document* rather than a picture');
     });
 
+    it('says the tool hands over the line to echo', function (): void {
+        // Measured on the live instance: a model told to compose the route
+        // got it wrong, and a model told in prose wrote the prose. The tool
+        // spells the line out, so the skill says to copy it.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('The tool hands you that line')
+            ->and($body)->toContain('rather than composing the route yourself');
+    });
+
     it('teaches the model to ask for the live embed with a link', function (): void {
         // The operator was seeing a download button where a widget should
         // have been: the frame only ever rendered in the tool bubble, which
