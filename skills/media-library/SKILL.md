@@ -98,7 +98,7 @@ A script-capable asset has **two** renderings, and they are not in the same plac
   [test-dashboard.html](/api/v1/media/<asset_id>/embed)
   ```
 
-  **The tool hands you that line.** `create_media` and `get_media` end their result with it for a script-capable asset the operator has permitted, so echo it as it stands rather than composing the route yourself. A model that composes the route gets it wrong, and a model told in prose writes the prose.
+  **The tool hands you that line.** `create_media` and `get_media` put it in their result for a script-capable asset the operator has permitted, so copy it from there as it stands rather than composing the route yourself. A model that composes the route gets it wrong, and a model told in prose writes the prose. `get_embed_code` returns the embed alone, with no line — call `get_media` when you want the live one as well.
 
   The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
 
@@ -113,7 +113,7 @@ Apart from that link, your message carries only markdown, and it is sanitised be
 | `text/html` | document | the download card |
 | `image/svg+xml` | image | an inline image, and a **static** one — a browser does not run an SVG's script inside an `<img>` |
 
-So an HTML widget reaches the operator as a **download button** in your message with the live one in the bubble above it, and an SVG widget reaches them as a static picture in your message and a live one in the bubble. Echo the card or the image exactly as the tool returned it, describe what you built in words, and add the embed link when you want the operator to see it running. The frame is the chat's to render, not yours.
+Without the embed link, an HTML widget reaches the operator as a **download button** in your message and an SVG widget as a static picture, with the live one in the bubble above. With the link, the message carries the live one too. Echo the card or the image exactly as the tool returned it, describe what you built in words, and add the embed link when you want the operator to see it running. The frame is the chat's to render, not yours.
 
 The **filename is the intent**, and the archive honours it. `create_media` re-sniffs the bytes and ignores the mime you declare, but a filename that says `.md` wins over a *prose-shaped* verdict — bytes that look like HTML because the prose carries markup. So:
 

@@ -289,6 +289,13 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->toContain('rather than composing the route yourself');
     });
 
+    it('does not claim the live line ends the result', function (): void {
+        // It does not: `get_media` puts the prompt and the derivative list
+        // after it, and `create_media` puts the idempotency note after it.
+        // A model told to look at the end would miss the line.
+        expect(mediaSkillBody())->not->toContain('end their result with it');
+    });
+
     it('teaches the model to ask for the live embed with a link', function (): void {
         // The operator was seeing a download button where a widget should
         // have been: the frame only ever rendered in the tool bubble, which

@@ -168,7 +168,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders inline. A script-capable asset (text/html, image/svg+xml) the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
+    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders it as an element. A script-capable asset (text/html, image/svg+xml) the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]

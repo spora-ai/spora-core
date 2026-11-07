@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Tools;
 
 use Mockery;
+use Spora\Models\MediaAsset;
 use Spora\Services\AssetReference;
 use Spora\Services\AssetStore;
 use Spora\Tools\MediaEmbed;
@@ -80,4 +81,77 @@ test('videoFromBytes() routes through the supplied AssetStore with video/mp4 def
     $html = MediaEmbed::videoFromBytes('video-bytes', $store, 'clip.mp4');
 
     expect($html)->toBe('<video controls preload="metadata" playsinline src="/api/v1/assets/abc.mp4"></video>');
+});
+
+test('liveEmbedLink() emits the line the model copies', function (): void {
+    $asset = new MediaAsset();
+    $asset->id = 'abc-123';
+    $asset->filename = 'dashboard.html';
+
+    $line = MediaEmbed::liveEmbedLink($asset, [
+        'url'     => '/api/v1/media/abc-123/embed',
+        'mime'    => 'text/html',
+        'scripts' => true,
+    ]);
+
+    expect($line)->toContain('[dashboard.html](/api/v1/media/abc-123/embed)');
+});
+
+test('liveEmbedLink() says nothing when there is nothing to show live', function (): void {
+    $asset = new MediaAsset();
+    $asset->id = 'abc-123';
+    $asset->filename = 'dashboard.html';
+
+    expect(MediaEmbed::liveEmbedLink($asset, null))->toBe('');
+});
+
+test('liveEmbedLink() escapes a filename that holds markup', function (): void {
+    // The upload path stores the operator's filename as it stands — only
+    // the control characters are stripped — and the chat's sanitiser
+    // keeps `a[href]` and `img[src]`. So markup in the name would reach
+    // the operator's message as markup.
+    $asset = new MediaAsset();
+    $asset->id = 'abc-123';
+    $asset->filename = '<a href="https://evil.example">x</a>.html';
+
+    $line = MediaEmbed::liveEmbedLink($asset, [
+        'url'     => '/api/v1/media/abc-123/embed',
+        'mime'    => 'text/html',
+        'scripts' => true,
+    ]);
+
+    expect($line)->not->toContain('<a href');
+    expect($line)->toContain('&lt;a href=&quot;https://evil.example&quot;&gt;');
+});
+
+test('liveEmbedLink() escapes the markdown delimiters in the filename', function (): void {
+    // A `]` would end the link's text early and let the rest of the name
+    // be read as a target.
+    $asset = new MediaAsset();
+    $asset->id = 'abc-123';
+    $asset->filename = 'a]b[c.html';
+
+    $line = MediaEmbed::liveEmbedLink($asset, [
+        'url'     => '/api/v1/media/abc-123/embed',
+        'mime'    => 'text/html',
+        'scripts' => true,
+    ]);
+
+    expect($line)->toContain('[a\]b\[c.html](/api/v1/media/abc-123/embed)');
+});
+
+test('liveEmbedLink() keeps the line on one line', function (): void {
+    // The chat mounts the frame where the link is, and the link has to be
+    // a line of its own.
+    $asset = new MediaAsset();
+    $asset->id = 'abc-123';
+    $asset->filename = "a\r\nb.html";
+
+    $line = MediaEmbed::liveEmbedLink($asset, [
+        'url'     => '/api/v1/media/abc-123/embed',
+        'mime'    => 'text/html',
+        'scripts' => true,
+    ]);
+
+    expect($line)->toContain('[ab.html](/api/v1/media/abc-123/embed)');
 });

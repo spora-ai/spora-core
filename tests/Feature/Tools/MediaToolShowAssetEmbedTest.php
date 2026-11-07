@@ -255,3 +255,37 @@ it('describes no embed on get_media while the operator has not permitted script-
         $restore();
     }
 });
+
+it('puts the live line after the instruction that names the card', function (): void {
+    // "Echo the block above verbatim" has to name the card. With the live
+    // line between the card and the instruction, it named the live line
+    // instead — and the model was told to copy that.
+    $agentId = seedMediaToolAgent();
+    ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+        makeMediaToolAdminAuth(),
+        null,
+        null,
+        mediaActiveTypesPolicy(activeTypes: true),
+    );
+
+    try {
+        $created = $tool->execute(
+            [
+                'action'    => 'create_media',
+                'filename'  => 'dashboard.html',
+                'mime_type' => 'text/html',
+                'content'   => '<!DOCTYPE html><html><body><h1>Hi</h1></body></html>',
+            ],
+            agentId: $agentId,
+        );
+
+        $echo = strpos($created->content, 'Echo the block above verbatim');
+        $live = strpos($created->content, '/embed');
+
+        expect($echo)->not->toBeFalse();
+        expect($live)->not->toBeFalse();
+        expect($echo)->toBeLessThan($live);
+    } finally {
+        $restore();
+    }
+});

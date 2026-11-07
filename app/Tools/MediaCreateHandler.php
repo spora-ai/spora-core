@@ -352,9 +352,12 @@ final readonly class MediaCreateHandler
                     $assetUrl,
                     (string) ($asset->filename ?? '') ?: $asset->id,
                 )
-                . MediaEmbed::liveEmbedLink($asset, $descriptor)
                 . "\n\nEcho the block above verbatim so the chat UI renders the download card."
-                . ' `create_media` is not idempotent — reuse this asset_id instead of calling it again.',
+                . ' `create_media` is not idempotent — reuse this asset_id instead of calling it again.'
+                // The line that shows the asset live, for a script-capable
+                // one the operator has permitted. It comes after the echo
+                // instruction, so "the block above" still means the card.
+                . MediaEmbed::liveEmbedLink($asset, $descriptor),
             [
                 'asset_id'  => $asset->id,
                 'asset_url' => $assetUrl,

@@ -247,10 +247,11 @@ final class MediaEmbed
             return '';
         }
 
-        $name = self::escapeMarkdownLinkText((string) ($asset->filename ?? '') ?: $asset->id);
+        $name = self::escapeMarkdownLinkText(self::stripLineBreaks((string) ($asset->filename ?? '') ?: $asset->id));
+        $url = htmlspecialchars($descriptor['url'], ENT_QUOTES, 'UTF-8');
 
         return "\n\nTo show this asset live in your reply, echo this line as well:\n\n"
-            . "[{$name}]({$descriptor['url']})\n";
+            . "[{$name}]({$url})\n";
     }
 
     /**
@@ -258,13 +259,21 @@ final class MediaEmbed
      *
      * A filename is the operator's, so it may hold any of them; the link
      * has to survive the round trip through the model's message.
+     *
+     * The HTML escape comes first, for the reason {@see fileCard()} gives:
+     * the text lands in the chat bubble, and the sanitiser's allow-list
+     * keeps `a[href]` and `img[src]`, so stored markup would otherwise
+     * reach the operator as markup. The markdown escape follows it, so the
+     * brackets the escape introduces are not escaped again.
      */
     private static function escapeMarkdownLinkText(string $value): string
     {
+        $safe = htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
         return str_replace(
             ['\\', '[', ']', '(', ')'],
             ['\\\\', '\\[', '\\]', '\\(', '\\)'],
-            $value,
+            $safe,
         );
     }
 
