@@ -217,6 +217,99 @@ describe('the media-library skill matches the media tool', function (): void {
             ->and($body)->toContain('never played');
     });
 
+    it('says the live embed sits in the tool bubble, beside the markdown', function (): void {
+        // The claim that made an operator look at a download button and
+        // conclude the platform had no widget: "instead of the download
+        // card". The frame is *additional* — the bubble shows the card and
+        // the frame, and the message shows the card alone.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain("tool's own bubble")
+            ->and($body)->toContain('live embed')
+            ->and($body)->not->toContain('instead of the download card');
+    });
+
+    it('splits the two script-capable types by what the message shows', function (): void {
+        // They are not one class: HTML is a document and its markdown is
+        // the download card, SVG is an image and its markdown is an inline
+        // picture. An agent told they share a rendering path looks for a
+        // card where there is an image.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('| `text/html` | document | the download card |')
+            ->and($body)->toContain('| `image/svg+xml` | image | an inline image');
+    });
+
+    it('says the SVG in the message is static', function (): void {
+        // Measured: the same SVG read "SCRIPT LIVE" on the embed route and
+        // "initialising…" through an `<img>`. A browser does not run an
+        // SVG's script inside an image, so the message's picture is inert
+        // whatever the operator's script switch says.
+        expect(mediaSkillBody())->toContain("does not run an SVG's script inside an `<img>`");
+    });
+
+    it('says an SVG is write-only to the agent', function (): void {
+        // `get_source` returns no bytes for a binary mime and
+        // `image/svg+xml` is binary, so an agent that authors an SVG cannot
+        // read it back without minting an `md` derivative first — which may
+        // not exist.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('write-only')
+            ->and($body)->toContain('`image/svg+xml` is binary');
+    });
+
+    it('reconciles the filename rule with the re-sniff', function (): void {
+        // Two passages, one subject: `create_media` ignores the declared
+        // mime and re-sniffs, and the filename wins over a prose-shaped
+        // verdict. Read apart they contradict, and an agent that believes
+        // the contradiction cannot tell why a report became a widget.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('re-sniffs the bytes and ignores the mime you declare')
+            ->and($body)->toContain('prose-shaped');
+    });
+
+    it('does not claim a browser parses an SVG as a document in the chat', function (): void {
+        // The SVG rides the image path, so the chat's markdown is an
+        // `<img>` — a picture, not a document. Only the embed route serves
+        // it as a document.
+        $body = mediaSkillBody();
+
+        expect($body)->not->toContain('parses both as a *document* rather than a picture');
+    });
+
+    it('says the tool hands over the line to echo', function (): void {
+        // Measured on the live instance: a model told to compose the route
+        // got it wrong, and a model told in prose wrote the prose. The tool
+        // spells the line out, so the skill says to copy it.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('The tool hands you that line')
+            ->and($body)->toContain('rather than composing the route yourself');
+    });
+
+    it('does not claim the live line ends the result', function (): void {
+        // It does not: `get_media` puts the prompt and the derivative list
+        // after it, and `create_media` puts the idempotency note after it.
+        // A model told to look at the end would miss the line.
+        expect(mediaSkillBody())->not->toContain('end their result with it');
+    });
+
+    it('teaches the model to ask for the live embed with a link', function (): void {
+        // The operator was seeing a download button where a widget should
+        // have been: the frame only ever rendered in the tool bubble, which
+        // is collapsed. The link is the model's way of asking for it in the
+        // message — and it is a reference, so the model never sees the
+        // asset's bytes.
+        $body = mediaSkillBody();
+
+        expect($body)->toContain('/api/v1/media/<asset_id>/embed')
+            ->and($body)->toContain('A link is the whole request')
+            ->and($body)->toContain('embed route')
+            ->and($body)->toContain('/api/v1/assets/<id>.html');
+    });
+
     it('says the filename decides whether an asset is a widget', function (): void {
         // The archive honours the extension, so the model's choice of
         // filename is the choice of whether the asset is a document or a

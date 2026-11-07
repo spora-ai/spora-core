@@ -338,6 +338,11 @@ final readonly class MediaCreateHandler
     private function created(MediaAsset $asset): ToolResult
     {
         $assetUrl = $asset->publicUrl();
+        // Present only for a script-capable asset the operator has
+        // permitted. The chat renders it as a live embed; the server
+        // decides whether it exists and whether its scripts may run, so the
+        // client cannot widen either.
+        $descriptor = $this->activeTypes->describeEmbed($asset);
 
         return ToolResult::ok(
             "Media asset {$asset->id}: " . ($asset->filename ?? '(no filename)') . "\n\n"
@@ -348,18 +353,18 @@ final readonly class MediaCreateHandler
                     (string) ($asset->filename ?? '') ?: $asset->id,
                 )
                 . "\n\nEcho the block above verbatim so the chat UI renders the download card."
-                . ' `create_media` is not idempotent — reuse this asset_id instead of calling it again.',
+                . ' `create_media` is not idempotent — reuse this asset_id instead of calling it again.'
+                // The line that shows the asset live, for a script-capable
+                // one the operator has permitted. It comes after the echo
+                // instruction, so "the block above" still means the card.
+                . MediaEmbed::liveEmbedLink($asset, $descriptor),
             [
                 'asset_id'  => $asset->id,
                 'asset_url' => $assetUrl,
                 'filename'  => $asset->filename,
                 'mime_type' => $asset->mime_type,
                 'byte_size' => $asset->byte_size,
-                // Present only for a script-capable asset the operator has
-                // permitted. The chat renders it as a live embed; the
-                // server decides whether it exists and whether its scripts
-                // may run, so the client cannot widen either.
-                'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
+                'embed_descriptor' => $descriptor,
             ],
         );
     }

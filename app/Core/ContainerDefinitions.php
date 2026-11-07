@@ -1707,6 +1707,7 @@ final class ContainerDefinitions
                     $c->get(MediaDerivativeHandler::class),
                     $c->get(MediaCreateHandler::class),
                     $c->get(MediaFolderHandler::class),
+                    $c->get(MediaActiveTypesPolicy::class),
                     $c->get(Config::class),
                     $c->get(ToolConfigService::class),
                 );

@@ -225,6 +225,58 @@ final class MediaEmbed
         return str_replace(["\r", "\n"], '', $value);
     }
 
+    /**
+     * The line a model echoes to show a script-capable asset **live**.
+     *
+     * The asset's bytes never reach the model, so the request to show it is
+     * a reference: a markdown link to the embed route. The chat renders
+     * that link as the live asset, in place, in the operator's own message.
+     *
+     * The link is what the model copies, so it has to be the exact thing —
+     * a model told to *construct* the route gets it wrong, and a model told
+     * in prose writes the prose.
+     *
+     * Empty for an asset that is not script-capable, or one the operator has
+     * not permitted: there is nothing to show live.
+     *
+     * @param array{url: string, mime: string, scripts: bool}|null $descriptor
+     */
+    public static function liveEmbedLink(MediaAsset $asset, ?array $descriptor): string
+    {
+        if ($descriptor === null) {
+            return '';
+        }
+
+        $name = self::escapeMarkdownLinkText(self::stripLineBreaks((string) ($asset->filename ?? '') ?: $asset->id));
+        $url = htmlspecialchars($descriptor['url'], ENT_QUOTES, 'UTF-8');
+
+        return "\n\nTo show this asset live in your reply, echo this line as well:\n\n"
+            . "[{$name}]({$url})\n";
+    }
+
+    /**
+     * The characters that would end a markdown link's text or target early.
+     *
+     * A filename is the operator's, so it may hold any of them; the link
+     * has to survive the round trip through the model's message.
+     *
+     * The HTML escape comes first, for the reason {@see fileCard()} gives:
+     * the text lands in the chat bubble, and the sanitiser's allow-list
+     * keeps `a[href]` and `img[src]`, so stored markup would otherwise
+     * reach the operator as markup. The markdown escape follows it, so the
+     * brackets the escape introduces are not escaped again.
+     */
+    private static function escapeMarkdownLinkText(string $value): string
+    {
+        $safe = htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        return str_replace(
+            ['\\', '[', ']', '(', ')'],
+            ['\\\\', '\\[', '\\]', '\\(', '\\)'],
+            $safe,
+        );
+    }
+
     /** Binary units the card's meta span renders; 1024-based like the rest of the archive's size reporting. */
     private static function formatBytes(int $bytes): string
     {

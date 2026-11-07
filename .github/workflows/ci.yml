@@ -346,11 +346,37 @@ jobs:
             # anchored: ](a.md), ](a.md "A Title"), ](a.md#frag). The
             # capture class has to admit the title, so the title comes back
             # with it and is stripped below.
+            #
+            # Fenced code blocks are dropped first. A link written inside
+            # one is syntax the reader copies — an example of the shape,
+            # not a link this file depends on — and its target is not a
+            # file in the repository. Without this, no document could show
+            # a link example at all: the `media-library` skill has to
+            # teach the model the exact link that asks for a live embed.
+            #
+            # The fence is tracked the way CommonMark reads it: three or
+            # more backticks or tildes, opened by a line that starts with
+            # one, closed by a line of the same character that is at least
+            # as long and carries nothing else. A longer fence therefore
+            # closes only on a longer fence, and a ``` line inside it is
+            # code rather than the end of it.
             targets=()
             while IFS= read -r target; do
               targets+=("$target")
             done < <(
-              grep -ohE '\]\([^)]+\)' "$file" \
+              awk '
+                match($0, /^ {0,3}(`{3,}|~{3,})/) {
+                  marker = substr($0, RSTART, RLENGTH)
+                  rest = substr($0, RSTART + RLENGTH)
+                  char = substr(marker, 1, 1)
+                  len = length(marker)
+                  if (fence == "") { fence = char; flen = len; next }
+                  if (char == fence && len >= flen && rest ~ /^[[:space:]]*$/) { fence = ""; next }
+                  next
+                }
+                fence == "" { print }
+              ' "$file" \
+                | grep -ohE '\]\([^)]+\)' \
                 | sed -E 's/^\]\((.*)\)$/\1/' \
                 | sed -E 's/[[:space:]]+"[^"]*"$//' \
                 | sed -E 's/#.*$//' \

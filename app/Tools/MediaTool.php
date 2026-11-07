@@ -8,6 +8,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\Config;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\ListMediaQuery;
+use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaDerivativeService;
@@ -167,7 +168,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'get_media',
-    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders inline.',
+    description: 'Return metadata + a markdown embed (image/audio/video/link) for one asset. Echo the embed verbatim so the chat UI renders it as an element. A script-capable asset (text/html, image/svg+xml) the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
@@ -203,7 +204,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 #[ToolOperation(
     name: 'create_media',
-    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML; HTML only where the operator has enabled SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id.',
+    description: 'Store text as a new media asset (Markdown, plain text, CSV, JSON, XML, YAML; HTML only where the operator has enabled SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES). Returns asset_id and a download link. Non-idempotent — a retry creates a second asset, so reuse the returned asset_id. A script-capable asset the operator has permitted can be shown LIVE: write a markdown link to its embed route on a line of its own — [filename](/api/v1/media/<asset_id>/embed) — and the chat renders it as a running frame in your reply.',
     operatorDescription: 'Create a text media asset',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
@@ -348,6 +349,7 @@ final class MediaTool extends AbstractTool
         private readonly MediaDerivativeHandler $derivativeHandler,
         private readonly MediaCreateHandler $createHandler,
         private readonly MediaFolderHandler $folderHandler,
+        private readonly MediaActiveTypesPolicy $activeTypes,
         private readonly Config $config,
         private readonly ?ToolConfigService $toolConfigService = null,
     ) {}
@@ -515,9 +517,17 @@ final class MediaTool extends AbstractTool
         $embed     = $this->embedForAsset($asset, $mediaType, $assetUrl, $altText);
 
         $content = "Media asset {$asset->id}: " . ($asset->filename ?? '(no filename)') . "\n\n" . $embed
-            . "\n\nEcho the markdown block above verbatim so the chat UI renders the asset inline."
+            // "as an element", not "inline": a document renders as a card and
+            // an image as a picture, and neither is played. "Inline" reads as
+            // "played", which is how an agent ends up telling the operator
+            // that a widget is running when the message carries a card.
+            . "\n\nEcho the markdown block above verbatim so the chat UI renders it as an element."
             . ' For a clean embed snippet without this header, call `get_embed_code`.'
-            . ' For a shareable external link, call `get_public_url` (approval-gated).';
+            . ' For a shareable external link, call `get_public_url` (approval-gated).'
+            // The line that shows the asset live, for a script-capable one
+            // the operator has permitted. The model copies it rather than
+            // composing the route, so it is spelled out here.
+            . MediaEmbed::liveEmbedLink($asset, $this->activeTypes->describeEmbed($asset));
 
         $prompt = isset($asset->prompt) && trim((string) $asset->prompt) !== ''
             ? trim((string) $asset->prompt)
@@ -605,6 +615,9 @@ final class MediaTool extends AbstractTool
                 'asset_url'  => $assetUrl,
                 'media_type' => $mediaType->value,
                 'embed'      => $embed,
+                // Same descriptor `get_media` carries: the op returns the
+                // same markdown, so it owes the chat the same live frame.
+                'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
             ],
         );
     }
@@ -918,6 +931,11 @@ final class MediaTool extends AbstractTool
             'public_url'       => $this->ensurePublicUrl($asset),
             'parent_id'        => $this->derivatives->parentOf($asset->id),
             'derivatives'      => $derivativeRows,
+            // The embed descriptor for a script-capable asset the operator
+            // has permitted, or null. Without it the chat has nothing to
+            // render a live frame from, and the operator gets a download
+            // card for a widget the asset could have been.
+            'embed_descriptor' => $this->activeTypes->describeEmbed($asset),
             'created_at'       => $asset->created_at?->toIso8601String(),
         ];
     }
