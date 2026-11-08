@@ -677,23 +677,19 @@ final class AttachmentRowRenderer
      */
     private function buildImageBlock(MediaAsset $asset, bool $supportsImages, int $imageBytes): ?array
     {
-        if (!$supportsImages) {
-            return null;
-        }
-
         $size = (int) ($asset->byte_size ?? 0);
         $fits = $size > 0
             ? $imageBytes + $size <= $this->maxRowImageBytes
             : $imageBytes < $this->maxRowImageBytes;
-        if (!$fits) {
-            return null;
-        }
 
-        $bytes = $this->loadAssetBytes($asset);
-        if ($bytes === null || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES) {
-            return null;
-        }
-        if ($imageBytes + strlen($bytes) > $this->maxRowImageBytes) {
+        // An image that does not fit is never read off disk — the same order
+        // the text branch uses.
+        $bytes = $supportsImages && $fits ? $this->loadAssetBytes($asset) : null;
+
+        if ($bytes === null
+            || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES
+            || $imageBytes + strlen($bytes) > $this->maxRowImageBytes
+        ) {
             return null;
         }
 
