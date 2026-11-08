@@ -15,6 +15,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
+use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
@@ -27,6 +28,7 @@ use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
+use Tests\Fixtures\StubOutputTool;
 
 // Helpers
 
@@ -602,6 +604,124 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
 
         $task->refresh();
         expect($task->status)->toBe('FAILED');
+    });
+
+    it('stops ticking when the task pauses for approval instead of spinning on it', function (): void {
+        // A task paused for approval is quiescent: tick() returns without
+        // changing anything. The worker must stop there — the approval
+        // path re-queues the task and the daemon picks it up with a fresh
+        // child. Looping over a paused task burns a core at 100% for as
+        // long as the task waits for a human.
+        $agent = Agent::create([
+            'principal_id' => createUserPrincipalPublic($this->userId),
+            'name'                 => 'ApprovalAgent',
+            'llm_driver_config_id' => $this->llmConfig->id,
+            'max_steps'            => 10,
+            'is_active'           => true,
+        ]);
+
+        $task = Task::create([
+            'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+            'trigger_user_id' => $this->userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Needs approval',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        // The agent must have the tool enabled, or the LLM's call names a
+        // tool the agent does not have.
+        AgentTool::insert([
+            'agent_id'   => $agent->id,
+            'tool_class' => StubOutputTool::class,
+            'tool_name'  => 'stub_output',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $db = new Database(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
+        );
+        $db->bootDatabaseConnectionOnly();
+
+        // The tool's only operation requires approval by default, so the
+        // first tick pauses the task instead of executing it.
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturn(new LLMResponse(
+            content: null,
+            toolCalls: [new DriverToolCall('call_out', 'stub_output', ['key' => 'val'])],
+            inputTokens: 10,
+            outputTokens: 5,
+            completionId: 'cmp_1',
+        ));
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        $container = Mockery::mock(ContainerInterface::class);
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Database::class)->andReturn($db);
+        $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
+        $container->allows('get')->with('tool_instances')->andReturn([new StubOutputTool()]);
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+        $container->allows('get')->with(NotificationService::class)
+            ->andReturn(Mockery::mock(NotificationService::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(ToolConfigService::class)->andReturnNull();
+        $container->allows('get')->with(LLMConfigService::class)->andReturn(
+            new LLMConfigService(Mockery::mock(Spora\Core\SecurityManagerInterface::class), []),
+        );
+        $container->allows('get')->with(MercurePublisherInterface::class)
+            ->andReturn(Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(LoggerInterface::class)
+            ->andReturn(Mockery::mock(LoggerInterface::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
+        $container->allows('get')->with(SubAgentServiceInterface::class)
+            ->andReturn(Mockery::mock(SubAgentServiceInterface::class)->shouldIgnoreMissing());
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publishForPrincipal')->andReturn(true);
+        $mercure->allows('publishToUser')->andReturn(true);
+
+        $command = new TaskRunCommand($db, $container, $mercure, WorkerRuntimeMode::Server);
+        $command->setName('task:run');
+        $tester = new CommandTester($command);
+
+        // A loop that never ends would hang the suite instead of failing
+        // it, so the query count is capped: exceeding the cap means the
+        // worker kept ticking after the task went quiescent.
+        $budget = 400;
+        $guard  = new class {
+            public int $queries = 0;
+            public bool $live = true;
+        };
+        Capsule::connection()->beforeExecuting(function () use ($guard, $budget): void {
+            if (!$guard->live) {
+                return;
+            }
+            $guard->queries++;
+            if ($guard->queries > $budget) {
+                throw new RuntimeException('The worker kept ticking after the task paused for approval.');
+            }
+        });
+
+        $tester->execute(['taskId' => $task->id]);
+        $guard->live = false;
+
+        expect($guard->queries)->toBeLessThan($budget);
+
+        $task->refresh();
+        expect($task->status)->toBe('PENDING_APPROVAL')
+            ->and($tester->getStatusCode())->toBe(Command::FAILURE);
     });
 });
 

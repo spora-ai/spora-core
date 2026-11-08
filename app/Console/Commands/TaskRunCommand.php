@@ -131,12 +131,16 @@ final class TaskRunCommand extends Command
 
         // Notification is sent by Orchestrator.tick() — do not duplicate here.
         try {
-            while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
+            // One LLM step per iteration, so the loop runs only while the
+            // task is RUNNING. A task that pauses for approval
+            // (PENDING_APPROVAL) is quiescent — tick() returns without
+            // touching it — and the approval path re-queues the task, so
+            // the daemon picks it up with a fresh child. Continuing to loop
+            // here would spin a core at 100% for as long as the task waits
+            // for a human.
+            while ($task->status === 'RUNNING') {
                 $orchestrator->tick($task->id);
                 $task->refresh();
-                if ($task->status === 'ABORTED') {
-                    break;
-                }
             }
         } catch (Throwable $e) {
             $task->refresh();

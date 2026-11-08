@@ -493,17 +493,147 @@ final class WorkerRunCommand extends Command
         $lockFile = $this->paths->storage('spora-worker.lock');
 
         $this->lockFd = fopen($lockFile, 'c');
-        if (!flock($this->lockFd, LOCK_EX | LOCK_NB)) {
-            $output->writeln('<error>Another worker instance is already running. Exiting.</error>');
-            $this->logger->warning('Could not acquire worker lock — another instance is running');
-            fclose($this->lockFd);
-            $this->lockFd = null;
+        if ($this->lockFd === false) {
+            $output->writeln('<error>Could not open the worker lock file.</error>');
+            $this->logger->error('Could not open the worker lock file', ['path' => $lockFile]);
             return false;
         }
 
-        // Write PID for debugging/observability
+        if (flock($this->lockFd, LOCK_EX | LOCK_NB)) {
+            $this->writeLockHolderPid($lockFile);
+            return true;
+        }
+
+        $holderPid = $this->readLockHolderPid($lockFile);
+
+        // A lock whose holder is gone is stale, and taking it over is safe.
+        // A lock we cannot attribute to a process is a lock we do not
+        // steal: the holder may be a worker that has not written its pid
+        // into the file yet.
+        if ($holderPid !== null
+            && !self::isProcessAlive($holderPid)
+            && $this->takeOverStaleLock($lockFile)) {
+            $this->logger->warning('Took over a stale worker lock', [
+                'path'            => $lockFile,
+                'dead_holder_pid' => $holderPid,
+            ]);
+            return true;
+        }
+
+        $output->writeln('<error>Another worker instance is already running. Exiting.</error>');
+        $this->logger->warning('Could not acquire worker lock — another instance is running', [
+            'holder_pid' => $holderPid,
+        ]);
+        fclose($this->lockFd);
+        $this->lockFd = null;
+        return false;
+    }
+
+    /**
+     * Replace the lock file so the lock lives on an inode nobody holds.
+     *
+     * The daemon spawns `task:run` children with proc_open(), and a child
+     * inherits the lock descriptor, so the flock outlives the daemon that
+     * took it. Unlinking the file and creating a new one gives the lock a
+     * fresh inode: the orphan keeps its lock on the old one, which no
+     * longer has a path, and the new daemon gets an uncontested lock.
+     *
+     * The replacement is serialised by a second lock file, so two daemons
+     * starting at the same moment cannot both replace the file and each
+     * end up holding a lock on a different inode. That lock is held only
+     * for the duration of the replacement and is closed before the first
+     * child is spawned, so it is never inherited and never outlives the
+     * process that took it.
+     */
+    private function takeOverStaleLock(string $lockFile): bool
+    {
+        $takeoverFd = fopen($lockFile . '.takeover', 'c');
+        if ($takeoverFd === false) {
+            return false;
+        }
+
+        try {
+            flock($takeoverFd, LOCK_EX);
+
+            // Re-read under the takeover lock: another daemon may have
+            // taken the lock over between our first attempt and now.
+            $holderPid = $this->readLockHolderPid($lockFile);
+            if ($holderPid === null || self::isProcessAlive($holderPid)) {
+                return false;
+            }
+
+            // A failed unlink leaves the old inode in place; the flock
+            // below then fails and the takeover is refused.
+            @unlink($lockFile);
+
+            $newFd = fopen($lockFile, 'c');
+            if ($newFd === false) {
+                return false;
+            }
+
+            if (!flock($newFd, LOCK_EX | LOCK_NB)) {
+                fclose($newFd);
+                return false;
+            }
+
+            // Only now does the descriptor become the worker's lock — until
+            // here the old one still points at the dead holder's inode.
+            fclose($this->lockFd);
+            $this->lockFd = $newFd;
+
+            $this->writeLockHolderPid($lockFile);
+            return true;
+        } finally {
+            flock($takeoverFd, LOCK_UN);
+            fclose($takeoverFd);
+        }
+    }
+
+    /**
+     * The pid of the process holding the lock, as written by that process.
+     * Null when the file holds no usable pid.
+     */
+    private function readLockHolderPid(string $lockFile): ?int
+    {
+        $raw = @file_get_contents($lockFile);
+        if ($raw === false) {
+            return null;
+        }
+
+        $pid = (int) trim($raw);
+
+        return $pid > 0 ? $pid : null;
+    }
+
+    private function writeLockHolderPid(string $lockFile): void
+    {
         file_put_contents($lockFile, (string) getmypid());
-        return true;
+    }
+
+    /**
+     * Whether the process still exists.
+     *
+     * `posix_kill()` with signal 0 reports false both for a process that
+     * does not exist (ESRCH) and for one owned by another user (EPERM).
+     * The second means the process is there, so the lock is not ours to
+     * take.
+     */
+    private static function isProcessAlive(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+
+        if (function_exists('posix_kill')) {
+            if (posix_kill($pid, 0)) {
+                return true;
+            }
+
+            // EPERM (1): the process is there but belongs to another user.
+            return posix_get_last_error() === 1;
+        }
+
+        return is_dir('/proc/' . $pid);
     }
 
     /**

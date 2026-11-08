@@ -36,7 +36,7 @@ const DAILY_9AM_CRON = '0 9 * * *';
 /**
  * @return array{0: WorkerRunCommand, 1: OrchestratorInterface, 2: Database}
  */
-function makeWorkerRunCommand(): array
+function makeWorkerRunCommand(?Paths $paths = null): array
 {
     Database::resetBootState();
     $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
@@ -93,7 +93,7 @@ function makeWorkerRunCommand(): array
         $container,
         $mercure,
         $notificationService,
-        new Paths(BASE_PATH),
+        $paths ?? new Paths(BASE_PATH),
         WorkerRuntimeMode::Server,
     );
 
@@ -1214,6 +1214,88 @@ describe('WorkerRunCommand mode flag validation', function (): void {
 
         expect($exitCode)->toBe(Symfony\Component\Console\Command\Command::FAILURE)
             ->and($buffer->fetch())->toContain('client-worker mode');
+    });
+});
+
+describe('WorkerRunCommand — worker lock', function (): void {
+    beforeEach(function (): void {
+        $this->storageDir = sys_get_temp_dir() . '/spora-worker-lock-' . getmypid() . '-' . uniqid();
+        mkdir($this->storageDir, 0777, true);
+        // Paths::storage() resolves SPORA_STORAGE_DIR, so the worker lock
+        // lands in the temp dir instead of the repository's storage/.
+        $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir;
+        $this->lockFile = $this->storageDir . '/spora-worker.lock';
+    });
+
+    afterEach(function (): void {
+        unset($_SERVER['SPORA_STORAGE_DIR']);
+        foreach (glob($this->storageDir . '/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($this->storageDir);
+    });
+
+    /**
+     * Hold the worker lock the way a running worker does, and record a pid
+     * as its holder.
+     */
+    function holdWorkerLock(string $lockFile, int $holderPid): mixed
+    {
+        $fd = fopen($lockFile, 'c');
+        flock($fd, LOCK_EX | LOCK_NB);
+        file_put_contents($lockFile, (string) $holderPid);
+
+        return $fd;
+    }
+
+    function invokeAcquireLock(WorkerRunCommand $command, Symfony\Component\Console\Output\BufferedOutput $output): bool
+    {
+        $ref = new ReflectionMethod($command, 'acquireLock');
+
+        return (bool) $ref->invoke($command, $output);
+    }
+    it('takes over a lock whose holder is gone', function (): void {
+        // The daemon spawns `task:run` children with proc_open(), and a
+        // child inherits the lock descriptor — so the flock outlives the
+        // daemon that took it. A worker starting against such a lock must
+        // take it over instead of refusing to run.
+        $holderFd = holdWorkerLock($this->lockFile, 4194304);
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeTrue()
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
+
+        fclose($holderFd);
+    });
+
+    it('refuses to start while a live worker holds the lock', function (): void {
+        // The pid of this test process is alive, so the lock is not stale
+        // and must not be taken over.
+        $holderFd = holdWorkerLock($this->lockFile, getmypid());
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeFalse()
+            ->and($output->fetch())->toContain('Another worker instance is already running');
+
+        fclose($holderFd);
+    });
+
+    it('acquires an uncontended lock', function (): void {
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeTrue()
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
     });
 });
 
