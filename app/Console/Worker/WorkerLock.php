@@ -34,7 +34,6 @@ final class WorkerLock
     /** @var resource|null */
     private mixed $fd = null;
 
-    /** The dead holder whose lock was replaced, when the acquisition took one over. */
     private ?int $takenOverFromPid = null;
 
     public function __construct(private readonly string $lockFile) {}
@@ -82,7 +81,7 @@ final class WorkerLock
     }
 
     /**
-     * The pid of the process holding the lock, as that process wrote it.
+     * The pid recorded in the lock file by the process that took the lock.
      * Null when the file holds no usable pid.
      */
     public function holderPid(): ?int
@@ -104,16 +103,14 @@ final class WorkerLock
         return $this->lockFile;
     }
 
-    /**
-     * The descriptor every path that changes the lock's owner runs under.
-     */
     private function openMutex(): mixed
     {
         return $this->openFile($this->lockFile . self::TAKEOVER_SUFFIX);
     }
 
     /**
-     * Lock the file as it stands. Fails when a live worker holds it.
+     * Lock the file as it stands. Fails when the lock is already held —
+     * by a live worker, or by an orphan that inherited the descriptor.
      */
     private function tryTake(): bool
     {
@@ -157,8 +154,6 @@ final class WorkerLock
     }
 
     /**
-     * Open a file for the lock.
-     *
      * The path is checked first so the failure is quiet: `fopen()` on a
      * path whose directory does not exist, or on a directory, warns — and
      * the caller reports the failure itself.
@@ -184,9 +179,6 @@ final class WorkerLock
         return new RuntimeException(sprintf('Could not open the worker lock file at %s.', $this->lockFile));
     }
 
-    /**
-     * Become the holder: keep the descriptor and record the pid in the file.
-     */
     private function adopt(mixed $fd): void
     {
         $this->fd = $fd;

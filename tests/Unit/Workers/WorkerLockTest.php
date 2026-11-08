@@ -152,7 +152,6 @@ describe('WorkerLock', function (): void {
             $pipes,
         );
 
-        // Wait until the child is about to take the lock.
         $deadline = microtime(true) + 10.0;
         while (!file_exists($readyFile) && microtime(true) < $deadline) {
             usleep(20_000);

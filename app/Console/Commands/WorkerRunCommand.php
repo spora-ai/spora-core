@@ -32,8 +32,8 @@ use Throwable;
 /**
  * Queue drain and persistent daemon worker.
  *
- * Cron mode (drains queue and exits): php bin/worker.php worker:run
- * Daemon mode (runs forever):         php bin/worker.php worker:run --daemon
+ * Cron mode (one pass, then exits): php bin/spora worker:run --once
+ * Daemon mode (runs forever):       php bin/spora worker:run
  *
  * Delegates the actual work to:
  *   - WorkerReaper:          orphan task reaper
@@ -64,7 +64,7 @@ final class WorkerRunCommand extends Command
 
     private int $principalScopeReadAt = 0;
 
-    /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
+    /** How many scheduled runs the last loop iteration processed (testing hook). */
     public int $lastScheduledProcessedCount = 0;
 
     private readonly WorkerReaper $reaper;
@@ -239,8 +239,8 @@ final class WorkerRunCommand extends Command
 
     /**
      * Run the early-exit gates and side-effect setup shared by every mode:
-     * mode-flag validation, daemon lock acquisition, signal-handler wiring,
-     * the startup banner, and the initial orphan reaping sweep.
+     * mode-flag validation, the single-instance lock (skipped in
+     * --reap-only), signal-handler wiring and the startup banner.
      *
      * Returns Command::FAILURE on validation/lock failure, or null once it
      * is safe to proceed with mode-specific work.
@@ -334,10 +334,6 @@ final class WorkerRunCommand extends Command
         $this->logger->info('Worker run (--reap-only)');
     }
 
-    /**
-     * Run the main worker loop, handling periodic orphan reaping, scheduled
-     * runs, child reaping, queue processing, and the once-mode break.
-     */
     private function runWorkerLoop(
         WorkerLoopOptions $options,
         OutputInterface $output,
@@ -433,11 +429,8 @@ final class WorkerRunCommand extends Command
             return;
         }
 
-        // The principal list is a full scan of the principals table, and the
-        // daemon runs the loop twice a second by default — reading it on
-        // every iteration would cost two table scans a second for the life
-        // of the daemon. A principal created while the daemon runs is picked
-        // up within the refresh interval.
+        // A principal created while the daemon runs is picked up within the
+        // refresh interval.
         $now = time();
         if ($this->principalScope === null
             || ($now - $this->principalScopeReadAt) >= self::PRINCIPAL_SCOPE_REFRESH_SECONDS) {
@@ -474,10 +467,6 @@ final class WorkerRunCommand extends Command
         }
     }
 
-    /**
-     * Handle the tail of each loop iteration: sleep in daemon mode, signal
-     * break in --once mode. Returns true when the caller should exit the loop.
-     */
     private function endOfIteration(bool $isOnce, int $sleep): bool
     {
         if ($isOnce) {
@@ -489,7 +478,8 @@ final class WorkerRunCommand extends Command
 
     /**
      * Acquire the single-instance lock, so only one worker runs at a time.
-     * Returns false if the lock cannot be acquired (another instance is running).
+     * Returns false if the lock cannot be acquired — the file could not be
+     * opened, or another instance holds it.
      */
     private function acquireLock(OutputInterface $output): bool
     {

@@ -153,11 +153,7 @@ function holdWorkerLockFile(string $lockFile, int $holderPid): mixed
  * Invoke a controller method through the middleware pipeline (for testing).
  * This mimics what Router::handleFound() does at runtime.
  *
- * @param object $controller The controller instance
- * @param string $method The method name to call
- * @param Symfony\Component\HttpFoundation\Request $request The request
  * @param array<int, object> $middleware List of middleware instances to apply (in order)
- * @return Symfony\Component\HttpFoundation\Response
  */
 function callController(object $controller, string $method, Symfony\Component\HttpFoundation\Request $request, array $middleware = []): Symfony\Component\HttpFoundation\Response
 {
