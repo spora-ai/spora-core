@@ -8,6 +8,8 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
@@ -143,10 +145,6 @@ final class AgentController
         }
 
         $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
         $principalId = $this->resolvePrincipalIdForCreate($userId, $body);
 
         $data = [
@@ -173,6 +171,14 @@ final class AgentController
             'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
+        $earlyExit = ($name === ''
+                ? $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY)
+                : null)
+            ?? $this->validateProviderConfigReferences($principalId, $data);
+        if ($earlyExit !== null) {
+            return $earlyExit;
+        }
+
         $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
@@ -184,25 +190,23 @@ final class AgentController
     /**
      * Resolve the owning principal for {@see store()}. Accepts an
      * explicit `principal_id` in the body when the caller is admin or
-     * owns the target principal; otherwise defaults to the caller's
-     * user-principal. Returns null when the field is omitted and no
-     * PrincipalService is wired (legacy test path).
+     * owns the target principal; otherwise the caller's user-principal.
+     * Returns null when no PrincipalService is wired (legacy test path).
      *
      * @param  array<string, mixed> $body
      */
     private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
     {
-        $requested = $body['principal_id'] ?? null;
-        if ($requested === null || (int) $requested <= 0) {
-            return null;
-        }
-        $requested = (int) $requested;
-
         if ($this->principalService === null) {
             return null;
         }
 
-        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
+        }
+
+        return $this->authorisePrincipalIdOrFallback($userId, (int) $requested);
     }
 
     private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
@@ -280,7 +284,15 @@ final class AgentController
         // runs first so the precedence matches the previous short-
         // circuit order. Consolidated into one guard so this method
         // stays under the S1142 3-return ceiling.
-        $earlyExit = $validationError ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null);
+        $visibleAgent = $this->agentService->getAgent($agentId, $userId);
+        $referenceError = $visibleAgent === null
+            ? null
+            : $this->validateProviderConfigReferences((int) $visibleAgent->principal_id, $data);
+
+        $earlyExit = $validationError
+            ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null)
+            ?? ($visibleAgent === null ? $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND) : null)
+            ?? $referenceError;
         if ($earlyExit !== null) {
             return $earlyExit;
         }
@@ -293,6 +305,38 @@ final class AgentController
         $this->applyProfilePictureUpdate($agentId, $picturePayload);
 
         return $agent;
+    }
+
+    /**
+     * A provider reference is only usable when the configuration is
+     * global or owned by the agent's own principal: a private
+     * configuration belongs to the principal that pays for it, and
+     * pointing an agent at another principal's would spend their
+     * provider account.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function validateProviderConfigReferences(?int $principalId, array $data): ?JsonResponse
+    {
+        $llmConfigId = $data['llm_driver_config_id'] ?? null;
+        $speechConfigId = $data['speech_driver_config_id'] ?? null;
+
+        $llmConfig = $llmConfigId === null ? null : LLMDriverConfiguration::find((int) $llmConfigId);
+        $speechConfig = $speechConfigId === null ? null : SpeechProviderConfiguration::find((int) $speechConfigId);
+
+        $llmIneligible = $principalId !== null && $llmConfigId !== null
+            && ($llmConfig === null || (!$llmConfig->is_global && (int) $llmConfig->principal_id !== $principalId));
+        $speechIneligible = $principalId !== null && $speechConfigId !== null
+            && ($speechConfig === null || (!$speechConfig->is_global && (int) $speechConfig->principal_id !== $principalId));
+
+        if (!$llmIneligible && !$speechIneligible) {
+            return null;
+        }
+
+        return $this->unprocessable(
+            'VALIDATION_ERROR',
+            'Configuration not found or does not belong to the requested principal.',
+        );
     }
 
     /**

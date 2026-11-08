@@ -219,7 +219,7 @@ test('updateConfiguration prunes stale keys from the settings blob on save', fun
     expect($created)->not->toBeNull();
 
     // updateConfiguration routes through encodeSettings → prune on write
-    $updated = $persistence->updateConfiguration($created->id, [
+    $updated = $persistence->updateConfiguration($created->id, $userId, [
         'settings' => ['api_key' => 'sk-stale', 'model' => 'gpt-4o-mini'],
     ], false);
     expect($updated)->not->toBeNull();

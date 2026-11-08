@@ -54,7 +54,7 @@ class StubAgentService implements AgentServiceInterface
         }
         $agent = new Agent();
         $agent->id = $agentId;
-        $agent->principal_id = 0;
+        $agent->principal_id = createUserPrincipalPublic($userId);
         $agent->name = 'Stub Agent';
         $agent->description = null;
         $agent->system_prompt = null;

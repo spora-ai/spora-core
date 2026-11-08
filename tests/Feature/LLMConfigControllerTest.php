@@ -6,8 +6,12 @@ use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Models\GroupMembership;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Security\CsrfTokenService;
+use Spora\Services\GroupService;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\Response;
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -473,6 +477,54 @@ test('update() returns 404 when updating another user\'s config', function (): v
     expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
 
     LLMDriverConfiguration::where('id', $configA->id)->delete();
+});
+
+test('update() refuses to edit a group configuration for an ordinary group member', function (): void {
+    [$controller, $authService, $llmConfigService, , $authMiddleware] = makeLLMConfigController();
+
+    $principalService = new PrincipalService(new PrincipalResolver());
+    $groupService = new GroupService($principalService);
+
+    $ownerId = $authService->register('group-config-owner@example.com', 'Password1!', 'Group Owner');
+    $group = $groupService->createGroup($ownerId, 'Group Config Group');
+    $groupPrincipalId = (int) $principalService->principalForGroup((int) $group->id)->id;
+
+    $memberId = $authService->register('group-config-member@example.com', 'Password1!', 'Group Member');
+    $groupService->addMember((int) $group->id, $memberId, GroupMembership::ROLE_MEMBER, $ownerId);
+
+    // The member's own user-principal: with it the group's principal is
+    // among the member's visible principals, so the configuration is
+    // visible to them — visible, but not theirs to edit.
+    $principalService->ensureUserPrincipal($memberId);
+
+    // The group's own configuration — the group pays for that API key.
+    $configId = (int) Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')->insertGetId([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'Group Owned Config',
+        'driver_class' => OpenAICompatibleDriver::class,
+        'settings'     => json_encode(['api_key' => 'sk-group', 'model' => 'gpt-4o']),
+        'is_default'   => false,
+        'is_global'    => false,
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    // The member can SEE the group's configuration — membership is enough
+    // for that — but seeing it is not authority to repoint it.
+    simulateLoggedInSession($memberId, 'group-config-member@example.com');
+
+    $request = jsonRequest('PUT', LLM_CONFIGS_URI . "/{$configId}", [
+        'settings' => ['base_url' => 'https://attacker.example.com/v1'],
+    ]);
+    $request->attributes->set('id', $configId);
+    $response = callController($controller, 'update', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+
+    $stored = (string) Illuminate\Database\Capsule\Manager::table('llm_driver_configurations')
+        ->where('id', $configId)
+        ->value('settings');
+    expect($stored)->not->toContain('attacker.example.com');
 });
 
 test('destroy() returns 404 when deleting another user\'s config', function (): void {
