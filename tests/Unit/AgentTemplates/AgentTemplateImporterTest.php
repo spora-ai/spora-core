@@ -243,3 +243,78 @@ test('settings are not applied when the tool plugin is missing', function (): vo
     expect(array_column($result->warnings, 'code'))->toContain('TOOL_PLUGIN_MISSING')
         ->and(AgentToolOverride::where('agent_id', $result->agent->id)->count())->toBe(0);
 });
+
+test('applyToAgent revokes a tool the template disables', function (): void {
+    // The `agent_tools` row is the enablement gate the executor checks
+    // before every call, and the operation overrides are the permissions
+    // that ride on it. A template that disables the tool has to take both
+    // away — reporting a successful update while leaving them behind
+    // keeps the tool executable.
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($this->userId),
+        'name'         => 'Revoke Target',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    AgentTool::create([
+        'agent_id'  => $agent->id,
+        'tool_class' => 'Spora\\Tools\\TimeTool',
+        'tool_name'  => 'time',
+    ]);
+    AgentToolOperationOverride::create([
+        'agent_id'                  => $agent->id,
+        'tool_class'                => 'Spora\\Tools\\TimeTool',
+        'operation'                 => 'now',
+        'enabled'                   => 1,
+        'default_requires_approval' => 0,
+    ]);
+
+    $template = new Spora\AgentTemplates\AgentTemplate([
+        'id' => 'revoke', 'name' => 'Revoke', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => 'Spora\\Tools\\TimeTool',
+            'enabled'    => false,
+            'operations' => [],
+        ]],
+    ], source: 'uploaded');
+
+    $this->importer->applyToAgent((int) $agent->id, $template);
+
+    expect(AgentTool::where('agent_id', $agent->id)
+        ->where('tool_class', 'Spora\\Tools\\TimeTool')
+        ->count())->toBe(0)
+        ->and(AgentToolOperationOverride::where('agent_id', $agent->id)
+            ->where('tool_class', 'Spora\\Tools\\TimeTool')
+            ->count())->toBe(0);
+});
+
+test('applyToAgent leaves a tool the template does not name alone', function (): void {
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($this->userId),
+        'name'         => 'Untouched Target',
+        'max_steps'    => 5,
+        'is_active'    => true,
+    ]);
+    AgentTool::create([
+        'agent_id'  => $agent->id,
+        'tool_class' => 'Spora\\Tools\\TimeTool',
+        'tool_name'  => 'time',
+    ]);
+
+    $template = new Spora\AgentTemplates\AgentTemplate([
+        'id' => 'untouched', 'name' => 'Untouched', 'version' => '1.0.0',
+        'agent' => ['system_prompt' => 'x'],
+        'tools' => [[
+            'tool_class' => 'Spora\\Tools\\CalculatorTool',
+            'enabled'    => true,
+            'operations' => [],
+        ]],
+    ], source: 'uploaded');
+
+    $this->importer->applyToAgent((int) $agent->id, $template);
+
+    expect(AgentTool::where('agent_id', $agent->id)
+        ->where('tool_class', 'Spora\\Tools\\TimeTool')
+        ->count())->toBe(1);
+});

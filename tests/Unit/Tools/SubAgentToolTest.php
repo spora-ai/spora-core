@@ -322,6 +322,32 @@ describe('SubAgentTool::execute (sub_agent op)', function (): void {
         $subAgent->shouldNotHaveReceived('spawn');
     });
 
+    test('reads the allowlist through the execution context', function (): void {
+        [$tool, , $subAgent, $config] = makeSubAgentTool();
+        seedSubAgentAgents();
+        $context = subAgentUserContext();
+
+        $child = new Task();
+        $child->id = SUB_AGENT_SUB_CHILD_ID;
+        $subAgent->allows('spawn')->andReturn($child);
+
+        // The allowlist is the agent's own setting, so it has to be read
+        // against the executing principal. Dropping the context lets the
+        // cascade fall back to the paying owner's principals — a
+        // different set, and for a group agent a different policy.
+        $config->shouldReceive('getEffectiveSettings')
+            ->once()
+            ->with(SubAgentTool::class, SUB_AGENT_AGENT_ID, SUB_AGENT_USER_ID, $context)
+            ->andReturn(['allowed_target_agents' => [SUB_AGENT_TARGET_AGENT]]);
+
+        $tool->execute(
+            ['op' => 'sub_agent', 'target_agent_id' => SUB_AGENT_TARGET_AGENT, 'prompt' => 'do the thing'],
+            SUB_AGENT_AGENT_ID,
+            SUB_AGENT_TASK_ID,
+            context: $context,
+        );
+    });
+
     test('returns failure when prompt is missing', function (): void {
         [$tool, , $subAgent] = makeSubAgentTool();
 

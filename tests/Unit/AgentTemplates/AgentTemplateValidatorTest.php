@@ -119,6 +119,22 @@ test('max_steps out of range fails validation', function (): void {
     expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_RANGE');
 });
 
+test('max_steps as a numeric string fails validation', function (): void {
+    // The updater casts whatever it is handed, so a string that skipped
+    // the range check would persist as the budget it spells — "10000"
+    // would authorise ten thousand model turns where the declared
+    // maximum is a hundred.
+    $raw = [
+        'id' => 'x', 'name' => 'X', 'version' => '1.0.0',
+        'agent' => ['max_steps' => '10000'],
+        'tools' => [],
+        'required_plugins' => [],
+    ];
+    $result = validatePayload($raw);
+    expect($result->isValid())->toBeFalse();
+    expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_INVALID');
+});
+
 test('non-list tools or required_plugins fails validation', function (): void {
     $raw = [
         'id' => 'x', 'name' => 'X', 'version' => '1.0.0',
