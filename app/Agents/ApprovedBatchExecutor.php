@@ -164,7 +164,9 @@ final class ApprovedBatchExecutor
             return;
         }
 
-        $row->update([
+        // The query-builder update bypasses Eloquent's `array` cast on
+        // `approved_arguments`, which would double-encode the JSON string.
+        ToolCallModel::where('id', $row->id)->update([
             'status'             => 'APPROVED',
             'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
         ]);
