@@ -358,10 +358,12 @@ final class MediaArchiveService
 
         // Otherwise a direct upload with neither a principal nor an agent
         // is the uploader's own asset, and it belongs to their personal
-        // principal — a group they pay for is a different principal.
+        // principal — a group they pay for is a different principal. An
+        // asset that names an agent is decided by the agent linkage above.
         return $throughAgent
             || (
-                $asset->user_id !== null
+                $asset->agent_id === null
+                && $asset->user_id !== null
                 && (int) $asset->user_id === $ownerUserId
                 && $this->isPersonalPrincipalOf($principalId, $ownerUserId)
             );

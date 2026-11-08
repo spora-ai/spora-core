@@ -277,9 +277,13 @@ describe('MediaTool::get_media', function (): void {
         // existing agents with the legacy setting keep working without a
         // migration. The principal context carries the user-principal
         // info that {@see MediaArchiveService::isAssetInPrincipalScope()}
-        // needs to recognise the asset as belonging to the caller's
-        // principal (via the direct-upload path: `asset.user_id === owner`).
-        $otherAgent = seedMediaToolAgent();
+        // needs: the asset names one of the caller's own agents, and the
+        // agent linkage decides it.
+        $otherAgent = Agent::create([
+            'principal_id' => createUserPrincipalPublic(42),
+            'name'         => 'Another Of The Users Agents',
+            'is_active'    => true,
+        ])->id;
         $asset = seedMediaAsset(agentId: $otherAgent, userId: 42);
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'user']);

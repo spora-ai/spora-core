@@ -57,7 +57,7 @@ describe('Agent API end-to-end', function (): void {
             'store',
             AgentApiTestSupport::bearer($plaintext, [
                 'text' => 'Summarise Q3',
-                'callback_url' => 'https://hooks.example.test/spora',
+                'callback_url' => 'https://93.184.216.34/spora',
             ]),
         );
 
@@ -79,7 +79,7 @@ describe('Agent API end-to-end', function (): void {
         // would ever be delivered.
         $callback = AgentApiTestSupport::callbackFor($chatId);
         expect($callback->pending_status)->toBeNull();
-        expect($callback->url)->toBe('https://hooks.example.test/spora');
+        expect($callback->url)->toBe('https://93.184.216.34/spora');
         expect($callback->next_attempt_at)->not->toBeNull();
 
         // A sweep while the chat is still QUEUED must post nothing.
@@ -142,7 +142,7 @@ describe('Agent API end-to-end', function (): void {
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);
         expect($http->requests)->toHaveCount(1);
         expect($http->requests[0]['method'])->toBe('POST');
-        expect($http->requests[0]['url'])->toBe('https://hooks.example.test/spora');
+        expect($http->requests[0]['url'])->toBe('https://93.184.216.34/spora');
 
         $payload = json_decode($http->body(0), true);
         expect($payload['status'])->toBe('COMPLETED');
@@ -185,7 +185,7 @@ describe('Agent API end-to-end', function (): void {
 
         $start = AgentApiTestSupport::call($container, AgentApiChatController::class, 'store', AgentApiTestSupport::bearer(
             $plaintext,
-            ['text' => 'Send it', 'callback_url' => 'https://hooks.example.test/spora'],
+            ['text' => 'Send it', 'callback_url' => 'https://93.184.216.34/spora'],
         ));
 
         $chatId = (int) AgentApiTestSupport::decode($start)['data']['chat']['id'];
@@ -552,7 +552,7 @@ describe('Agent API callback delivery failures', function (): void {
 
         $start = AgentApiTestSupport::call($container, AgentApiChatController::class, 'store', AgentApiTestSupport::bearer(
             $plaintext,
-            ['text' => 'hi', 'callback_url' => 'https://hooks.example.test/spora'],
+            ['text' => 'hi', 'callback_url' => 'https://93.184.216.34/spora'],
         ));
 
         $chatId = (int) AgentApiTestSupport::decode($start)['data']['chat']['id'];

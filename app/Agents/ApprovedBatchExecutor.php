@@ -152,6 +152,10 @@ final class ApprovedBatchExecutor
     {
         ToolCallModel::where('task_id', $taskId)
             ->where('provider_call_id', $providerCallId)
+            // Only the rows still awaiting a decision. A call id may be
+            // reused once the earlier call has finished, and approving the
+            // reuse must not resurrect the finished one.
+            ->where('status', 'PENDING_APPROVAL')
             ->update([
                 'status'             => 'APPROVED',
                 'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),

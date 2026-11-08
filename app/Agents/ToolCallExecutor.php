@@ -65,13 +65,20 @@ final class ToolCallExecutor
         string         $toolClass,
     ): ?ToolCallDisposition {
         // The operator's decision selects proposals by their provider call
-        // id, so two proposals sharing one id make the decision ambiguous:
-        // approving it would authorize both. The second proposal is
-        // refused rather than recorded.
-        if (ToolCallModel::where('task_id', $task->id)
+        // id, so two *live* proposals sharing one id make the decision
+        // ambiguous: approving it would authorize both. A call id may be
+        // reused once the earlier call has finished.
+        $liveCallExists = ToolCallModel::where('task_id', $task->id)
             ->where('provider_call_id', $toolCall->providerCallId)
-            ->exists()
-        ) {
+            ->where(function ($query): void {
+                $query->where('status', 'PENDING_APPROVAL')
+                    ->orWhere(function ($approved): void {
+                        $approved->where('status', 'APPROVED')->whereNull('executed_at');
+                    });
+            })
+            ->exists();
+
+        if ($liveCallExists) {
             $this->recordDuplicateCallId($task, $toolCall);
             return ToolCallDisposition::DuplicateCallId;
         }
@@ -383,7 +390,7 @@ final class ToolCallExecutor
     }
 
     /**
-     * Tell the LLM that its second proposal reused a call id.
+     * Tell the LLM that its second proposal reused a live call id.
      */
     private function recordDuplicateCallId(Task $task, DriverToolCall $toolCall): void
     {
@@ -391,7 +398,7 @@ final class ToolCallExecutor
             taskId: $task->id,
             role: 'tool',
             content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString(
-                "Tool call id '{$toolCall->providerCallId}' is already used by another call in this task; this call was ignored.",
+                "Tool call id '{$toolCall->providerCallId}' is already used by another call awaiting a decision in this task; this call was ignored.",
             )),
             context: new HistoryMessageContext(
                 toolCallId: $toolCall->providerCallId,

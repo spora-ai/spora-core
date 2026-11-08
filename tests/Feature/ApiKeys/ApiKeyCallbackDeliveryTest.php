@@ -46,7 +46,7 @@ describe('callback delivery checks', function (): void {
                 [
                     'agent_id' => $group['agentIds'][0],
                     'text' => 'hi',
-                    'callback_url' => 'https://hooks.example.test/spora',
+                    'callback_url' => 'https://93.184.216.34/spora',
                 ],
             ),
         );

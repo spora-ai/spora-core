@@ -46,7 +46,7 @@ describe('WorkerRunCommand callback sweep', function (): void {
             'store',
             AgentApiTestSupport::bearer($key, [
                 'text' => 'What is 17 times 3?',
-                'callback_url' => 'https://hooks.example.test/spora',
+                'callback_url' => 'https://93.184.216.34/spora',
             ]),
         );
         $chatId = (int) AgentApiTestSupport::decode($start)['data']['chat']['id'];
@@ -92,7 +92,7 @@ describe('WorkerRunCommand callback sweep', function (): void {
         oneIteration($container->get(WorkerRunCommand::class));
 
         expect($http->requests)->toHaveCount(1);
-        expect($http->requests[0]['url'])->toBe('https://hooks.example.test/spora');
+        expect($http->requests[0]['url'])->toBe('https://93.184.216.34/spora');
         expect(json_decode($http->body(0), true)['answer'])->toBe('The answer is 51.');
         expect($chatId)->toBeGreaterThan(0);
     });
@@ -126,7 +126,7 @@ describe('WorkerRunCommand callback sweep', function (): void {
             $container,
             \Spora\Http\AgentApi\AgentApiChatController::class,
             'store',
-            AgentApiTestSupport::bearer($key, ['text' => 'hi', 'callback_url' => 'https://hooks.example.test/spora']),
+            AgentApiTestSupport::bearer($key, ['text' => 'hi', 'callback_url' => 'https://93.184.216.34/spora']),
         );
 
         oneIteration($container->get(WorkerRunCommand::class));

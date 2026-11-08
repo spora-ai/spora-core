@@ -63,7 +63,7 @@ describe('scoped API end-to-end', function (): void {
                 [
                     'agent_id' => $group['agentIds'][0],
                     'text' => 'Summarise Q3',
-                    'callback_url' => 'https://hooks.example.test/spora',
+                    'callback_url' => 'https://93.184.216.34/spora',
                 ],
             ),
         );
@@ -81,7 +81,7 @@ describe('scoped API end-to-end', function (): void {
 
         $callback = AgentApiTestSupport::callbackFor($chatId);
         expect($callback->pending_status)->toBeNull();
-        expect($callback->url)->toBe('https://hooks.example.test/spora');
+        expect($callback->url)->toBe('https://93.184.216.34/spora');
         expect($callback->next_attempt_at)->not->toBeNull();
 
         // A sweep while the chat is still QUEUED must post nothing.
@@ -111,7 +111,7 @@ describe('scoped API end-to-end', function (): void {
         expect(AgentApiTestSupport::dispatchDue($container))->toBe(1);
         expect($http->requests)->toHaveCount(1);
         expect($http->requests[0]['method'])->toBe('POST');
-        expect($http->requests[0]['url'])->toBe('https://hooks.example.test/spora');
+        expect($http->requests[0]['url'])->toBe('https://93.184.216.34/spora');
 
         $payload = json_decode($http->body(0), true);
         expect($payload['status'])->toBe('COMPLETED');
@@ -163,7 +163,7 @@ describe('scoped API end-to-end', function (): void {
                 [
                     'agent_id' => $group['agentIds'][0],
                     'text' => 'Send it',
-                    'callback_url' => 'https://hooks.example.test/spora',
+                    'callback_url' => 'https://93.184.216.34/spora',
                 ],
             ),
         );
@@ -251,7 +251,7 @@ describe('scoped API end-to-end', function (): void {
                 [
                     'agent_id' => $group['agentIds'][0],
                     'text' => 'Say hello',
-                    'callback_url' => 'https://hooks.example.test/spora',
+                    'callback_url' => 'https://93.184.216.34/spora',
                 ],
             ),
         );

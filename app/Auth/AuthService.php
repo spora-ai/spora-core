@@ -134,7 +134,10 @@ class AuthService
      */
     private function refuseSuspendedAccount(string $email): void
     {
-        $user = User::where('email', $email)->first();
+        // The auth library trims the address before it looks the account
+        // up, so the check has to trim it too — otherwise a leading space
+        // walks past the suspension check and the login still succeeds.
+        $user = User::where('email', trim($email))->first();
         if ($user !== null && (int) $user->status === Status::SUSPENDED) {
             throw new InvalidCredentialsException('The email address or password is incorrect.');
         }

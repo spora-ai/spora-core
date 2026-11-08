@@ -471,6 +471,28 @@ describe('AuthController::login', function (): void {
         expect($body['error']['code'])->toBe('INVALID_CREDENTIALS');
     });
 
+    test('refuses a suspended account whose address carries a leading space', function (): void {
+        // The auth library trims the address before it looks the account
+        // up, so the suspension check has to trim it too — otherwise the
+        // space walks past the check and the login succeeds.
+        [$controller, $authService] = makeAuthController();
+        $authService->register('spaced@example.com', AUTHCTL_TEST_PASSWORD, 'Spaced');
+        User::where('email', 'spaced@example.com')->update(['verified' => 1]);
+
+        $userId = (int) User::where('email', 'spaced@example.com')->value('id');
+        (new UserService())->updateUser($userId, ['suspended' => true]);
+
+        $request = jsonRequest('POST', '/api/v1/auth/login', [
+            'email'    => ' spaced@example.com',
+            'password' => AUTHCTL_TEST_PASSWORD,
+        ]);
+        $response = $controller->login($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_CREDENTIALS');
+    });
+
     test('clears the rate limit bucket on successful login', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('clear@example.com', AUTHCTL_TEST_PASSWORD, 'Clear');

@@ -143,7 +143,7 @@ describe('ApiKey relations', function (): void {
             'chat_id' => $task->id,
             'key_id' => $keyRow->id,
             'agent_id' => $seed['agentId'],
-            'url' => 'https://hooks.example.test/spora',
+            'url' => 'https://93.184.216.34/spora',
         ]);
 
         expect($callback->chat->id)->toBe($task->id);
@@ -164,7 +164,7 @@ describe('ApiKey relations', function (): void {
             'chat_id' => $task->id,
             'key_id' => $keyRow->id,
             'agent_id' => $seed['agentId'],
-            'url' => 'https://hooks.example.test/spora',
+            'url' => 'https://93.184.216.34/spora',
         ]);
 
         expect(\Spora\Models\ApiCallback::where('key_id', $keyRow->id)->count())->toBe(1);

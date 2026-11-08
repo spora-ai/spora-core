@@ -147,6 +147,13 @@ final class AuthWorkflow
         }
 
         $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            // The login was accepted and the session closed right after —
+            // the account was suspended in the meantime. The caller gets
+            // the same answer a wrong password gets.
+            return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
+        }
+
         $result = $this->userService->getUser($userId);
         $userData = $result !== null ? $result['user'] : ['id' => $userId, 'email' => (string) $body['email'], 'username' => null];
 

@@ -64,19 +64,27 @@ describe('SsrfGuard', function (): void {
     it('accepts a public host', function (): void {
         $guard = new SsrfGuard();
 
-        expect($guard->rejectReason('https://hooks.example.com/spora'))->toBeNull();
-        expect($guard->rejectReason('https://hooks.example.com/spora?a=1&b=2'))->toBeNull();
+        $screen = $guard->screen('https://example.com/spora');
+        if ($screen['resolve'] === []) {
+            $this->markTestSkipped('This environment resolves no public name.');
+        }
+
+        expect($screen['reason'])->toBeNull();
+
+        $withQuery = $guard->screen('https://example.com/spora?a=1&b=2');
+        expect($withQuery['reason'])->toBeNull();
     });
 
     it('accepts a public IP literal', function (): void {
         expect((new SsrfGuard())->rejectReason('https://93.184.216.34/spora'))->toBeNull();
     });
 
-    it('leaves an unresolvable name to the HTTP client', function (): void {
-        // Nothing to protect against if the name never resolves, and the
-        // transport will report the DNS failure.
+    it('refuses a name that resolves to no address', function (): void {
+        // An empty resolve map pins nothing, so the client would run its
+        // own lookup — and the second answer can name a private address.
+        // A name with no vetted address is refused.
         expect((new SsrfGuard())->rejectReason('https://this-host-does-not-exist.invalid/spora'))
-            ->toBeNull();
+            ->not->toBeNull();
     });
 
     it('pins a name to the address it vetted, and a literal to nothing', function (): void {

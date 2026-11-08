@@ -152,7 +152,7 @@ test('the callback the old key owed is still owed', function (): void {
         'chat_id' => 1,
         'key_id' => $id,
         'agent_id' => 1,
-        'url' => 'https://hooks.example.test/spora',
+        'url' => 'https://93.184.216.34/spora',
         'pending_status' => 'COMPLETED',
         'attempts' => 0,
         'next_attempt_at' => '2026-01-03 00:00:00',
@@ -167,7 +167,7 @@ test('the callback the old key owed is still owed', function (): void {
 
     expect($callback)->not->toBeNull();
     expect($callback->key_id)->toBe($id);
-    expect($callback->url)->toBe('https://hooks.example.test/spora');
+    expect($callback->url)->toBe('https://93.184.216.34/spora');
     // The outbox still points at the key table, or deleting the key would
     // leave a row nothing can deliver.
     expect($callback->key)->not->toBeNull();
@@ -331,7 +331,7 @@ test('down leaves behind the callback of a key the legacy table cannot hold', fu
         'chat_id' => 1,
         'key_id' => $agentKeyId,
         'agent_id' => 1,
-        'url' => 'https://hooks.example.test/spora',
+        'url' => 'https://93.184.216.34/spora',
         'pending_status' => 'COMPLETED',
         'attempts' => 0,
         'created_at' => '2026-01-01 00:00:00',

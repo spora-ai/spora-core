@@ -45,6 +45,7 @@ final class SsrfGuard
             'no_host'           => 'Callback URL has no host.',
             'loopback_host'     => 'Callback URL resolves to a loopback or link-local address.',
             'private_address'   => 'Callback URL resolves to a private or reserved address.',
+            'unresolvable_host' => 'Callback URL host could not be resolved to an address.',
         ],
     ];
 
@@ -64,6 +65,7 @@ final class SsrfGuard
             'no_host'           => 'Refusing to fetch a URL with no hostname.',
             'loopback_host'     => 'Refusing to fetch a loopback or link-local hostname.',
             'private_address'   => 'Refusing to fetch a private or loopback IP.',
+            'unresolvable_host' => 'Refusing to fetch a hostname that could not be resolved to an address.',
         ],
     ];
 
@@ -184,11 +186,12 @@ final class SsrfGuard
             }
         }
 
-        // A name that resolves to nothing is left to the HTTP client, which
-        // will fail with a DNS error. There is nothing to protect against
-        // from a name that never resolves.
+        // A name that resolves to nothing is refused. An empty resolve map
+        // pins nothing, so the client would run its own lookup — and the
+        // second answer can name a private address. Fail closed: only a
+        // name with a vetted address goes on.
         return [
-            'reason' => null,
+            'reason'  => $addresses === [] ? $this->policy['messages']['unresolvable_host'] : null,
             'resolve' => $addresses === [] ? [] : [$host => $addresses[0]],
         ];
     }

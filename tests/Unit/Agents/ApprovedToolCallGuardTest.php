@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
@@ -143,7 +144,7 @@ it('refuses a second proposal that reuses a provider call id', function (): void
     $agent    = Agent::find($agentId);
     $task     = Task::find($taskId);
 
-    $first = new Spora\Drivers\ValueObjects\ToolCall(
+    $first = new DriverToolCall(
         'call_duplicate',
         'stub_two_operation',
         ['action' => 'safe'],
@@ -152,7 +153,7 @@ it('refuses a second proposal that reuses a provider call id', function (): void
     // The first proposal is recorded.
     $executor->executeOrQueue($first, $agent, $task);
 
-    $second = new Spora\Drivers\ValueObjects\ToolCall(
+    $second = new DriverToolCall(
         'call_duplicate',
         'stub_two_operation',
         ['action' => 'safe'],
@@ -162,4 +163,38 @@ it('refuses a second proposal that reuses a provider call id', function (): void
 
     expect($disposition)->toBe(Spora\Agents\ToolCallDisposition::DuplicateCallId)
         ->and(ToolCallModel::where('task_id', $taskId)->count())->toBe(1);
+});
+
+it('allows a call id to be reused once the earlier call has finished', function (): void {
+    [$agentId, $taskId] = approvalGuardSeed();
+
+    // A backend may reuse a call id in a later turn. The earlier call has
+    // run, so nothing is awaiting a decision under that id and the reuse
+    // is not ambiguous.
+    ToolCallModel::create([
+        'task_id'            => $taskId,
+        'agent_id'           => $agentId,
+        'provider_call_id'   => 'call_reused',
+        'tool_name'          => 'stub_two_operation',
+        'tool_class'         => StubTwoOperationTool::class,
+        'tool_type'          => 'output',
+        'operation'          => 'safe',
+        'status'             => 'APPROVED',
+        'proposed_arguments' => ['action' => 'safe'],
+        'executed_at'        => date('Y-m-d H:i:s'),
+        'created_at'         => date('Y-m-d H:i:s'),
+        'updated_at'         => date('Y-m-d H:i:s'),
+    ]);
+
+    $tool = new StubTwoOperationTool();
+    $orchestrator = approvalGuardOrchestrator($tool);
+
+    $disposition = $orchestrator->toolCallExecutor->executeOrQueue(
+        new DriverToolCall('call_reused', 'stub_two_operation', ['action' => 'safe']),
+        Agent::find($agentId),
+        Task::find($taskId),
+    );
+
+    expect($disposition)->not->toBe(Spora\Agents\ToolCallDisposition::DuplicateCallId)
+        ->and(ToolCallModel::where('task_id', $taskId)->count())->toBe(2);
 });
