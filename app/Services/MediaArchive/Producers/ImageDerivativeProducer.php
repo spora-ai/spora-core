@@ -50,7 +50,8 @@ use Throwable;
  * EXIF orientation is applied by the Intervention driver during decode
  * (`autoOrientation = true` is the default), so a portrait iPhone
  * upload lands the right way up regardless of the resize/convert
- * preset chosen.
+ * preset chosen. The EXIF profile itself does not travel with the
+ * derivative — see {@see resolveDriver()}.
  */
 final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
 {
@@ -191,7 +192,16 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
     private function resolveDriver(): DriverInterface
     {
         if (extension_loaded('imagick')) {
-            return new \Intervention\Image\Drivers\Imagick\Driver();
+            $driver = new \Intervention\Image\Drivers\Imagick\Driver();
+
+            // The derivative is served to everyone who can read the
+            // asset, so the source's EXIF profile must not travel with
+            // it — the profile can carry the GPS coordinates of whoever
+            // took the photo. GD needs no equivalent: it writes no
+            // metadata of its own.
+            $driver->config()->strip = true;
+
+            return $driver;
         }
         return new \Intervention\Image\Drivers\Gd\Driver();
     }

@@ -133,6 +133,34 @@ test('format-jpeg re-encodes as JPEG with the source dimensions', function (): v
     expect($out->height)->toBe(480);
 });
 
+test('the derivative carries no EXIF profile from the source', function (): void {
+    if (!extension_loaded('imagick')) {
+        // GD writes no metadata of its own, so only the Imagick driver
+        // can carry a profile into the derivative.
+        $this->markTestSkipped('This environment has no Imagick driver.');
+    }
+
+    // A JPEG whose EXIF profile is a place the camera was.
+    $imagick = new Imagick();
+    $imagick->newImage(64, 48, new ImagickPixel('rgb(200, 120, 60)'));
+    $imagick->setImageFormat('jpeg');
+    $imagick->setImageProfile('exif', "Exif\x00\x00MM\x00*\x00\x00\x00\x08\x00\x00");
+    $bytes = (string) $imagick->getImagesBlob();
+    $imagick->clear();
+
+    expect($bytes)->toContain('Exif');
+
+    $producer = new ImageDerivativeProducer();
+    $source = seedImageAsset($bytes, 'image/jpeg');
+
+    // The derivative is served to everyone who can read the asset, and
+    // an EXIF profile can carry the GPS coordinates of whoever took the
+    // photo.
+    $out = $producer->produce($source, 'format-jpeg');
+
+    expect($out->bytes)->not->toContain('Exif');
+});
+
 test('format-webp re-encodes as WebP with the source dimensions', function (): void {
     $producer = new ImageDerivativeProducer();
     $source = seedImageAsset(makePng(320, 200), 'image/png');
