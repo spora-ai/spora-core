@@ -41,7 +41,7 @@ final class AgentTemplateToolsApplier
      * Walk the template's tools array and return the per-tool summary.
      * For each entry:
      * - tool_class not registered → TOOL_PLUGIN_MISSING warning, no row.
-     * - tool disabled → no row.
+     * - tool disabled → the agent's assignment for that tool is revoked.
      * - tool enabled + missing global config → row + TOOL_NEEDS_CONFIGURATION warning.
      *
      * Returns the tools-enabled list and pushes any per-tool warnings
@@ -108,11 +108,41 @@ final class AgentTemplateToolsApplier
             ];
         }
 
-        if ($toolClass === '' || !(bool) ($toolEntry['enabled'] ?? false)) {
+        if ($toolClass === '') {
+            return $empty;
+        }
+
+        if (!array_key_exists('enabled', $toolEntry)) {
+            // The entry says nothing about the tool, so the agent's
+            // current state stands.
+            return $empty;
+        }
+
+        if (!(bool) $toolEntry['enabled']) {
+            $this->revokeTool($agentId, $toolClass);
             return $empty;
         }
 
         return $this->applyEnabledTool($agentId, $toolClass, $toolEntry, $toolIndex, $warnings);
+    }
+
+    /**
+     * Drop the records that authorise the tool for this agent.
+     *
+     * The `agent_tools` row is the enablement gate the executor checks
+     * before every call, and the operation overrides are the permissions
+     * that ride on it. Leaving them in place would keep a tool the
+     * template just disabled executable.
+     */
+    private function revokeTool(int $agentId, string $toolClass): void
+    {
+        AgentTool::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->delete();
+
+        AgentToolOperationOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->delete();
     }
 
     /**

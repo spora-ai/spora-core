@@ -58,4 +58,24 @@ describe('AgentTemplateValidator::validatePartial', function (): void {
         expect($result->isValid())->toBeFalse();
         expect($result->errors()[0]['code'])->toBe('NAME_INVALID');
     });
+
+    it('refuses a max_steps that is not an integer', function (): void {
+        // The scoped update path is the one that reaches an existing
+        // agent, and it casts the value it accepts.
+        $result = (new AgentTemplateValidator())->validatePartial([
+            'agent' => ['max_steps' => '10000'],
+        ]);
+
+        expect($result->isValid())->toBeFalse();
+        expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_INVALID');
+    });
+
+    it('refuses a max_steps outside the supported range', function (): void {
+        $result = (new AgentTemplateValidator())->validatePartial([
+            'agent' => ['max_steps' => 10000],
+        ]);
+
+        expect($result->isValid())->toBeFalse();
+        expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_RANGE');
+    });
 });

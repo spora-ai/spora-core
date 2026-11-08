@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\HandoverServiceInterface;
+use Spora\Services\PrincipalContext;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\Attributes\Tool;
@@ -127,7 +128,7 @@ final class SubAgentTool extends AbstractTool
         array $arguments,
         int $agentId,
         ?int $taskId = null,
-        ?\Spora\Services\PrincipalContext $context = null,
+        ?PrincipalContext $context = null,
     ): ToolResult {
         $userId = $context?->ownerUserId;
         $op = $this->getOperationName($arguments);
@@ -138,18 +139,23 @@ final class SubAgentTool extends AbstractTool
         // order so the runtime default matches the skill's "default
         // go-to" claim.
         return match ($op) {
-            'handover'           => $this->executeHandover($arguments, $agentId, $userId, $taskId),
-            'sub_agent_continue' => $this->executeContinue($arguments, $agentId, $userId, $taskId),
-            default              => $this->executeSubAgent($arguments, $agentId, $userId, $taskId),
+            'handover'           => $this->executeHandover($arguments, $agentId, $userId, $taskId, $context),
+            'sub_agent_continue' => $this->executeContinue($arguments, $agentId, $userId, $taskId, $context),
+            default              => $this->executeSubAgent($arguments, $agentId, $userId, $taskId, $context),
         };
     }
 
-    private function executeHandover(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
-    {
+    private function executeHandover(
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?int $taskId,
+        ?PrincipalContext $context,
+    ): ToolResult {
         $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
-        $error = $this->validateHandoverInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
+        $error = $this->validateHandoverInputs($targetAgentId, $prompt, $agentId, $userId, $taskId, $context);
         if ($error !== null) {
             return new ToolResult(false, $error);
         }
@@ -183,12 +189,17 @@ final class SubAgentTool extends AbstractTool
         );
     }
 
-    private function executeSubAgent(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
-    {
+    private function executeSubAgent(
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?int $taskId,
+        ?PrincipalContext $context,
+    ): ToolResult {
         $targetAgentId = $this->resolveTargetAgentId($arguments['target_agent_id'] ?? null);
         $prompt        = trim((string) ($arguments['prompt'] ?? ''));
 
-        $error = $this->validateSubAgentInputs($targetAgentId, $prompt, $agentId, $userId, $taskId);
+        $error = $this->validateSubAgentInputs($targetAgentId, $prompt, $agentId, $userId, $taskId, $context);
         if ($error !== null) {
             return new ToolResult(false, $error);
         }
@@ -222,8 +233,13 @@ final class SubAgentTool extends AbstractTool
         );
     }
 
-    private function executeContinue(array $arguments, int $agentId, ?int $userId, ?int $taskId): ToolResult
-    {
+    private function executeContinue(
+        array $arguments,
+        int $agentId,
+        ?int $userId,
+        ?int $taskId,
+        ?PrincipalContext $context,
+    ): ToolResult {
         $childTaskId = $this->resolveChildTaskId($arguments['task_id'] ?? null);
         $prompt      = trim((string) ($arguments['prompt'] ?? ''));
 
@@ -240,7 +256,7 @@ final class SubAgentTool extends AbstractTool
         // The operator's trust boundary applies to a continuation too: the
         // child's agent has to be on the allowlist, and the LLM cannot
         // name a task that lives on an agent the operator never approved.
-        if ($error === null && !$this->isTargetAllowed((int) $child->agent_id, $agentId, $userId)) {
+        if ($error === null && !$this->isTargetAllowed((int) $child->agent_id, $agentId, $userId, $context)) {
             $error = self::TARGET_NOT_ALLOWED;
         }
 
@@ -272,27 +288,39 @@ final class SubAgentTool extends AbstractTool
         );
     }
 
-    private function validateHandoverInputs(int $targetAgentId, string $prompt, int $agentId, ?int $userId, ?int $taskId): ?string
-    {
+    private function validateHandoverInputs(
+        int $targetAgentId,
+        string $prompt,
+        int $agentId,
+        ?int $userId,
+        ?int $taskId,
+        ?PrincipalContext $context,
+    ): ?string {
         return match (true) {
             $targetAgentId <= 0 => 'target_agent_id is required.',
             $prompt === ''      => self::PROMPT_REQUIRED,
             $userId === null    => 'Handover requires an authenticated user.',
             $taskId === null    => 'Handover requires a current task context.',
-            !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
+            !$this->isTargetAllowed($targetAgentId, $agentId, $userId, $context)
                 => self::TARGET_NOT_ALLOWED,
             default => null,
         };
     }
 
-    private function validateSubAgentInputs(int $targetAgentId, string $prompt, int $agentId, ?int $userId, ?int $taskId): ?string
-    {
+    private function validateSubAgentInputs(
+        int $targetAgentId,
+        string $prompt,
+        int $agentId,
+        ?int $userId,
+        ?int $taskId,
+        ?PrincipalContext $context,
+    ): ?string {
         return match (true) {
             $targetAgentId <= 0 => 'target_agent_id is required.',
             $prompt === ''      => self::PROMPT_REQUIRED,
             $userId === null    => 'Sub-agent requires an authenticated user.',
             $taskId === null    => 'Sub-agent requires a current task context.',
-            !$this->isTargetAllowed($targetAgentId, $agentId, $userId)
+            !$this->isTargetAllowed($targetAgentId, $agentId, $userId, $context)
                 => self::TARGET_NOT_ALLOWED,
             default => null,
         };
@@ -363,20 +391,37 @@ final class SubAgentTool extends AbstractTool
      * `callerControlsPrincipal` check. Fail-closed when the source agent
      * cannot be loaded.
      */
-    private function isTargetAllowed(int $targetAgentId, int $agentId, ?int $userId): bool
-    {
+    private function isTargetAllowed(
+        int $targetAgentId,
+        int $agentId,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): bool {
         if ($userId === null) {
             return false;
         }
-        if (!$this->isTargetOnAllowlist($targetAgentId, $agentId, $userId)) {
+        if (!$this->isTargetOnAllowlist($targetAgentId, $agentId, $userId, $context)) {
             return false;
         }
         return $this->sharePrincipal($targetAgentId, $agentId);
     }
 
-    private function isTargetOnAllowlist(int $targetAgentId, int $agentId, int $userId): bool
-    {
-        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId);
+    /**
+     * Read the delegation allowlist through the execution's context.
+     *
+     * The setting belongs to the *agent*, so it has to be resolved against
+     * the agent's principal. Omitting the context lets the cascade fall
+     * back to the paying owner's principals — a different set — and a
+     * group agent's group-level `allowed_target_agents` is then invisible
+     * while the owner's personal list decides instead.
+     */
+    private function isTargetOnAllowlist(
+        int $targetAgentId,
+        int $agentId,
+        int $userId,
+        ?PrincipalContext $context,
+    ): bool {
+        $settings = $this->config->getEffectiveSettings(self::class, $agentId, $userId, $context);
         $allowed  = $settings['allowed_target_agents'] ?? [];
         return is_array($allowed)
             && in_array($targetAgentId, array_map('intval', $allowed), true);
