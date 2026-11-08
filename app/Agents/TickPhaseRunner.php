@@ -190,7 +190,13 @@ final class TickPhaseRunner
                 ? json_decode((string) $row->getAttribute('approved_arguments'), true, 512, JSON_THROW_ON_ERROR)
                 : (array) $row->getAttribute('approved_arguments');
             $toolName      = (string) $row->getAttribute('tool_name');
-            $operationName = $operationMap[$providerCallId] ?? null;
+
+            // The row's own operation first. A reused call id makes the map
+            // ambiguous — it would name the other call's operation.
+            $ownOperation = $row->getAttribute('operation');
+            $operationName = is_string($ownOperation) && $ownOperation !== ''
+                ? $ownOperation
+                : ($operationMap[$providerCallId] ?? null);
 
             $this->approvedToolExecutor()->execute($task, $row, $providerCallId, $toolName, $approvedArgs, $operationName);
         }

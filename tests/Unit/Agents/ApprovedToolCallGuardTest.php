@@ -198,3 +198,51 @@ it('allows a call id to be reused once the earlier call has finished', function 
     expect($disposition)->not->toBe(Spora\Agents\ToolCallDisposition::DuplicateCallId)
         ->and(ToolCallModel::where('task_id', $taskId)->count())->toBe(2);
 });
+
+it('keeps the finished call\'s outcome when a later call reuses its id', function (): void {
+    [$agentId, $taskId] = approvalGuardSeed();
+
+    // The call that already ran, under the id a later call reuses.
+    $finished = ToolCallModel::create([
+        'task_id'            => $taskId,
+        'agent_id'           => $agentId,
+        'provider_call_id'   => 'call_reused',
+        'tool_name'          => 'stub_two_operation',
+        'tool_class'         => StubTwoOperationTool::class,
+        'tool_type'          => 'output',
+        'operation'          => 'safe',
+        'status'             => 'APPROVED',
+        'proposed_arguments' => ['action' => 'safe'],
+        'result_content'     => 'the first call\'s result',
+        'executed_at'        => date('Y-m-d H:i:s'),
+        'created_at'         => date('Y-m-d H:i:s'),
+        'updated_at'         => date('Y-m-d H:i:s'),
+    ]);
+
+    // The later call, approved and waiting to run.
+    $reused = ToolCallModel::create([
+        'task_id'            => $taskId,
+        'agent_id'           => $agentId,
+        'provider_call_id'   => 'call_reused',
+        'tool_name'          => 'stub_two_operation',
+        'tool_class'         => StubTwoOperationTool::class,
+        'tool_type'          => 'output',
+        'operation'          => 'safe',
+        'status'             => 'APPROVED',
+        'proposed_arguments' => ['action' => 'safe'],
+        'approved_arguments' => ['action' => 'safe'],
+        'executed_at'        => null,
+        'created_at'         => date('Y-m-d H:i:s'),
+        'updated_at'         => date('Y-m-d H:i:s'),
+    ]);
+
+    $tool = new StubTwoOperationTool();
+    $orchestrator = approvalGuardOrchestrator($tool);
+
+    $orchestrator->tick($taskId);
+
+    // The worker ran the approved call; the finished one keeps its result.
+    expect($tool->dispatchedOperation)->toBe('safe')
+        ->and($reused->fresh()->result_content)->toContain('two_operation_safe')
+        ->and($finished->fresh()->result_content)->toBe('the first call\'s result');
+});

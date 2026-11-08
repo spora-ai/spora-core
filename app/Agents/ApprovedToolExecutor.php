@@ -51,14 +51,14 @@ final class ApprovedToolExecutor
             ?? $this->operationRejectionReason($task, $toolInstance, $approvedArgs, $operationName, $toolName);
 
         if ($rejectReason !== null) {
-            $this->recordRevokedToolCall($task, $providerCallId, $toolName, $rejectReason);
+            $this->recordRevokedToolCall($task, $row, $toolName, $rejectReason);
             return;
         }
 
         try {
             SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
         } catch (Throwable $e) {
-            $this->recordApprovedFailure($task, $providerCallId, $toolName, 'Validation Error: ' . $e->getMessage());
+            $this->recordApprovedFailure($task, $row, $toolName, 'Validation Error: ' . $e->getMessage());
             return;
         }
 
@@ -143,13 +143,14 @@ final class ApprovedToolExecutor
 
         // Query-builder update() bypasses Eloquent's `array` cast on `approved_arguments`,
         // which would double-encode the JSON string. Same anti-pattern PR #150 fixed.
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'result_content' => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
+        //
+        // The write names the row, not the call id: a later proposal may reuse
+        // the id, and the completed call keeps the outcome it had.
+        ToolCallModel::where('id', $row->id)->update([
+            'result_content' => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+            'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
+            'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+        ]);
 
         if ($toolInstance instanceof AskUserQuestionTool) {
             // An approved question still has to park the task on its
@@ -183,28 +184,29 @@ final class ApprovedToolExecutor
      * no single user-actor in this column's model. The reason lives in
      * `reject_reason` and in the appended history row, which is what the
      * LLM sees on its next round-trip.
+     *
+     * The write names the row, not the call id: a later proposal may reuse
+     * the id, and a completed call keeps the outcome it had.
      */
     private function recordRevokedToolCall(
         Task $task,
-        string $providerCallId,
+        ToolCallModel $row,
         string $toolName,
         string $rejectReason,
     ): void {
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'status'        => 'REJECTED',
-                'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-                'rejected_by'   => null,
-                'reject_reason' => $rejectReason,
-            ]);
+        ToolCallModel::where('id', $row->id)->update([
+            'status'        => 'REJECTED',
+            'rejected_at'   => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+            'rejected_by'   => null,
+            'reject_reason' => $rejectReason,
+        ]);
 
         $this->orchestrator->appendHistory(
             taskId: $task->id,
             role: 'tool',
             content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
             context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
+                toolCallId: (string) $row->provider_call_id,
                 toolName: $toolName,
             ),
         );
@@ -212,25 +214,23 @@ final class ApprovedToolExecutor
 
     private function recordApprovedFailure(
         Task $task,
-        string $providerCallId,
+        ToolCallModel $row,
         string $toolName,
         string $message,
     ): void {
         $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($message));
 
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'result_content' => $scrubbed,
-                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
+        ToolCallModel::where('id', $row->id)->update([
+            'result_content' => $scrubbed,
+            'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
+        ]);
 
         $this->orchestrator->appendHistory(
             taskId: $task->id,
             role: 'tool',
             content: $scrubbed,
             context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
+                toolCallId: (string) $row->provider_call_id,
                 toolName: $toolName,
             ),
         );
