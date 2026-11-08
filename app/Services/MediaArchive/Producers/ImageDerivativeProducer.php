@@ -50,14 +50,11 @@ use Throwable;
  * EXIF orientation is applied by the Intervention driver during decode
  * (`autoOrientation = true` is the default), so a portrait iPhone
  * upload lands the right way up regardless of the resize/convert
- * preset chosen. Metadata (including EXIF tags and colour profiles)
- * is stripped on encode via the dedicated `strip = true` driver
- * config so the operator's derivative doesn't leak GPS coordinates
- * the way the upload sometimes does.
+ * preset chosen.
  */
 final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
 {
-    /** Pillow: lowercase MIMEs, no trailing parameters. */
+    /** Lowercase MIME types, no trailing parameters. */
     private const SUPPORTED_SOURCE_MIMES = [
         'image/png',
         'image/jpeg',
@@ -189,9 +186,7 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
      * Pick the GD or Imagick driver based on what's loaded. Imagick
      * wins when present — better quality resampling and animated
      * WebP/GIF support — and the producer degrades gracefully to GD
-     * on barebones installs. `strip = true` drops EXIF and other
-     * metadata from the encoded output so the derivative doesn't
-     * leak coordinates the way the upload sometimes does.
+     * on barebones installs.
      */
     private function resolveDriver(): DriverInterface
     {

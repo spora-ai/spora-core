@@ -16,7 +16,7 @@ use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
  * Sonar S1448 20-method cap, the same reason the ingest pipeline lives in
  * {@see MediaArchiveIngestPipeline}.
  *
- * Three concerns, one because they are the tree's:
+ * The concerns, one because they are the tree's:
  *
  *   - the subtree of a folder, and the paths each descendant takes under
  *     a new root path;

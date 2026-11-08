@@ -35,7 +35,7 @@ use Throwable;
  * its own `display_name` that surfaces in the Capability endpoint and
  * the recording button.
  *
- * v1 trade-offs (per the plan):
+ * v1 trade-offs:
  *
  *  - No `diarize`, `context_bias[]`, `file_id`, or `file_url` fields.
  *    If a future operator needs Mistral's `diarize`, a thin subclass of
@@ -43,16 +43,15 @@ use Throwable;
  *    `extendMultipartBody(array $body, array $settings): array` hook that
  *    a future patch can introduce without disturbing the v1 schema.
  *  - One config per Capability endpoint row. Multi-config view lives in
- *    the operator-facing `/settings/speech` page (separate plan).
- *  - Optimistic {@see isConfigured()} — the real key check happens at
- *    transcribe time so settings edited via the UI after registry
- *    construction are picked up on the next call (matches the
- *    `MistralTranscribeProvider::isConfigured()` contract).
+ *    the operator-facing `/settings/speech` page.
+ *  - {@see isConfigured()} — optimistic on the legacy path, where the real
+ *    key check happens at transcribe time so settings edited via the UI
+ *    after registry construction are picked up on the next call. On the
+ *    v2-cascade path the gate is the bound `api_key` instead.
  *
  * Operators who set their API key via direct SQL inserts into the
- * `tool_configurations` table during the v1 testing window need to
- * manually re-create the config in the operator UI post-upgrade. There
- * is no auto-migration; this is documented at the call site.
+ * `tool_configurations` table need to re-create the config in the
+ * operator UI; there is no auto-migration.
  */
 #[ToolSetting(
     key: 'api_key',
@@ -150,7 +149,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * {@see \Spora\Services\SpeechProviderConfigPersistence::decodeSettings()})
      * so {@see transcribe()} and {@see isConfigured()} consult the
      * `speech_provider_configurations` cascade — the single source of
-     * truth post-{@see https://github.com/spora-ai/spora-core/pull/238 PR #238}.
+     * truth for the v2 rows.
      * Falls back to `ToolConfigService` only when no bound settings
      * are present (legacy v1 `tool_user_settings` operators keep
      * working without an admin-side re-save). The registry resets
@@ -299,8 +298,8 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
 
     /**
      * Read a string setting with trim/empty fallback to `$default`.
-     * Shared by every non-key, non-language text setting so the
-     * trim+is_string+empty-default dance lives in one place.
+     * Shared by every text setting so the trim+is_string+empty-default
+     * dance lives in one place.
      *
      * @param array<string, mixed> $settings
      */
@@ -349,8 +348,9 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 if (isset($part['filename'], $part['contents']) && is_string($part['contents']) && is_file($part['contents'])) {
                     // File field — open the temp file so Symfony's
                     // `normalizeBody()` sees a `resource` and emits a
-                    // proper multipart body. Reaps the handle in the
-                    // finally below so it survives across the call.
+                    // proper multipart body. The handle has to stay open
+                    // until the request is dispatched, so it is closed in
+                    // the finally below rather than here.
                     $openedStreams[] = $handle = fopen((string) $part['contents'], 'rb');
                     $body[$name] = $handle;
                 } else {

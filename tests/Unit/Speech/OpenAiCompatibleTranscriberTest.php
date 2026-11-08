@@ -89,6 +89,8 @@ test('bindLabel() caches the label; getName/getDisplayName return it', function 
 });
 
 test('isConfigured() is optimistic — always true; the real key check happens at transcribe()', function (): void {
+    // Without bound v2 settings the gate stays optimistic; the v2 path
+    // gates on the bound `api_key` instead.
     $provider = buildOaiProvider([]);
     expect($provider->isConfigured())->toBeTrue();
 });

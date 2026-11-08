@@ -262,8 +262,9 @@ final class MediaArchiveService
         }
         if ($query->search !== null && trim($query->search) !== '') {
             $term = '%' . trim($query->search) . '%';
-            // Escape LIKE wildcards so user-typed terms do not act as SQL
-            // patterns; the substring match itself stays functional.
+            // Escape LIKE wildcards for the UUID match, so a user-typed
+            // `%` does not act as a SQL pattern there; the substring
+            // match itself stays functional.
             $escaped = addcslashes(trim($query->search), '%_\\');
             $prefixed = '%' . $escaped . '%';
             $builder->where(function (Builder $q) use ($term, $prefixed): void {

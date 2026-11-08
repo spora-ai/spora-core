@@ -72,8 +72,6 @@ afterEach(function (): void {
 });
 
 /**
- * The files the store wrote.
- *
  * @return list<string>
  */
 function storedAssetFiles(string $storageDir): array

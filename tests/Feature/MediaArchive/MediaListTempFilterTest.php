@@ -101,7 +101,6 @@ test('list excludes temp rows by default', function (): void {
     seedTempAsset(1, (int) $agent->id, true, 'temp');
     seedTempAsset(1, (int) $agent->id, false, 'perm');
 
-    // Default includeTemporary=false → only the permanent row survives.
     $page = $service->list(new ListMediaQuery(agentOwnerUserId: 1));
     expect($page->total())->toBe(1);
     $items = collect($page->items());

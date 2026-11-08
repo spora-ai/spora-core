@@ -13,13 +13,11 @@ use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
- * Unit coverage for {@see MediaArchiveUrlResolver} — the URL-branch
- * half of {@see \Spora\Services\MediaArchive\MediaArchiveService}
- * extracted in PR #125 to keep the orchestrator under Sonar's
- * 20-method-per-class threshold. Covers the four resolve() outcomes
- * (local promote, external fallback on promotion off, oversize
- * Content-Length, fetch exception) and the sniffForExternal()
- * precedence chain.
+ * Unit coverage for {@see MediaArchiveUrlResolver} — the URL branch of
+ * the archive's ingest, extracted from
+ * {@see \Spora\Services\MediaArchive\MediaArchiveService} so that service
+ * stays under Sonar's 20-method-per-class threshold. Covers the
+ * resolve() outcomes and the sniffForExternal() precedence chain.
  */
 function makeUrlResolver(MockHttpClient $client, bool $promoteExternal = true, int $maxBytes = 100 * 1024 * 1024): MediaArchiveUrlResolver
 {

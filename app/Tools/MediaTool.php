@@ -79,9 +79,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           natural key `(parent_id, format, producer_plugin,
  *                           producer_operation)` — re-rendering returns
  *                           the same derivative id, which is what makes a
- *                           blind retry safe. Enabled and auto-approved, which
- *                           this release made explicit rather than
- *                           incidental: the natural key is a DB-enforced
+ *                           blind retry safe. Enabled and auto-approved:
+ *                           the natural key is a DB-enforced
  *                           UNIQUE index, so a retry cannot duplicate and a
  *                           loop cannot grow the row count; the derivative is
  *                           derived from a parent the agent already owns, it
@@ -318,7 +317,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 final class MediaTool extends AbstractTool
 {
-    /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
+    /** Single error string used for asset-not-found / not-in-scope responses. */
     private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
 
     /**
@@ -378,7 +377,7 @@ final class MediaTool extends AbstractTool
             'create_derivative' => $this->createDerivative($arguments, $agentId, $userId, $context),
             // Straight from the match, no `createMedia()` wrapper: the
             // handler extraction exists to keep this class under the
-            // per-method budget, and a 21st method would undo it.
+            // per-method budget, and a new method here would undo it.
             'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
             'list_folders', 'create_folder', 'rename_folder', 'delete_folder', 'file_asset', 'search_assets'
                 => $this->folderHandler->run($operation, $principalId, $arguments),

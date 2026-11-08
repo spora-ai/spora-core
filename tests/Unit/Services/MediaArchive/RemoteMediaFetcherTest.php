@@ -153,8 +153,9 @@ describe('RemoteMediaFetcher::probe', function (): void {
     });
 
     it('returns httpStatus=0 + null fields when the transport throws', function (): void {
-        // MockHttpClient throws when the response factory throws — wrap a
-        // callable that returns a MockResponse that signals an error.
+        // A MockResponse carrying an `error` option simulates a
+        // network-level failure — the probe catches it and reports no
+        // status.
         $client = new MockHttpClient([
             new MockResponse('', ['error' => 'Connection refused']),
         ]);
@@ -369,12 +370,9 @@ final class WatchedHttpClient implements HttpClientInterface
 {
     public WatchedResponse $response;
 
-    /** The chunks the fetcher pulled out of the stream. */
     public int $chunksStreamed = 0;
 
     /**
-     * Every request the fetcher made, with the options it sent.
-     *
      * @var list<array{method: string, url: string, options: array<string, mixed>}>
      */
     public array $requests = [];
