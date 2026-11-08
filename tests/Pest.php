@@ -137,6 +137,19 @@ function claimAndTick(Spora\Agents\OrchestratorInterface $orchestrator, int $tas
 }
 
 /**
+ * Hold the worker lock file the way a running worker does, and record a pid
+ * as its holder. Returns the descriptor so the test can release it.
+ */
+function holdWorkerLockFile(string $lockFile, int $holderPid): mixed
+{
+    $fd = fopen($lockFile, 'c');
+    flock($fd, LOCK_EX | LOCK_NB);
+    file_put_contents($lockFile, (string) $holderPid);
+
+    return $fd;
+}
+
+/**
  * Invoke a controller method through the middleware pipeline (for testing).
  * This mimics what Router::handleFound() does at runtime.
  *

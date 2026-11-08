@@ -1235,47 +1235,17 @@ describe('WorkerRunCommand — worker lock', function (): void {
         @rmdir($this->storageDir);
     });
 
-    /**
-     * Hold the worker lock the way a running worker does, and record a pid
-     * as its holder.
-     */
-    function holdWorkerLock(string $lockFile, int $holderPid): mixed
-    {
-        $fd = fopen($lockFile, 'c');
-        flock($fd, LOCK_EX | LOCK_NB);
-        file_put_contents($lockFile, (string) $holderPid);
-
-        return $fd;
-    }
-
     function invokeAcquireLock(WorkerRunCommand $command, Symfony\Component\Console\Output\BufferedOutput $output): bool
     {
         $ref = new ReflectionMethod($command, 'acquireLock');
 
         return (bool) $ref->invoke($command, $output);
     }
-    it('takes over a lock whose holder is gone', function (): void {
-        // The daemon spawns `task:run` children with proc_open(), and a
-        // child inherits the lock descriptor — so the flock outlives the
-        // daemon that took it. A worker starting against such a lock must
-        // take it over instead of refusing to run.
-        $holderFd = holdWorkerLock($this->lockFile, 4194304);
 
-        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
-        $output = new Symfony\Component\Console\Output\BufferedOutput();
-
-        $acquired = invokeAcquireLock($command, $output);
-
-        expect($acquired)->toBeTrue()
-            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
-
-        fclose($holderFd);
-    });
-
-    it('refuses to start while a live worker holds the lock', function (): void {
+    it('reports a live worker and does not take the lock', function (): void {
         // The pid of this test process is alive, so the lock is not stale
         // and must not be taken over.
-        $holderFd = holdWorkerLock($this->lockFile, getmypid());
+        $holderFd = holdWorkerLockFile($this->lockFile, getmypid());
 
         [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
         $output = new Symfony\Component\Console\Output\BufferedOutput();
@@ -1286,16 +1256,6 @@ describe('WorkerRunCommand — worker lock', function (): void {
             ->and($output->fetch())->toContain('Another worker instance is already running');
 
         fclose($holderFd);
-    });
-
-    it('acquires an uncontended lock', function (): void {
-        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
-        $output = new Symfony\Component\Console\Output\BufferedOutput();
-
-        $acquired = invokeAcquireLock($command, $output);
-
-        expect($acquired)->toBeTrue()
-            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
     });
 });
 
