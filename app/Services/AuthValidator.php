@@ -47,6 +47,27 @@ final class AuthValidator
         return $this->error('UNAUTHENTICATED', self::MSG_AUTHENTICATION_REQUIRED, Response::HTTP_UNAUTHORIZED);
     }
 
+    /**
+     * Refuse a request that does not carry a JSON body.
+     *
+     * A cross-site form can only send `text/plain`,
+     * `application/x-www-form-urlencoded` or `multipart/form-data` without a
+     * CORS preflight, so a JSON-only endpoint cannot be reached from another
+     * origin by a form. The login endpoint must not be reachable that way: a
+     * form could otherwise log the victim's browser into an account the
+     * attacker owns.
+     *
+     * @return JsonResponse|null null when the content type is acceptable
+     */
+    public function requireJsonContentType(Request $request): ?JsonResponse
+    {
+        if ($request->getContentTypeFormat() === 'json') {
+            return null;
+        }
+
+        return $this->error('UNSUPPORTED_MEDIA_TYPE', 'The request body must be sent as application/json.', Response::HTTP_UNSUPPORTED_MEDIA_TYPE);
+    }
+
     public function invalidJson(): JsonResponse
     {
         return $this->error('INVALID_JSON', self::MSG_INVALID_JSON, Response::HTTP_BAD_REQUEST);

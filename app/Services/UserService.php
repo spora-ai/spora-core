@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Delight\Auth\Role;
+use Delight\Auth\Status;
 use Illuminate\Support\Carbon;
 use Spora\Models\User;
 use Spora\Models\UserLocation;
@@ -86,7 +87,15 @@ final class UserService implements UserServiceInterface
         }
 
         if (array_key_exists('suspended', $data)) {
-            $user->force_logout = $data['suspended'] ? 1 : 0;
+            // The account state lives in `status`; the auth library keeps
+            // `force_logout` as the revocation counter it compares against
+            // the session, so it only ever moves forward. Suspending twice
+            // therefore revokes the sessions opened in between.
+            $suspended = (bool) $data['suspended'];
+            $user->status = $suspended ? Status::SUSPENDED : Status::NORMAL;
+            if ($suspended) {
+                $user->force_logout = (int) $user->force_logout + 1;
+            }
         }
 
         if (array_key_exists('verified', $data)) {
@@ -310,6 +319,7 @@ final class UserService implements UserServiceInterface
             'name'     => $user->name,
             'roles'    => $roles,
             'verified' => (bool) $user->verified,
+            'suspended' => (int) $user->status === Status::SUSPENDED,
             'registered' => (int) $user->registered,
             'is_admin' => in_array('ADMIN', $roles, true),
             // Embedded so every `getUser`/`getUsers` consumer (admin

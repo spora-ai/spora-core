@@ -124,12 +124,14 @@ final class AuthEmailFlow
 
     /**
      * Initiate a password reset for the given email address.
+     *
+     * The link is built on `$baseUrl` rather than on the detected origin: it
+     * carries the reset credential, so the host it names decides who gets it.
      */
-    public function forgotPassword(string $email): void
+    public function forgotPassword(string $email, string $baseUrl): void
     {
-        $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
+        $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email, $baseUrl): void {
             if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
                 $resetUrl = "{$baseUrl}{$this->appPrefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
             }

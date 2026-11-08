@@ -32,6 +32,25 @@ test('detect strips trailing slash from config app_url', function (): void {
     expect(RequestOrigin::detect(new Config(['SPORA_APP_URL' => 'https://spora.fabiangrassl.de/'])))->toBe('https://spora.fabiangrassl.de');
 });
 
+// configured(Config $config)
+
+test('configured returns null when the app URL is only auto-detected', function (): void {
+    $_SERVER['HTTP_HOST'] = 'spora.example.com';
+
+    $config = new Config(['SPORA_APP_URL' => 'http://spora.example.com']);
+
+    expect(RequestOrigin::configured($config))->toBeNull();
+});
+
+test('configured returns the origin the operator pinned', function (): void {
+    $config = new Config(
+        ['SPORA_APP_URL' => 'https://spora.fabiangrassl.de/'],
+        ['SPORA_APP_URL' => Config::SOURCE_CONFIG_FILE],
+    );
+
+    expect(RequestOrigin::configured($config))->toBe('https://spora.fabiangrassl.de');
+});
+
 test('detect does NOT read SPOra_APP_URL from $_ENV (config system owns it)', function (): void {
     // Security regression test: RequestOrigin MUST NOT bypass the framework
     // config system by reading $_ENV directly. config.php and SPORA_APP_URL

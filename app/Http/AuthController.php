@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\Core\RequestOrigin;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
@@ -72,6 +73,11 @@ final class AuthController
 
         if ($this->isRateLimited($clientIp)) {
             return $this->rateLimitedResponse($clientIp);
+        }
+
+        $unsupportedMediaType = $this->validator->requireJsonContentType($request);
+        if ($unsupportedMediaType instanceof JsonResponse) {
+            return $unsupportedMediaType;
         }
 
         return $this->withRateLimitHeaders(
@@ -167,7 +173,16 @@ final class AuthController
             return $this->rateLimitedResponse($clientIp);
         }
 
-        return $this->workflow->handleForgotPassword($request, $clientIp);
+        $baseUrl = RequestOrigin::configured($this->config);
+        if ($baseUrl === null) {
+            return $this->validator->error(
+                'PASSWORD_RECOVERY_UNAVAILABLE',
+                'Password recovery needs the application URL to be configured. Set SPORA_APP_URL and try again.',
+                Response::HTTP_SERVICE_UNAVAILABLE,
+            );
+        }
+
+        return $this->workflow->handleForgotPassword($request, $clientIp, $baseUrl);
     }
 
     public function resetPassword(Request $request): JsonResponse
