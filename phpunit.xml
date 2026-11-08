@@ -26,7 +26,13 @@
         <!-- Raise the per-process memory limit so the full ~2504-test
              suite (which forks per pest workers) finishes without the
              PHPUnit "Premature end of PHP process" error that the
-             default 128M hits on the longest test groups. -->
-        <ini name="memory_limit" value="1G"/>
+             default 128M hits on the longest test groups.
+
+             The coverage job also merges every worker's coverage data in
+             the parent process, and that parent needs more headroom than
+             a worker does: the payload grows with the size of `app/`, and
+             a merge that runs out of memory loses the whole report
+             ("Failed to unserialize coverage data"). -->
+        <ini name="memory_limit" value="2G"/>
     </php>
 </phpunit>
