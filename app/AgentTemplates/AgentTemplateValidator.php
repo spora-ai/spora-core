@@ -248,7 +248,7 @@ final class AgentTemplateValidator
             ]);
         }
 
-        if (isset($agent['max_steps'])) {
+        if (array_key_exists('max_steps', $agent)) {
             $this->validateMaxSteps($agent['max_steps'], $result);
         }
     }
@@ -258,7 +258,7 @@ final class AgentTemplateValidator
      * to be an integer inside the supported range. A numeric string is
      * refused rather than cast: the updater casts whatever it is given,
      * so a string that skipped this check would persist as the budget it
-     * spells.
+     * spells — and `null` would persist as `0`, a budget no task may run.
      */
     private function validateMaxSteps(mixed $value, ValidationResult $result): void
     {

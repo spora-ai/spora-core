@@ -93,11 +93,9 @@ final class AgentPictureController
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
 
-        if (!$this->canManagePicture($agent, $userId)) {
-            return $this->forbidden('FORBIDDEN', 'You cannot manage the picture of this agent.');
-        }
-
-        return $agent;
+        return $this->canManagePicture($agent, $userId)
+            ? $agent
+            : $this->forbidden('FORBIDDEN', 'You cannot manage the picture of this agent.');
     }
 
     /**

@@ -145,28 +145,21 @@ final readonly class SpeechToTextCascadeResolver
 
     private function loadAgentSpeechConfig(int $agentId): ?SpeechProviderConfiguration
     {
-        if ($agentId <= 0) {
-            return null;
-        }
-        $agent = Agent::find($agentId);
+        $agent = $agentId > 0 ? Agent::find($agentId) : null;
         if ($agent === null || $agent->speech_driver_config_id === null) {
             return null;
         }
 
         $config = SpeechProviderConfiguration::find($agent->speech_driver_config_id);
-        if ($config === null) {
-            return null;
-        }
 
         // The override belongs to the agent's own principal (or is
         // global) — the same scope the preference tiers use. A reference
         // to another principal's configuration would spend their
         // provider account.
-        if (!$config->is_global && (int) $config->principal_id !== (int) $agent->principal_id) {
-            return null;
-        }
+        $belongsToAgent = $config !== null
+            && ($config->is_global || (int) $config->principal_id === (int) $agent->principal_id);
 
-        return $config;
+        return $belongsToAgent ? $config : null;
     }
 
     /**

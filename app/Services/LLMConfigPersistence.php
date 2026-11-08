@@ -269,25 +269,27 @@ final class LLMConfigPersistence
             return null;
         }
 
+        return $this->isEditableConfiguration($config, $callerUserId, $isAdmin) ? $config : null;
+    }
+
+    /**
+     * Whether the caller may change this configuration.
+     *
+     * A global configuration is admin-only, and a principal-scoped one
+     * belongs to the principal that pays for it. Read visibility
+     * through group membership is not edit authority: an ordinary
+     * member who can see the group's configuration must not be able
+     * to repoint its provider endpoint while the stored API key
+     * stays behind.
+     */
+    private function isEditableConfiguration(LLMDriverConfiguration $config, int $callerUserId, bool $isAdmin): bool
+    {
         if ($isAdmin) {
-            return $config;
+            return true;
         }
 
-        // A global configuration is admin-only, and a principal-scoped one
-        // belongs to the principal that pays for it. Read visibility
-        // through group membership is not edit authority: an ordinary
-        // member who can see the group's configuration must not be able
-        // to repoint its provider endpoint while the stored API key
-        // stays behind.
-        if ($config->is_global) {
-            return null;
-        }
-
-        if (!$this->principalResolver->canManagePrincipal((int) $config->principal_id, $callerUserId)) {
-            return null;
-        }
-
-        return $config;
+        return !$config->is_global
+            && $this->principalResolver->canManagePrincipal((int) $config->principal_id, $callerUserId);
     }
 
     private function applyConfigurationUpdates(LLMDriverConfiguration $config, array $data): ?bool
