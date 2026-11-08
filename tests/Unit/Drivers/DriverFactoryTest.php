@@ -57,6 +57,7 @@ test('makeFromAgent uses agent-specific llm_driver_config_id', function (): void
 
     $agent = new Agent();
     $agent->id = 1;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $config->id;
 
@@ -124,6 +125,7 @@ test('makeFromAgent returns Anthropic driver when that config is set on agent', 
 
     $agent = new Agent();
     $agent->id = 4;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $config->id;
 
@@ -156,6 +158,7 @@ test('makeFromAgent uses agent config over global default', function (): void {
 
     $agent = new Agent();
     $agent->id = 5;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->name = 'Test';
     $agent->llm_driver_config_id = $agentConfig->id;
 
@@ -190,6 +193,7 @@ test('makeDriverFromConfig passes per-LLM-config timeout to the driver', functio
 
     $agent = new Agent();
     $agent->id = 99;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->name = 'Timeout Test';
     $agent->llm_driver_config_id = $config->id;
 
@@ -220,6 +224,7 @@ test('makeDriverFromConfig uses global llmTimeout when config has no timeout', f
 
     $agent = new Agent();
     $agent->id = 100;
+    $agent->principal_id = createUserPrincipalPublic(1);
     $agent->name = 'Timeout Test';
     $agent->llm_driver_config_id = $config->id;
 

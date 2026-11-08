@@ -232,9 +232,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
 
     public function updateConfiguration(int $configId, int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        unset($userId);
-
-        return $this->persistence->updateConfiguration($configId, $data, $isAdmin);
+        return $this->persistence->updateConfiguration($configId, $userId, $data, $isAdmin);
     }
 
     public function deleteConfiguration(int $configId, int $userId, bool $isAdmin): bool

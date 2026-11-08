@@ -221,28 +221,37 @@ final class LlmConfigValidator
     public function resolveAccessibleConfig(int $id, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
     {
         $config = $this->service->getConfiguration($id, $userId ?? 0, $isAdmin);
-        if ($config !== null) {
+        if ($config === null) {
+            $config = $this->service->findConfiguration($id);
+            if ($config === null) {
+                return $this->notFound();
+            }
+        }
+
+        return $this->authorizeNonOwnerAccess($config, $userId, $isAdmin);
+    }
+
+    /**
+     * Editing a configuration needs management authority over the
+     * principal that owns it. Being able to *see* it — an ordinary
+     * member of the owning group sees it through the group's principal —
+     * is not that authority.
+     */
+    private function authorizeNonOwnerAccess(LLMDriverConfiguration $config, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
+    {
+        if ($isAdmin) {
             return $config;
         }
 
-        $existingConfig = $this->service->findConfiguration($id);
-        if ($existingConfig === null) {
-            return $this->notFound();
-        }
-
-        return $this->authorizeNonOwnerAccess($existingConfig, $userId, $isAdmin);
-    }
-
-    private function authorizeNonOwnerAccess(LLMDriverConfiguration $config, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
-    {
-        if (!$isAdmin && $config->is_global) {
+        if ($config->is_global) {
             return $this->forbidden();
         }
-        if ($config->principal_id !== null && ($userId === null || !$this->principalResolver->isPrincipalOwner($userId, (int) $config->principal_id))) {
-            return $this->notFound();
-        }
 
-        return $config;
+        $mayManage = $userId !== null
+            && $config->principal_id !== null
+            && $this->principalResolver->canManagePrincipal((int) $config->principal_id, $userId);
+
+        return $mayManage ? $config : $this->notFound();
     }
 
     /**

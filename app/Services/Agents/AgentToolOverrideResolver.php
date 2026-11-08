@@ -159,16 +159,36 @@ final class AgentToolOverrideResolver
             $settings = [];
         }
 
-        $drivers = $this->llmConfig->getDrivers();
-        $schema = null;
-        foreach ($drivers as $driver) {
-            if ($driver['driver_class'] === $config->driver_class) {
-                $schema = $driver['settings_schema'];
-                break;
+        $schema = $this->schemaForDriverClass($config->driver_class);
+        if ($schema === null) {
+            // The settings are decrypted by now, and without the schema
+            // there is no way to tell which of them are secrets — so
+            // return nothing rather than the plaintext.
+            return [];
+        }
+
+        return $this->llmConfig->maskForApi($settings, $schema);
+    }
+
+    /**
+     * The settings schema of the class the configuration was written
+     * with. PHP accepts a leading backslash and a different case for a
+     * class name, so the registry lookup cannot be an exact string
+     * match — it is keyed by the canonical spelling.
+     *
+     * @return list<array>|null
+     */
+    private function schemaForDriverClass(string $driverClass): ?array
+    {
+        $needle = strtolower(ltrim($driverClass, '\\'));
+
+        foreach ($this->llmConfig->getDrivers() as $driver) {
+            if (strtolower(ltrim($driver['driver_class'], '\\')) === $needle) {
+                return $driver['settings_schema'];
             }
         }
 
-        return $schema !== null ? $this->llmConfig->maskForApi($settings, $schema) : $settings;
+        return null;
     }
 
     /**

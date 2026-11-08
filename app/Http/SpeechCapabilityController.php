@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Services\AgentServiceInterface;
 use Spora\Speech\SpeechToTextRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -27,16 +28,24 @@ use Symfony\Component\HttpFoundation\Request;
  * the agent-settings page uses this so the badge next to the dropdown
  * says "group default" for a group-owned agent, not "user default".
  * Missing/malformed `?agent_id` falls back to the unscoped path so the
- * composer (no agent context) keeps working as-is.
+ * composer (no agent context) keeps working as-is. An `?agent_id=N` the
+ * caller cannot see is a 404: the cascade resolves that agent's own
+ * principal's configuration, so the response would otherwise carry
+ * another principal's configuration metadata.
  *
  * Mirrors the shape of {@see MediaAllowedTypesController}:
  * read-only, auth-only (no CSRF).
  */
 final class SpeechCapabilityController
 {
+    use JsonControllerHelpers;
+
+    private const MSG_AGENT_NOT_FOUND = 'Agent not found.';
+
     public function __construct(
         private readonly SpeechToTextRegistry $registry,
         private readonly AuthService $auth,
+        private readonly AgentServiceInterface $agentService,
     ) {}
 
     #[OA\Get(
@@ -83,6 +92,13 @@ final class SpeechCapabilityController
     {
         $userId = $this->auth->currentUserId();
         $agentId = $this->parseAgentId($request);
+
+        // The agent's cascade resolves its own principal's configuration,
+        // so the caller has to be able to see the agent — otherwise the
+        // response carries another principal's configuration metadata.
+        if ($agentId !== null && $this->agentService->getAgent($agentId, (int) $userId) === null) {
+            return $this->notFound('AGENT_NOT_FOUND', self::MSG_AGENT_NOT_FOUND);
+        }
 
         // "configured" summary: a provider was resolved AND it self-
         // reports configured. The fallback tier picks the first
