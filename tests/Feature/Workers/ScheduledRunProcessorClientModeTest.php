@@ -387,11 +387,17 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
 
         $processor->processSynchronously(new BufferedOutput(), $userId, 600);
 
-        expect($published)->not->toBeEmpty()
-            ->and($groupPrincipalId)->not->toBe($userId);
+        expect($published)->not->toBeEmpty();
 
         foreach ($published as $principalId) {
             expect($principalId)->toBe($groupPrincipalId);
+
+            // The audience is a principal, and this one is the group — not
+            // the caller, whose id lives in a different sequence and may
+            // well carry the same number.
+            $audience = Spora\Models\Principal::find($principalId);
+            expect($audience)->not->toBeNull()
+                ->and($audience->type)->toBe(Spora\Models\Principal::TYPE_GROUP);
         }
     });
 });

@@ -40,8 +40,8 @@ afterEach(function (): void {
 });
 
 test('continue accepts media_ids on a vision-capable agent and returns 200', function (): void {
-    $controller = buildWireShapeController();
-    $asset = ingestWireShapeImageAsset();
+    [$controller, $userId] = buildWireShapeController();
+    $asset = ingestWireShapeImageAsset($userId);
 
     $request = Request::create(
         '/api/v1/tasks/1/continue',
@@ -59,7 +59,10 @@ test('continue accepts media_ids on a vision-capable agent and returns 200', fun
     expect($resp->getStatusCode())->toBe(200);
 });
 
-function buildWireShapeController(): TaskController
+/**
+ * @return array{0: TaskController, 1: int} The controller and the caller's user id.
+ */
+function buildWireShapeController(): array
 {
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $llmService = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
@@ -105,17 +108,20 @@ function buildWireShapeController(): TaskController
 
     $stub = new StubTaskService();
     $mediaCapability = new TaskMediaCapabilityService($factory);
-    return new TaskController(
-        $authService,
-        $stub,
-        $mediaCapability,
-        new ContinueTaskDispatcher($stub, $mediaCapability),
-        new DecisionsRequestValidator($stub),
-        new AnswerQuestionRequestValidator(new \Spora\Services\PrincipalResolver()),
-    );
+    return [
+        new TaskController(
+            $authService,
+            $stub,
+            $mediaCapability,
+            new ContinueTaskDispatcher($stub, $mediaCapability),
+            new DecisionsRequestValidator($stub),
+            new AnswerQuestionRequestValidator(new \Spora\Services\PrincipalResolver()),
+        ),
+        $userId,
+    ];
 }
 
-function ingestWireShapeImageAsset(): MediaAsset
+function ingestWireShapeImageAsset(int $userId): MediaAsset
 {
     $tmp = sys_get_temp_dir() . '/spora-wireshape-' . bin2hex(random_bytes(4));
     mkdir($tmp, 0755, recursive: true);
@@ -136,7 +142,7 @@ function ingestWireShapeImageAsset(): MediaAsset
         bytes: $png,
         mime: 'image/png',
         filename: 'wireshape.png',
-        userId: 1,
+        userId: $userId,
         uploadSource: 'upload',
     ));
 }

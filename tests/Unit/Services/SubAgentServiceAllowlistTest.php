@@ -78,8 +78,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
 
     it('publishes ONLY the allowlist keys, even when the row has extras', function () use (&$invokePublish, &$captured): void {
         $authService = bootAuthLayer();
-        $userId = $GLOBALS['__allowlist_user_id']
-            ?? ($GLOBALS['__allowlist_user_id'] = $authService->currentUserId());
+        $userId = (int) $authService->currentUserId();
         $agent = Agent::query()->first() ?? Agent::create([
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Allowlist Agent', 'max_steps' => 5, 'is_active' => true,
         ]);
@@ -119,8 +118,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         // principal happens to carry that number. The audience has to be
         // the task's principal.
         $authService = bootAuthLayer();
-        $userId = $GLOBALS['__allowlist_user_id']
-            ?? ($GLOBALS['__allowlist_user_id'] = $authService->currentUserId());
+        $userId = (int) $authService->currentUserId();
         $agent = Agent::query()->first() ?? Agent::create([
             'principal_id' => $this->createUserPrincipal($userId), 'name' => 'Allowlist Agent', 'max_steps' => 5, 'is_active' => true,
         ]);
@@ -147,8 +145,14 @@ describe('SubAgentService::publishParentState data projection', function (): voi
         $invokePublish((int) $parent->id);
 
         expect($captured)->toHaveCount(1);
-        expect($captured[0]['principal_id'])->toBe($groupPrincipalId)
-            ->and($captured[0]['principal_id'])->not->toBe($userId);
+        expect($captured[0]['principal_id'])->toBe($groupPrincipalId);
+
+        // The audience is a principal, and this one is the group — not the
+        // user, whose id lives in a different sequence and may well carry
+        // the same number.
+        $audience = Spora\Models\Principal::find($captured[0]['principal_id']);
+        expect($audience)->not->toBeNull()
+            ->and($audience->type)->toBe(Spora\Models\Principal::TYPE_GROUP);
     });
 
     it('returns silently when the parent task is missing', function () use (&$invokePublish, &$captured): void {

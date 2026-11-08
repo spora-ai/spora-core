@@ -43,8 +43,8 @@ afterEach(function (): void {
 });
 
 test('store returns 400 when an image is attached to a non-vision agent', function (): void {
-    [$controller] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
-    $asset = ingestImageAsset('agent-gpt35');
+    [$controller, , $userId] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
+    $asset = ingestImageAsset('agent-gpt35', $userId);
     $request = jsonRequest('POST', '/api/v1/tasks', [
         'prompt'    => 'describe this',
         'agent_id'  => 10,
@@ -57,8 +57,8 @@ test('store returns 400 when an image is attached to a non-vision agent', functi
 });
 
 test('store returns 201 when an image is attached to a vision-capable agent', function (): void {
-    [$controller] = buildCapabilityController('claude-3-5-sonnet-20241022', AnthropicCompatibleDriver::class);
-    $asset = ingestImageAsset('agent-vision');
+    [$controller, , $userId] = buildCapabilityController('claude-3-5-sonnet-20241022', AnthropicCompatibleDriver::class);
+    $asset = ingestImageAsset('agent-vision', $userId);
     $request = jsonRequest('POST', '/api/v1/tasks', [
         'prompt'    => 'describe this',
         'agent_id'  => 10,
@@ -69,8 +69,8 @@ test('store returns 201 when an image is attached to a vision-capable agent', fu
 });
 
 test('store returns 201 when a text attachment is used with a non-vision agent', function (): void {
-    [$controller] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
-    $asset = ingestTextAsset('agent-text');
+    [$controller, , $userId] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
+    $asset = ingestTextAsset('agent-text', $userId);
     $request = jsonRequest('POST', '/api/v1/tasks', [
         'prompt'    => 'summarise this',
         'agent_id'  => 10,
@@ -91,8 +91,8 @@ test('store returns 201 when no media_ids are attached even on a non-vision agen
 });
 
 test('continue returns 400 when an image is attached to a non-vision agent', function (): void {
-    [$controller, $stub] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
-    $asset = ingestImageAsset('agent-continue');
+    [$controller, $stub, $userId] = buildCapabilityController('gpt-3.5-turbo', OpenAICompatibleDriver::class);
+    $asset = ingestImageAsset('agent-continue', $userId);
     $request = Request::create(
         '/api/v1/tasks/1/continue',
         'POST',
@@ -110,7 +110,7 @@ test('continue returns 400 when an image is attached to a non-vision agent', fun
 });
 
 /**
- * @return array{0: TaskController, 1: StubTaskService}
+ * @return array{0: TaskController, 1: StubTaskService, 2: int} The caller's user id.
  */
 function buildCapabilityController(string $model, string $driverClass): array
 {
@@ -183,6 +183,7 @@ function buildCapabilityController(string $model, string $driverClass): array
             new AnswerQuestionRequestValidator(new PrincipalResolver()),
         ),
         $stub,
+        $userId,
     ];
 }
 
@@ -204,7 +205,7 @@ function buildCapabilityAssetStore(): array
     return [MediaArchiveTestSupport::buildService($assetStore), $tmp, $tmp];
 }
 
-function ingestImageAsset(string $name): MediaAsset
+function ingestImageAsset(string $name, int $userId): MediaAsset
 {
     [$service] = buildCapabilityAssetStore();
     // Smallest legal PNG (1x1 transparent pixel)
@@ -216,19 +217,19 @@ function ingestImageAsset(string $name): MediaAsset
         bytes: $png,
         mime: 'image/png',
         filename: "{$name}.png",
-        userId: 1,
+        userId: $userId,
         uploadSource: 'upload',
     ));
 }
 
-function ingestTextAsset(string $name): MediaAsset
+function ingestTextAsset(string $name, int $userId): MediaAsset
 {
     [$service] = buildCapabilityAssetStore();
     return $service->ingest(new MediaIngestRequest(
         bytes: 'hello world',
         mime: 'text/plain',
         filename: "{$name}.txt",
-        userId: 1,
+        userId: $userId,
         uploadSource: 'upload',
     ));
 }
