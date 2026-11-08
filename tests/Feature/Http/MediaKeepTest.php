@@ -126,7 +126,6 @@ test('admin can keep a temp row — flips is_temporary=false and returns the ser
     expect($payload['data']['is_temporary'])->toBeFalse();
     expect($payload['data']['id'])->toBe($asset->id);
 
-    // Persisted row reflects the flip.
     $reloaded = MediaAsset::find($asset->id);
     expect($reloaded->is_temporary)->toBeFalse();
 });
@@ -149,7 +148,6 @@ test('stranger gets 403 when the row belongs to another user', function (): void
     $resp = $controller->keep($asset->id);
 
     expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
-    // Row is unchanged.
     expect((bool) MediaAsset::find($asset->id)->is_temporary)->toBeTrue();
 });
 
@@ -171,7 +169,6 @@ test('keep is idempotent — calling on a non-temp row returns 200 without re-sa
     expect($resp->getStatusCode())->toBe(Response::HTTP_OK);
     $payload = json_decode($resp->getContent(), true);
     expect($payload['data']['is_temporary'])->toBeFalse();
-    // No mutation: updated_at stays put.
     $reloaded = MediaAsset::find($asset->id);
     expect($reloaded->updated_at?->toIso8601String())->toBe($originalUpdatedAt);
 });

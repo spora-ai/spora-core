@@ -192,8 +192,8 @@ final class AgentToolOverrideResolver
     }
 
     /**
-     * Used by AgentToolOperationsResolver via injection through the facade.
-     * Kept package-internal: callers go through the operation resolver for
+     * Used by AgentToolOperationsResolver by injection. Kept
+     * package-internal: callers go through the operation resolver for
      * the high-level read, this is just flag parsing.
      */
     public function extractOverrideFlag(?AgentToolOperationOverride $row, string $field): ?int

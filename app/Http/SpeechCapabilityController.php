@@ -101,10 +101,10 @@ final class SpeechCapabilityController
         }
 
         // "configured" summary: a provider was resolved AND it self-
-        // reports configured. The fallback tier picks the first
-        // registered class (which may not have an api_key yet) — the
-        // summary reflects whether transcribing would actually work,
-        // not whether a class exists.
+        // reports configured. A resolved class is not enough — its
+        // configuration may carry no credentials — so the summary
+        // reflects whether transcribing would actually work, not
+        // whether a class exists.
         $resolvedProvider = $this->registry->configuredProvider($userId, $agentId);
         $isReady = $resolvedProvider !== null && $resolvedProvider->isConfigured();
 

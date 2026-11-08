@@ -116,7 +116,6 @@ test('publishToUser logs error when HTTP response is 5xx', function (): void {
 
     $result = $publisher->publishToUser(42, ['event' => 'notification']);
 
-    // 5xx is still treated as success because no exception was thrown
     expect($result)->toBeTrue();
     expect($logger->records[1]['context']['http_status'])->toBe(500);
 });
@@ -143,7 +142,6 @@ test('publishForPrincipal and publishToUser do not throw when logger is provided
     $response->shouldReceive('getStatusCode')->andReturn(200);
     $client->shouldReceive('request')->andReturn($response);
 
-    // Pass a mock logger that allows any calls
     $logger = Mockery::mock(LoggerInterface::class);
     $logger->shouldReceive('debug')->zeroOrMoreTimes();
     $logger->shouldReceive('info')->zeroOrMoreTimes();

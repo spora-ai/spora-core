@@ -358,14 +358,12 @@ final class TaskService implements TaskServiceInterface
      * `QUEUED` (or leaves it in `AWAITING_INPUT` if other batches are
      * still pending), and publishes the new state to Mercure.
      *
-     * Mercure publish is best-effort: the controller has already
-     * returned 204 by the time this method is reached, so a publish
-     * failure must not fail an otherwise-successful answer submit.
+     * Mercure publish is best-effort: a wedged hub must not turn an
+     * otherwise-successful answer submit into a 502.
      * `MercurePublisher::doPublish` logs the underlying transport
      * error internally and returns `false`; this method additionally
      * catches anything that escapes that layer (interface swaps,
-     * pluggable implementations) so a wedged hub cannot regress a
-     * correct answer into a 502. Clients whose subscription is the
+     * pluggable implementations). Clients whose subscription is the
      * Mercure SSE event still see the new state on the next poll of
      * `GET /api/v1/tasks/{id}` after the row flips.
      *
@@ -383,10 +381,9 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
-     * Best-effort Mercure publish — see method docblock. The controller
-     * returns 200 with the new task resource; a publish failure here is
-     * logged by MercurePublisher and the next poll of GET
-     * /api/v1/tasks/{id} re-syncs the client.
+     * Best-effort Mercure publish — see {@see self::answerTask()}. A
+     * publish failure here is logged by MercurePublisher and the next
+     * poll of GET /api/v1/tasks/{id} re-syncs the client.
      *
      * @param array<string, mixed> $resource
      */
@@ -395,8 +392,7 @@ final class TaskService implements TaskServiceInterface
         try {
             $this->mercure->publishForPrincipal($taskId, $principalId, $resource);
         } catch (Throwable) {
-            // Mirrors MercurePublisher::doPublish's own try/catch
-            // (app/Services/MercurePublisher.php:122) — nothing else to
+            // Mirrors MercurePublisher::doPublish's own try/catch — nothing else to
             // do here; the row state is already committed.
         }
     }

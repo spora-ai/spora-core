@@ -166,7 +166,6 @@ describe('AuthController::register', function (): void {
 
         $response = $controller->register($request);
 
-        // The forwarded IP is rate limited, so the controller should return 429
         expect($response->getStatusCode())->toBe(Response::HTTP_TOO_MANY_REQUESTS);
     });
 
@@ -492,7 +491,6 @@ describe('AuthController::login', function (): void {
         $authService->register('clear@example.com', AUTHCTL_TEST_PASSWORD, 'Clear');
         User::where('email', 'clear@example.com')->update(['verified' => 1]);
 
-        // 4 failed attempts (under limit)
         for ($i = 0; $i < 4; $i++) {
             $req = jsonRequest('POST', '/api/v1/auth/login', [
                 'email'    => 'clear@example.com',
@@ -508,7 +506,6 @@ describe('AuthController::login', function (): void {
         $okResp = $controller->login($okReq);
         expect($okResp->getStatusCode())->toBe(Response::HTTP_OK);
 
-        // After successful login the bucket should be cleared (rate limit reset)
         $statusReq = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => 'clear@example.com',
             'password' => 'wrong',
@@ -789,7 +786,6 @@ describe('AuthController::verify', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('verify-ok@example.com', AUTHCTL_TEST_PASSWORD, 'Verify OK');
 
-        // Manually insert a valid confirmation row for the user
         $user = User::where('email', 'verify-ok@example.com')->first();
         $selector = 'sel' . bin2hex(random_bytes(8));
         $rawToken = 'tok' . bin2hex(random_bytes(8));
@@ -824,7 +820,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Confirmation row pointing at a new email (different from users.email)
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $userId,
             'email'    => 'verify-change-new@example.com',
@@ -843,21 +838,17 @@ describe('AuthController::verify', function (): void {
         expect($body['old_email'])->toBe('verify-change@example.com');
         expect($body['new_email'])->toBe('verify-change-new@example.com');
 
-        // The target user's record was updated to the new email.
         $updated = User::find($userId);
         expect($updated->email)->toBe('verify-change-new@example.com');
 
-        // The logged-in session's email sync was applied.
         expect($_SESSION[Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-change-new@example.com');
     });
 
     test('returns kind=change when the requester is logged in as a different user than the confirmation target', function (): void {
         [$controller, $authService] = makeAuthController();
-        // Target user (A) whose email will be changed.
         $targetUserId = $authService->register('verify-cross-target@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Target');
         User::where('id', $targetUserId)->update(['verified' => 1]);
 
-        // Requester (B), logged in but unrelated to the confirmation row.
         $requesterId = $authService->register('verify-cross-requester@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Requester');
         simulateLoggedInSession($requesterId, 'verify-cross-requester@example.com');
 
@@ -865,7 +856,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Confirmation row targeting A (not B).
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $targetUserId,
             'email'    => 'verify-cross-target-new@example.com',
@@ -883,11 +873,9 @@ describe('AuthController::verify', function (): void {
         expect($body['old_email'])->toBe('verify-cross-target@example.com');
         expect($body['new_email'])->toBe('verify-cross-target-new@example.com');
 
-        // A's record updated, B untouched.
         expect(User::find($targetUserId)->email)->toBe('verify-cross-target-new@example.com');
         expect(User::find($requesterId)->email)->toBe('verify-cross-requester@example.com');
 
-        // The requester's session email is the original — no cross-write.
         expect($_SESSION[Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-cross-requester@example.com');
     });
 
@@ -951,7 +939,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // The subject's pending confirmation points at the target's email
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $subjectId,
             'email'    => 'verify-target@example.com',
@@ -1227,7 +1214,6 @@ describe('AuthController::resetPassword', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('reset-dis@example.com', AUTHCTL_TEST_PASSWORD, 'Reset Disabled');
         $user = User::where('email', 'reset-dis@example.com')->first();
-        // Disable password reset for this user
         User::where('id', $user->id)->update(['resettable' => 0]);
 
         $selector = 'rdis' . bin2hex(random_bytes(8));
@@ -1370,7 +1356,6 @@ describe('AuthController::requestEmailChange', function (): void {
         ]);
         $response = $controller->requestEmailChange($request);
 
-        // The current user is unverified, so the request fails with EMAIL_NOT_VERIFIED
         expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
         $body = json_decode($response->getContent(), true);
         expect($body['error']['code'])->toBe('EMAIL_NOT_VERIFIED');
@@ -1414,7 +1399,6 @@ describe('AuthController::requestEmailChange', function (): void {
         User::where('id', $userId)->update(['verified' => 1]);
         simulateLoggedInSession($userId, 'chg-take@example.com');
 
-        // Another user already owns the target email
         $authService->register('taken-target@example.com', AUTHCTL_TEST_PASSWORD, 'Taken Target');
 
         $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [
@@ -1533,7 +1517,6 @@ describe('AuthController::confirmEmailChange', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Insert a confirmation row where the new email differs from the old
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $user->id,
             'email'    => 'confirm-new@example.com',

@@ -366,7 +366,6 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
         $service->sendEmailForScheduledRun($task);
 
-        // No exception and no notification created (different method)
         expect(Notification::where('user_id', $userId)->count())->toBe(0);
     });
 

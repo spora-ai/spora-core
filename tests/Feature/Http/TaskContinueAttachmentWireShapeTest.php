@@ -27,8 +27,8 @@ use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
 
 /**
- * Plan §4 — pins that `POST /api/v1/tasks/{taskId}/continue` accepts
- * `media_ids` on a vision-capable agent and returns 200.
+ * Pins that `POST /api/v1/tasks/{taskId}/continue` accepts `media_ids` on
+ * a vision-capable agent and returns 200.
  *
  * The DB-side `role=attachment` row + ownership check are exercised by
  * the orchestrator suite; this test pins the controller + capability-

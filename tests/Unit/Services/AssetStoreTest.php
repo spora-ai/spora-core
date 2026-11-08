@@ -109,7 +109,6 @@ test('LocalAssetStore writes a file and returns a local URL', function (): void 
         expect($ref->token)->not->toBeNull();
         expect($ref->url)->toStartWith('/api/v1/assets/');
         expect($ref->url)->toEndWith('.mp3');
-        // File must exist on disk under <SPORA_STORAGE_DIR>/assets.
         $onDisk = glob($dir . '/assets/*') ?: [];
         expect($onDisk)->toHaveCount(1);
         expect(file_get_contents($onDisk[0]))->toBe($bytes);

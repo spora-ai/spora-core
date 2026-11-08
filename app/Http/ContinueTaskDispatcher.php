@@ -31,8 +31,6 @@ final class ContinueTaskDispatcher
     ) {}
 
     /**
-     * Validate the request body and dispatch `continueTask`.
-     *
      * @param array<string, mixed> $body Decoded request body.
      */
     public function handleContinue(int $taskId, int $userId, array $body): JsonResponse
@@ -147,9 +145,6 @@ final class ContinueTaskDispatcher
         }
     }
 
-    /**
-     * @param MediaCapabilityMismatchException|InvalidArgumentException $e
-     */
     private function exceptionResponse(
         MediaCapabilityMismatchException|InvalidArgumentException $e,
     ): JsonResponse {

@@ -64,7 +64,8 @@ final class LLMConfigPreferences
     }
 
     /**
-     * Returns the default LLMDriverConfiguration (is_default = true).
+     * The caller's preferred configuration — their user-principal's
+     * preference, not the global default.
      */
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {

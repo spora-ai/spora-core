@@ -27,8 +27,10 @@ use Symfony\Component\HttpFoundation\Response;
  * - POST   /api/v1/agents/{id}/picture/image  — multipart upload, 1 MiB cap,
  *                                              image MIMEs only (PNG/JPEG/WebP).
  * - DELETE /api/v1/agents/{id}/picture/image  — clear the uploaded image,
- *                                              fall back to the default
- *                                              archetype avatar.
+ *                                              keeping the archetype
+ *                                              avatar that was picked
+ *                                              (the default when none
+ *                                              was ever picked).
  *
  * The shared multipart-upload pipeline (size cap, MIME allowlist, byte
  * decode verification) lives in {@see AvatarUploadSupport} so the

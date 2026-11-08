@@ -32,11 +32,11 @@ use Tests\Support\MediaArchiveTestSupport;
 use Tests\Unit\Http\StubTaskService;
 
 /**
- * B2 (review): Image-capability pre-flight in TaskController.
+ * Image-capability pre-flight in TaskController.
  *
- * Plan §8.3 / §12 require a 400 when media_ids contains an image and the
- * agent's LLM does not support image input. These tests pin the
- * behaviour for `store()` and `continue()`.
+ * A 400 is required when media_ids contains an image and the agent's LLM
+ * does not support image input. These tests pin the behaviour for
+ * `store()` and `continue()`.
  */
 afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();

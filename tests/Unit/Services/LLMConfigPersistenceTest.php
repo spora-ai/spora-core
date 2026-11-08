@@ -42,10 +42,8 @@ test('encodeSettings encrypts only password-typed fields and leaves the rest pla
         'model' => 'gpt-4o',
     ]);
 
-    // api_key should be encrypted (different from the input)
     expect($encoded['api_key'])->toBeString()
         ->and($encoded['api_key'])->not->toBe('sk-test-key');
-    // Non-password keys stay plain
     expect($encoded['base_url'])->toBe('https://api.example.com')
         ->and($encoded['model'])->toBe('gpt-4o');
 });
@@ -169,7 +167,7 @@ test('encodeSettings drops keys not declared by the driver schema (regression: s
         'api_key' => 'sk-test',
         'model' => 'gpt-4o',
         'temperature' => '0.7',
-        // Stale keys that used to come from #[ToolSetting] before PR #203:
+        // Stale keys that used to come from a removed #[ToolSetting]:
         'max_tokens_output' => '4096',
         'context_window' => '300000',
     ]);
@@ -202,7 +200,7 @@ test('updateConfiguration prunes stale keys from the settings blob on save', fun
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
 
-    // Create with stale keys already in the blob (simulates a pre-#203 row)
+    // Create with stale keys already in the blob (simulates a pre-pruning row)
     $principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
     $principalId = $principalService->ensureUserPrincipal($userId)->id;
     $created = $persistence->createConfiguration($principalId, $userId, [

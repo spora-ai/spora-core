@@ -189,10 +189,6 @@ final class ScheduledRunController
         }
     }
 
-    /**
-     * Validate create payload.
-     * Returns an error JsonResponse or null if valid.
-     */
     private function validateCreate(array $body): ?JsonResponse
     {
         $flags = $this->classifyCreatePayload($body);

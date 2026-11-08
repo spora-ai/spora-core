@@ -325,12 +325,13 @@ final class ApiKeyCallbackDispatcher
             'body' => $payload,
             'timeout' => self::TIMEOUT_SECONDS,
             'max_duration' => self::MAX_DURATION_SECONDS,
-            // `SsrfGuard` screened the URL as supplied, once. Following a
-            // redirect would re-issue the POST to a host that was never
-            // screened — a `302` to the cloud metadata endpoint turns the
-            // guard into a comment. A 3xx falls through to
-            // `recordFailure()` and is retried, which is the right answer
-            // for a receiver that has no reason to redirect.
+            // `SsrfGuard` screened the URL as supplied and pinned the
+            // address it vetted; following a redirect would re-issue the
+            // POST to a host that was never screened — a `302` to the
+            // cloud metadata endpoint turns the guard into a comment. A
+            // 3xx falls through to `recordFailure()` and is retried,
+            // which is the right answer for a receiver that has no reason
+            // to redirect.
             'max_redirects' => 0,
             'resolve' => $screen['resolve'],
         ]);

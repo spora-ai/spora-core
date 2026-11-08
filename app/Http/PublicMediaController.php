@@ -28,9 +28,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *
  * Per the user's design choice, the endpoint serves **raw bytes only**
  * — no JSON envelope, no Content-Disposition. The MIME is the row's
- * sniffed mime, the cache header is `private, max-age=86400` so
- * CDNs can cache the response for a day without leaking the file
- * to other callers. A document-shaped response (HTML, SVG, XML) is
+ * sniffed mime, the cache header is `private, max-age=86400` so the
+ * browser may reuse the bytes for a day while a shared cache must not
+ * store them. A document-shaped response (HTML, SVG, XML) is
  * served with the isolation headers, so a shared asset cannot reach
  * the operator's origin.
  */
