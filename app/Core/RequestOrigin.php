@@ -39,9 +39,6 @@ final class RequestOrigin
      */
     private const DEFAULT_APP_PREFIX = '/spora';
 
-    /**
-     * Resolve the public base URL.
-     */
     public static function detect(?Config $config = null): string
     {
         $configured = $config?->getString('SPORA_APP_URL') ?? '';

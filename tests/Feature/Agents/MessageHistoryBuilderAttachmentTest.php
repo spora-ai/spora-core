@@ -20,9 +20,6 @@ use Tests\Support\MediaArchiveTestSupport;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
-/**
- * Plan §12 B2b — attachment row → content-block expansion.
- */
 function seedAttachmentAgent(): int
 {
     $authService = bootAuthLayer();
@@ -208,7 +205,6 @@ test('attachment row referencing a missing asset skips the block gracefully', fu
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // No blocks produced — fall back to content string.
     expect($messages[0]['content'])->toBe('fallback content');
 });
 
@@ -225,7 +221,6 @@ test('attachment row with empty attachments JSON still emits a user message (bug
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // No attachment refs → fall through to row content as plain text.
     expect($messages[0]['content'])->toBe('operator typed prompt');
 });
 
@@ -270,7 +265,6 @@ test('attachment + following user row merge into one user message', function ():
         'content'  => 'Summarize this paper',
     ]);
     $messages = (new MessageHistoryBuilder())->build($task->id);
-    // Two rows in → one merged user message out (no `role: attachment`).
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
@@ -390,7 +384,6 @@ test('attachment with image is dropped but metadata prefix still surfaces when d
         'role'     => 'user',
         'content'  => 'Describe this',
     ]);
-    // Driver with vision capability explicitly turned off.
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
         model: 'claude-3-5-sonnet-20241022',
@@ -733,7 +726,6 @@ test('attachment skips raw-byte inline for a binary mime with no derivative (PDF
     expect($composed['text'])->toContain('# cv.pdf (no inline text)');
     expect($composed['text'])->toContain('get_source');
     expect($composed['text'])->not->toContain('[no extractable text]');
-    // And the raw bytes do NOT leak into the body.
     expect($composed['text'])->not->toContain('%PDF-1.4');
 });
 
@@ -1007,7 +999,6 @@ test('attachment rejects mislabeled binary content (text mime with NUL bytes) an
     $composed = $messages[0]['content'][1];
     expect($composed['text'])->toContain('# fake.txt (no inline text)');
     expect($composed['text'])->toContain('get_source');
-    // The binary content must not leak into the body.
     expect($composed['text'])->not->toContain("\x00\x01\x02\x03");
 });
 

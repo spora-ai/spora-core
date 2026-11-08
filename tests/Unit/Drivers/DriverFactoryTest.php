@@ -292,7 +292,6 @@ test('makeFromAgent gracefully handles wrong key — partial settings returned, 
 
     expect($driver)->toBeInstanceOf(OpenAICompatibleDriver::class);
     expect($driver->getModelName())->toBe('gpt-4o');
-    // api_key decryption failed → null → cast to empty string (no getApiKey method)
 
     LLMDriverConfiguration::where('id', $config->id)->delete();
 });

@@ -157,16 +157,12 @@ final class AuthEmailFlow
         });
     }
 
-    /**
-     * Reset the password using a selector/token pair.
-     */
     public function resetPassword(string $selector, string $token, string $newPassword): void
     {
         $this->auth->resetPassword($selector, $token, $newPassword);
     }
 
     /**
-     * Resend the email verification email for an unverified user.
      * Silently returns if there is no pending confirmation request for the email.
      */
     public function resendVerificationEmail(string $email): void

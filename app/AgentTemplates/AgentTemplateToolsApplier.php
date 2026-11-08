@@ -42,7 +42,7 @@ final class AgentTemplateToolsApplier
      * For each entry:
      * - tool_class not registered → TOOL_PLUGIN_MISSING warning, no row.
      * - tool disabled → the agent's assignment for that tool is revoked.
-     * - tool enabled + missing global config → row + TOOL_NEEDS_CONFIGURATION warning.
+     * - tool enabled + missing required settings → row + TOOL_NEEDS_CONFIGURATION warning.
      *
      * Returns the tools-enabled list and pushes any per-tool warnings
      * onto $warnings. Returning (instead of using a by-ref parameter)

@@ -87,11 +87,6 @@ function makeClientScheduledProcessor(
     ];
 }
 
-/**
- * Seed an agent owned by the user-principal for $userId.
- *
- * @return int  agent id
- */
 function seedClientAgent(int $userId, string $name): int
 {
     return (int) Agent::create([
@@ -103,8 +98,6 @@ function seedClientAgent(int $userId, string $name): int
 }
 
 /**
- * Seed a ScheduledRun + PENDING entry that's due now.
- *
  * @return array{run: ScheduledRun, entry: object}
  */
 function seedClientSchedule(int $agentId, int $userId, ?string $cron, string $label): array
@@ -258,21 +251,18 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
             600,
         );
 
-        // Old entry must be SKIPPED.
         $oldEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $sched['run']->id)
             ->where('due_at', SRP_CLIENT_PAST_DUE_AT)
             ->first();
         expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
 
-        // A new PENDING row for the next minute must exist.
         $nextEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $sched['run']->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->first();
         expect($nextEntry)->not->toBeNull();
 
-        // Run stays active.
         $sched['run']->refresh();
         expect((bool) $sched['run']->is_active)->toBeTrue();
     });

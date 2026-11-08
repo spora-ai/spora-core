@@ -7,12 +7,12 @@ namespace Spora\Agents;
 /**
  * Outcome of processing a single tool call inside {@see ToolCallExecutor::executeOrQueue()}.
  *
- * The outer {@see Orchestrator::handleToolCalls()} loop uses this to decide whether the
- * call should be added to the pending-approval batch.
+ * The outer {@see ToolCallBatchHandler::dispatchOneToolCall()} loop uses this
+ * to decide whether the call should be added to the pending-approval batch.
  */
 enum ToolCallDisposition: string
 {
-    /** The LLM invoked a tool the agent has not enabled — caught at the loop level. */
+    /** The LLM invoked a tool the agent has not enabled — the gate throws and the caller catches it. */
     case SystemError = 'system_error';
 
     /** The operation is disabled for this agent; record + history written, no execution. */

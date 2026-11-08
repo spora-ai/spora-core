@@ -24,11 +24,12 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Per-call worker for {@see Orchestrator::handleToolCalls()}: resolves,
- * validates, and either executes or queues a single {@see DriverToolCall},
- * reporting the outcome as a {@see ToolCallDisposition}.
+ * Per-call worker for {@see ToolCallBatchHandler::dispatchOneToolCall()}:
+ * resolves, validates, and either executes or queues a single
+ * {@see DriverToolCall}, reporting the outcome as a {@see ToolCallDisposition}.
  *
- * Package-private collaborator: constructed and called only by {@see Orchestrator}.
+ * Package-private collaborator: {@see Orchestrator} constructs it, and the
+ * other extracted services reach it through the orchestrator.
  */
 final class ToolCallExecutor
 {
@@ -343,7 +344,6 @@ final class ToolCallExecutor
      */
     private function parkQuestionBatch(Task $task, string $providerCallId, array $arguments): void
     {
-        // Build the PendingQuestionBatch from the validated input.
         $questions = [];
         foreach (($arguments['questions'] ?? []) as $rawQuestion) {
             if (!is_array($rawQuestion)) {
@@ -433,8 +433,7 @@ final class ToolCallExecutor
             'operation_description' => $operationDescription,
             'status'                => 'PENDING_APPROVAL',
             // ToolCall::$casts['proposed_arguments'] => 'array' encodes
-            // on save. Pre-encoding here double-encodes (the same
-            // pattern PR #150 fixed in Orchestrator::appendHistory).
+            // on save. Pre-encoding here double-encodes.
             'proposed_arguments'    => $toolCall->arguments,
             'human_description'     => $toolInstance->describeAction($toolCall->arguments),
         ]);
@@ -459,8 +458,7 @@ final class ToolCallExecutor
             'operation_description' => $operationDescription,
             'status'                => 'DISABLED',
             // ToolCall::$casts['proposed_arguments'] => 'array' encodes
-            // on save. Pre-encoding here double-encodes (the same
-            // pattern PR #150 fixed in Orchestrator::appendHistory).
+            // on save. Pre-encoding here double-encodes.
             'proposed_arguments'    => $toolCall->arguments,
             'human_description'     => $operationDescription,
         ]);
@@ -523,8 +521,7 @@ final class ToolCallExecutor
                 'status'         => 'APPROVED',
                 'result_content' => $scrubbed,
                 // ToolCall::$casts['result_data'] => 'array' encodes on
-                // save. Pre-encoding double-encodes (same pattern PR
-                // #150 fixed in Orchestrator::appendHistory).
+                // save. Pre-encoding double-encodes.
                 'result_data'    => $result->data,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);

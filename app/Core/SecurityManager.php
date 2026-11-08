@@ -11,15 +11,15 @@ use Spora\Core\ValueObjects\EncryptedValue;
 
 /**
  * Singleton. Registered via PHP-DI factory.
- * Loads master key once at construction. Fails immediately if key is invalid.
+ * Holds the master key in memory: the constructor takes the raw key, and
+ * {@see self::fromKeyFile()} is the one that reads a key file. An invalid
+ * key fails immediately.
  */
 final class SecurityManager implements SecurityManagerInterface
 {
     private readonly string $masterKey;
 
     /**
-     * @param string $key the raw key: exactly `SODIUM_CRYPTO_SECRETBOX_KEYBYTES` bytes
-     *
      * @throws InvalidSecretKeyException if the key is not the right length
      */
     public function __construct(string $key)

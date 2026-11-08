@@ -33,7 +33,6 @@ final class StubTwoOperationTool implements ToolInterface
 {
     use HasOperations;
 
-    /** The operation the tool last dispatched to. */
     public ?string $dispatchedOperation = null;
 
     public function execute(

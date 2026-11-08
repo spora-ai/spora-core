@@ -315,9 +315,6 @@ final class AgentTemplateValidator
     {
         $path = "tools[{$index}]";
 
-        // After the outer loop in validateTools() filters out non-list
-        // payloads, every $tool entry is either an array or a non-array
-        // (a scalar). The !is_array branch handles the latter.
         if (!is_array($tool)) {
             $result->addError([
                 'code'     => 'TOOL_NOT_OBJECT',

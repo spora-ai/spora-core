@@ -37,9 +37,6 @@ const PLUGINS_PATH = '/plugins';
 const TEST_PASSWORD_RUN = 'Password1!';
 const TEST_GLOBAL_CONFIG_NAME = 'Test Global Config';
 
-/**
- * Create a mock LLM driver that returns a text response.
- */
 function makeTextResponseDriver(string $content): LLMDriverInterface
 {
     $driver = Mockery::mock(LLMDriverInterface::class);
@@ -56,9 +53,6 @@ function makeTextResponseDriver(string $content): LLMDriverInterface
     return $driver;
 }
 
-/**
- * Create a mock LLM driver that throws.
- */
 function makeThrowingDriver(Throwable $e): LLMDriverInterface
 {
     $driver = Mockery::mock(LLMDriverInterface::class);

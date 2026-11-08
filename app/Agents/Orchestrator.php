@@ -328,21 +328,20 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Re-run a failed task in place: same task_id, same URL, full conversation
+     * Re-run a failed task in place: same task_id, full conversation
      * history preserved as LLM context. The LLM sees the original user prompt
      * plus any failed assistant/tool rows from the previous attempt, which lets
      * it either retry the failing call or take an alternative path on transient
      * errors (rate limit, timeout, gateway blip).
      *
      * Resets `error_code`, `failure_reason`, `retry_after`, `step_count`,
-     * `retry_of_task_id`, and `status` (FAILED → RUNNING in Sync mode, FAILED →
-     * QUEUED in Async mode). `max_steps` is preserved. No existing history
-     * rows are rewritten; any new rows produced on this re-run come from the
-     * underlying tick, not from retry() itself. `retry_of_task_id` is cleared
-     * so the task becomes claimable by WorkerQueueProcessor's main QUEUED
-     * loop — the chain "ends" as soon as the worker picks the row up, and a
-     * subsequent failure (if any) re-arms it via TickPhaseRunner::
-     * notifyFailedAndScheduleRetry.
+     * `retry_of_task_id`, and `status` (FAILED → QUEUED). `max_steps` is
+     * preserved. No existing history rows are rewritten; any new rows produced
+     * on this re-run come from the underlying tick, not from retry() itself.
+     * `retry_of_task_id` is cleared so the task becomes claimable by
+     * WorkerQueueProcessor's main QUEUED loop — the chain "ends" as soon as
+     * the worker picks the row up, and a subsequent failure (if any) re-arms
+     * it via TickPhaseRunner::notifyFailedAndScheduleRetry.
      */
     public function retry(int $taskId): Task
     {
@@ -556,7 +555,8 @@ final class Orchestrator implements OrchestratorInterface
         // that acts on the caller's behalf must not borrow their identity.
         $context  = $resolver->resolveForToolExecute($agentId, $taskId);
 
-        // Arguments may contain PII — never log them.
+        // Arguments may contain PII — they stay on the debug channel; the
+        // error paths below omit them.
         $this->logger?->debug('Tool dispatch', [
             'tool'      => $toolName,
             'agent_id'  => $agentId,

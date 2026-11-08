@@ -140,12 +140,13 @@ final class OrchestratorContainerBindings
 
     /**
      * Single-instance services for the client-worker housekeeping path.
-     * DbRateLimiter + HousekeepingLock are stateless wrappers around the
-     * `ratelimit_hits` and `worker_housekeeping_locks` tables (see migrations
-     * 0071/0072). WorkerReaper and ScheduledRunProcessor are also used by the
-     * CLI `worker:run --scheduled` flow but were constructed inline in
-     * WorkerRunCommand before this slice — they now live in the container so
-     * the HTTP controller and the CLI share the same singletons.
+     * DbRateLimiter wraps the `ratelimit_hits` table (migration 0072) and
+     * HousekeepingLock the `worker_housekeeping_locks` table (migration 0071).
+     *
+     * WorkerReaper is resolved from the container by the CLI as well, so both
+     * entry points build it the same way. ScheduledRunProcessor is registered
+     * here for the HTTP path; `worker:run --once` and `worker:run --daemon`
+     * build their own.
      */
     private static function workerRuntime(): array
     {

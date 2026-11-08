@@ -54,7 +54,7 @@ final class DatabaseSeeder
 
         // Bootstrap admin. Insert-only: a deleted or renamed admin is left alone
         // so the seeder cannot be used as a backdoor. Repairs go through
-        //    `bin/spora db:repair-admin`.
+        // `bin/spora db:repair-admin`.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
             // The credential is generated, not fixed: a password that is in the
@@ -80,8 +80,8 @@ final class DatabaseSeeder
         $principalService = $this->principalService ?? new PrincipalService(new PrincipalResolver());
         $adminPrincipalId = (int) $principalService->ensureUserPrincipal($userId)->id;
 
-        // 3. Install the Spora Core Agent from the built-in template if missing.
-        //    Keyed on agent name so a template id rename leaves the agent in place.
+        // Install the Spora Core Agent from the built-in template if missing.
+        // Keyed on agent name so a template id rename leaves the agent in place.
         $existing = \Spora\Models\Agent::where('principal_id', $adminPrincipalId)
             ->where('name', 'Spora Core Agent')
             ->first();

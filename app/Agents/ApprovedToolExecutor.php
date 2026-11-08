@@ -141,8 +141,8 @@ final class ApprovedToolExecutor
         // safeExecute() catches every Throwable internally — no outer try/catch needed.
         $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $task->agent_id, $task->id);
 
-        // Query-builder update() bypasses Eloquent's `array` cast on `approved_arguments`,
-        // which would double-encode the JSON string. Same anti-pattern PR #150 fixed.
+        // Query-builder update() bypasses Eloquent's `array` cast on
+        // `approved_arguments`, which would double-encode the JSON string.
         //
         // The write names the row, not the call id: a later proposal may reuse
         // the id, and the completed call keeps the outcome it had.

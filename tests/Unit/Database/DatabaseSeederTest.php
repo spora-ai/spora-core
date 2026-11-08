@@ -48,16 +48,14 @@ function makeSeeder(): DatabaseSeeder
 }
 
 it('seeds the admin user and agent successfully', function () {
-    // Per-test fresh schema. SQLite `:memory:` masks this (each Pest test
-    // Per-test fresh DB — MariaDB's persisting counters would otherwise leave the admin/agent row behind.
+    // Per-test fresh DB — SQLite's `:memory:` masks this, but MariaDB's
+    // persisting counters would otherwise leave the admin/agent row behind.
     TestDatabaseFactory::freshDatabase();
 
-    // Initial state
     expect(User::count())->toBe(0)
         ->and(Agent::count())->toBe(0)
         ->and(AgentTool::count())->toBe(0);
 
-    // Run the seeder
     ob_start();
     makeSeeder()->run();
     $output = ob_get_clean();
@@ -66,7 +64,6 @@ it('seeds the admin user and agent successfully', function () {
         ->toContain("Created Spora Core Agent from 'core/core-assistant' template")
         ->toContain('2 tools');
 
-    // Assert database state
     $user = User::where('email', 'admin@spora.local')->first();
     expect($user)->not->toBeNull();
 
@@ -193,7 +190,8 @@ it('inserts mail templates from YAML that are missing from the DB', function () 
     // mail templates and the admin row behind in the per-worker MariaDB DB.
     TestDatabaseFactory::freshDatabase();
 
-    // Pre-condition: drop one of the system templates so the seeder has to recreate it.
+    // Pre-condition: the DB carries a `welcome` row but no
+    // `email_change_verification` row, so the seeder has a template to create.
     $now = date('Y-m-d H:i:s');
     Capsule::table('mail_templates')->insert([
         'name'       => 'welcome',
@@ -203,17 +201,14 @@ it('inserts mail templates from YAML that are missing from the DB', function () 
         'created_at' => $now,
         'updated_at' => $now,
     ]);
-    // `email_change_verification` is intentionally absent.
 
     ob_start();
     $output = ob_get_clean();
 
-    // Make sure DB really is missing the template before seeding.
     expect(MailTemplate::where('name', 'email_change_verification')->exists())->toBeFalse();
 
     makeSeeder()->run();
 
-    // The seeder should have picked up the missing YAML.
     expect(MailTemplate::where('name', 'email_change_verification')->exists())->toBeTrue();
     expect(MailTemplate::where('name', 'email_change_verification')->value('subject'))
         ->toContain('Confirm your new email address');
