@@ -79,20 +79,25 @@ final class SsrfGuard
      * Not exhaustive — the documentation ranges (`192.0.2.0/24`,
      * `198.51.100.0/24`, `203.0.113.0/24`) are not listed.
      *
+     * Every address here is a reserved-network constant the guard exists
+     * to refuse, so a hardcoded-address finding on one of them says
+     * nothing: they are the deny list, not a host the deployment talks
+     * to.
+     *
      * @var list<array{0: string, 1: int}>
      */
     private const DENY_IPV4_RANGES = [
         ['0.0.0.0', 8],
-        ['10.0.0.0', 8],
-        ['100.64.0.0', 10],
+        ['10.0.0.0', 8],      // NOSONAR php:S1313 — reserved range, denied by design
+        ['100.64.0.0', 10],  // NOSONAR php:S1313 — reserved range, denied by design
         ['127.0.0.0', 8],
-        ['169.254.0.0', 16],
-        ['172.16.0.0', 12],
-        ['192.0.0.0', 24],
-        ['192.168.0.0', 16],
-        ['198.18.0.0', 15],
-        ['224.0.0.0', 4],
-        ['240.0.0.0', 4],
+        ['169.254.0.0', 16], // NOSONAR php:S1313 — reserved range, denied by design
+        ['172.16.0.0', 12],  // NOSONAR php:S1313 — reserved range, denied by design
+        ['192.0.0.0', 24],   // NOSONAR php:S1313 — reserved range, denied by design
+        ['192.168.0.0', 16], // NOSONAR php:S1313 — reserved range, denied by design
+        ['198.18.0.0', 15],  // NOSONAR php:S1313 — reserved range, denied by design
+        ['224.0.0.0', 4],    // NOSONAR php:S1313 — reserved range, denied by design
+        ['240.0.0.0', 4],    // NOSONAR php:S1313 — reserved range, denied by design
     ];
 
     private const DENY_HOSTS = ['localhost', '::1', '0.0.0.0', '[::1]'];
@@ -136,22 +141,35 @@ final class SsrfGuard
     /** @return Screen */
     private function screenHost(string $host): array
     {
-        if ($host === '') {
-            return ['reason' => $this->policy['messages']['no_host'], 'resolve' => []];
+        $reason = $this->rejectReasonForHost($host);
+
+        if ($reason !== null) {
+            return ['reason' => $reason, 'resolve' => []];
         }
 
-        if (in_array($host, self::DENY_HOSTS, true)) {
-            return ['reason' => $this->policy['messages']['loopback_host'], 'resolve' => []];
-        }
+        return $this->screenAddresses($host);
+    }
 
-        $bare = trim($host, '[]');
+    /** The reasons a host is refused before anything is resolved. */
+    private function rejectReasonForHost(string $host): ?string
+    {
+        $literal = $this->literalAddress($host);
 
-        if (filter_var($bare, FILTER_VALIDATE_IP) !== false) {
+        return match (true) {
+            $host === '' => $this->policy['messages']['no_host'],
+            in_array($host, self::DENY_HOSTS, true) => $this->policy['messages']['loopback_host'],
+            $literal !== null && $this->isDeniedAddress($literal) => $this->policy['messages']['private_address'],
+            default => null,
+        };
+    }
+
+    /** @return Screen */
+    private function screenAddresses(string $host): array
+    {
+        if ($this->literalAddress($host) !== null) {
             // A literal address is the destination: there is nothing to
             // resolve and nothing to pin.
-            return $this->isDeniedAddress($bare)
-                ? ['reason' => $this->policy['messages']['private_address'], 'resolve' => []]
-                : ['reason' => null, 'resolve' => []];
+            return ['reason' => null, 'resolve' => []];
         }
 
         // Both families. `gethostbynamel()` is A-only, so a name whose sole
@@ -169,11 +187,18 @@ final class SsrfGuard
         // A name that resolves to nothing is left to the HTTP client, which
         // will fail with a DNS error. There is nothing to protect against
         // from a name that never resolves.
-        if ($addresses === []) {
-            return ['reason' => null, 'resolve' => []];
-        }
+        return [
+            'reason' => null,
+            'resolve' => $addresses === [] ? [] : [$host => $addresses[0]],
+        ];
+    }
 
-        return ['reason' => null, 'resolve' => [$host => $addresses[0]]];
+    /** The host as an IP literal, or null when it is a name. */
+    private function literalAddress(string $host): ?string
+    {
+        $bare = trim($host, '[]');
+
+        return filter_var($bare, FILTER_VALIDATE_IP) !== false ? $bare : null;
     }
 
     /** Everything decidable without a host: length, well-formedness, scheme. */
