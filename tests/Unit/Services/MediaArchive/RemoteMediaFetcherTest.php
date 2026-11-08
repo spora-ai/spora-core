@@ -7,6 +7,7 @@ namespace Tests\Unit\Services\MediaArchive;
 use Psr\Log\NullLogger;
 use Spora\Services\MediaArchive\RemoteMediaFetcher;
 use Spora\Services\MediaArchive\RemoteMediaFetchException;
+use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpClient\Chunk\DataChunk;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -271,6 +272,50 @@ describe('RemoteMediaFetcher body budget', function (): void {
     });
 });
 
+describe('RemoteMediaFetcher address pinning', function (): void {
+    it('pins a hostname request to the address the guard vetted', function (): void {
+        $vetted = SsrfGuard::forWebFetch()->screen('https://example.com/pinned')['resolve'];
+
+        if ($vetted === []) {
+            $this->markTestSkipped('This environment resolves no public name.');
+        }
+
+        $client = new WatchedHttpClient('body');
+
+        makeFetcher($client)->fetch('https://example.com/pinned');
+
+        $options = $client->requests[0]['options'] ?? [];
+
+        // The name resolves to a public address now, and the request has
+        // to go there rather than to whatever the name answers with a
+        // moment later.
+        expect($options['resolve'] ?? null)->toHaveKey('example.com');
+        expect(filter_var($options['resolve']['example.com'], FILTER_VALIDATE_IP))->not->toBeFalse();
+    });
+
+    it('pins the redirect hop to the address that hop vetted', function (): void {
+        $guard = SsrfGuard::forWebFetch();
+        $first = $guard->screen('https://example.com/redirect.png')['resolve'];
+        $second = $guard->screen('https://example.net/final.png')['resolve'];
+
+        if ($first === [] || $second === []) {
+            $this->markTestSkipped('This environment resolves no public name.');
+        }
+
+        $client = new WatchedHttpClient('body', redirectTo: 'https://example.net/final.png');
+
+        makeFetcher($client)->fetch('https://example.com/redirect.png');
+
+        // A redirect target is a destination of its own: each hop is
+        // screened, and each hop is pinned to the address its own screen
+        // vetted.
+        expect($client->requests)->toHaveCount(2);
+        expect($client->requests[0]['options']['resolve'] ?? null)->toHaveKey('example.com');
+        expect($client->requests[1]['url'])->toBe('https://example.net/final.png');
+        expect($client->requests[1]['options']['resolve'] ?? null)->toHaveKey('example.net');
+    });
+});
+
 /**
  * A response the test can watch: it records the cancellation the fetcher
  * performs when the body passes the ceiling.
@@ -327,6 +372,13 @@ final class WatchedHttpClient implements HttpClientInterface
     /** The chunks the fetcher pulled out of the stream. */
     public int $chunksStreamed = 0;
 
+    /**
+     * Every request the fetcher made, with the options it sent.
+     *
+     * @var list<array{method: string, url: string, options: array<string, mixed>}>
+     */
+    public array $requests = [];
+
     private ?WatchedResponse $redirect = null;
 
     public function __construct(string $body, ?string $redirectTo = null)
@@ -339,6 +391,12 @@ final class WatchedHttpClient implements HttpClientInterface
 
     public function request(string $method, string $url, array $options = []): ResponseInterface
     {
+        $this->requests[] = [
+            'method'  => $method,
+            'url'     => $url,
+            'options' => $options,
+        ];
+
         $redirect = $this->redirect;
         $this->redirect = null;
 

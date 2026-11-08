@@ -29,7 +29,9 @@ use Throwable;
  * Every destination is screened by {@see SsrfGuard}, so a URL that
  * resolves inside the deployment's own network is refused. A redirect is
  * a destination of its own, and the client is told not to follow one:
- * the fetcher follows it itself, screening each hop.
+ * the fetcher follows it itself, screening each hop. Each hop is pinned
+ * to the address the guard vetted, so a name that answers with a private
+ * address a moment later is not reached.
  *
  * Errors are normalised to {@see RemoteMediaFetchException} so the service
  * can decide whether to fall back to `storage_mode=external` or surface
@@ -62,8 +64,6 @@ final class RemoteMediaFetcher
      */
     public function fetch(string $url): array
     {
-        $url = $this->screen($url);
-
         [$response] = $this->send('GET', $url, ['headers' => ['Accept' => '*/*']]);
 
         $status = $response->getStatusCode();
@@ -138,7 +138,10 @@ final class RemoteMediaFetcher
      *
      * The client is told not to follow a redirect itself: the guard
      * screened the URL as given, and a redirect target is a different
-     * host. Each hop is screened here before it is requested.
+     * host. Each hop is screened here before it is requested, and pinned
+     * to the address the guard vetted — the hostname keeps the `Host`
+     * header and the TLS certificate check, so the connection cannot
+     * land on a private address the name answers with a moment later.
      *
      * @param  array<string, mixed> $options
      * @return array{0: ResponseInterface}
@@ -150,11 +153,14 @@ final class RemoteMediaFetcher
         $hops = 0;
 
         while (true) {
+            [$url, $resolve] = $this->screen($url);
+
             try {
                 $response = $this->http->request($method, $url, $options + [
                     'timeout'      => $this->timeoutSeconds,
                     'max_duration' => $this->timeoutSeconds,
                     'max_redirects' => 0,
+                    'resolve'      => $resolve,
                 ]);
                 $status = $response->getStatusCode();
             } catch (Throwable $e) {
@@ -178,7 +184,7 @@ final class RemoteMediaFetcher
                 );
             }
 
-            $url = $this->screen($target);
+            $url = $target;
         }
     }
 
@@ -198,22 +204,28 @@ final class RemoteMediaFetcher
     }
 
     /**
-     * Refuse a URL the deployment's own network is reachable at.
+     * Screen a URL and report the address its request may be pinned to.
+     *
+     * The guard resolves the host here and hands back the address it
+     * vetted; the request is pinned to it, so the client cannot resolve
+     * the name a second time and land somewhere else.
+     *
+     * @return array{0: string, 1: array<string, string>}
      *
      * @throws RemoteMediaFetchException
      */
-    private function screen(string $url): string
+    private function screen(string $url): array
     {
-        $reason = $this->ssrf->rejectReason($url);
-        if ($reason !== null) {
+        $screen = $this->ssrf->screen($url);
+        if ($screen['reason'] !== null) {
             throw new RemoteMediaFetchException(
                 url: $url,
                 httpStatus: 0,
-                message: $reason,
+                message: $screen['reason'],
             );
         }
 
-        return $url;
+        return [$url, $screen['resolve']];
     }
 
     /**
@@ -264,7 +276,6 @@ final class RemoteMediaFetcher
     public function probe(string $url): array
     {
         try {
-            $url = $this->screen($url);
             [$response] = $this->send('HEAD', $url, []);
             $status = $response->getStatusCode();
             $headers = $response->getHeaders(false);

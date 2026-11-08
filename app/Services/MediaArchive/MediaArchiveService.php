@@ -350,21 +350,21 @@ final class MediaArchiveService
 
         // A row with no stored principal predates the principal column.
         // The agent linkage still names one, so it decides.
-        if ($asset->agent_id !== null
+        $throughAgent = $asset->agent_id !== null
             && Agent::query()
                 ->where('id', (int) $asset->agent_id)
                 ->where('principal_id', $principalId)
-                ->exists()
-        ) {
-            return true;
-        }
+                ->exists();
 
-        // A direct upload with neither a principal nor an agent is the
-        // uploader's own asset, and it belongs to their personal
+        // Otherwise a direct upload with neither a principal nor an agent
+        // is the uploader's own asset, and it belongs to their personal
         // principal — a group they pay for is a different principal.
-        return $asset->user_id !== null
-            && (int) $asset->user_id === $ownerUserId
-            && $this->isPersonalPrincipalOf($principalId, $ownerUserId);
+        return $throughAgent
+            || (
+                $asset->user_id !== null
+                && (int) $asset->user_id === $ownerUserId
+                && $this->isPersonalPrincipalOf($principalId, $ownerUserId)
+            );
     }
 
     /**

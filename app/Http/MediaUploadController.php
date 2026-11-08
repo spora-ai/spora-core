@@ -234,6 +234,16 @@ final class MediaUploadController
             );
         }
 
+        return $this->checkAgentPrincipalMatches($agentId, $principalId);
+    }
+
+    /**
+     * The agent and the principal the request names have to be the same
+     * one, or the upload would be filed under a principal the agent does
+     * not belong to.
+     */
+    private function checkAgentPrincipalMatches(int $agentId, ?int $principalId): ?JsonResponse
+    {
         $agentPrincipalId = $this->principalOfAgent($agentId);
         if ($principalId !== null && $agentPrincipalId !== null && $agentPrincipalId !== $principalId) {
             return $this->error(
