@@ -82,9 +82,6 @@ afterEach(function (): void {
     Mockery::close();
 });
 
-// ---------------------------------------------------------------------------
-// register()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::register', function (): void {
     test('returns 201 with user data on successful registration', function (): void {
@@ -290,9 +287,6 @@ describe('AuthController::register', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// login()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::login', function (): void {
     test('returns 200 with user data on successful login', function (): void {
@@ -524,9 +518,6 @@ describe('AuthController::login', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// logout()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::logout', function (): void {
     test('returns 200 with a {logged_out: true} envelope', function (): void {
@@ -539,9 +530,6 @@ describe('AuthController::logout', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// me()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::me', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -600,9 +588,6 @@ describe('AuthController::me', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// password()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::password', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -681,9 +666,6 @@ describe('AuthController::password', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// account()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::account', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -770,9 +752,6 @@ describe('AuthController::account', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// verify()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::verify', function (): void {
     test('returns 422 when selector is empty', function (): void {
@@ -990,9 +969,6 @@ describe('AuthController::verify', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// forgotPassword()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::forgotPassword', function (): void {
     test('returns 200 when email exists and user is verified', function (): void {
@@ -1120,9 +1096,6 @@ describe('AuthController::forgotPassword', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// resetPassword()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::resetPassword', function (): void {
     test('returns 400 on invalid JSON', function (): void {
@@ -1281,9 +1254,6 @@ describe('AuthController::resetPassword', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// resendVerification()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::resendVerification', function (): void {
     test('returns 200 even when email is unknown (no enumeration)', function (): void {
@@ -1350,9 +1320,6 @@ describe('AuthController::resendVerification', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// requestEmailChange()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::requestEmailChange', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -1521,9 +1488,6 @@ describe('AuthController::requestEmailChange', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// confirmEmailChange()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::confirmEmailChange', function (): void {
     test('returns 400 on invalid JSON', function (): void {

@@ -204,9 +204,6 @@ it('treats a tool setting of 0 as unset rather than as a zero-second timeout', f
     assertTimeoutReachesHttpClient(['http_timeout' => 0], 7, 7);
 });
 
-// ---------------------------------------------------------------------
-// fetch_pdf: extraction + the SSRF / size guards on the way in
-// ---------------------------------------------------------------------
 
 it('fetches a PDF and returns its text as markdown', function () {
     $client = Mockery::mock(HttpClientInterface::class);

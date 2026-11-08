@@ -93,10 +93,8 @@ final class AuthValidator
         return false;
     }
 
-    // ---------------------------------------------------------------------
-    // Catch-arm mappers — each mirrors the match (true) { $e instanceof X => ... }
-    // pattern from the AuthController. Order matters: most specific first.
-    // ---------------------------------------------------------------------
+    // Catch-arm mappers, each mirroring the AuthController's `match (true)`.
+    // Order matters: most specific first.
 
     public function mapEmailVerificationError(AuthException $e): JsonResponse
     {

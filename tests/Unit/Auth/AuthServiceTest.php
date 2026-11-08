@@ -253,11 +253,6 @@ test('changeEmail() throws NotLoggedInException when not logged in', function ()
         ->toThrow(Delight\Auth\NotLoggedInException::class);
 });
 
-// ---------------------------------------------------------------------------
-// Coverage added for the AuthService split in Phase 3 PR 3.4. The methods
-// exercised here will move into AuthEmailFlow / AuthRoleAdmin; these tests
-// pin the public contract so the split is a pure refactor (php:S1448).
-// ---------------------------------------------------------------------------
 
 describe('AuthService::changeEmail', function (): void {
     test('logged-in user can request an email change and the verification URL follows the app URL', function (): void {
@@ -481,10 +476,8 @@ describe('AuthService typed exception flow', function (): void {
     });
 });
 
-// Smoke test added for the AuthService split in Phase 3 PR 3.4. The facade
-// must wire up the two new collaborators (AuthEmailFlow, AuthRoleAdmin) so
-// that delegated calls reach the right collaborator (php:S1448).
-// ---------------------------------------------------------------------------
+// The facade must wire up AuthEmailFlow and AuthRoleAdmin so that
+// delegated calls reach the right collaborator.
 
 test('AuthService wires AuthEmailFlow and AuthRoleAdmin collaborators (split smoke test)', function (): void {
     $service = bootAuthLayer();

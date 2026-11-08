@@ -44,9 +44,7 @@ final class LlmConfigValidator
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
-    // ---------------------------------------------------------------------
-    // POST /llm-configs (create)
-    // ---------------------------------------------------------------------
+    // POST /llm-configs (create).
 
     /**
      * @param array<string, mixed> $body
@@ -210,9 +208,7 @@ final class LlmConfigValidator
         return $this->error('VALIDATION_ERROR', 'Failed to create configuration.', Response::HTTP_UNPROCESSABLE_ENTITY);
     }
 
-    // ---------------------------------------------------------------------
-    // PUT /llm-configs/{id} (update) — also authorizes the access
-    // ---------------------------------------------------------------------
+    // PUT /llm-configs/{id} (update), which also authorizes the access.
 
     /**
      * Returns the configuration the current user can modify, or a
@@ -306,9 +302,7 @@ final class LlmConfigValidator
         return $data;
     }
 
-    // ---------------------------------------------------------------------
-    // Error response helpers — kept here so the controller stays thin
-    // ---------------------------------------------------------------------
+    // Error response helpers, kept here so the controller stays thin.
 
     public function error(string $code, string $message, int $status): JsonResponse
     {

@@ -53,9 +53,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         $this->preferences        = $preferences ?? new LLMConfigPreferences($this->principalService);
     }
 
-    // ---------------------------------------------------------------------
-    // Schema / driver discovery (delegated to SchemaInspector)
-    // ---------------------------------------------------------------------
+    // Schema and driver discovery.
 
     /**
      * @return list<array{name: string, display_name: string, driver_class: string, settings_schema: list<array>}>
@@ -65,9 +63,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $this->schemaInspector->getDrivers();
     }
 
-    // ---------------------------------------------------------------------
-    // Settings encode / decode / mask (delegated to Persistence)
-    // ---------------------------------------------------------------------
+    // Settings encode, decode and mask.
 
     /**
      * @return array<string, mixed>
@@ -111,9 +107,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $masked;
     }
 
-    // ---------------------------------------------------------------------
-    // Configuration listing / lookup (read paths; no collaborator needed)
-    // ---------------------------------------------------------------------
+    // Configuration listing and lookup.
 
     /**
      * Union of every principal-scoped config the user can see plus every
@@ -211,9 +205,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return LLMDriverConfiguration::find($configId);
     }
 
-    // ---------------------------------------------------------------------
-    // Configuration mutations (delegated to Persistence)
-    // ---------------------------------------------------------------------
+    // Configuration mutations.
 
     public function createConfiguration(int $userId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
@@ -240,9 +232,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         return $this->persistence->deleteConfiguration($configId, $userId, $isAdmin);
     }
 
-    // ---------------------------------------------------------------------
-    // Default + preference resolution (delegated to Preferences)
-    // ---------------------------------------------------------------------
+    // Default and preference resolution.
 
     public function setDefaultConfiguration(int $configId, int $userId, bool $isAdmin): ?LLMDriverConfiguration
     {
@@ -271,9 +261,7 @@ final class LLMConfigService implements LLMConfigServiceInterface
         $this->preferences->unsetPrincipalPreferredConfig($principalId);
     }
 
-    // ---------------------------------------------------------------------
-    // Resource DTO (composes schema + decode + mask; stays on the facade)
-    // ---------------------------------------------------------------------
+    // The resource DTO.
 
     /**
      * @return array<string, mixed>
