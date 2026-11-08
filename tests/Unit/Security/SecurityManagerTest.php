@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Spora\Core\Exceptions\DecryptionFailedException;
+use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\SecurityManager;
 use Spora\Core\ValueObjects\EncryptedValue;
 
@@ -49,14 +50,14 @@ test('constructing with a key shorter than 32 bytes throws RuntimeException', fu
     expect(fn() => new SecurityManager('tooshort'))->toThrow(RuntimeException::class);
 });
 
-test('constructing with a key from a file path works correctly', function (): void {
+test('constructing with a key file path works correctly', function (): void {
     $key      = makeValidKey();
     $tmpFile  = tempnam(sys_get_temp_dir(), 'spora_key_');
 
     file_put_contents($tmpFile, $key);
 
     try {
-        $sm        = new SecurityManager($tmpFile);
+        $sm        = SecurityManager::fromKeyFile($tmpFile);
         $plaintext = 'file-based key test';
 
         $encrypted = $sm->encrypt($plaintext);
@@ -108,7 +109,7 @@ test('decrypt() throws DecryptionFailedException when decoded bytes are too shor
 });
 
 test('constructing with a non-existent file path throws RuntimeException', function (): void {
-    expect(fn() => new SecurityManager('/tmp/spora_does_not_exist_' . uniqid() . '.key'))
+    expect(fn() => SecurityManager::fromKeyFile('/tmp/spora_does_not_exist_' . uniqid() . '.key'))
         ->toThrow(RuntimeException::class, 'not found or not readable');
 });
 
@@ -117,9 +118,46 @@ test('constructing with a file containing wrong-length key throws RuntimeExcepti
     file_put_contents($tmpFile, 'tooshort');
 
     try {
-        expect(fn() => new SecurityManager($tmpFile))
+        expect(fn() => SecurityManager::fromKeyFile($tmpFile))
             ->toThrow(RuntimeException::class, 'corrupt');
     } finally {
         unlink($tmpFile);
     }
+});
+
+/**
+ * A path and a raw key are told apart by the caller, not by their length.
+ * A 32-character path is a path: read as a key, it would encrypt every
+ * stored secret with the installation's pathname.
+ */
+test('a 32-byte path is read as a path, not used as the key', function (): void {
+    $key = makeValidKey();
+
+    // A relative path, because the length of the path is the point: a
+    // 32-character one is exactly as long as a raw key.
+    $dir = sys_get_temp_dir() . '/spora-key-' . uniqid();
+    mkdir($dir);
+    $previous = getcwd();
+    chdir($dir);
+
+    try {
+        $path = str_pad('k', 32, 'x');
+        file_put_contents($path, $key);
+
+        expect(strlen($path))->toBe(32);
+
+        $manager = SecurityManager::fromKeyFile($path);
+
+        // The file's contents are the key, not its name.
+        expect(hash('sha256', $manager->masterKey()))->toBe(hash('sha256', $key));
+    } finally {
+        chdir((string) $previous);
+        @unlink($dir . '/' . str_pad('k', 32, 'x'));
+        @rmdir($dir);
+    }
+});
+
+test('the raw key is refused when it is not 32 bytes', function (): void {
+    expect(fn() => new SecurityManager('too short'))
+        ->toThrow(InvalidSecretKeyException::class, 'exactly 32 bytes');
 });

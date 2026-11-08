@@ -237,6 +237,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      *   url: string,
      *   headers: array<string, string>,
      *   multipart: list<array<string, mixed>>,
+     *   staged_path: string,
      *   timeout: int
      * }
      */
@@ -273,10 +274,11 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         }
 
         return [
-            'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
-            'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
-            'multipart' => $multipart,
-            'timeout'   => $timeout,
+            'url'         => rtrim($baseUrl, '/') . '/audio/transcriptions',
+            'headers'     => ['Authorization' => 'Bearer ' . $apiKey],
+            'multipart'   => $multipart,
+            'staged_path' => $uploadPath,
+            'timeout'     => $timeout,
         ];
     }
 
@@ -334,7 +336,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * content-type detector from `application/x-www-form-urlencoded`
      * to `multipart/form-data`. Text fields pass through as scalars.
      *
-     * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, timeout: int} $request
+     * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, staged_path: string, timeout: int} $request
      * @return array<string, mixed>
      */
     private function sendTranscribeRequest(array $request): array
@@ -360,6 +362,10 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 'headers' => $request['headers'],
                 'body'    => $body,
                 'timeout' => $request['timeout'],
+                // The provider is the one the operator configured. A redirect
+                // would take the recording — and the API key that travels
+                // with it — to a host nobody vetted.
+                'max_redirects' => 0,
             ]);
             $payload = $response->toArray(false);
         } catch (Throwable $e) {
@@ -369,6 +375,11 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 if (is_resource($handle)) {
                     fclose($handle);
                 }
+            }
+            // The staged copy is the whole asset on disk. It leaves with the
+            // request, whether the request succeeded or not.
+            if (is_file($request['staged_path'])) {
+                unlink($request['staged_path']);
             }
         }
 
@@ -419,22 +430,25 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * stream the file off-disk rather than buffering it; an explicit
      * path also avoids the `UploadedFile` round-trip, which the
      * multipart API doesn't accept (it expects a file path or a stream,
-     * not a `UploadedFile` wrapper).
+     * not an `UploadedFile` wrapper).
      *
-     * The temp file is left in place — `HttpClient` opens it, reads
-     * it, and the OS reclaims it when nothing references it. The path
-     * is returned to the caller for inclusion in the multipart entry.
+     * The file is removed once the request is done — see
+     * {@see self::sendTranscribeRequest()}.
      *
      * @return array{0: string, 1: string} [path, filename]
      */
     private function writeTempUpload(string $bytes, string $mimeType): array
     {
+        // The MIME is checked before anything is written: a rejected
+        // recording must not leave a copy of the asset behind.
+        $ext = $this->extensionFor($mimeType);
+
         $tmp = tempnam(sys_get_temp_dir(), 'spora_oai_stt_');
         if ($tmp === false) {
             throw new InvalidAudioException('Failed to stage audio for upload.');
         }
         file_put_contents($tmp, $bytes);
-        $ext = $this->extensionFor($mimeType);
+
         return [$tmp, 'recording.' . $ext];
     }
 

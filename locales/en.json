@@ -323,6 +323,7 @@
     "Seconds to wait for a model response before giving up.": "Seconds to wait for a model response before giving up.",
     "Secret key at %s is corrupt: expected %d bytes, got %d.": "Secret key at %s is corrupt: expected %d bytes, got %d.",
     "Secret key file": "Secret key file",
+    "Secret key must be exactly %d bytes, got %d.": "Secret key must be exactly %d bytes, got %d.",
     "Send \"name\" to rename the folder, \"parent_id\" to move it.": "Send \"name\" to rename the folder, \"parent_id\" to move it.",
     "Sendmail — hand off to the local mail binary": "Sendmail — hand off to the local mail binary",
     "Server — bin/spora worker:run drains the queue": "Server — bin/spora worker:run drains the queue",

@@ -216,6 +216,44 @@ test('the rate-limit setting moves with its new name', function (): void {
     expect($stored->first()->value)->toBe('120');
 });
 
+/**
+ * A key revoked while the migration was in flight is a row that is *missing*
+ * from the new table — which is what a key the copy has not reached yet
+ * looks like too. A repeated copy must not put a revoked credential back.
+ */
+test('a key revoked after the copy is not recreated by a repeated copy', function (): void {
+    Capsule::table('users')->insert(['id' => 1, 'email' => 'a@example.com', 'name' => 'A']);
+    Capsule::table('agents')->insert(['id' => 1, 'principal_id' => 1, 'name' => 'Agent']);
+
+    $id = str_repeat('a', 32);
+
+    Capsule::table('agent_api_keys')->insert([
+        'id' => $id,
+        'agent_id' => 1,
+        'name' => 'legacy',
+        'secret_hash' => str_repeat('b', 64),
+        'created_at' => '2026-01-01 00:00:00',
+        'updated_at' => '2026-01-01 00:00:00',
+    ]);
+
+    $migration = require __DIR__ . '/../../../database/migrations/0098_scoped_api_keys.php';
+
+    // The two steps the copy needs: the new table, and the copy itself.
+    (new ReflectionMethod($migration, 'createKeysTable'))->invoke($migration);
+    (new ReflectionMethod($migration, 'copyKeys'))->invoke($migration);
+
+    expect(Capsule::table('api_keys')->where('id', $id)->exists())->toBeTrue();
+
+    // The owner revokes it while the migration is still in flight.
+    Capsule::table('api_keys')->where('id', $id)->delete();
+
+    // The copy runs again — the migration is repeatable, and a run that died
+    // half-way is the one that repeats it.
+    (new ReflectionMethod($migration, 'copyKeys'))->invoke($migration);
+
+    expect(Capsule::table('api_keys')->where('id', $id)->exists())->toBeFalse();
+});
+
 test('a value already stored under the new name is not overwritten', function (): void {
     Capsule::table('settings')->insert([
         'group_key' => 'framework',

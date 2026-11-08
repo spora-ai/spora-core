@@ -35,6 +35,12 @@ use Illuminate\Database\Schema\Blueprint;
  * lets such a run be repeated: each step skips the work that is already done
  * and finishes the work that is not.
  *
+ * The copy of the keys is the one step that cannot be repeated blindly. A
+ * key revoked while the migration was in flight is a row that is *missing*
+ * from the new table, which is what a key that was never copied looks like
+ * too — so the legacy row carries a `copied_at` mark, and the two are told
+ * apart.
+ *
  * `scope` is a plain string, not a database enum: SQLite and MySQL spell
  * CHECK constraints differently and the universe is three values. The
  * invariants (`agent` ⇒ `agent_id`, `group` ⇒ `group_id`, `global` ⇒ neither)
@@ -111,6 +117,11 @@ return new class extends Migration
      *
      * A key that is already in the new table is left alone, so a run that
      * died between creating the table and copying the rows can be repeated.
+     *
+     * The copy marks the legacy row it imported. The new table cannot carry
+     * that mark: a revoked key is a row that is *not* there, so the absence
+     * of the row cannot mean "not copied yet" — a run that is repeated after
+     * a revocation would put the credential back.
      */
     private function copyKeys(): void
     {
@@ -120,27 +131,61 @@ return new class extends Migration
             return;
         }
 
+        $this->markCopiedColumn();
+
         Capsule::table(self::OLD_KEYS_TABLE)->orderBy('id')->chunk(200, static function ($rows): void {
-            foreach ($rows as $row) {
-                $id = (string) $row->id;
+            // The import and the mark are one step: a run that dies between
+            // them leaves a key that looks uncopied, and the next run would
+            // put back a credential that was revoked in between.
+            Capsule::connection()->transaction(static function () use ($rows): void {
+                foreach ($rows as $row) {
+                    if ($row->copied_at !== null) {
+                        continue;
+                    }
 
-                if (Capsule::table(self::KEYS_TABLE)->where('id', $id)->exists()) {
-                    continue;
+                    $id = (string) $row->id;
+
+                    if (!Capsule::table(self::KEYS_TABLE)->where('id', $id)->exists()) {
+                        Capsule::table(self::KEYS_TABLE)->insert([
+                            'id'           => $id,
+                            'scope'        => 'agent',
+                            'agent_id'     => $row->agent_id === null ? null : (int) $row->agent_id,
+                            'group_id'     => null,
+                            'name'         => (string) $row->name,
+                            'secret_hash'  => (string) $row->secret_hash,
+                            'last_used_at' => $row->last_used_at,
+                            'created_by'   => $row->created_by === null ? null : (int) $row->created_by,
+                            'created_at'   => $row->created_at,
+                            'updated_at'   => $row->updated_at,
+                        ]);
+                    }
+
+                    Capsule::table(self::OLD_KEYS_TABLE)
+                        ->where('id', $id)
+                        ->update(['copied_at' => gmdate('Y-m-d H:i:s')]);
                 }
+            });
+        });
+    }
 
-                Capsule::table(self::KEYS_TABLE)->insert([
-                    'id'           => $id,
-                    'scope'        => 'agent',
-                    'agent_id'     => $row->agent_id === null ? null : (int) $row->agent_id,
-                    'group_id'     => null,
-                    'name'         => (string) $row->name,
-                    'secret_hash'  => (string) $row->secret_hash,
-                    'last_used_at' => $row->last_used_at,
-                    'created_by'   => $row->created_by === null ? null : (int) $row->created_by,
-                    'created_at'   => $row->created_at,
-                    'updated_at'   => $row->updated_at,
-                ]);
-            }
+    /**
+     * The column that records which legacy rows have been imported.
+     *
+     * It lives on the legacy table because that is the table the copy reads;
+     * the new table cannot hold it — a revoked key is a row that is absent
+     * from it, and the copy needs to tell that apart from a key it has not
+     * reached yet.
+     */
+    private function markCopiedColumn(): void
+    {
+        $schema = Capsule::schema();
+
+        if ($schema->hasColumn(self::OLD_KEYS_TABLE, 'copied_at')) {
+            return;
+        }
+
+        $schema->table(self::OLD_KEYS_TABLE, static function (Blueprint $table): void {
+            $table->dateTime('copied_at')->nullable();
         });
     }
 

@@ -288,3 +288,43 @@ test('the publisher JWT grants only the topic being published', function (): voi
     $publisher = new MercurePublisher($client, $hubUrl, 'secret1234secret1234secret1234secret1234');
     $publisher->publishForPrincipal(99, 42, ['status' => 'RUNNING']);
 });
+
+/**
+ * A principal's task stream carries that principal's answers, so the hub
+ * must not hand it to anyone who can name the topic. Mercure's answer is the
+ * `private` parameter: only the subscribers whose token carries the topic
+ * receive a private update.
+ */
+test('the update is published as private', function (): void {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $hubUrl = 'http://mercure/.well-known/mercure';
+
+    $client->shouldReceive('request')
+        ->once()
+        ->with('POST', $hubUrl, Mockery::on(function (array $options) {
+            expect($options['body']['private'])->toBe('on');
+
+            return true;
+        }))
+        ->andReturn(Mockery::mock(ResponseInterface::class));
+
+    $publisher = new MercurePublisher($client, $hubUrl, 'secret1234secret1234secret1234secret1234');
+    $publisher->publishForPrincipal(99, 42, ['status' => 'RUNNING']);
+});
+
+test('a notification is published as private too', function (): void {
+    $client = Mockery::mock(HttpClientInterface::class);
+    $hubUrl = 'http://mercure/.well-known/mercure';
+
+    $client->shouldReceive('request')
+        ->once()
+        ->with('POST', $hubUrl, Mockery::on(function (array $options) {
+            expect($options['body']['private'])->toBe('on');
+
+            return true;
+        }))
+        ->andReturn(Mockery::mock(ResponseInterface::class));
+
+    $publisher = new MercurePublisher($client, $hubUrl, 'secret1234secret1234secret1234secret1234');
+    $publisher->publishToUser(7, ['event' => 'notification']);
+});

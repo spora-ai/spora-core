@@ -323,6 +323,7 @@
   "Seconds to wait for a model response before giving up.": "Sekunden, die auf eine Modellantwort gewartet wird, bevor aufgegeben wird.",
   "Secret key at %s is corrupt: expected %d bytes, got %d.": "Der Schlüssel unter %s ist beschädigt: %d Bytes erwartet, %d erhalten.",
   "Secret key file": "Datei mit dem geheimen Schlüssel",
+  "Secret key must be exactly %d bytes, got %d.": "Der geheime Schlüssel muss genau %d Bytes lang sein, %d erhalten.",
   "Send \"name\" to rename the folder, \"parent_id\" to move it.": "Sende \"name\", um den Ordner umzubenennen, \"parent_id\", um ihn zu verschieben.",
   "Sendmail — hand off to the local mail binary": "Sendmail — Übergabe an das lokale Mail-Binärprogramm",
   "Server — bin/spora worker:run drains the queue": "Server — bin/spora worker:run leert die Warteschlange",

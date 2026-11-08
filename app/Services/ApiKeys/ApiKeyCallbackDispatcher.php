@@ -6,8 +6,13 @@ namespace Spora\Services\ApiKeys;
 
 use Illuminate\Support\Carbon;
 use Psr\Log\LoggerInterface;
+use Spora\Auth\ApiKeyScope;
+use Spora\Models\Agent;
 use Spora\Models\ApiCallback;
+use Spora\Models\ApiKey;
 use Spora\Models\Task;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\SsrfGuard;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Throwable;
@@ -27,6 +32,11 @@ use Throwable;
  * the terminal transition: `pending_status` is what is owed,
  * `delivered_status` is what the receiver last acknowledged, and the two
  * only diverge while a POST is outstanding.
+ *
+ * A registration is a snapshot, and both halves of it can change: the key
+ * can be revoked or lose its reach over the agent, and the name it points at
+ * can start answering with another address. So every delivery re-checks the
+ * key's reach and screens the destination again.
  */
 final class ApiKeyCallbackDispatcher
 {
@@ -68,6 +78,11 @@ final class ApiKeyCallbackDispatcher
         private readonly ApiKeyChatProjection $projection,
         private readonly CallbackSecretResolver $secrets,
         private readonly LoggerInterface $logger,
+        // The guard screens the stored URL again before every delivery: the
+        // name may answer with a different address than it did when the
+        // callback was registered.
+        private readonly SsrfGuard $guard = new SsrfGuard(),
+        private readonly ApiKeyReach $reach = new ApiKeyReach(new PrincipalResolver()),
     ) {}
 
     /**
@@ -186,6 +201,16 @@ final class ApiKeyCallbackDispatcher
 
     private function deliver(ApiCallback $row, Task $task): bool
     {
+        if (!$this->keyReachesTask($row, $task)) {
+            // The key that registered this callback no longer reaches the
+            // task's agent — it was revoked, or the agent moved to another
+            // principal. The subscription goes with the access: the receiver
+            // is no longer entitled to this task's data.
+            $row->delete();
+
+            return false;
+        }
+
         $response = $this->post($row, $task);
 
         if (!$response instanceof ResponseInterface) {
@@ -193,10 +218,23 @@ final class ApiKeyCallbackDispatcher
             return false;
         }
 
-        $statusCode = $response->getStatusCode();
+        try {
+            $statusCode = $response->getStatusCode();
+        } catch (Throwable $e) {
+            // The transport failed while the response was being read. The
+            // attempt has to be accounted for like any other failure, or the
+            // row stays due and is retried for ever.
+            $this->recordFailure($row, null, $e->getMessage());
+
+            return false;
+        }
 
         if ($statusCode < 200 || $statusCode >= 300) {
-            $this->recordFailure($row, $statusCode, $this->bodyError($response));
+            // The receiver's body is not read: it is the receiver's to shape,
+            // and a small gzipped answer can expand into a large allocation
+            // in the worker before the message is truncated.
+            $response->cancel();
+            $this->recordFailure($row, $statusCode, 'HTTP ' . $statusCode);
 
             return false;
         }
@@ -204,6 +242,35 @@ final class ApiKeyCallbackDispatcher
         $this->recordSuccess($row, $task, $statusCode);
 
         return true;
+    }
+
+    /**
+     * Whether the key that registered the callback may still touch the task's
+     * agent.
+     *
+     * The registration is a snapshot: the key can have been revoked, or the
+     * agent can have moved to another principal, since it was made.
+     */
+    private function keyReachesTask(ApiCallback $row, Task $task): bool
+    {
+        $key = ApiKey::find($row->key_id);
+
+        if ($key === null) {
+            return false;
+        }
+
+        $scope = ApiKeyScope::fromValue($key->scope);
+
+        if ($scope === null) {
+            return false;
+        }
+
+        $agent = $scope === ApiKeyScope::Agent && $key->agent_id !== null
+            ? Agent::find($key->agent_id)
+            : null;
+        $groupId = $key->group_id === null ? null : (int) $key->group_id;
+
+        return $this->reach->allows(new ApiKeyContext($key, $scope, $agent, null, $groupId), (int) $task->agent_id);
     }
 
     /**
@@ -218,6 +285,17 @@ final class ApiKeyCallbackDispatcher
         if ($secret === null) {
             // The key was deleted; its callbacks go with it.
             $row->delete();
+
+            return null;
+        }
+
+        // The name the callback was registered under is resolved again here:
+        // the answers it gave then are not the answers it gives now, and the
+        // request goes to the address this screening vetted.
+        $screen = $this->guard->screen($row->url);
+
+        if ($screen['reason'] !== null) {
+            $this->recordFailure($row, null, $screen['reason']);
 
             return null;
         }
@@ -244,6 +322,7 @@ final class ApiKeyCallbackDispatcher
                 // `recordFailure()` and is retried, which is the right answer
                 // for a receiver that has no reason to redirect.
                 'max_redirects' => 0,
+                'resolve' => $screen['resolve'],
             ]);
         } catch (Throwable $e) {
             $this->recordFailure($row, null, $e->getMessage());
@@ -296,21 +375,6 @@ final class ApiKeyCallbackDispatcher
         }
 
         $row->save();
-    }
-
-    private function bodyError(ResponseInterface $response): string
-    {
-        try {
-            $body = $response->toArray(false);
-        } catch (Throwable) {
-            return 'HTTP error';
-        }
-
-        if (isset($body['error']['message']) && is_string($body['error']['message'])) {
-            return $body['error']['message'];
-        }
-
-        return 'HTTP ' . $response->getStatusCode();
     }
 
     private function sign(string $payload, string $secret): string

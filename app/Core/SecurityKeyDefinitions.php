@@ -41,7 +41,7 @@ final class SecurityKeyDefinitions
             );
         }
 
-        return new SecurityManager($path);
+        return SecurityManager::fromKeyFile($path);
     }
 
     private static function resolveKeyPath(ContainerInterface $c): ?string
