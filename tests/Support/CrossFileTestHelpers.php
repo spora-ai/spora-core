@@ -353,6 +353,7 @@ if (!function_exists('makeMediaToolWithRealArchive')) {
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service'], $activeTypes),
             makeMediaFolderHandlerForTest($ctx['service']),
+            $activeTypes,
             $config ?? new Spora\Core\Config(),
             $toolConfigService,
         );
@@ -411,8 +412,32 @@ if (!function_exists('buildMediaToolForSchema')) {
             $derivativeHandler,
             makeMediaCreateHandlerForTest($ctx['service']),
             makeMediaFolderHandlerForTest($ctx['service']),
+            new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config()),
             new Spora\Core\Config(),
         );
+    }
+}
+
+if (!function_exists('mediaActiveTypesPolicy')) {
+    /**
+     * A policy with the operator's script-capable toggles at chosen values.
+     *
+     * The two switches answer different questions — whether a script-capable
+     * format may exist at all, and whether an embedded copy may run its
+     * script — so both are settable here.
+     */
+    function mediaActiveTypesPolicy(bool $activeTypes, bool $embedScripts = false): Spora\Services\MediaArchive\MediaActiveTypesPolicy
+    {
+        return new Spora\Services\MediaArchive\MediaActiveTypesPolicy(new Spora\Core\Config(
+            [
+                'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => $activeTypes,
+                'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => $embedScripts,
+            ],
+            [
+                'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => Spora\Core\Config::SOURCE_ENV,
+                'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => Spora\Core\Config::SOURCE_ENV,
+            ],
+        ));
     }
 }
 

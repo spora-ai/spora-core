@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\Tools;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Core\Config;
-use Spora\Services\MediaArchive\MediaActiveTypesPolicy;
 
 /**
  * The operator's script-capable toggle, seen through `create_media`.
@@ -157,20 +155,3 @@ it('stores a Markdown report as Markdown even when its body is markup-dense', fu
         $restore();
     }
 });
-
-/**
- * A policy with the operator's script-capable toggle at a chosen value.
- */
-function mediaActiveTypesPolicy(bool $activeTypes, bool $embedScripts = false): MediaActiveTypesPolicy
-{
-    return new MediaActiveTypesPolicy(new Config(
-        [
-            'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => $activeTypes,
-            'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => $embedScripts,
-        ],
-        [
-            'SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES'   => Config::SOURCE_ENV,
-            'SPORA_MEDIA_ARCHIVE_ALLOW_EMBED_SCRIPTS' => Config::SOURCE_ENV,
-        ],
-    ));
-}

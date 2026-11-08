@@ -1,6 +1,6 @@
 ---
 name: media-library
-description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library, and organise them in folders. Trigger on any of: 'show this asset', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', 'file this in a folder', 'create a folder for these documents', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, the size/mime constraints that decide between inline-bytes and public-URL retrieval, and how the folder tree is shaped."
+description: "Search, retrieve, embed, share, and produce media assets (images, audio, video, documents) from the media library, and organise them in folders. Trigger on any of: 'show this asset', 'show this dashboard live', 'render to PNG', 'list derivatives', 'fetch the source code', 'mint a share link', 'convert the derivative', 'what files do we have', 'media archive search', 'file this in a folder', 'create a folder for these documents', or any request that mentions an `asset_id` from a prior media tool call. The skill explains which operation fits the intent, how returned `asset_id`s chain into follow-up calls, the size/mime constraints that decide between inline-bytes and public-URL retrieval, how to show a script-capable asset as a live widget in your reply, and how the folder tree is shaped."
 license: MIT
 compatibility: "Designed for Spora agents with the `media` tool enabled."
 metadata:
@@ -65,7 +65,7 @@ Want a **clean** markdown snippet only — no asset header, no extracted text? U
 
 `get_media`, `get_embed_code`, `create_media` and `create_derivative` all render the same asset identically. The type decides the shape:
 
-- **Image** — a markdown image: the filename as the alt text, the asset url as the target.
+- **Image** — a markdown image: the filename as the alt text, the asset url as the target. `image/svg+xml` is in this bucket, not the document one, so an SVG's markdown is a picture rather than a card.
 - **Audio** — an `<audio>` element: `<audio controls preload="metadata" src="/api/v1/assets/0b8a…f31c.mp3"></audio>`
 - **Video** — a `<video>` element, with the width and height when the archive knows them: `<video controls playsinline width="1280" height="720" src="/api/v1/assets/0b8a…f31c.mp4"></video>`
 - **Document** (`text/*` and `application/*` — Markdown, PDF, CSV, JSON, XML, YAML, HTML where the operator has permitted it, plus anything a plugin's converter registers) — the download card below.
@@ -87,19 +87,40 @@ This is one `MediaType::Document` render, not a per-op or per-producer format. *
 
 ### A script-capable asset can render as a live widget
 
-Two MIME types are **script-capable**: `text/html` and `image/svg+xml`. A browser parses both as a *document* rather than a picture, so both can carry script. Every other type renders as the shape above.
+Two MIME types are **script-capable**: `text/html` and `image/svg+xml`. Both can carry script, so both are the operator's decision — and it is two decisions: they have to permit script-capable assets at all, and they have a second switch for whether an embed may run script. Both switches are off by default and neither is readable from a tool call, so **never promise the operator a live widget** — produce the asset, say what it is, and let the chat render it as the operator has configured it.
 
-The chat may render a script-capable asset as a **live embed** — an iframe showing the asset — instead of the download card. Whether it does is the operator's decision, and it is two decisions: they have to permit script-capable assets at all, and they have a second switch for whether an embed may run script. Both are off by default and neither is readable from a tool call, so **never promise the operator a live widget** — produce the asset, say what it is, and let the chat render it as the operator has configured it.
+A script-capable asset has **two** renderings, and they are not in the same place:
 
-Two things follow from where that decision is made:
+- **In the tool's own bubble**, the chat shows the asset as a **live embed** — an iframe, next to the markdown the tool returned. The chat reads the tool result's structured data to do that, and that structured data never reaches you, so you cannot inspect it or influence it.
+- **In your own message**, you ask for the same live embed by **linking its embed route** — a markdown link, on a line of its own:
 
-- **The markdown you echo is not what decides it.** The card stays the card. The chat reads the tool result's structured data and renders the embed itself — and that structured data never reaches you, so you cannot inspect it or influence it.
-- **Do not paste the asset's own markup into your final message.** The assistant's message is sanitised before it is rendered, so raw HTML there is stripped or shown as text — never played. Echo the *card*, which is sanitiser-safe, and write about the asset in words. The widget itself is rendered by the tool's own bubble, out of data you never see.
+  ```markdown
+  [test-dashboard.html](/api/v1/media/<asset_id>/embed)
+  ```
 
-The **filename is the intent**, and the archive honours it. An asset named `page.html` is a document; an asset named `report.md` is Markdown, even when its body carries enough markup that the byte sniffer would have called it HTML. So:
+  **The tool hands you that line.** `create_media` and `get_media` put it in their result for a script-capable asset the operator has permitted, so copy it from there as it stands rather than composing the route yourself. A model that composes the route gets it wrong, and a model told in prose writes the prose. `get_embed_code` returns the embed alone, with no line — call `get_media` when you want the live one as well.
+
+  The chat renders that link as the live asset, in place, as a block. **A link is the whole request** — you never see the asset's bytes and you never write any markup, exactly as a link to a file is a link and not the file.
+
+  The target is the **embed route**, not the asset route: `/api/v1/assets/<id>.html` is the *download* path and stays a plain link, while `/api/v1/media/<id>/embed` is the one the chat can show live. A share link from `get_public_url` opens the asset and is never framed.
+
+  Whether the frame may run script is the operator's decision, made twice over, and both switches are off by default and unreadable from a tool call — so **never promise the operator a live widget**. Write the link, and let the chat render it as the operator has configured it. If the operator has not permitted it, the link stays a link and the operator can still open it.
+
+Apart from that link, your message carries only markdown, and it is sanitised before it is rendered — so raw markup in it is stripped or shown as text and never played. What the operator reads there is the markdown, and it differs per type:
+
+| type | bucket | your message shows |
+| --- | --- | --- |
+| `text/html` | document | the download card |
+| `image/svg+xml` | image | an inline image, and a **static** one — a browser does not run an SVG's script inside an `<img>` |
+
+Without the embed link, an HTML widget reaches the operator as a **download button** in your message and an SVG widget as a static picture, with the live one in the bubble above. With the link, the message carries the live one too. Echo the card or the image exactly as the tool returned it, describe what you built in words, and add the embed link when you want the operator to see it running. The frame is the chat's to render, not yours.
+
+The **filename is the intent**, and the archive honours it. `create_media` re-sniffs the bytes and ignores the mime you declare, but a filename that says `.md` wins over a *prose-shaped* verdict — bytes that look like HTML because the prose carries markup. So:
 
 - A **widget** — a dashboard, a chart, an interactive page — is a `.html` file.
-- A **report** is a `.md` file, and it stays a document.
+- A **report** is a `.md` file, and it stays a document even when its body is markup-dense.
+
+An SVG has one more limit: it is **write-only** to you. `get_source` returns no bytes for a binary mime, and `image/svg+xml` is binary, so reading an SVG back means creating its `md` derivative first — and there may be none, in which case the call fails and says so.
 
 The embed is served from the session, so the frame needs the operator to be signed in. A share link minted with `get_public_url` opens the asset itself, not the embed.
 
