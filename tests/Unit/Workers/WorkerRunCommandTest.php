@@ -1257,6 +1257,34 @@ describe('WorkerRunCommand — worker lock', function (): void {
 
         fclose($holderFd);
     });
+
+    it('takes over a lock whose holder is gone', function (): void {
+        $holderFd = holdWorkerLockFile($this->lockFile, 4194304);
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeTrue()
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
+
+        fclose($holderFd);
+    });
+
+    it('reports a lock file it cannot open', function (): void {
+        // Point the storage dir at a path that does not exist, so the lock
+        // file cannot be created.
+        $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir . '/missing';
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeFalse()
+            ->and($output->fetch())->toContain('Could not open the worker lock file');
+    });
 });
 
 describe('ScheduledRunProcessor substituteVariables', function (): void {

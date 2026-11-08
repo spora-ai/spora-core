@@ -109,12 +109,7 @@ final class WorkerLock
      */
     private function openMutex(): mixed
     {
-        $mutex = fopen($this->lockFile . self::TAKEOVER_SUFFIX, 'c');
-        if ($mutex === false) {
-            throw $this->openFailed();
-        }
-
-        return $mutex;
+        return $this->openFile($this->lockFile . self::TAKEOVER_SUFFIX);
     }
 
     /**
@@ -122,10 +117,7 @@ final class WorkerLock
      */
     private function tryTake(): bool
     {
-        $fd = fopen($this->lockFile, 'c');
-        if ($fd === false) {
-            throw $this->openFailed();
-        }
+        $fd = $this->openFile($this->lockFile);
 
         if (!flock($fd, LOCK_EX | LOCK_NB)) {
             fclose($fd);
@@ -144,12 +136,14 @@ final class WorkerLock
      */
     private function replaceStaleLock(int $deadHolderPid): bool
     {
-        @unlink($this->lockFile);
-
-        $fd = fopen($this->lockFile, 'c');
-        if ($fd === false) {
-            throw $this->openFailed();
+        // Removing the file is what gives the lock a new inode. Where the
+        // directory cannot be written, the old inode stays and the orphan
+        // keeps holding it — the flock below then refuses.
+        if (is_writable(dirname($this->lockFile))) {
+            @unlink($this->lockFile);
         }
+
+        $fd = $this->openFile($this->lockFile);
 
         if (!flock($fd, LOCK_EX | LOCK_NB)) {
             fclose($fd);
@@ -160,6 +154,29 @@ final class WorkerLock
         $this->adopt($fd);
 
         return true;
+    }
+
+    /**
+     * Open a file for the lock.
+     *
+     * The path is checked first so the failure is quiet: `fopen()` on a
+     * path whose directory does not exist, or on a directory, warns — and
+     * the caller reports the failure itself.
+     *
+     * @throws RuntimeException when the file cannot be opened.
+     */
+    private function openFile(string $path): mixed
+    {
+        if (!is_dir(dirname($path)) || is_dir($path)) {
+            throw $this->openFailed();
+        }
+
+        $fd = fopen($path, 'c');
+        if ($fd === false) {
+            throw $this->openFailed();
+        }
+
+        return $fd;
     }
 
     private function openFailed(): RuntimeException
@@ -178,6 +195,10 @@ final class WorkerLock
 
     private function readHolderPid(): ?int
     {
+        if (!is_file($this->lockFile)) {
+            return null;
+        }
+
         $raw = @file_get_contents($this->lockFile);
         if ($raw === false) {
             return null;
@@ -198,10 +219,6 @@ final class WorkerLock
      */
     private static function isProcessAlive(int $pid): bool
     {
-        if ($pid <= 0) {
-            return false;
-        }
-
         if (!function_exists('posix_kill')) {
             return is_dir('/proc/' . $pid);
         }

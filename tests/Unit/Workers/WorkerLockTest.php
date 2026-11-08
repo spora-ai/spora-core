@@ -12,8 +12,9 @@ describe('WorkerLock', function (): void {
     });
 
     afterEach(function (): void {
+        chmod($this->storageDir, 0755);
         foreach (glob($this->storageDir . '/*') ?: [] as $file) {
-            @unlink($file);
+            is_dir($file) ? @rmdir($file) : @unlink($file);
         }
         @rmdir($this->storageDir);
     });
@@ -21,9 +22,10 @@ describe('WorkerLock', function (): void {
     it('acquires an uncontended lock and records the holder pid', function (): void {
         $lock = new WorkerLock($this->lockFile);
 
-        expect($lock->acquire())->toBeTrue()
-            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid())
-            ->and($lock->holderPid())->toBe(getmypid());
+        expect($lock->holderPid())->toBeNull()
+            ->and($lock->acquire())->toBeTrue()
+            ->and($lock->holderPid())->toBe(getmypid())
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
 
         $lock->release();
     });
@@ -38,10 +40,42 @@ describe('WorkerLock', function (): void {
         $lock = new WorkerLock($this->lockFile);
 
         expect($lock->acquire())->toBeTrue()
-            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid())
+            ->and($lock->takenOverFrom())->toBe(4194304)
+            ->and($lock->path())->toBe($this->lockFile);
 
         fclose($holderFd);
         $lock->release();
+    });
+
+    it('reports a lock file it cannot open', function (): void {
+        $lock = new WorkerLock($this->storageDir . '/missing/spora-worker.lock');
+
+        expect(fn() => $lock->acquire())->toThrow(RuntimeException::class);
+    });
+
+    it('reports a lock path that is a directory', function (): void {
+        mkdir($this->lockFile);
+
+        $lock = new WorkerLock($this->lockFile);
+
+        expect(fn() => $lock->acquire())->toThrow(RuntimeException::class);
+    });
+
+    it('refuses to take over a lock it cannot replace', function (): void {
+        // The storage directory cannot be written, so the lock file cannot
+        // be replaced: the old inode stays in place, and the orphan still
+        // holds it.
+        $holderFd = holdWorkerLockFile($this->lockFile, 4194304);
+        touch($this->lockFile . '.takeover');
+        chmod($this->storageDir, 0555);
+
+        $lock = new WorkerLock($this->lockFile);
+
+        expect($lock->acquire())->toBeFalse();
+
+        chmod($this->storageDir, 0755);
+        fclose($holderFd);
     });
 
     it('refuses to start while a live worker holds the lock', function (): void {
@@ -92,6 +126,10 @@ describe('WorkerLock', function (): void {
         expect($second->acquire())->toBeTrue();
 
         $second->release();
+        // Releasing a lock that is not held is a no-op.
+        $second->release();
+
+        expect(true)->toBeTrue();
     });
 
     it('makes a second worker wait while the first one decides', function (): void {
