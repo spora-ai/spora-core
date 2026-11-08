@@ -251,12 +251,12 @@ describe('an idempotent re-ingest', function (): void {
             $principalId,
             $toolCall,
             (string) $folder->id,
-            'https://cdn.example/reingest.md',
+            'https://93.184.216.34/reingest.md',
             'theme.md',
         );
 
         $asset = $archive->ingest(new MediaIngestRequest(
-            url: 'https://cdn.example/reingest.md',
+            url: 'https://93.184.216.34/reingest.md',
             toolCallId: $toolCall->id,
             filename: 'theme.md',
             principalId: $principalId,
@@ -283,12 +283,12 @@ describe('an idempotent re-ingest', function (): void {
             $principalId,
             $toolCall,
             (string) $folder->id,
-            'https://cdn.example/reingest-collide.md',
+            'https://93.184.216.34/reingest-collide.md',
             'theme.md',
         );
 
         expect(fn() => $archive->ingest(new MediaIngestRequest(
-            url: 'https://cdn.example/reingest-collide.md',
+            url: 'https://93.184.216.34/reingest-collide.md',
             toolCallId: $toolCall->id,
             filename: 'taken.md',
             principalId: $principalId,
@@ -312,12 +312,12 @@ describe('an idempotent re-ingest', function (): void {
             $principalId,
             $toolCall,
             (string) $folder->id,
-            'https://cdn.example/reingest-nofolder.md',
+            'https://93.184.216.34/reingest-nofolder.md',
             'theme.md',
         );
 
         expect(fn() => $archive->ingest(new MediaIngestRequest(
-            url: 'https://cdn.example/reingest-nofolder.md',
+            url: 'https://93.184.216.34/reingest-nofolder.md',
             toolCallId: $toolCall->id,
             filename: 'taken.md',
             principalId: $principalId,

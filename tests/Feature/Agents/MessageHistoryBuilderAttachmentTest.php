@@ -1186,3 +1186,92 @@ test('a summary that covers both halves of a turn drops the whole turn', functio
     expect($rendered)->toContain('The operator asked to ship the release notes.');
     expect($rendered)->toContain('Shipped.');
 });
+
+test('a repeated image id is rendered once', function (): void {
+    // The blocks are built from the asset, so a repeated id would
+    // duplicate them — and load and base64-encode the image again for
+    // every occurrence.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [
+            ['media_id' => $asset->id, 'kind' => 'image'],
+            ['media_id' => $asset->id, 'kind' => 'image'],
+            ['media_id' => $asset->id, 'kind' => 'image'],
+        ],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    $blocks = $messages[0]['content'];
+    $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+    expect($images)->toHaveCount(1);
+});
+
+test('the row forwards no more image bytes than the budget', function (): void {
+    // The per-asset cap bounds one image; the row's budget bounds the
+    // row. An image that does not fit is not loaded at all.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    $row = TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    // The renderer lives beside the builder in its file; loading the
+    // builder's class is what makes it available.
+    expect(class_exists(MessageHistoryBuilder::class))->toBeTrue();
+
+    $renderer = new \Spora\Agents\AttachmentRowRenderer($driver, BASE_PATH, maxRowImageBytes: 1);
+    $blocks = $renderer->render($row->fresh());
+
+    expect($blocks)->not->toBeNull();
+    $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+    expect($images)->toHaveCount(0);
+});

@@ -132,26 +132,51 @@ final class MediaFolderService
      */
     public function move(int $principalId, string $folderId, ?string $parentId): MediaFolder
     {
-        $folder = $this->requireFolder($principalId, $folderId);
-        $parent = $this->parentFor($principalId, $parentId);
+        // The ancestry check and the parent write share one transaction, so
+        // a move that is refused leaves the tree as it was.
+        return Capsule::connection()->transaction(
+            function () use ($principalId, $folderId, $parentId): MediaFolder {
+                $this->lockHierarchy($principalId);
 
-        if ($parent !== null) {
-            $descendants = $this->descendantsWithPaths($folder, (string) $folder->path);
-            $inside = (string) $parent->id === (string) $folder->id
-                || array_key_exists((string) $parent->id, $descendants);
-            if ($inside) {
-                throw new MediaFolderValidationException(
-                    'A folder cannot be moved inside itself.',
-                );
-            }
-        }
+                $folder = $this->requireFolder($principalId, $folderId);
+                $parent = $this->parentFor($principalId, $parentId);
 
-        // The parent changes before the path is rewritten, so the single
-        // save in `repath()` persists both.
-        $folder->parent_id = $parent?->id;
-        $this->repath($folder, $this->paths->pathFor($parent, (string) $folder->name), (string) $folder->name);
+                if ($parent !== null) {
+                    $descendants = $this->descendantsWithPaths($folder, (string) $folder->path);
+                    $inside = (string) $parent->id === (string) $folder->id
+                        || array_key_exists((string) $parent->id, $descendants);
+                    if ($inside) {
+                        throw new MediaFolderValidationException(
+                            'A folder cannot be moved inside itself.',
+                        );
+                    }
+                }
 
-        return $folder;
+                // The parent changes before the path is rewritten, so the single
+                // save in `repath()` persists both.
+                $folder->parent_id = $parent?->id;
+                $this->repath($folder, $this->paths->pathFor($parent, (string) $folder->name), (string) $folder->name);
+
+                return $folder;
+            },
+        );
+    }
+
+    /**
+     * Lock the principal's folders for the rest of the transaction.
+     *
+     * Two overlapping moves otherwise both validate against the same
+     * pre-move state — A under B and B under A each pass the "not inside
+     * itself" check — and both save, leaving a cycle the traversal below
+     * would then follow forever. The lock makes the second move wait for
+     * the first to commit, so its check reads the committed tree.
+     */
+    private function lockHierarchy(int $principalId): void
+    {
+        MediaFolder::query()
+            ->where('principal_id', $principalId)
+            ->lockForUpdate()
+            ->get();
     }
 
     /**
@@ -394,6 +419,10 @@ final class MediaFolderService
      * The folder's descendants and the path each one takes under
      * `$rootPath`.
      *
+     * A folder id seen twice means the persisted tree holds a cycle. The
+     * walk stops there: following it would never end, and every hop would
+     * lengthen the path strings.
+     *
      * @return array<string, array{folder: MediaFolder, path: string}>
      */
     private function descendantsWithPaths(MediaFolder $root, string $rootPath): array
@@ -408,16 +437,22 @@ final class MediaFolderService
         }
 
         $descendants = [];
+        $visited = [(string) $root->id => true];
         $stack = [[(string) $root->id, $rootPath]];
         while ($stack !== []) {
             [$parentId, $parentPath] = array_pop($stack);
             foreach ($byParent[$parentId] ?? [] as $child) {
+                $childId = (string) $child->id;
+                if (isset($visited[$childId])) {
+                    continue;
+                }
+                $visited[$childId] = true;
                 $childPath = $parentPath . MediaFolderPaths::SEPARATOR . (string) $child->name;
-                $descendants[(string) $child->id] = [
+                $descendants[$childId] = [
                     'folder' => $child,
                     'path'   => $childPath,
                 ];
-                $stack[] = [(string) $child->id, $childPath];
+                $stack[] = [$childId, $childPath];
             }
         }
 

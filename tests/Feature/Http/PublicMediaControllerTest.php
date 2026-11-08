@@ -256,6 +256,46 @@ test('returns 200 when the asset_token points at a real file inside storage', fu
     expect($resp->headers->get('Cache-Control'))->toContain('private');
 });
 
+test('a shared XML asset is served with a sandboxing CSP', function (): void {
+    // XML is uploadable, but a browser parses it as a document and an
+    // XHTML-namespace script element in it is as available as one in HTML.
+    [$service, $controller] = buildPublicController();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: '<?xml version="1.0"?><root/>',
+        mime: 'application/xml',
+        filename: 'doc.xml',
+        userId: 1,
+        publicAccessToken: 'tok-xml',
+        uploadSource: 'upload',
+    ));
+    MediaAsset::query()->where('id', $asset->id)->update(['mime_type' => 'application/xml']);
+
+    $req = Request::create("/api/v1/public/media/{$asset->id}?token=tok-xml", 'GET');
+    $resp = $controller->show($asset->id, $req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect($resp->headers->get('Content-Type'))->toContain('application/xml');
+    expect($resp->headers->get('Content-Security-Policy'))->toBe('sandbox');
+});
+
+test('a shared text asset carries no sandboxing CSP', function (): void {
+    [$service, $controller] = buildPublicController();
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: 'plain content',
+        mime: 'text/plain',
+        filename: 'plain.txt',
+        userId: 1,
+        publicAccessToken: 'tok-plain',
+        uploadSource: 'upload',
+    ));
+
+    $req = Request::create("/api/v1/public/media/{$asset->id}?token=tok-plain", 'GET');
+    $resp = $controller->show($asset->id, $req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect($resp->headers->get('Content-Security-Policy'))->toBeNull();
+});
+
 /**
  * @return array{0: MediaArchiveService, 1: PublicMediaController}
  */

@@ -407,6 +407,15 @@ final class AttachmentRowRenderer
     private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
 
     /**
+     * The ceiling on the image bytes one row forwards.
+     *
+     * The per-asset cap bounds one image; this bounds the row. An image
+     * block is a base64 copy of the asset, so a row of images costs the
+     * worker its own bytes before the provider request is even built.
+     */
+    private const MAX_INLINE_ROW_IMAGE_BYTES = 32 * 1024 * 1024;
+
+    /**
      * Leading bytes we sample to confirm the asset really is text
      * before inlining it. A NUL byte anywhere in the sample flags the
      * file as binary so a mislabeled mime cannot poison the LLM context.
@@ -446,6 +455,7 @@ final class AttachmentRowRenderer
     public function __construct(
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
+        private readonly int $maxRowImageBytes = self::MAX_INLINE_ROW_IMAGE_BYTES,
     ) {}
 
     /**
@@ -498,6 +508,12 @@ final class AttachmentRowRenderer
      * {@see AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES} was read as
      * forbidding.
      *
+     * A repeated media id is one attachment: the blocks are built from the
+     * asset, so the second occurrence would duplicate them and load and
+     * encode the image again. The row's image bytes are capped as a whole
+     * ({@see MAX_INLINE_ROW_IMAGE_BYTES}), because the per-asset cap bounds
+     * one image and not the row.
+     *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
@@ -512,8 +528,23 @@ final class AttachmentRowRenderer
         $metadataBlocks = [];
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
+        $imageBytes     = 0;
+        $seenMediaIds   = [];
 
         foreach ($row->attachments as $ref) {
+            if (!is_array($ref)) {
+                continue;
+            }
+            // One asset is one attachment: the blocks are built from the
+            // asset, so a repeated id would duplicate them — and an image
+            // would be loaded and base64-encoded again for every
+            // occurrence.
+            $mediaId = $this->mediaIdOf($ref);
+            if ($mediaId === null || isset($seenMediaIds[$mediaId])) {
+                continue;
+            }
+            $seenMediaIds[$mediaId] = true;
+
             $asset = $this->resolveAttachmentAsset($ref);
             if ($asset === null) {
                 continue;
@@ -521,10 +552,19 @@ final class AttachmentRowRenderer
             $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
             $kind = (string) ($ref['kind'] ?? 'text');
             if ($kind === 'image') {
-                $image = $this->buildImageBlock($asset, $supportsImages);
-                if ($image !== null) {
-                    $imageBlocks[] = $image;
+                if (!$this->imageFits($asset, $imageBytes)) {
+                    continue;
                 }
+                $image = $this->buildImageBlock($asset, $supportsImages);
+                if ($image === null) {
+                    continue;
+                }
+                [$imageBlock, $bytes] = $image;
+                if ($imageBytes + $bytes > $this->maxRowImageBytes) {
+                    continue;
+                }
+                $imageBlocks[] = $imageBlock;
+                $imageBytes    += $bytes;
                 continue;
             }
             [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
@@ -536,12 +576,39 @@ final class AttachmentRowRenderer
     }
 
     /**
+     * Whether the image still fits the row's image budget.
+     *
+     * The recorded size decides it, so an image that does not fit is
+     * never read off disk — the same order the text branch uses. An asset
+     * whose size was not recorded is measured after it is loaded.
+     */
+    private function imageFits(MediaAsset $asset, int $spent): bool
+    {
+        $size = (int) ($asset->byte_size ?? 0);
+        if ($size > 0) {
+            return $spent + $size <= $this->maxRowImageBytes;
+        }
+
+        return $spent < $this->maxRowImageBytes;
+    }
+
+    /**
+     * @param array<string, mixed> $ref
+     */
+    private function mediaIdOf(array $ref): ?string
+    {
+        $mediaId = $ref['media_id'] ?? null;
+
+        return is_string($mediaId) && $mediaId !== '' ? $mediaId : null;
+    }
+
+    /**
      * @param array<string, mixed> $ref
      */
     private function resolveAttachmentAsset(array $ref): ?MediaAsset
     {
-        $mediaId = $ref['media_id'] ?? null;
-        if (!is_string($mediaId) || $mediaId === '') {
+        $mediaId = $this->mediaIdOf($ref);
+        if ($mediaId === null) {
             return null;
         }
         return MediaAsset::query()->find($mediaId);
@@ -604,10 +671,12 @@ final class AttachmentRowRenderer
     }
 
     /**
+     * The image block and the bytes it spent on the row's image budget.
+     *
      * Returns null when the image isn't forwarded (non-vision driver or
      * oversized payload) so the caller can drop it without branching.
      *
-     * @return array<string, mixed>|null
+     * @return array{0: array<string, mixed>, 1: int}|null
      */
     private function buildImageBlock(MediaAsset $asset, bool $supportsImages): ?array
     {
@@ -619,9 +688,12 @@ final class AttachmentRowRenderer
             return null;
         }
         return [
-            'type'      => 'image',
-            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-            'base64'    => base64_encode($bytes),
+            [
+                'type'      => 'image',
+                'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+                'base64'    => base64_encode($bytes),
+            ],
+            strlen($bytes),
         ];
     }
 

@@ -14,6 +14,7 @@ use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Models\MediaDerivative;
 use Spora\Models\MediaFolder;
+use Spora\Models\Principal;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
@@ -313,12 +314,19 @@ final class MediaArchiveService
     }
 
     /**
-     * True iff the asset belongs to the given principal: either a direct
-     * upload by the principal's owner user, or attached to any agent owned
-     * by that principal. Used by `MediaTool::assetInScope()` for the
-     * single-asset auth check (get_media / get_public_url / get_embed_code);
-     * mirrors the LIST endpoint's `applyPrincipalIdScope()` query so both
-     * paths share one principal-aware definition.
+     * True iff the asset belongs to the given principal: the row's own
+     * `principal_id`, or — for a legacy row that carries none — an asset
+     * attached to an agent of that principal, or a direct upload by the
+     * owner of a *personal* principal. Used by `MediaTool::assetInScope()`
+     * for the single-asset auth check (get_media / get_public_url /
+     * get_embed_code); it answers the same question as the LIST
+     * endpoint's `applyPrincipalIdScope()` query — which rows belong to
+     * this principal.
+     *
+     * The row's principal is the decision, not the uploader: a group
+     * principal's paying owner is a different identity from the principal,
+     * so an uploader match alone would hand the owner's personal assets
+     * and the assets of every other group they pay for to the group.
      *
      * Returns `false` when the principal context is unresolvable
      * (cold principal / boot-auth test harness with no PrincipalContext).
@@ -334,14 +342,43 @@ final class MediaArchiveService
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
-        return ($asset->user_id !== null && (int) $asset->user_id === $ownerUserId)
-            || (
-                $asset->agent_id !== null
-                && Agent::query()
-                    ->where('id', (int) $asset->agent_id)
-                    ->where('principal_id', $principalId)
-                    ->exists()
-            );
+
+        $assetPrincipalId = $asset->principal_id === null ? null : (int) $asset->principal_id;
+        if ($assetPrincipalId !== null) {
+            return $assetPrincipalId === $principalId;
+        }
+
+        // A row with no stored principal predates the principal column.
+        // The agent linkage still names one, so it decides.
+        if ($asset->agent_id !== null
+            && Agent::query()
+                ->where('id', (int) $asset->agent_id)
+                ->where('principal_id', $principalId)
+                ->exists()
+        ) {
+            return true;
+        }
+
+        // A direct upload with neither a principal nor an agent is the
+        // uploader's own asset, and it belongs to their personal
+        // principal — a group they pay for is a different principal.
+        return $asset->user_id !== null
+            && (int) $asset->user_id === $ownerUserId
+            && $this->isPersonalPrincipalOf($principalId, $ownerUserId);
+    }
+
+    /**
+     * Whether the principal is the user's own personal principal. A group
+     * principal is owned by a user too, and that ownership is a billing
+     * relationship, not an identity match.
+     */
+    private function isPersonalPrincipalOf(int $principalId, int $userId): bool
+    {
+        $principal = Principal::find($principalId);
+
+        return $principal !== null
+            && $principal->type === Principal::TYPE_USER
+            && (int) $principal->user_id === $userId;
     }
 
     public function writePayloadToAsset(MediaAsset $asset, string $bytes): void

@@ -160,6 +160,77 @@ test('isAssetInPrincipalScope returns false when the PrincipalContext is cold (p
     expect($svc->isAssetInPrincipalScope($asset, $cold, null))->toBeFalse();
 });
 
+test('isAssetInPrincipalScope keeps a group principal out of the paying owner\'s personal assets', function (): void {
+    $ownerId = 12351;
+    seedMediaArchiveSvcUser($ownerId);
+    $personalPrincipalId = seedMediaArchiveSvcPrincipal($ownerId);
+    $groupPrincipalId = seedMediaArchiveSvcGroupPrincipal($ownerId);
+
+    // The owner uploaded this into their own personal principal.
+    $asset = seedMediaArchiveSvcAsset(agentId: null, userId: $ownerId, principalId: $personalPrincipalId);
+
+    // The group principal's paying owner is the same user, but the
+    // principal is a different identity: the group's scope does not
+    // reach the owner's personal archive.
+    $context = new PrincipalContext(
+        principalId: $groupPrincipalId,
+        type: Principal::TYPE_GROUP,
+        ownerUserId: $ownerId,
+        runnerUserId: $ownerId,
+    );
+
+    $svc = makePrincipalScopeService();
+    expect($svc->isAssetInPrincipalScope($asset, $context, $ownerId))->toBeFalse();
+});
+
+test('isAssetInPrincipalScope admits an asset the group principal itself owns', function (): void {
+    $ownerId = 12352;
+    seedMediaArchiveSvcUser($ownerId);
+    $groupPrincipalId = seedMediaArchiveSvcGroupPrincipal($ownerId);
+
+    $asset = seedMediaArchiveSvcAsset(agentId: null, userId: $ownerId, principalId: $groupPrincipalId);
+
+    $context = new PrincipalContext(
+        principalId: $groupPrincipalId,
+        type: Principal::TYPE_GROUP,
+        ownerUserId: $ownerId,
+        runnerUserId: $ownerId,
+    );
+
+    $svc = makePrincipalScopeService();
+    expect($svc->isAssetInPrincipalScope($asset, $context, $ownerId))->toBeTrue();
+});
+
+/**
+ * A group principal whose paying owner is `$ownerUserId`.
+ */
+function seedMediaArchiveSvcGroupPrincipal(int $ownerUserId): int
+{
+    $now = date('Y-m-d H:i:s');
+    $groupId = (int) Capsule::table('groups')->insertGetId([
+        'name'              => 'masps-group-' . $ownerUserId,
+        'description'       => null,
+        'created_by_user_id' => $ownerUserId,
+        'created_at'        => $now,
+        'updated_at'        => $now,
+    ]);
+    Capsule::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $ownerUserId,
+        'role'       => \Spora\Models\GroupMembership::ROLE_OWNER,
+        'joined_at'  => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    return (int) Capsule::table('principals')->insertGetId([
+        'type'       => Principal::TYPE_GROUP,
+        'group_id'   => $groupId,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+}
+
 function makePrincipalScopeService(): MediaArchiveService
 {
     $tmp = sys_get_temp_dir() . '/spora-masips-' . bin2hex(random_bytes(4));
