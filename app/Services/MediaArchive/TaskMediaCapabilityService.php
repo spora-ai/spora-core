@@ -17,9 +17,9 @@ use Throwable;
  * under the 20-method Sonar threshold and the capability logic is
  * independently unit-testable.
  *
- * Plan §8.3 — reject an image attachment when the agent's LLM cannot
- * consume image blocks, returning a clear HTTP 400 at the request boundary
- * rather than a silent image-strip during the first tick.
+ * Reject an image attachment when the agent's LLM cannot consume image
+ * blocks, returning a clear HTTP 400 at the request boundary rather than
+ * a silent image-strip during the first tick.
  *
  * Also hosts the attach-time `md`-derivative mint: the media ids have
  * just been parsed and validated, and this is the last point before the
@@ -61,8 +61,8 @@ final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
 
     /**
      * Reject an image attachment when the agent's LLM cannot consume image
-     * blocks. Plan §8.3 / §12 require a 400 at the request boundary rather
-     * than a silent image-strip during the first tick. {@see MessageHistoryBuilder}
+     * blocks. The caller gets a 400 at the request boundary rather than a
+     * silent image-strip during the first tick. {@see MessageHistoryBuilder}
      * still strips defensively — this pre-flight gives the caller a useful error.
      *
      * @param list<string> $mediaIds

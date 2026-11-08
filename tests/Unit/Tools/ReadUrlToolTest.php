@@ -459,8 +459,6 @@ it('returns a helpful error when the fetch_pdf URL has no hostname after validat
     $client->shouldNotReceive('request');
 
     $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
-    // `http://%20/path` is a syntactically valid URL whose host part
-    // (%20) cannot resolve; verify it isn't fetched.
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://%20/path.pdf'], 1);
 
     expect($result->success)->toBeFalse();

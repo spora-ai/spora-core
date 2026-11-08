@@ -175,7 +175,6 @@ test('produce throws InvalidArgumentException for an unsupported source MIME', f
 test('produce throws when the data_url payload column is empty', function (): void {
     $producer = new ImageDerivativeProducer();
     $source = seedImageAsset('', 'image/png', 'data_url');
-    // seedImageAsset refused empty bytes; force-create one with payload='':
     $source->payload = '';
     $source->save();
 

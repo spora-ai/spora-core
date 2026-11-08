@@ -20,8 +20,6 @@ use Tests\Support\MediaArchiveTestSupport;
 use Tests\Support\TypstSourceDerivativeProducer;
 
 /**
- * Plan §12 B2b — pinning MediaAllowedTypesService behaviour.
- *
  * The dynamic part of the allowlist is now the union of every registered
  * derivative producer's `supportedSourceFormats()`. That is the seam that
  * keeps a binary document uploadable: a PDF is accepted out of the box
@@ -89,9 +87,7 @@ test('a bare extension in supportedSourceFormats does not leak into allowedMimeT
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
 
-    // The real MIME is picked up...
     expect($mimes)->toContain('text/markdown');
-    // ...the bare extensions are not.
     expect($mimes)->not->toContain('md');
     expect($mimes)->not->toContain('markdown');
 });
@@ -430,9 +426,9 @@ test('normalizeImageExtensions preserves an empty list', function (): void {
 });
 
 test('a plugin-registered text/x-typst producer adds the MIME and the typ extension to the allowlist', function (): void {
-    // The plugin seam, re-anchored from the deleted converter: a plugin
-    // makes a format uploadable by registering a *producer*, and the
-    // upload UI's `accept=` attribute is derived from the same union.
+    // The plugin seam: a plugin makes a format uploadable by registering
+    // a *producer*, and the upload UI's `accept=` attribute is derived
+    // from the same union.
     [$serviceWithout] = buildAllowedTypesService();
     expect($serviceWithout->allowedMimeTypes())->not->toContain('text/x-typst');
     expect($serviceWithout->allowedExtensions())->not->toContain('typ');
