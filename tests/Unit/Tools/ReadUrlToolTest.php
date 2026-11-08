@@ -422,6 +422,38 @@ it('still fetches a public https URL', function () {
         ->and($result->content)->toContain('Public page');
 });
 
+it('pins the request to the address the guard vetted', function () {
+    $vetted = SsrfGuard::forWebFetch()->screen('https://example.com/pinned')['resolve'];
+
+    if ($vetted === []) {
+        $this->markTestSkipped('This environment resolves no public name.');
+    }
+
+    $captured = null;
+
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
+    $response->allows('getStatusCode')->andReturn(200);
+    $response->allows('getHeaders')->andReturn(['content-type' => ['text/plain']]);
+    $response->allows('getContent')->andReturn('body text');
+
+    $client->expects('request')->andReturnUsing(
+        static function (string $method, string $url, array $options) use (&$captured, $response): ResponseInterface {
+            $captured = $options;
+
+            return $response;
+        },
+    );
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $tool->execute(['url' => 'https://example.com/pinned'], 1);
+
+    // The name resolves to a public address now, and the request has to go
+    // there rather than to whatever the name answers with a moment later.
+    expect($captured['resolve'] ?? null)->toHaveKey('example.com');
+    expect(filter_var($captured['resolve']['example.com'], FILTER_VALIDATE_IP))->not->toBeFalse();
+});
+
 it('returns a helpful error when the fetch_pdf URL has no hostname after validation', function () {
     // `http://` with a URL-encoded whitespace host (`%20`) passes
     // `filter_var`/`parse_url` but `gethostbynamel` returns false; the

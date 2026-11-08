@@ -160,7 +160,7 @@ test('DatabaseSchemaInstaller throws SchemaInstallFailedException on misnamed pl
 test('SecurityManager throws DecryptKeyMissingException when key file is missing', function (): void {
     $missing = '/tmp/spora_does_not_exist_' . uniqid() . '.key';
 
-    expect(fn() => new SecurityManager($missing))
+    expect(fn() => SecurityManager::fromKeyFile($missing))
         ->toThrow(DecryptKeyMissingException::class, 'not found or not readable');
 });
 
@@ -169,7 +169,7 @@ test('SecurityManager throws DecryptKeyMissingException when key file is corrupt
     file_put_contents($tmpFile, 'tooshort');
 
     try {
-        expect(fn() => new SecurityManager($tmpFile))
+        expect(fn() => SecurityManager::fromKeyFile($tmpFile))
             ->toThrow(DecryptKeyMissingException::class, 'corrupt');
     } finally {
         unlink($tmpFile);

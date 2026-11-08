@@ -249,6 +249,10 @@ final class SystemMailer implements MailerInterface
      * TLS on `smtps://`. The port decides nothing; it has to be the port the
      * server expects for that encryption.
      *
+     * `require_tls` makes the transport refuse to authenticate or send unless
+     * the connection is encrypted: without it a peer that does not advertise
+     * STARTTLS gets the credentials in clear.
+     *
      * @throws InvalidArgumentException if host is missing or encryption is unsupported
      */
     private function buildSmtpDsn(): string
@@ -291,7 +295,7 @@ final class SystemMailer implements MailerInterface
         }
 
         return sprintf(
-            '%s://%s%s:%d',
+            '%s://%s%s:%d?require_tls=true',
             $encryption === 'ssl' ? 'smtps' : 'smtp',
             $credentials,
             rawurlencode($host),
