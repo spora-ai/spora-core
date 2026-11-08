@@ -924,6 +924,7 @@ final class ContainerDefinitions
                     $c->get(UserServiceInterface::class),
                     $c->get(CsrfTokenService::class),
                     $c->get(AuthValidator::class),
+                    $c->get(LoggerInterface::class),
                 );
             },
 

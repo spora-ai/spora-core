@@ -150,16 +150,24 @@ final class ApprovedBatchExecutor
      */
     private function recordApprovalOnly(int $taskId, string $providerCallId, array $approvedArgs): void
     {
-        ToolCallModel::where('task_id', $taskId)
+        // Only the row still awaiting a decision. A call id may be reused
+        // once the earlier call has finished, and the reused call is the
+        // one the operator is approving — the finished call keeps the
+        // arguments it ran with.
+        $row = ToolCallModel::where('task_id', $taskId)
             ->where('provider_call_id', $providerCallId)
-            // Only the rows still awaiting a decision. A call id may be
-            // reused once the earlier call has finished, and approving the
-            // reuse must not resurrect the finished one.
             ->where('status', 'PENDING_APPROVAL')
-            ->update([
-                'status'             => 'APPROVED',
-                'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
-            ]);
+            ->orderBy('id')
+            ->first();
+
+        if ($row === null) {
+            return;
+        }
+
+        $row->update([
+            'status'             => 'APPROVED',
+            'approved_arguments' => json_encode($approvedArgs, JSON_THROW_ON_ERROR),
+        ]);
     }
 
     private function reopenForRemainingPending(Task $task, AgentState $state, array $remaining): void

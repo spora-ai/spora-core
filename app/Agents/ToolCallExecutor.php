@@ -64,10 +64,12 @@ final class ToolCallExecutor
         DriverToolCall $toolCall,
         string         $toolClass,
     ): ?ToolCallDisposition {
-        // The operator's decision selects proposals by their provider call
-        // id, so two *live* proposals sharing one id make the decision
-        // ambiguous: approving it would authorize both. A call id may be
-        // reused once the earlier call has finished.
+        // The operator's decision names a proposal by its provider call id,
+        // so the id has to name exactly one proposal. Two proposals that
+        // share an id are ambiguous only while both are live — a finished
+        // call leaves nothing to authorize — so a reuse is refused while
+        // another call under that id is still awaiting a decision or still
+        // waiting to run.
         $liveCallExists = ToolCallModel::where('task_id', $task->id)
             ->where('provider_call_id', $toolCall->providerCallId)
             ->where(function ($query): void {

@@ -12,6 +12,8 @@ use Delight\Auth\ResetDisabledException;
 use Delight\Auth\TooManyRequestsException as DelightTooManyRequestsException;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
@@ -53,12 +55,17 @@ final class AuthWorkflow
      */
     private const SELF_SERVICE_FIELDS = ['username', 'name'];
 
+    private readonly LoggerInterface $logger;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
         private readonly CsrfTokenService $csrfService,
         private readonly AuthValidator $validator,
-    ) {}
+        ?LoggerInterface $logger = null,
+    ) {
+        $this->logger = $logger ?? new NullLogger();
+    }
 
     /**
      * Decode the body, then validate the registration payload. Delegates the
@@ -284,6 +291,14 @@ final class AuthWorkflow
             // A missing, unverified or ineligible account answers exactly like
             // an eligible one: the outcome depends on the account, and the
             // response must not.
+        } catch (TransportExceptionInterface | InvalidArgumentException $e) {
+            // A mail failure reaches here only for an eligible account, so
+            // it must not change the answer. The request still counts
+            // against the rate limit below.
+            $this->logger->error('Password reset email could not be sent', [
+                'exception_class' => get_class($e),
+                'message'         => $e->getMessage(),
+            ]);
         }
 
         // Count the attempt even on success to prevent brute-forcing valid emails
