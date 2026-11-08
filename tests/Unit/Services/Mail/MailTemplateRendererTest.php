@@ -142,3 +142,63 @@ test('html-decodes href attribute values in the plain-text Links block', functio
     expect($rendered->bodyText)->toContain('https://example.test/?a=1&b=2');
     expect($rendered->bodyText)->not->toContain('&amp;');
 });
+
+test('the renderer the container hands out escapes raw html like the fallback one', function () {
+    // The container builds its own converter. It has to carry the same
+    // escaping policy, or a runtime payload reaches the recipient's client
+    // as markup on the production path and as text on the fallback one.
+    $renderer = settingsAwareContainer()->get(MailTemplateRenderer::class);
+
+    $rendered = $renderer->render(
+        ['user_prompt' => '<img src=x onerror=alert(1)>'],
+        'subject',
+        'Prompt: {{user_prompt}}',
+        null,
+    );
+
+    expect($rendered->bodyHtml)->not->toContain('<img')
+        ->and($rendered->bodyHtml)->toContain('&lt;img');
+});
+
+test('the renderer the container hands out strips unsafe link schemes', function () {
+    $renderer = settingsAwareContainer()->get(MailTemplateRenderer::class);
+
+    $rendered = $renderer->render([], 'subject', '[click](javascript:alert(1))', null);
+
+    expect($rendered->bodyHtml)->not->toContain('javascript:');
+});
+
+test('encodes a runtime value substituted into the html shell', function () {
+    // The shell is the operator's markup; the value is a task prompt.
+    $rendered = mailRenderer()->render(
+        ['user_prompt' => '<script>alert(1)</script>'],
+        'subject',
+        null,
+        '<p>{{user_prompt}}</p>',
+    );
+
+    expect($rendered->bodyHtml)->toBe('<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>');
+});
+
+test('encodes a runtime value that would otherwise close an attribute', function () {
+    $rendered = mailRenderer()->render(
+        ['user_prompt' => '" onmouseover="alert(1)'],
+        'subject',
+        null,
+        '<p title="{{user_prompt}}">x</p>',
+    );
+
+    expect($rendered->bodyHtml)->not->toContain('onmouseover="alert(1)"')
+        ->and($rendered->bodyHtml)->toContain('&quot;');
+});
+
+test('leaves the operator\'s own shell markup alone', function () {
+    $rendered = mailRenderer()->render(
+        ['user_prompt' => 'hello'],
+        'subject',
+        null,
+        '<h1>Hi</h1><p class="lead">{{user_prompt}}</p>',
+    );
+
+    expect($rendered->bodyHtml)->toBe('<h1>Hi</h1><p class="lead">hello</p>');
+});

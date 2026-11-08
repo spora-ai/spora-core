@@ -99,6 +99,12 @@ final class NotificationSubscriptionController
             return $this->badRequest($e->getMessage());
         }
 
+        // A subscription delivers another party's task prompts, so the
+        // target has to be one the subscriber can already reach.
+        if (!$this->subscriptions->canSubscribeToTarget($userId, $targetType, $targetId)) {
+            return $this->forbidden('You cannot subscribe to this target.');
+        }
+
         $this->subscriptions->subscribeUserToTarget($userId, $targetType, $targetId);
 
         return new JsonResponse([
@@ -183,6 +189,14 @@ final class NotificationSubscriptionController
         return new JsonResponse(
             ['error' => ['code' => 'INVALID_REQUEST', 'message' => $message]],
             Response::HTTP_BAD_REQUEST,
+        );
+    }
+
+    private function forbidden(string $message): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => ['code' => 'FORBIDDEN', 'message' => $message]],
+            Response::HTTP_FORBIDDEN,
         );
     }
 }

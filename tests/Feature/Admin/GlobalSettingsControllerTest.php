@@ -9,6 +9,9 @@ use Spora\Http\GlobalSettingsController;
 use Spora\Http\Middleware\AdminMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Settings\PluginSettingsProviderInterface;
+use Spora\Settings\PluginSettingsRegistry;
+use Spora\Settings\SettingDefinition;
 use Spora\Settings\SettingsRegistry;
 use Spora\Settings\SettingsRepository;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -157,6 +160,58 @@ test('GET never puts a plaintext secret on the wire', function (): void {
 
     expect($response->getContent())->not->toContain('hunter2-the-real-password')
         ->and(collectSettings($response)['SPORA_MAIL_PASSWORD']['value'])->toBe('***');
+});
+
+test('GET never puts a confidential default of a secret on the wire', function (): void {
+    // A provider can ship a secret with a default of its own — the default
+    // is the credential until the operator changes it.
+    $registry = new SettingsRegistry(
+        new Paths(BASE_PATH),
+        new PluginSettingsRegistry(
+            ['provider'],
+            static fn(string $class): PluginSettingsProviderInterface => new class implements PluginSettingsProviderInterface {
+                public function slug(): string
+                {
+                    return 'provider';
+                }
+
+                /**
+                 * @return list<SettingDefinition>
+                 */
+                public function settings(): array
+                {
+                    return [
+                        new SettingDefinition(
+                            key: 'api_token',
+                            label: 'API token',
+                            type: SettingDefinition::TYPE_TEXT,
+                            default: 'sk-the-shipped-credential',
+                            secret: true,
+                        ),
+                    ];
+                }
+            },
+        ),
+    );
+
+    $controller = new GlobalSettingsController(
+        $registry,
+        new SettingsRepository(
+            new Spora\Core\SecurityManager(str_repeat('k', SODIUM_CRYPTO_SECRETBOX_KEYBYTES)),
+            $registry,
+        ),
+        new Config(),
+        new AuthService(
+            new Delight\Auth\Auth(new PDO('sqlite::memory:')),
+            'https://host.test',
+            '',
+        ),
+    );
+
+    $response = $controller->index();
+
+    expect($response->getContent())->not->toContain('sk-the-shipped-credential')
+        ->and(collectSettings($response)['SPORA_PROVIDER_API_TOKEN']['default'])->toBe('***');
 });
 
 test('PATCH rejects a key the registry does not declare', function (): void {

@@ -15,6 +15,7 @@ use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaAssetSerializer;
 use Spora\Services\MediaArchive\MediaIngestRequest;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\PrincipalResolver;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,6 +33,11 @@ use Symfony\Component\HttpFoundation\Response;
  * The shared multipart-upload pipeline (size cap, MIME allowlist, byte
  * decode verification) lives in {@see AvatarUploadSupport} so the
  * Agent and Group controllers can share it without duplication.
+ *
+ * Both picture routes are writes on the agent's owning principal: the
+ * picture is shared by everyone who can see the agent, so replacing or
+ * clearing it is reserved for whoever may manage that principal. See
+ * {@see self::canManagePicture()}.
  */
 final class AgentPictureController
 {
@@ -41,6 +47,7 @@ final class AgentPictureController
     public function __construct(
         private readonly AuthService $authService,
         private readonly AgentServiceInterface $agentService,
+        private readonly PrincipalResolver $principalResolver,
         private readonly AgentPictureService $pictureService,
         private readonly MediaArchiveService $mediaArchive,
         private readonly MimeSniffer $sniffer,
@@ -56,9 +63,9 @@ final class AgentPictureController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        $agentError = $this->resolveAgentForUpload($agentId, $userId);
-        if ($agentError !== null) {
-            return $agentError;
+        $agent = $this->resolveAgentForWrite($agentId, $userId);
+        if ($agent instanceof JsonResponse) {
+            return $agent;
         }
 
         $prepared = $this->prepareUpload($request);
@@ -70,17 +77,44 @@ final class AgentPictureController
     }
 
     /**
-     * Look up the agent for an upload. Returns null on success, or a 4xx
-     * JsonResponse on failure. Extracted from {@see uploadImage()} so the
-     * controller stays under the 3-return ceiling (S1142).
+     * Resolve the agent a picture write targets. Returns the agent on
+     * success, or a 4xx JsonResponse on failure. Extracted from
+     * {@see uploadImage()} so the controller stays under the 3-return
+     * ceiling (S1142).
      */
-    private function resolveAgentForUpload(int $agentId, int $userId): ?JsonResponse
+    private function resolveAgentForWrite(int $agentId, ?int $userId): Agent|JsonResponse
     {
+        if ($userId === null) {
+            return $this->unauthenticated();
+        }
+
         $agent = $this->agentService->getAgent($agentId, $userId);
         if ($agent === null) {
             return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
         }
-        return null;
+
+        if (!$this->canManagePicture($agent, $userId)) {
+            return $this->forbidden('FORBIDDEN', 'You cannot manage the picture of this agent.');
+        }
+
+        return $agent;
+    }
+
+    /**
+     * Whether the caller may change the agent's picture.
+     *
+     * Seeing the agent is not enough: every group member sees a shared
+     * group's agents, and the picture is the principal's shared face. The
+     * bar is the same one the agent API keys use — management of the
+     * owning principal, with the global admin on top.
+     */
+    private function canManagePicture(Agent $agent, int $userId): bool
+    {
+        if ($this->authService->isAdmin()) {
+            return true;
+        }
+
+        return $this->principalResolver->canManagePrincipal((int) $agent->principal_id, $userId);
     }
 
     /**
@@ -125,9 +159,9 @@ final class AgentPictureController
         $userId = $this->authService->currentUserId();
         $agentId = (int) $request->attributes->get('id', 0);
 
-        $agent = $this->agentService->getAgent($agentId, $userId);
-        if ($agent === null) {
-            return $this->notFound('AGENT_NOT_FOUND', 'Agent not found.');
+        $agent = $this->resolveAgentForWrite($agentId, $userId);
+        if ($agent instanceof JsonResponse) {
+            return $agent;
         }
 
         $this->pictureService->detachImage($agentId);
