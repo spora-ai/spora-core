@@ -233,17 +233,34 @@ final class MediaAllowedTypesService
             }
             $set[strtolower($mime)] = true;
         }
-        $agentSupportsImages = $agentId === null
-            || $this->agentSupportsImages($agentId);
-        if ($agentSupportsImages && $this->imageExtensions !== []) {
-            foreach ($this->imageExtensions as $ext) {
-                $mime = self::imageMimeForExtension($ext);
-                if ($mime !== null) {
-                    $set[$mime] = true;
-                }
+        foreach ($this->allowedImageMimeTypes($agentId) as $mime) {
+            $set[$mime] = true;
+        }
+
+        return array_keys($set);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function allowedImageMimeTypes(?int $agentId): array
+    {
+        if ($agentId !== null && !$this->agentSupportsImages($agentId)) {
+            return [];
+        }
+        if ($this->imageExtensions === []) {
+            return [];
+        }
+
+        $mimes = [];
+        foreach ($this->imageExtensions as $ext) {
+            $mime = self::imageMimeForExtension($ext);
+            if ($mime !== null) {
+                $mimes[] = $mime;
             }
         }
-        return array_keys($set);
+
+        return $mimes;
     }
 
     /**

@@ -80,7 +80,7 @@ final class PdfMarkdownExtractor
         $config = new Config();
         $config->setDecodeMemoryLimit($this->maxDecodedStreamBytes);
 
-        (new ReflectionProperty(PdfToMarkdownParser::class, 'parser'))
+        (new ReflectionProperty(PdfToMarkdownParser::class, 'parser')) // NOSONAR php:S3011 — see comment above
             ->setValue($this->parser, new Parser([], $config));
     }
 }
