@@ -15,30 +15,33 @@ use Spora\Services\SpeechProviderConfigValidator;
  * {@see SpeechToTextProviderInterface} and picks the configured one
  * for the transcribe endpoint.
  *
- * Selection model is a **five-tier cascade** (mirrors
+ * Selection model is a **cascade** (mirrors
  * {@see \Spora\Services\LLMConfigPreferences::getEffectiveConfigForAgent()},
- * adapted for the speech storage tables):
+ * adapted for the speech storage tables). With an agent:
  *
  *   1. **Agent override** — `agents.speech_driver_config_id` →
  *      `speech_provider_configurations.provider_class`. If the FK
  *      points at an existing config whose class is registered, use
  *      it.
- *   2. **User preference** —
+ *   2. **Principal preference** —
  *      `principal_preferences.preferred_speech_config_id` for the
- *      agent's user-principal. Same resolution as tier 1.
- *   3. **Group preference** — for every group the user belongs to
- *      (ordered by `group_memberships.joined_at ASC`), check that
- *      group's preference; first match wins.
- *   4. **Global default** —
+ *      agent's principal — the user-principal or the group-principal,
+ *      depending on `agents.principal_id`. A group-owned agent
+ *      consults its group's preference, not the caller's.
+ *   3. **Global default** —
  *      `speech_provider_configurations WHERE is_global = true AND
  *      is_default = true`. First match wins, ordered
  *      `updated_at DESC, id DESC`.
- *   5. **First-registered-wins fallback** — iterate providers in
- *      constructor order, return the first whose effective settings
- *      resolve to a configured state. (Legacy behaviour, preserved
- *      so an operator with no preferences / agent override / global
- *      default still gets the same fallback they did before this
- *      PR.)
+ *
+ * Without an agent — the recording button, which has no agent
+ * context — the caller's own user-principal preference comes first,
+ * then every group the caller belongs to in
+ * `group_memberships.joined_at ASC` order, then the global default.
+ *
+ * A cascade that resolves no config resolves to **no class**. The
+ * previous "fallback to the first registered class" tier surfaced a
+ * class in the SPA capability badge even when no FK config existed,
+ * which told the operator a provider was configured when none was.
  *
  * Every tier validates that the resolved class is registered; an
  * unregistered class (e.g. the operator removed a plugin) is treated
@@ -46,8 +49,8 @@ use Spora\Services\SpeechProviderConfigValidator;
  * behaviour.
  *
  * The cascade walk lives in {@see SpeechToTextCascadeResolver}; this
- * class stays small (one constructor + six public methods) so it
- * stays under the SonarCloud S1448 20-method-per-class ceiling.
+ * class stays small so it stays under the SonarCloud S1448
+ * 20-method-per-class ceiling.
  */
 final readonly class SpeechToTextRegistry
 {
@@ -114,7 +117,7 @@ final readonly class SpeechToTextRegistry
     }
 
     /**
-     * Resolve the effective provider per the five-tier cascade.
+     * Resolve the effective provider per the cascade.
      *
      * The transcribe controller translates `null` into HTTP 503
      * `SPEECH_PROVIDER_UNAVAILABLE`. Backward-compatible no-arg
@@ -131,15 +134,13 @@ final readonly class SpeechToTextRegistry
             return null;
         }
 
-        // Tiers 1-4 picked a specific class — return its provider,
-        // but only when it self-reports configured (the
-        // `isConfigured()` gate that {@see SpeechToTextProviderInterface}
-        // documents; see the docblock on
+        // The cascade picked a class — return its provider, but only
+        // when it self-reports configured (the `isConfigured()` gate
+        // that {@see SpeechToTextProviderInterface} documents; see the
+        // docblock on
         // {@see \Spora\Speech\OpenAiCompatibleTranscriber::isConfigured()}
-        // for the optimistic-default rationale). Tier 5 (fallback)
-        // applies the same gate so a non-configured provider is never
-        // handed to the transcribe call regardless of which tier
-        // resolved the class.
+        // for the optimistic-default rationale), so a non-configured
+        // provider is never handed to the transcribe call.
         //
         // `bindSettings()` MUST fire BEFORE `isConfigured()` is read so
         // providers can consult the bound v2 settings when answering
@@ -169,11 +170,9 @@ final readonly class SpeechToTextRegistry
      * "Currently using: X" widget: `class`, `source`, `config_id`,
      * `display_name`.
      *
-     * For tiers 1-4 the resolved class IS the provider's class and
-     * `config_id` / `display_name` come from the FK target. For tier 5
-     * (fallback) the resolved class is the first registered provider
-     * with no FK backing it — `config_id` is `null` and the
-     * provider's static `getDisplayName()` is returned.
+     * The cascade's class and its `config_id` are the effective pair: a
+     * cascade that resolved no config resolves no class and leaves
+     * `config_id` null.
      *
      * Every iterated provider has `bindLabel()` invoked (when
      * available) so the `display_name` reflects the operator's
@@ -253,10 +252,10 @@ final readonly class SpeechToTextRegistry
     /**
      * Decode the resolved v2 row's `settings` blob and push it into the
      * provider via {@see SpeechToTextProviderInterface::bindSettings()}.
-     * Not invoked on tier-5 fallback — {@see configuredProvider()} only
-     * calls this when `$configId !== null`. Early-returns when the
-     * registry was built without a persistence resolver (unit-test /
-     * controller-less paths where there is no row to decode).
+     * {@see configuredProvider()} only calls this when `$configId` is
+     * not null, so there is no row to decode otherwise. Early-returns
+     * when the registry was built without a persistence resolver
+     * (unit-test / controller-less paths).
      */
     private function bindProviderSettings(SpeechToTextProviderInterface $provider, int $configId): void
     {
