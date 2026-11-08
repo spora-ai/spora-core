@@ -34,6 +34,36 @@ final class NotificationSubscriptionService
 {
     private const SQL_TIMESTAMP_FORMAT = 'Y-m-d H:i:s';
 
+    public function __construct(
+        private readonly PrincipalResolver $principalResolver = new PrincipalResolver(),
+    ) {}
+
+    /**
+     * Whether the user may subscribe to the target: an agent they can see,
+     * or a principal they can act for.
+     *
+     * A subscription is a standing opt-in to another party's task prompts,
+     * so it may only be taken out for something the subscriber can already
+     * reach.
+     */
+    public function canSubscribeToTarget(int $userId, string $targetType, int $targetId): bool
+    {
+        if ($targetType === NotificationSubscription::TARGET_AGENT) {
+            return $this->principalResolver->isVisibleTo($targetId, $userId);
+        }
+
+        return in_array($targetId, $this->principalResolver->visiblePrincipalIds($userId), true);
+    }
+
+    /**
+     * The subscribers that may still receive this task's content.
+     *
+     * A subscription row is not a permanent grant: the subscriber has to
+     * still act for the task's principal, so a member who left the group
+     * (or an agent that was transferred) stops receiving the prompts.
+     *
+     * @return list<int>
+     */
     public function resolveRecipientsForTask(Task $task): array
     {
         $this->ensureDefaultSubscribersExist($task);
@@ -58,11 +88,21 @@ final class NotificationSubscriptionService
             return [];
         }
 
-        return Capsule::table('users')
+        $existing = Capsule::table('users')
             ->whereIn('id', $ids)
             ->pluck('id')
             ->map(static fn($v) => (int) $v)
             ->all();
+
+        return array_values(array_filter(
+            $existing,
+            fn(int $userId): bool => $this->canActForPrincipal($userId, (int) $task->principal_id),
+        ));
+    }
+
+    private function canActForPrincipal(int $userId, int $principalId): bool
+    {
+        return in_array($principalId, $this->principalResolver->visiblePrincipalIds($userId), true);
     }
 
     /**
@@ -111,6 +151,11 @@ final class NotificationSubscriptionService
         }
     }
 
+    /**
+     * Store the opt-in. The caller must have cleared the target with
+     * {@see self::canSubscribeToTarget()} first — delivery re-checks the
+     * access anyway, so a row that skips it never carries content.
+     */
     public function subscribeUserToTarget(int $userId, string $targetType, int $targetId): void
     {
         $this->assertTargetType($targetType);

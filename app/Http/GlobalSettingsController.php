@@ -256,13 +256,30 @@ final class GlobalSettingsController
             'type'          => $definition->type,
             'description'   => $this->translator->trans($definition->description),
             'value'         => $value,
-            'default'       => $definition->default,
+            'default'       => $this->presentDefault($definition),
             'source'        => $this->config->sourceOf($definition->key),
             'readonly'      => $definition->bootOnly,
             'secret'        => $definition->secret,
             'undecryptable' => $isUndecryptable,
             'options'       => $this->localiseOptions($definition),
         ];
+    }
+
+    /**
+     * The declared default of a setting, masked when the setting is a secret.
+     *
+     * A secret can ship a confidential default — a provider that carries its
+     * own credential — and the API discloses no secret. An empty default
+     * stays empty: there is nothing in it to disclose, and the page reads an
+     * empty default as "no default" rather than as a masked value.
+     */
+    private function presentDefault(SettingDefinition $definition): mixed
+    {
+        if (!$definition->secret || $definition->default === null || $definition->default === '') {
+            return $definition->default;
+        }
+
+        return self::MASK;
     }
 
     /**

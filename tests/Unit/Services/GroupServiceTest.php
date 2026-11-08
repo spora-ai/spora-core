@@ -261,6 +261,33 @@ describe('GroupService::changeMemberRole extended paths', function (): void {
         $service->changeMemberRole($group->id, $target, 'member', $admin);
         expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $target)->value('role'))->toBe('member');
     });
+
+    it('rejects an admin demoting an owner while a second owner remains', function (): void {
+        // The last-owner guard only fires when the owner is the last one, so
+        // an admin could otherwise strip a co-owner's role.
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR6');
+        $secondOwner = bootAuth($auth, 'cr-second-owner@example.com', GROUP_TEST_PASSWORD);
+        $admin = bootAuth($auth, 'cr-admin6@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $secondOwner, 'owner', $ownerId);
+        $service->addMember($group->id, $admin, 'admin', $ownerId);
+
+        expect(fn() => $service->changeMemberRole($group->id, $secondOwner, 'member', $admin))
+            ->toThrow(GroupMembershipRuleException::class);
+
+        expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $secondOwner)->value('role'))->toBe('owner');
+    });
+
+    it('lets an owner demote another owner while a second owner remains', function (): void {
+        [$service, $principalService, $ownerId, $auth] = makeGroupServiceWithOwner();
+        $group = $service->createGroup($ownerId, 'CR7');
+        $secondOwner = bootAuth($auth, 'cr-second-owner7@example.com', GROUP_TEST_PASSWORD);
+        $service->addMember($group->id, $secondOwner, 'owner', $ownerId);
+
+        $service->changeMemberRole($group->id, $secondOwner, 'member', $ownerId);
+
+        expect((string) GroupMembership::where('group_id', $group->id)->where('user_id', $secondOwner)->value('role'))->toBe('member');
+    });
 });
 
 describe('GroupService::removeMember extended paths', function (): void {

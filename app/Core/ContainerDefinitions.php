@@ -1249,6 +1249,7 @@ final class ContainerDefinitions
                 return new AgentPictureController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(PrincipalResolver::class),
                     $c->get(AgentPictureService::class),
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),

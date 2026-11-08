@@ -205,13 +205,14 @@ final class GroupService
                     throw new GroupMembershipRuleException('Caller is not a member of the group.');
                 }
 
-                self::assertCallerCanChangeRole($callerRole, $newRole);
                 $existing = self::fetchMembershipRow($groupId, $memberUserId);
                 if ($existing === null) {
                     throw new GroupMembershipRuleException(
                         "User {$memberUserId} is not a member of group {$groupId}.",
                     );
                 }
+
+                self::assertCallerCanChangeRole($callerRole, $newRole, (string) $existing->role);
 
                 self::assertNotDemotingLastOwner($groupId, $existing->role, $newRole);
 
@@ -239,10 +240,13 @@ final class GroupService
             ]);
     }
 
-    private static function assertCallerCanChangeRole(string $callerRole, string $newRole): void
+    private static function assertCallerCanChangeRole(string $callerRole, string $newRole, string $currentRole): void
     {
         if ($newRole === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
             throw new GroupMembershipRuleException('Only owners can promote to owner.');
+        }
+        if ($currentRole === GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_OWNER) {
+            throw new GroupMembershipRuleException('Only owners can change the role of an owner.');
         }
         if ($callerRole !== GroupMembership::ROLE_OWNER && $callerRole !== GroupMembership::ROLE_ADMIN) {
             throw new GroupMembershipRuleException(
