@@ -172,11 +172,16 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         if ($updateData !== []) {
             $this->normalizeUpdateFields($updateData);
-            $this->recomputeNextRunAtIfNeeded($updateData, $run);
 
+            // Before anything writes: rescheduling rewrites the queue
+            // entries, and a foreign template that fails the check
+            // afterwards would leave the schedule and its entries
+            // disagreeing.
             if (isset($updateData['template_id'])) {
                 $this->assertTemplateBelongsToAgent((int) $updateData['template_id'], $agentId);
             }
+
+            $this->recomputeNextRunAtIfNeeded($updateData, $run);
 
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)

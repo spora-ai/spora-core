@@ -139,6 +139,43 @@ it('does not name a foreign template when serialising a schedule', function (): 
     expect($serialised['template_name'])->toBeNull();
 });
 
+it('leaves the queue entries alone when the template check fails', function (): void {
+    $auth = bootAuthLayer();
+    $userId = $auth->register('schedule-entries@example.com', TEST_PASSWORD, 'Entries');
+
+    $ownAgentId     = scheduleScopeAgent($userId, 'Own Agent');
+    $foreignAgentId = scheduleScopeAgent($userId, 'Foreign Agent');
+
+    $foreignTemplateId = scheduleScopeTemplate($foreignAgentId, 'Foreign private prompt');
+
+    $service = scheduleScopeService();
+    $created = $service->createRun($ownAgentId, $userId, [
+        'raw_prompt'      => 'plain',
+        'cron_expression' => '0 * * * *',
+    ]);
+    $runId = $created['scheduled_run']['id'];
+
+    $entryId = (int) Capsule::table('scheduled_runs_next')->insertGetId([
+        'scheduled_run_id' => $runId,
+        'due_at'           => '2026-01-01 00:00:00',
+        'status'           => 'PENDING',
+        'created_at'       => '2026-01-01 00:00:00',
+        'updated_at'       => '2026-01-01 00:00:00',
+    ]);
+
+    // The update changes the schedule AND names a foreign template. The
+    // reschedule rewrites the queue entries, so the template check has to
+    // come first — otherwise the entries are rewritten and the schedule
+    // is not, and the two disagree.
+    expect(static fn() => $service->updateRun($runId, $ownAgentId, $userId, [
+        'template_id'     => $foreignTemplateId,
+        'cron_expression' => '30 * * * *',
+    ]))->toThrow(PromptTemplateMissingException::class);
+
+    $entry = Capsule::table('scheduled_runs_next')->where('id', $entryId)->first();
+    expect($entry->status)->toBe('PENDING');
+});
+
 it('records the authenticated caller as the trigger user of a manually triggered run', function (): void {
     $auth = bootAuthLayer();
     $userId = $auth->register('schedule-trigger@example.com', TEST_PASSWORD, 'Trigger');

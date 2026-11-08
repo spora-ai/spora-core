@@ -57,11 +57,6 @@ final class ScheduledRunProcessor
         $run = $context['run'];
         $agent = $context['agent'];
 
-        $template = $this->findTemplate($run);
-
-        $prompt = $this->buildPrompt($run, $template, $agent);
-        $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-
         $this->logger->info('Triggering scheduled run', [
             'run_id' => $run->id,
             'agent_id' => $run->agent_id,
@@ -69,6 +64,16 @@ final class ScheduledRunProcessor
         $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
 
         try {
+            // Building the prompt is inside the try: the expansion has a
+            // ceiling, and a template that exceeds it must fail the run
+            // the same way a failing orchestrator does — with the entry
+            // marked SKIPPED and the next occurrence queued. An exception
+            // escaping here would leave the entry CLAIMED and the
+            // schedule silent from now on.
+            $template = $this->findTemplate($run);
+            $prompt   = $this->buildPrompt($run, $template, $agent);
+            $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+
             $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps, null, $run->id);
         } catch (Throwable $e) {
             $this->logger->error('Scheduled run failed', [
@@ -151,11 +156,6 @@ final class ScheduledRunProcessor
         $run = $context['run'];
         $agent = $context['agent'];
 
-        $template = $this->findTemplate($run);
-
-        $prompt = $this->buildPrompt($run, $template, $agent);
-        $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-
         $this->logger->info('Triggering scheduled run (client mode)', [
             'run_id'         => $run->id,
             'agent_id'       => $run->agent_id,
@@ -171,6 +171,14 @@ final class ScheduledRunProcessor
         $task = null;
 
         try {
+            // Inside the try for the same reason as in process(): a
+            // template whose expansion exceeds the ceiling must fail the
+            // run the way a failing orchestrator does, not leave the
+            // entry CLAIMED and the schedule silent.
+            $template = $this->findTemplate($run);
+            $prompt   = $this->buildPrompt($run, $template, $agent);
+            $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+
             // Explicit caller id lands in `trigger_user_id`; null would fall
             // back to the agent's most-recent trigger for credential
             // resolution. `principal_id` comes from the agent, not this arg.

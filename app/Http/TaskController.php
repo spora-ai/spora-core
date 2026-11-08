@@ -152,23 +152,20 @@ final class TaskController
             // {@see \Spora\Services\MediaArchive\TaskMediaCapabilityService}.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
-            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
-        } catch (MediaNotOwnedException $e) {
+        } catch (MediaNotOwnedException|MediaCapabilityMismatchException|InvalidArgumentException $e) {
+            [$code, $status] = match (true) {
+                $e instanceof MediaNotOwnedException            => ['MEDIA_NOT_OWNED', Response::HTTP_FORBIDDEN],
+                $e instanceof MediaCapabilityMismatchException => ['MEDIA_CAPABILITY_MISMATCH', Response::HTTP_BAD_REQUEST],
+                default                                        => ['NOT_FOUND', Response::HTTP_NOT_FOUND],
+            };
+
             return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_NOT_OWNED', 'message' => $e->getMessage()]],
-                Response::HTTP_FORBIDDEN,
-            );
-        } catch (MediaCapabilityMismatchException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        } catch (InvalidArgumentException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
-                Response::HTTP_NOT_FOUND,
+                ['error' => ['code' => $code, 'message' => $e->getMessage()]],
+                $status,
             );
         }
+
+        return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
     }
 
     private function validateStartTaskFields(string $prompt, ?int $agentId): ?JsonResponse

@@ -12,6 +12,7 @@ use Delight\Auth\Status;
 use Delight\Auth\TooManyRequestsException as DelightTooManyRequestsException;
 use Delight\Auth\UserAlreadyExistsException;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
 use Spora\Auth\Exceptions\InvalidCredentialsException;
@@ -45,8 +46,9 @@ class AuthService
         private readonly Auth $auth,
         string $appUrl = '',
         string $appPrefix = '/spora',
+        ?LoggerInterface $logger = null,
     ) {
-        $this->emailFlow = new AuthEmailFlow($auth, $appUrl, $appPrefix);
+        $this->emailFlow = new AuthEmailFlow($auth, $appUrl, $appPrefix, $logger);
         $this->roleAdmin = new AuthRoleAdmin($auth);
     }
 

@@ -49,6 +49,21 @@ final class ToolCallExecutor
         $toolInstance = $this->orchestrator->resolveToolByName($toolCall->toolName);
         $toolClass    = get_class($toolInstance);
 
+        $gated = $this->gateDisposition($agent, $task, $toolCall, $toolClass);
+
+        return $gated ?? $this->executeGatedCall($toolCall, $agent, $task, $toolInstance, $toolClass);
+    }
+
+    /**
+     * The disposition the call must take before anything is recorded, or
+     * null when the call may proceed.
+     */
+    private function gateDisposition(
+        Agent           $agent,
+        Task            $task,
+        DriverToolCall $toolCall,
+        string         $toolClass,
+    ): ?ToolCallDisposition {
         // The operator's decision selects proposals by their provider call
         // id, so two proposals sharing one id make the decision ambiguous:
         // approving it would authorize both. The second proposal is
@@ -76,9 +91,21 @@ final class ToolCallExecutor
             );
         }
 
+        return null;
+    }
+
+    private function executeGatedCall(
+        DriverToolCall $toolCall,
+        Agent           $agent,
+        Task            $task,
+        ToolInterface   $toolInstance,
+        string          $toolClass,
+    ): ToolCallDisposition {
         $operationName        = 'default';
         $operationDescription = null;
-        if (in_array(HasOperations::class, class_uses_recursive($toolClass), true)) {
+        $hasOperations        = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
+
+        if ($hasOperations) {
             // The op is resolved the same way the orchestrator resolves it
             // for the approval default, so the op that is validated, the op
             // that is enablement-checked and the op whose approval default
@@ -106,21 +133,19 @@ final class ToolCallExecutor
         // Routing it through the inline-execute path would flip the task
         // to APPROVED/COMPLETED before any answer ever lands.
         if ($toolInstance instanceof AskUserQuestionTool) {
-            if ($requiresApproval) {
-                // The operator configured this operation to need approval,
-                // so the question waits for a decision like any other call.
-                // The approved run parks the task on the question batch.
-                $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, true, $toolInstance);
-                return ToolCallDisposition::AwaitingApproval;
-            }
-
-            $toolCallRecord = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, false, $toolInstance);
-            return $this->validateAndParkQuestion($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $operationName);
+            return $this->dispatchQuestion(
+                $toolCall,
+                $agent,
+                $task,
+                $toolInstance,
+                $operationName,
+                $operationDescription,
+                $requiresApproval,
+            );
         }
 
-        $toolCallRecord   = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, $requiresApproval, $toolInstance);
+        $toolCallRecord = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, $requiresApproval, $toolInstance);
 
-        $hasOperations = in_array(HasOperations::class, class_uses_recursive($toolClass), true);
         return $this->validateAndExecute(
             $task,
             $toolCall,
@@ -130,6 +155,32 @@ final class ToolCallExecutor
             $requiresApproval,
             $hasOperations ? $operationName : null,
         );
+    }
+
+    /**
+     * The question tool's own path: it parks the task for answers rather
+     * than returning a result.
+     */
+    private function dispatchQuestion(
+        DriverToolCall $toolCall,
+        Agent           $agent,
+        Task            $task,
+        ToolInterface   $toolInstance,
+        string          $operationName,
+        ?string         $operationDescription,
+        bool            $requiresApproval,
+    ): ToolCallDisposition {
+        if ($requiresApproval) {
+            // The operator configured this operation to need approval,
+            // so the question waits for a decision like any other call.
+            // The approved run parks the task on the question batch.
+            $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, true, $toolInstance);
+            return ToolCallDisposition::AwaitingApproval;
+        }
+
+        $toolCallRecord = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, false, $toolInstance);
+
+        return $this->validateAndParkQuestion($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $operationName);
     }
 
     /**

@@ -421,6 +421,7 @@ final class ContainerDefinitions
                     $c->get(DelightAuth::class),
                     $config->getString('SPORA_APP_URL') ?? '',
                     $config->getString('SPORA_APP_PREFIX') ?? '/spora',
+                    $c->get(LoggerInterface::class),
                 );
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 return $authService;

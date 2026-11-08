@@ -19,7 +19,6 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
-use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
@@ -28,7 +27,6 @@ use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\TaskCompactionService;
 use Spora\Services\TaskCompactionServiceInterface;
@@ -131,7 +129,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolInstances,
             $config->toolConfigService,
             $config->pluginLoader,
-            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+            fn(array $llmSettings): string => (new LlmConfigBlockRenderer())->render($llmSettings),
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
@@ -682,44 +680,6 @@ final class Orchestrator implements OrchestratorInterface
         return $this->toolOperations->resolveOperationName($toolInstance, $arguments, $agentId);
     }
 
-    /**
-     * Stamp a `tool_calls` row REJECTED for a tool that the agent has been
-     * revoked from or had a specific op disabled, and append a `'tool'`
-     * history message carrying the cause. Shared by both resume paths
-     * (`ApprovedBatchExecutor`, `TickPhaseRunner`) so the disposition shape
-     * stays consistent across sync and worker modes.
-     *
-     * `rejected_by` is left null: revocation is an admin/system action with
-     * no single user-actor in this column's model. The reason lives in
-     * `reject_reason` and in the appended history row, which is what the
-     * LLM sees on its next round-trip.
-     */
-    public function recordRevokedToolCall(
-        Task   $task,
-        string $providerCallId,
-        string $toolName,
-        string $rejectReason,
-    ): void {
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'status'        => 'REJECTED',
-                'rejected_at'   => date(self::DB_TIMESTAMP_FORMAT),
-                'rejected_by'   => null,
-                'reject_reason' => $rejectReason,
-            ]);
-
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
-    }
-
     public function buildMessages(int $taskId): array
     {
         $driver = null;
@@ -745,29 +705,6 @@ final class Orchestrator implements OrchestratorInterface
     private function buildToolDefinitions(array $enabledClasses, int $agentId, ?PrincipalContext $context = null): array
     {
         return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $context);
-    }
-
-    private function buildLlmConfigBlock(array $llmSettings): string
-    {
-        if ($llmSettings === []) {
-            return '';
-        }
-
-        $lines = [];
-        foreach ($llmSettings as $setting) {
-            $value = $setting['value'];
-            if ($value === null || $value === '' || $value === []) {
-                $display = '(not configured)';
-            } elseif (is_array($value)) {
-                // list<string> from a multi-select, or a list of agent "Name (#id)" pairs.
-                $display = implode(', ', array_map(static fn($v) => is_scalar($v) ? (string) $v : json_encode($v), $value));
-            } else {
-                $display = (string) $value;
-            }
-            $lines[] = '- ' . $setting['label'] . ': ' . $display;
-        }
-
-        return "\n[Effective Configuration]\n" . implode("\n", $lines);
     }
 
     public function resolveToolByName(string $toolName): ToolInterface

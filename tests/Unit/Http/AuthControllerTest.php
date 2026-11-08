@@ -16,12 +16,14 @@ use Spora\Models\User;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
+use Spora\Services\MailerInterface;
 use Spora\Services\RateLimiter;
 use Spora\Services\SystemMailer;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Mailer\Exception\TransportException;
 
 const AUTHCTL_TEST_PASSWORD = 'Password1!';
 
@@ -1046,6 +1048,28 @@ describe('AuthController::forgotPassword', function (): void {
 
         $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
             'email' => 'unverified-reset@example.com',
+        ]);
+        $response = $controller->forgotPassword($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['message'])->toBe('If an account with that email exists, a password reset email has been sent.');
+    });
+
+    test('answers a broken mail transport like an account that does not exist', function (): void {
+        // An eligible account reaches the mailer; an unknown one does not.
+        // A transport failure must not turn that difference into a 5xx, or
+        // the status answers whether the account exists.
+        [$controller, $authService] = makeAuthController();
+        $authService->register('broken-mail@example.com', AUTHCTL_TEST_PASSWORD, 'Broken Mail');
+
+        $mailer = Mockery::mock(MailerInterface::class);
+        $mailer->shouldReceive('sendPasswordResetEmail')
+            ->andThrow(new TransportException('smtp is down'));
+        $authService->setSystemMailer($mailer);
+
+        $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
+            'email' => 'broken-mail@example.com',
         ]);
         $response = $controller->forgotPassword($request);
 

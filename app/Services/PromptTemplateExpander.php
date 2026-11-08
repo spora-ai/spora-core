@@ -86,23 +86,36 @@ final class PromptTemplateExpander
      */
     private function resolve(array $matches, array $defaults, ?Agent $agent): string
     {
-        $key           = $matches[1];
-        $inlineDefault = $matches[2] ?? null;
+        $key = $matches[1];
 
-        $builtin = $this->resolveBuiltin($key);
-        if ($builtin !== null) {
-            return $builtin;
+        return $this->resolveBuiltin($key)
+            ?? $this->resolveAgentValue($key, $agent)
+            ?? $this->resolveStoredDefault($key, $defaults)
+            ?? ($matches[2] ?? $matches[0]);
+    }
+
+    /**
+     * The value an agent-scoped placeholder takes, if it names one.
+     */
+    private function resolveAgentValue(string $key, ?Agent $agent): ?string
+    {
+        if ($agent === null || ($key !== 'agent_name' && $key !== 'user_name')) {
+            return null;
         }
 
-        if ($agent !== null && ($key === 'agent_name' || $key === 'user_name')) {
-            return $key === 'agent_name' ? (string) $agent->name : $this->resolveUserName($agent);
+        return $key === 'agent_name' ? (string) $agent->name : $this->resolveUserName($agent);
+    }
+
+    /**
+     * @param array<string, string|null> $defaults
+     */
+    private function resolveStoredDefault(string $key, array $defaults): ?string
+    {
+        if (!isset($defaults[$key]) || $defaults[$key] === '') {
+            return null;
         }
 
-        if (isset($defaults[$key]) && $defaults[$key] !== '') {
-            return (string) $defaults[$key];
-        }
-
-        return $inlineDefault ?? $matches[0];
+        return (string) $defaults[$key];
     }
 
     private function resolveBuiltin(string $key): ?string

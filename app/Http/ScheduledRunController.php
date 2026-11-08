@@ -140,11 +140,9 @@ final class ScheduledRunController
             return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        if ($result === null) {
-            return $this->notFound();
-        }
-
-        return new JsonResponse(['data' => $result]);
+        return $result === null
+            ? $this->notFound()
+            : new JsonResponse(['data' => $result]);
     }
 
     /**
