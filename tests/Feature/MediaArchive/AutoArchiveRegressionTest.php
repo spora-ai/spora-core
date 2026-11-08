@@ -124,7 +124,7 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     $service  = new MediaArchiveService($pipeline, $derivatives);
 
     $asset = $service->ingest(new MediaIngestRequest(
-        url: 'https://cdn.example/song.mp3',
+        url: 'https://93.184.216.34/song.mp3',
         mime: 'audio/mpeg',
         pluginSlug: 'test',
         toolName: 'regression',
@@ -132,5 +132,5 @@ test('URL ingest returns the local archive URL even when optional columns are mi
 
     expect($asset->asset_url)->toStartWith('/api/v1/assets/')
         ->and($asset->storage_mode)->toBe('local')
-        ->and($asset->source_url)->toBe('https://cdn.example/song.mp3');
+        ->and($asset->source_url)->toBe('https://93.184.216.34/song.mp3');
 });

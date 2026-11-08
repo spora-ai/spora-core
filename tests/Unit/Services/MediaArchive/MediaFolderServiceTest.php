@@ -225,9 +225,41 @@ describe('MediaFolderService::move', function (): void {
         expect(fn() => $service->move($principalId, (string) $folder->id, (string) $target->id))
             ->toThrow(MediaFolderUniquenessException::class);
     });
+
+    it('terminates on a tree that already holds a cycle', function (): void {
+        // A cycle can only reach the tree through two overlapping moves.
+        // The traversal has to stop at the repeated node — following it
+        // never ends, and every hop lengthens the path strings.
+        $principalId = createUserPrincipalPublic(525);
+        $service = folderService();
+        $a = $service->create($principalId, 'CycleA');
+        $b = $service->create($principalId, 'CycleB', (string) $a->id);
+
+        MediaFolder::query()->where('id', $a->id)->update(['parent_id' => $b->id]);
+        MediaFolder::query()->where('id', $b->id)->update(['parent_id' => $a->id]);
+
+        expect(fn() => $service->move($principalId, (string) $a->id, (string) $b->id))
+            ->toThrow(MediaFolderValidationException::class);
+    });
 });
 
 describe('MediaFolderService::delete', function (): void {
+    it('terminates on a tree that already holds a cycle', function (): void {
+        // The delete walks the same descendants, so the same repeated
+        // node has to stop the walk.
+        $principalId = createUserPrincipalPublic(526);
+        $service = folderService();
+        $a = $service->create($principalId, 'CycleA');
+        $b = $service->create($principalId, 'CycleB', (string) $a->id);
+
+        MediaFolder::query()->where('id', $a->id)->update(['parent_id' => $b->id]);
+        MediaFolder::query()->where('id', $b->id)->update(['parent_id' => $a->id]);
+
+        $service->delete($principalId, (string) $a->id);
+
+        expect(MediaFolder::query()->where('id', $a->id)->exists())->toBeFalse();
+        expect(MediaFolder::query()->where('id', $b->id)->exists())->toBeFalse();
+    });
     it('deletes the subfolders and leaves the assets in the root', function (): void {
         $principalId = createUserPrincipalPublic(531);
         $service = folderService();

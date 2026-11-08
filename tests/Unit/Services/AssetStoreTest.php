@@ -158,6 +158,28 @@ test('LocalAssetStore::readFromAsset() resolves Typst files by MIME', function (
     }
 });
 
+test('LocalAssetStore::readFromAsset() serves the row MIME, not the filename extension', function (): void {
+    // The extension locates the file; the row's MIME decides how a browser
+    // reads it. An uploader-supplied `.html` name must not turn an
+    // accepted `text/plain` upload into an HTML response.
+    [$store, , $restore] = buildLocalStore();
+    try {
+        $ref = $store->store('<script>alert(1)</script>', mime: 'text/plain', filename: 'note.html');
+
+        $asset = new MediaAsset();
+        $asset->asset_token  = $ref->token;
+        $asset->mime_type    = 'text/plain';
+        $asset->filename     = 'note.html';
+        $asset->storage_mode = 'local';
+
+        $resolved = $store->readFromAsset($asset);
+        expect($resolved['path'])->toEndWith('.html');
+        expect($resolved['mime'])->toBe('text/plain');
+    } finally {
+        $restore();
+    }
+});
+
 describe('LocalAssetStore extension agreement with the archive', function (): void {
     // Writer and reader must resolve the same MIME to the same extension, or
     // a local-mode asset is written under one suffix and looked for under
@@ -220,7 +242,10 @@ describe('LocalAssetStore extension agreement with the archive', function (): vo
             $asset->mime_type    = 'application/x-unknown-thing';
             $asset->storage_mode = 'local';
 
-            expect($store->readFromAsset($asset)['mime'])->toBe('application/octet-stream');
+            // The row's own MIME is what the response carries: the
+            // extension locates the file, it does not decide how a browser
+            // reads it.
+            expect($store->readFromAsset($asset)['mime'])->toBe('application/x-unknown-thing');
         } finally {
             $restore();
         }

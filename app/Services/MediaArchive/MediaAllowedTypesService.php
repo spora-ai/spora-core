@@ -49,6 +49,10 @@ use Throwable;
  *     target MIME can be allowlisted. Nothing structurally enforces the
  *     pairing.
  *
+ *     A producer's claim does not widen the operator's active-content
+ *     decision: a script-capable type a producer advertises stays out of
+ *     the allowlist while source 5 forbids it.
+ *
  *  4. Configurable image MIME types — `image/*` is **additionally** allowed
  *     when the requesting user's agent's LLM reports
  *     `LLMDriverInterface::supportsImageInput() === true`. The allowed
@@ -168,6 +172,23 @@ final class MediaAllowedTypesService
         return $this->activeTypes?->allowActiveTypes() ?? false;
     }
 
+    /**
+     * Whether a MIME may be created.
+     *
+     * A producer's claim to handle a format does not widen the operator's
+     * active-content decision: a producer that advertises `text/html`
+     * would otherwise make HTML uploadable while the operator has
+     * forbidden it.
+     */
+    private function permitsCreationOf(string $mime): bool
+    {
+        if ($this->activeTypes !== null) {
+            return $this->activeTypes->permitsCreationOf($mime);
+        }
+
+        return !MediaScriptableTypes::isScriptable($mime);
+    }
+
     /** @var list<string> */
     private readonly array $imageExtensions;
 
@@ -207,6 +228,9 @@ final class MediaAllowedTypesService
             }
         }
         foreach ($this->derivatives->producerSourceMimeTypes() as $mime) {
+            if (!$this->permitsCreationOf($mime)) {
+                continue;
+            }
             $set[strtolower($mime)] = true;
         }
         $agentSupportsImages = $agentId === null

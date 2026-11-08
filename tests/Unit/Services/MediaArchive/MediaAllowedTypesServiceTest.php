@@ -157,6 +157,79 @@ test('isAllowed accepts the audio allowlist (incl. video/webm and video/mp4 for 
     }
 });
 
+test('a producer claiming text/html does not make HTML uploadable while active types are off', function (): void {
+    // A producer's claim to handle a format is not an operator's decision
+    // to allow it: the active-content toggle governs HTML and SVG.
+    MediaDerivativeProducerDiscovery::add(new class implements \Spora\Services\MediaArchive\MediaDerivativeProducerInterface {
+        /** @return list<string> */
+        public function supportedSourceFormats(): array
+        {
+            return ['text/html'];
+        }
+
+        /** @return list<string> */
+        public function supportedDerivativeFormats(): array
+        {
+            return ['md'];
+        }
+
+        public function pluginSlug(): string
+        {
+            return 'tests-html-producer';
+        }
+
+        public function operationName(): string
+        {
+            return 'html.to_md';
+        }
+
+        public function produce(\Spora\Models\MediaAsset $source, string $format, array $options = []): \Spora\Services\MediaArchive\DerivativeOutput
+        {
+            return new \Spora\Services\MediaArchive\DerivativeOutput('', 'text/markdown');
+        }
+    }::class);
+
+    [$service] = buildAllowedTypesServiceWithPolicy(false);
+
+    expect($service->isAllowed('text/html', null))->toBeFalse();
+    expect($service->allowedMimeTypes())->not->toContain('text/html');
+});
+
+test('a producer claiming text/html is allowed once the operator permits active types', function (): void {
+    MediaDerivativeProducerDiscovery::add(new class implements \Spora\Services\MediaArchive\MediaDerivativeProducerInterface {
+        /** @return list<string> */
+        public function supportedSourceFormats(): array
+        {
+            return ['text/html'];
+        }
+
+        /** @return list<string> */
+        public function supportedDerivativeFormats(): array
+        {
+            return ['md'];
+        }
+
+        public function pluginSlug(): string
+        {
+            return 'tests-html-producer';
+        }
+
+        public function operationName(): string
+        {
+            return 'html.to_md';
+        }
+
+        public function produce(\Spora\Models\MediaAsset $source, string $format, array $options = []): \Spora\Services\MediaArchive\DerivativeOutput
+        {
+            return new \Spora\Services\MediaArchive\DerivativeOutput('', 'text/markdown');
+        }
+    }::class);
+
+    [$service] = buildAllowedTypesServiceWithPolicy(true);
+
+    expect($service->isAllowed('text/html', null))->toBeTrue();
+});
+
 /**
  * @return array{0: MediaAllowedTypesService, 1: MediaDerivativeService}
  */
@@ -171,6 +244,31 @@ function buildAllowedTypesService(?array $imageExtensions = null): array
     $derivatives = buildAllowedTypesDerivativeService();
     return [
         new MediaAllowedTypesService($derivatives, $factory, $imageExtensions),
+        $derivatives,
+    ];
+}
+
+/**
+ * The same service, wired to an operator decision about the
+ * script-capable formats.
+ *
+ * @return array{0: MediaAllowedTypesService, 1: MediaDerivativeService}
+ */
+function buildAllowedTypesServiceWithPolicy(bool $allowActiveTypes): array
+{
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $llmService = new LLMConfigService($security, [
+        OpenAICompatibleDriver::class,
+        AnthropicCompatibleDriver::class,
+    ]);
+    $factory = new DriverFactory(new NullLogger(), $llmService, 60);
+    $derivatives = buildAllowedTypesDerivativeService();
+    $policy = new \Spora\Services\MediaArchive\MediaActiveTypesPolicy(
+        new \Spora\Core\Config(['SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES' => $allowActiveTypes]),
+    );
+
+    return [
+        new MediaAllowedTypesService($derivatives, $factory, null, $policy),
         $derivatives,
     ];
 }

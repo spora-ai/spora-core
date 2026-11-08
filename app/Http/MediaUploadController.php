@@ -7,6 +7,7 @@ namespace Spora\Http;
 use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Core\Config;
+use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderNotFoundException;
 use Spora\Services\MediaArchive\Exceptions\MediaFolderUniquenessException;
@@ -45,6 +46,10 @@ use Symfony\Component\HttpFoundation\Response;
  * `kind` marks it. The folder is checked against the target principal
  * and against the folder's filename rule, so an upload that would
  * collide is a 422 rather than a database error.
+ *
+ * `agent_id` and `principal_id` both name the destination, so both are
+ * checked against the caller's visible principals before the bytes are
+ * stored.
  */
 final class MediaUploadController
 {
@@ -120,6 +125,7 @@ final class MediaUploadController
     {
         // The allowlist must use the sniffed MIME, never the client header.
         $error = $this->checkMimeAllowed($sniffedMime, $request->agentId)
+            ?? $this->checkAgentAllowed($request->agentId, $request->principalId, $userId)
             ?? $this->checkPrincipalAllowed($request->principalId, $userId)
             ?? $this->checkKindAllowed($request->kind);
         if ($error !== null) {
@@ -205,6 +211,54 @@ final class MediaUploadController
             'UNSUPPORTED_MEDIA_TYPE',
             sprintf('MIME type "%s" is not in the upload allowlist.', $sniffedMime),
         );
+    }
+
+    /**
+     * The `agent_id` names the agent the upload is filed under, and the
+     * ingest pipeline inherits that agent's principal when the request
+     * names none — so an unchecked agent id picks the destination
+     * principal. The agent must therefore be one the caller can act as,
+     * and it must belong to the principal the request names.
+     */
+    private function checkAgentAllowed(?int $agentId, ?int $principalId, int $userId): ?JsonResponse
+    {
+        if ($agentId === null) {
+            return null;
+        }
+
+        if (!$this->principalResolver->isVisibleTo($agentId, $userId)) {
+            return $this->error(
+                Response::HTTP_FORBIDDEN,
+                'FORBIDDEN_AGENT',
+                'You can only upload against an agent you can see.',
+            );
+        }
+
+        $agentPrincipalId = $this->principalOfAgent($agentId);
+        if ($principalId !== null && $agentPrincipalId !== null && $agentPrincipalId !== $principalId) {
+            return $this->error(
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+                'AGENT_PRINCIPAL_MISMATCH',
+                'The agent does not belong to the target principal.',
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * The principal the agent belongs to, or null when the row is
+     * missing or its principal column is not backfilled.
+     *
+     * Read off the agent row because
+     * {@see \Spora\Services\PrincipalResolver::isVisibleTo()} answers
+     * "may the caller see this agent", not "which principal is it".
+     */
+    private function principalOfAgent(int $agentId): ?int
+    {
+        $principalId = Agent::query()->where('id', $agentId)->value('principal_id');
+
+        return $principalId === null ? null : (int) $principalId;
     }
 
     /**

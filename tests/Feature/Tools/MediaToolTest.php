@@ -549,6 +549,55 @@ describe('MediaTool::get_media', function (): void {
         }
     });
 
+    it('does not mint a public share token', function (): void {
+        // `get_public_url` is the operation that hands out a link that
+        // keeps working outside the session, and it is approval-gated. A
+        // metadata read must not mint the same capability behind the
+        // operator's back.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['public_url'])->toBeNull();
+            expect($asset->fresh()->public_access_token)->toBeNull();
+        } finally {
+            $restore();
+        }
+    });
+
+    it('reports the share URL of an asset that is already shared', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'tok-shared');
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['public_url'])->toBe('https://example.test/api/v1/public/media/' . $asset->id . '?token=tok-shared');
+        } finally {
+            $restore();
+        }
+    });
+
     it('emits a markdown image embed + echo instruction in the content', function (): void {
         // Mirrors the OpenAI image tool's pattern: the chat UI only
         // renders the image when the LLM echoes the markdown tag
