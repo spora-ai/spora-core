@@ -57,12 +57,16 @@ final class DatabaseSeeder
         //    `bin/spora db:repair-admin`.
         $user = User::where('email', 'admin@spora.local')->first();
         if ($user === null) {
-            $userId = $this->authService->register('admin@spora.local', 'password', 'Admin', true);
+            // The credential is generated, not fixed: a password that is in the
+            // source would hand every fresh installation the same admin
+            // account. It is printed once, here, for the operator to use.
+            $password = self::generatePassword();
+            $userId = $this->authService->register('admin@spora.local', $password, 'Admin', true);
             User::where('id', $userId)->update([
                 'roles_mask' => Role::ADMIN,
                 'status'     => 1,
             ]);
-            echo "Created Admin User: admin@spora.local / password\n";
+            echo "Created Admin User: admin@spora.local / {$password}\n";
         } else {
             $userId = $user->id;
             echo "Admin user already exists.\n";
@@ -98,5 +102,16 @@ final class DatabaseSeeder
         }
 
         echo "Database Seeding Complete!\n";
+    }
+
+    /**
+     * A one-time credential for the bootstrap admin.
+     *
+     * Hex so it can be copied from a console log into a password field
+     * without a quoting or escaping question.
+     */
+    private static function generatePassword(): string
+    {
+        return bin2hex(random_bytes(12));
     }
 }

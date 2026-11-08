@@ -8,6 +8,7 @@ use Delight\Auth\Auth;
 use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\InvalidPasswordException;
+use Delight\Auth\Status;
 use Delight\Auth\TooManyRequestsException as DelightTooManyRequestsException;
 use Delight\Auth\UserAlreadyExistsException;
 use InvalidArgumentException;
@@ -96,14 +97,19 @@ class AuthService
      * Authenticate a user by email and password.
      * On success the session is populated by delight-im/auth.
      *
+     * A suspended account is refused before the credentials are checked, so a
+     * suspension cannot be undone by logging in again.
+     *
      * @param bool $rememberMe when true, keeps the user logged in across browser restarts
      *
-     * @throws InvalidCredentialsException  if the email or password is incorrect
+     * @throws InvalidCredentialsException  if the email or password is incorrect, or the account is suspended
      * @throws AccountUnverifiedException   if the account requires email verification
      * @throws TooManyRequestsException     if the email or IP login budget is exhausted
      */
     public function login(string $email, string $password, bool $rememberMe = false): void
     {
+        $this->refuseSuspendedAccount($email);
+
         $rememberDuration = $rememberMe ? (int) (60 * 60 * 24 * 365.25) : null;
 
         try {
@@ -115,6 +121,20 @@ class AuthService
         } catch (DelightTooManyRequestsException $e) {
             // delight-im passes the estimated wait in seconds as the exception code.
             throw new TooManyRequestsException((int) $e->getCode());
+        }
+    }
+
+    /**
+     * Refuse a suspended account.
+     *
+     * The refusal is the one a wrong password gets: a caller must not be able
+     * to tell a suspended account from an account that does not exist.
+     */
+    private function refuseSuspendedAccount(string $email): void
+    {
+        $user = User::where('email', $email)->first();
+        if ($user !== null && (int) $user->status === Status::SUSPENDED) {
+            throw new InvalidCredentialsException('The email address or password is incorrect.');
         }
     }
 
@@ -131,7 +151,7 @@ class AuthService
      */
     public function currentUserId(): ?int
     {
-        if (!$this->auth->isLoggedIn()) {
+        if (!$this->isLoggedIn()) {
             return null;
         }
 
@@ -140,10 +160,26 @@ class AuthService
 
     /**
      * Return true if a user is currently logged in.
+     *
+     * A session whose account was suspended in the meantime does not count:
+     * the session is closed and the caller is treated as anonymous. The
+     * account state in the session is the one the auth library refreshes
+     * from the database on its resync interval, so a suspension takes effect
+     * within that window — the same window the revocation counter uses.
      */
     public function isLoggedIn(): bool
     {
-        return $this->auth->isLoggedIn();
+        if (!$this->auth->isLoggedIn()) {
+            return false;
+        }
+
+        if ($this->auth->isSuspended()) {
+            $this->auth->logOut();
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -208,10 +244,15 @@ class AuthService
 
     /**
      * Initiate a password reset for the given email address.
+     *
+     * @param string $baseUrl The origin the reset link is built on. It must be
+     *                        the operator's own origin: the link carries the
+     *                        credential, and a request-supplied host would hand
+     *                        it to whoever chose that host.
      */
-    public function forgotPassword(string $email): void
+    public function forgotPassword(string $email, string $baseUrl): void
     {
-        $this->emailFlow->forgotPassword($email);
+        $this->emailFlow->forgotPassword($email, $baseUrl);
     }
 
     /**

@@ -100,6 +100,32 @@ it('does not duplicate records if seeder is run twice', function () {
     expect($output)->toContain('Spora Core Agent already exists');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('does not seed the admin with a source-visible password', function () {
+    TestDatabaseFactory::freshDatabase();
+
+    ob_start();
+    makeSeeder()->run();
+    ob_get_clean();
+
+    $user = User::where('email', 'admin@spora.local')->firstOrFail();
+    expect(Delight\Auth\PasswordHash::verify('password', (string) $user->password))->toBeFalse();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('prints a generated admin credential that authenticates', function () {
+    TestDatabaseFactory::freshDatabase();
+
+    ob_start();
+    makeSeeder()->run();
+    $output = (string) ob_get_clean();
+
+    preg_match('#Created Admin User: admin@spora\.local / (\S+)#', $output, $matches);
+    expect($matches)->toHaveCount(2);
+    expect($matches[1])->not()->toBe('password');
+
+    $user = User::where('email', 'admin@spora.local')->firstOrFail();
+    expect(Delight\Auth\PasswordHash::verify($matches[1], (string) $user->password))->toBeTrue();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 it('does not modify an existing admin row (security)', function () {
     // Per-test fresh DB so the admin row from a previous test doesn't trip the email-unique key on MariaDB.
     TestDatabaseFactory::freshDatabase();

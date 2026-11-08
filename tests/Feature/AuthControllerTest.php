@@ -303,7 +303,7 @@ test('resetPassword resets password with valid selector and token', function ():
     $authService->setSystemMailer($proxyMailer);
 
     // Initiate password reset to generate selector/token
-    $authService->forgotPassword($email);
+    $authService->forgotPassword($email, 'https://spora.test');
 
     // Parse selector and token from the captured URL
     $capturedUrl = (string) $captured['url'];
