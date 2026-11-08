@@ -12,7 +12,7 @@ namespace Spora\Agents;
  */
 enum ToolCallDisposition: string
 {
-    /** The LLM invoked a tool the agent has not enabled — the gate throws and the caller catches it. */
+    /** Unused: the gate throws `ToolNotEnabledException` for a tool the agent has not enabled, and the caller catches it. */
     case SystemError = 'system_error';
 
     /** The operation is disabled for this agent; record + history written, no execution. */
