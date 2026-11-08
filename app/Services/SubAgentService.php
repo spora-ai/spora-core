@@ -452,21 +452,7 @@ final class SubAgentService implements SubAgentServiceInterface
             $orchestrator = ($this->orchestratorFactory)();
 
             foreach ($childIds as $childId) {
-                $child = Task::find($childId);
-                if ($child === null) {
-                    continue;
-                }
-                if (!$this->childIsWithinParentBoundary($parent, $child)) {
-                    continue;
-                }
-
-                $toolCallId = $this->findToolCallIdForChild((int) $parent->id, $childId);
-                $this->replaceOrAppendToolHistory(
-                    orchestrator: $orchestrator,
-                    parentTaskId: (int) $parent->id,
-                    toolCallId: $toolCallId,
-                    content: $this->childContent($child),
-                );
+                $this->importChildAnswer($parent, $childId, $orchestrator);
             }
 
             // Re-decode `$row->data` (the freshly-locked snapshot) instead
@@ -495,6 +481,32 @@ final class SubAgentService implements SubAgentServiceInterface
 
             return true;
         });
+    }
+
+    /**
+     * Import one child's answer into the parent's tool history.
+     *
+     * A child that no longer exists, or one whose answer belongs to
+     * another principal's conversation, is skipped — see
+     * {@see childIsWithinParentBoundary()}.
+     */
+    private function importChildAnswer(Task $parent, int $childId, OrchestratorInterface $orchestrator): void
+    {
+        $child = Task::find($childId);
+        if ($child === null) {
+            return;
+        }
+        if (!$this->childIsWithinParentBoundary($parent, $child)) {
+            return;
+        }
+
+        $toolCallId = $this->findToolCallIdForChild((int) $parent->id, $childId);
+        $this->replaceOrAppendToolHistory(
+            orchestrator: $orchestrator,
+            parentTaskId: (int) $parent->id,
+            toolCallId: $toolCallId,
+            content: $this->childContent($child),
+        );
     }
 
     /**

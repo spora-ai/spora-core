@@ -94,8 +94,6 @@ final class AgentTemplateToolsApplier
         int $toolIndex,
         array &$warnings,
     ): array {
-        $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
-
         $toolClass = (string) ($toolEntry['tool_class'] ?? '');
         $missingWarning = $this->buildToolPluginMissingWarning($toolClass, $registeredTools);
 
@@ -108,13 +106,29 @@ final class AgentTemplateToolsApplier
             ];
         }
 
-        if ($toolClass === '') {
-            return $empty;
-        }
+        return $this->applyKnownTool($agentId, $toolClass, $toolEntry, $toolIndex, $warnings);
+    }
 
-        if (!array_key_exists('enabled', $toolEntry)) {
-            // The entry says nothing about the tool, so the agent's
-            // current state stands.
+    /**
+     * Apply an entry whose tool class is known to the registry, and the
+     * entries that name no tool at all.
+     *
+     * @param array<string, mixed> $toolEntry
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     */
+    private function applyKnownTool(
+        int $agentId,
+        string $toolClass,
+        array $toolEntry,
+        int $toolIndex,
+        array &$warnings,
+    ): array {
+        $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
+
+        if ($toolClass === '' || !array_key_exists('enabled', $toolEntry)) {
+            // The entry names no tool, or says nothing about it, so the
+            // agent's current state stands.
             return $empty;
         }
 

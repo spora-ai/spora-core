@@ -78,4 +78,15 @@ describe('AgentTemplateValidator::validatePartial', function (): void {
         expect($result->isValid())->toBeFalse();
         expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_RANGE');
     });
+
+    it('refuses a max_steps that is null', function (): void {
+        // The updater casts whatever it is given, and `(int) null` is 0 —
+        // a budget no task may run.
+        $result = (new AgentTemplateValidator())->validatePartial([
+            'agent' => ['max_steps' => null],
+        ]);
+
+        expect($result->isValid())->toBeFalse();
+        expect(array_column($result->errors(), 'code'))->toContain('MAX_STEPS_INVALID');
+    });
 });
