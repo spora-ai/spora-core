@@ -93,9 +93,9 @@ it('renders a real SubAgentTool LLM projection end-to-end', function (): void {
         'is_active'    => true,
     ]);
 
-    // Migration 0067 cut agents.user_id but ToolConfigSchemaInspector still
-    // queries Agent::where('user_id', …). Bridge the gap so the projection
-    // can resolve the just-created agent's name.
+    // The inspector resolves agents by `principal_id`; the `agents.user_id`
+    // column this adds is a leftover from the pre-0067 schema and is not
+    // consulted.
     if (!Capsule::schema()->hasColumn('agents', 'user_id')) {
         Capsule::schema()->table('agents', function ($table): void {
             $table->unsignedBigInteger('user_id')->nullable();

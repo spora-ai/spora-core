@@ -19,9 +19,6 @@ use RuntimeException;
  */
 final class TempDirectory
 {
-    /**
-     * Create a directory named after the prefix, with a random suffix.
-     */
     public static function create(string $prefix): string
     {
         $dir = sys_get_temp_dir() . '/' . $prefix . bin2hex(random_bytes(8));
@@ -34,8 +31,6 @@ final class TempDirectory
     }
 
     /**
-     * Remove the directory and everything in it.
-     *
      * A symlink at the root is left alone: following it would delete what
      * it points at rather than what the test created.
      */

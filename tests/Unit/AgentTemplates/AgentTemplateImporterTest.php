@@ -33,7 +33,6 @@ test('applyTemplate("core/core-assistant") persists per-operation auto_approve o
         ->where('operation', 'now')
         ->first();
     expect($nowOverride)->not->toBeNull();
-    // auto_approve=true in template → default_requires_approval=0 in DB
     expect((int) $nowOverride->default_requires_approval)->toBe(0);
 });
 

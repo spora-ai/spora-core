@@ -127,7 +127,7 @@ final class ScheduledRunProcessor
         // before issuing the session token). If for any reason it doesn't — e.g.
         // a mid-flight logout or a manual SQL poke — visiblePrincipalIds() returns
         // [] and we skip the call without erroring. The next /housekeeping call
-        // (within 5 min) will retry once auth has settled.
+        // will retry once auth has settled.
         $resolver = new PrincipalResolver();
         $visiblePrincipalIds = $resolver->visiblePrincipalIds($userId);
         if ($visiblePrincipalIds === []) {
@@ -520,9 +520,6 @@ final class ScheduledRunProcessor
             ]);
     }
 
-    /**
-     * Substitute {{variable}} placeholders in a template string.
-     */
     private function substituteVariables(string $template, array $variables, ?Agent $agent = null): string
     {
         return $this->expander->expand($template, $variables, $agent);

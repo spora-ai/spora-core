@@ -143,17 +143,11 @@ class AuthService
         }
     }
 
-    /**
-     * Log the currently authenticated user out and destroy their session.
-     */
     public function logout(): void
     {
         $this->auth->logOut();
     }
 
-    /**
-     * Return the ID of the currently authenticated user, or null if not logged in.
-     */
     public function currentUserId(): ?int
     {
         if (!$this->isLoggedIn()) {
@@ -187,9 +181,6 @@ class AuthService
         return true;
     }
 
-    /**
-     * Return the email address of the currently authenticated user, or null if not logged in.
-     */
     public function currentUserEmail(): ?string
     {
         if (!$this->auth->isLoggedIn()) {
@@ -260,16 +251,12 @@ class AuthService
         $this->emailFlow->forgotPassword($email, $baseUrl);
     }
 
-    /**
-     * Reset the password using a selector/token pair.
-     */
     public function resetPassword(string $selector, string $token, string $newPassword): void
     {
         $this->emailFlow->resetPassword($selector, $token, $newPassword);
     }
 
     /**
-     * Resend the email verification email for an unverified user.
      * Silently returns if there is no pending confirmation request for the email.
      */
     public function resendVerificationEmail(string $email): void
@@ -277,33 +264,21 @@ class AuthService
         $this->emailFlow->resendVerificationEmail($email);
     }
 
-    /**
-     * Grant a role to a user.
-     */
     public function grantRole(int $userId, int $role): void
     {
         $this->roleAdmin->grantRole($userId, $role);
     }
 
-    /**
-     * Revoke a role from a user.
-     */
     public function revokeRole(int $userId, int $role): void
     {
         $this->roleAdmin->revokeRole($userId, $role);
     }
 
-    /**
-     * Check if a user has a specific role.
-     */
     public function userHasRole(int $userId, int $role): bool
     {
         return $this->roleAdmin->userHasRole($userId, $role);
     }
 
-    /**
-     * Delete a user by ID.
-     */
     public function deleteUser(int $userId): void
     {
         $this->roleAdmin->deleteUser($userId);

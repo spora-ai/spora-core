@@ -65,9 +65,6 @@ function makeOrchestrator(
     );
 }
 
-/**
- * Create a mock LLMDriverInterface that returns a fixed LLMResponse.
- */
 function mockLlm(LLMResponse $response): LLMDriverInterface
 {
     $mock = Mockery::mock(LLMDriverInterface::class);
@@ -79,9 +76,6 @@ function mockLlm(LLMResponse $response): LLMDriverInterface
     return $mock;
 }
 
-/**
- * Wrap a mock LLMDriverInterface in a DriverFactory stub that always returns it.
- */
 function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
 {
     $factory = Mockery::mock(DriverFactory::class);
@@ -121,9 +115,6 @@ function seedAgent(): array
     return [$agent->id, $userId];
 }
 
-/**
- * Marks the given tool instances as enabled for the agent in the database.
- */
 function enableToolsForAgent(int $agentId, array $toolInstances): void
 {
     foreach ($toolInstances as $instance) {
@@ -494,7 +485,6 @@ it('continuing an auto-aborted task clears the max_steps_reached flag', function
     $task = $orch->start($agentId, 'Infinite loop', maxSteps: 3);
     claimAndTick($orch, $task->id);
 
-    // Sanity-check the auto-abort happened.
     $task->refresh();
     $data = is_array($task->data) ? $task->data : [];
     expect($task->status)->toBe('ABORTED')
@@ -984,7 +974,6 @@ it('injects the correct agentId into the tool execute scope', function (): void 
 
     $task->refresh();
 
-    // The tool should have returned "Agent ID is: {$agentId}"
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->result_content)->toBe("Agent ID is: {$agentId}");
@@ -1014,13 +1003,11 @@ it('handleToolCalls schema validation failure writes both ToolCall and history r
     // The error must be fed back to the LLM so the task can complete, not get stuck
     expect($task->status)->toBe('COMPLETED');
 
-    // ToolCall record must be APPROVED with the validation error message
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord)->not()->toBeNull()
         ->and($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->result_content)->toContain(VALIDATION_ERROR);
 
-    // A history row for this tool call must also exist (atomically written with the record above)
     $toolHistory = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_schema_fail')
@@ -1096,7 +1083,6 @@ it('continues correctly when LLM sends tool call with empty array arguments "[]"
     $receivedArgs = null;
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$receivedArgs) {
-        // Capture the arguments from the continuation request
         foreach ($request->messages as $msg) {
             if (isset($msg['tool_calls'])) {
                 foreach ($msg['tool_calls'] as $tc) {
@@ -1113,17 +1099,14 @@ it('continues correctly when LLM sends tool call with empty array arguments "[]"
 
     $orch->tick($task->id);
 
-    // The task should complete without error
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
 
-    // The arguments sent to the LLM should be "{}" (object), NOT "[]" (array/string)
     expect($receivedArgs)->not()->toBe('[]')
         ->and($receivedArgs)->toBe('{}');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('buildMessages normalizes empty array arguments "[]" to empty object "{}" before sending to LLM', function (): void {
-    // This is a unit test for buildMessages specifically
     [$agentId] = seedAgent();
 
     $task = Task::create([
@@ -1155,7 +1138,6 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
         'content'      => 'done',
     ]);
 
-    // Capture what buildMessages produces
     /** @var list<array<string,mixed>> $capturedMessages */
     $capturedMessages = [];
 
@@ -1171,7 +1153,6 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
 
     $orch->tick($task->id);
 
-    // Find the tool call message
     $toolCallMsg = null;
     foreach ($capturedMessages as $msg) {
         if (isset($msg['tool_calls'])) {
@@ -1196,7 +1177,6 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
         'max_steps'   => 10,
     ]);
 
-    // Insert history: 3 user messages (sequences 0, 1, 2) then a summary row
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Hi there']);
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'What is the time?']);
@@ -1211,7 +1191,6 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
     // Recent history after the summary
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Thanks']);
 
-    // Capture what buildMessages produces
     /** @var list<array<string,mixed>> $capturedMessages */
     $capturedMessages = [];
 
@@ -1275,9 +1254,8 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
     $orch->tick($task->id);
 
-    // buildMessages iterates sequentially: when summary-2 (seq 3, range 2-2) is encountered,
-    // it removes messages with sequence <= 2. summary-1 (seq 1) is NOT in range 2-2, so it is preserved.
-    // Result: First summary + Second summary + Recent = 3 messages.
+    // Neither range contains the other, so neither summary supersedes the other:
+    // each stands in for its own row, and the row after them is untouched.
     expect(count($capturedMessages))->toBe(3);
     expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('First summary');
@@ -1314,7 +1292,6 @@ test('resolveLlmConfig throws when no config exists at any level', function (): 
 test('resolveLlmConfig uses user preference when agent has no llm_driver_config_id', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create a config and set it as user preference
     $config = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1334,13 +1311,11 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should not throw - uses user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     LLMDriverConfiguration::where('id', $config->id)->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -1348,7 +1323,6 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
 test('resolveLlmConfig prefers user preference over global default', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create a global default config
     $globalConfig = LLMDriverConfiguration::create([
         'principal_id' => null,
         'name' => 'Global Default Config',
@@ -1361,7 +1335,6 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $globalConfig->max_tokens_output = 1024;
     $globalConfig->save();
 
-    // Create a user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1381,13 +1354,11 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should use user preference, not global default
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     // Detach references first (FK from principal_preferences.preferred_llm_config_id).
     PrincipalPreference::whereIn('preferred_llm_config_id', [$globalConfig->id, $prefConfig->id])->delete();
@@ -1398,7 +1369,6 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 test('resolveLlmConfig uses agent-specific config when set', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1415,7 +1385,6 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
         'preferred_llm_config_id' => $prefConfig->id,
     ]);
 
-    // Create agent-specific config
     $agentConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'Agent Config',
@@ -1427,7 +1396,6 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $agentConfig->max_tokens_output = 4096;
     $agentConfig->save();
 
-    // Set the agent to use the agent-specific config
     $agent = Agent::find($agentId);
     $agent->llm_driver_config_id = $agentConfig->id;
     $agent->save();
@@ -1435,13 +1403,11 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should use agent-specific config, not user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     // Detach references before deleting LLMDriverConfigurations (FK from
     // principal_preferences.preferred_llm_config_id and from agents.llm_driver_config_id).
@@ -1459,7 +1425,6 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     $userA = $authService->register('user-a-iso@example.com', TEST_PASSWORD, 'UseraIso');
     $userB = $authService->register('user-b-iso@example.com', TEST_PASSWORD, 'UserbIso');
 
-    // User A creates their own config
     $configA = LLMDriverConfiguration::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Config',
@@ -1470,13 +1435,11 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
         'max_tokens_output' => 2048,
     ]);
 
-    // User A sets preference for their own config
     PrincipalPreference::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'preferred_llm_config_id' => $configA->id,
     ]);
 
-    // User B creates their own config
     $configB = LLMDriverConfiguration::create([
         'principal_id' => createUserPrincipalPublic($userB),
         'name' => 'User B Config',
@@ -1487,13 +1450,11 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
         'max_tokens_output' => 1024,
     ]);
 
-    // User B sets preference for their own config
     PrincipalPreference::create([
         'principal_id' => createUserPrincipalPublic($userB),
         'preferred_llm_config_id' => $configB->id,
     ]);
 
-    // Create agents for both users
     $agentA = Agent::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Agent',
@@ -1524,7 +1485,6 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     claimAndTick($orchB, $taskB->id);
     expect($taskB->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::whereIn('principal_id', [$userA, $userB])->delete();
     // Detach references first (FK from principal_preferences.preferred_llm_config_id).
     PrincipalPreference::whereIn('preferred_llm_config_id', [$configA->id, $configB->id])->delete();
@@ -1578,9 +1538,9 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     expect($task->status)->toBe('COMPLETED')
         ->and($task->step_count)->toBe(2);
 
-    // When all tools are auto-approved, publishIntermediateState should be called exactly once:
-    // - Line 787 publishes before the recursive tick
-    // - Line 821 should NOT publish again (that was the bug)
+    // When all tools are auto-approved, publishIntermediateState should be called
+    // exactly once: the batch publishes before the recursive tick, and the
+    // recursive tick must not publish again (that was the bug).
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1619,7 +1579,7 @@ it('publishes intermediate state when tools require approval', function (): void
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
-    // When approval is needed, publishIntermediateState is called exactly once (line 821)
+    // When approval is needed, publishIntermediateState is called exactly once.
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1915,13 +1875,11 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     $logs = Capsule::connection()->getQueryLog();
     Capsule::connection()->disableQueryLog();
 
-    // Find the override query in the log
     $overrideQueryLog = array_filter($logs, fn($log) => str_contains($log['query'], 'agent_tool_operation_overrides'));
 
     expect($overrideQueryLog)->not->toBeEmpty();
     $query = reset($overrideQueryLog)['query'];
 
-    // Check that it includes the 'in' clause for the tool_class
     expect($query)->toContain('in (?)');
 });
 
@@ -2161,7 +2119,6 @@ it('tick compacts history and retries successfully when context window error hap
     expect($task->status)->toBe('COMPLETED')
         ->and($task->final_response)->toBe('Recovered after compaction.');
 
-    // The summary row should exist.
     $summaryRows = TaskHistory::where('task_id', $task->id)->where('role', 'summary')->get();
     expect($summaryRows)->not->toBeEmpty();
     expect($summaryRows->first()->content)->toBe('Summary of past conversation.');
@@ -2305,7 +2262,6 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
         ->and($rejected)->toHaveCount(1)
         ->and($rejected->first()->provider_call_id)->toBe('call_b');
 
-    // The dangling PENDING_APPROVAL should have a history row explaining the discard.
     $discarded = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_b')
@@ -2914,7 +2870,6 @@ it('scheduleAutoRetry schedules the retry in place when error code is retryable 
         ->count();
     expect($separateRetries)->toBe(0);
 
-    // Cleanup
     $agent->retry_after_minutes = 0;
     $agent->max_retries         = 0;
     $agent->save();
@@ -3001,7 +2956,6 @@ it('scheduleAutoRetry does NOT exceed max_retries', function (): void {
     $retryTask = Task::where('retry_of_task_id', $task->id)->first();
     expect($retryTask)->toBeNull();
 
-    // Cleanup
     $agent->retry_after_minutes = 0;
     $agent->max_retries         = 0;
     $agent->save();
@@ -3077,7 +3031,6 @@ it('resolveToolByName throws when the LLM invokes an unknown tool name', functio
     $task = $orch->start($agentId, 'Unknown tool test', maxSteps: 3);
     claimAndTick($orch, $task->id);
 
-    // Verify the System Error row was written for the unknown tool.
     $errorRow = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_x')
@@ -3261,7 +3214,6 @@ it('buildMessages includes tool result rows in the conversation sent to the LLM'
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $orch->tick($task->id);
 
-    // Expect 3 messages: user, assistant tool_calls, tool result.
     expect($capturedMessages)->toHaveCount(3);
     expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('Hello');
@@ -3566,8 +3518,6 @@ describe('Orchestrator::handleToolCalls — validation failure', function (): vo
         // Validation failure is recoverable — the LLM is given a second chance.
         expect($task->status)->toBe('COMPLETED');
 
-        // ToolCall row is APPROVED (not PENDING_APPROVAL) and carries the
-        // validation error message in result_content.
         $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
         expect($toolCallRecord)->not()->toBeNull()
             ->and($toolCallRecord->status)->toBe('APPROVED')
@@ -3910,7 +3860,6 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
         $orch = makeOrchestrator(mockDriverFactory($mock));
         $orch->tick($task->id);
 
-        // Expect 3 messages: user + assistant(tool_calls) + tool.
         expect($capturedMessages)->toHaveCount(3);
 
         // The tool message has the OpenAI-compatible shape.

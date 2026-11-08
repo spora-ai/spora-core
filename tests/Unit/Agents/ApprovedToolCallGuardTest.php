@@ -150,7 +150,6 @@ it('refuses a second proposal that reuses a provider call id', function (): void
         ['action' => 'safe'],
     );
 
-    // The first proposal is recorded.
     $executor->executeOrQueue($first, $agent, $task);
 
     $second = new DriverToolCall(
