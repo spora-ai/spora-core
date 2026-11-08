@@ -52,6 +52,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->once()->with(['mid-image-1', 'mid-image-2'])->andReturn(['mid-image-1', 'mid-image-2']);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with(['mid-image-1', 'mid-image-2']);
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -74,6 +75,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -162,6 +164,7 @@ describe('ContinueTaskDispatcher::handleContinue — body validation', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldNotReceive('parseMediaIds');
         $mediaCapability->shouldNotReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldNotReceive('ensureAttachmentsAccessible');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(1, 1, []);
@@ -179,6 +182,7 @@ describe('ContinueTaskDispatcher::handleContinue — task lookup', function (): 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldNotReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldNotReceive('ensureAttachmentsAccessible');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
         $response = $dispatcher->handleContinue(999999, 1, ['prompt' => 'go']);
@@ -196,6 +200,7 @@ describe('ContinueTaskDispatcher::handleContinue — task lookup', function (): 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with([]);
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -209,6 +214,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
     test('returns 400 MEDIA_CAPABILITY_MISMATCH when the agent does not support images', function (): void {
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn(['img-1']);
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible')
             ->once()
             ->andThrow(new MediaCapabilityMismatchException(
@@ -239,6 +245,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -259,6 +266,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -278,6 +286,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
@@ -320,6 +329,7 @@ describe('ContinueTaskDispatcher — input shape', function (): void {
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
         $mediaCapability->shouldReceive('parseMediaIds')->andReturn([]);
         $mediaCapability->shouldReceive('ensureMediaCapabilityCompatible');
+        $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
         $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);

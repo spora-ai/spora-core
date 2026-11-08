@@ -29,4 +29,7 @@ enum ToolCallDisposition: string
 
     /** Tool queued for user answers (ask_user_question); record written, task parked in AWAITING_INPUT. */
     case AwaitingInput = 'awaiting_input';
+
+    /** The provider reused a call id already proposed in this task; history written, no record created. */
+    case DuplicateCallId = 'duplicate_call_id';
 }

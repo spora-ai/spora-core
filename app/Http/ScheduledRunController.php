@@ -10,6 +10,7 @@ use DateTimeZone;
 use JsonException;
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\ScheduledRunServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -81,6 +82,8 @@ final class ScheduledRunController
                 ['data' => $result],
                 Response::HTTP_CREATED,
             );
+        } catch (PromptTemplateMissingException $e) {
+            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
         } catch (RuntimeException) {
             return $this->notFound();
         }
@@ -131,7 +134,11 @@ final class ScheduledRunController
             return $this->error('INVALID_JSON', 'Request body must be valid JSON.', Response::HTTP_BAD_REQUEST);
         }
 
-        $result = $this->scheduledRunService->updateRun($runId, $agentId, $userId, $body);
+        try {
+            $result = $this->scheduledRunService->updateRun($runId, $agentId, $userId, $body);
+        } catch (PromptTemplateMissingException $e) {
+            return $this->error('VALIDATION_ERROR', $e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
 
         if ($result === null) {
             return $this->notFound();

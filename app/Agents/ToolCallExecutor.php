@@ -49,6 +49,18 @@ final class ToolCallExecutor
         $toolInstance = $this->orchestrator->resolveToolByName($toolCall->toolName);
         $toolClass    = get_class($toolInstance);
 
+        // The operator's decision selects proposals by their provider call
+        // id, so two proposals sharing one id make the decision ambiguous:
+        // approving it would authorize both. The second proposal is
+        // refused rather than recorded.
+        if (ToolCallModel::where('task_id', $task->id)
+            ->where('provider_call_id', $toolCall->providerCallId)
+            ->exists()
+        ) {
+            $this->recordDuplicateCallId($task, $toolCall);
+            return ToolCallDisposition::DuplicateCallId;
+        }
+
         // Re-load the current allow-list at gate-check time. The snapshot
         // TickPhaseRunner::prepareTickContext() captured at tick start is
         // still used by Orchestrator::buildToolDefinitions() for the LLM's
@@ -94,6 +106,14 @@ final class ToolCallExecutor
         // Routing it through the inline-execute path would flip the task
         // to APPROVED/COMPLETED before any answer ever lands.
         if ($toolInstance instanceof AskUserQuestionTool) {
+            if ($requiresApproval) {
+                // The operator configured this operation to need approval,
+                // so the question waits for a decision like any other call.
+                // The approved run parks the task on the question batch.
+                $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, true, $toolInstance);
+                return ToolCallDisposition::AwaitingApproval;
+            }
+
             $toolCallRecord = $this->createPendingRecord($task, $agent, $toolCall, $operationName, $operationDescription, false, $toolInstance);
             return $this->validateAndParkQuestion($task, $toolCall, $toolInstance, $agent, $toolCallRecord, $operationName);
         }
@@ -216,57 +236,117 @@ final class ToolCallExecutor
                 return;
             }
 
-            // Build the PendingQuestionBatch from the validated input.
-            $questions = [];
-            foreach (($toolCall->arguments['questions'] ?? []) as $rawQuestion) {
-                if (!is_array($rawQuestion)) {
-                    continue;
-                }
-                $questions[] = PendingQuestion::fromLlmInput($rawQuestion);
-            }
-            $batch = PendingQuestionBatch::build($toolCall->providerCallId, $questions);
-
-            // Merge into any existing pending_state (a later tool call in
-            // the same tick that lands as AwaitingApproval keeps its row in
-            // pending_tool_calls alongside the new batch).
-            /** @var list<PendingQuestionBatch> $existingQuestions */
-            $existingQuestions = [];
-            /** @var list<\Spora\Drivers\ValueObjects\ToolCall> $existingToolCalls */
-            $existingToolCalls = [];
-            $existingSnapshot = [];
-            if (is_string($task->pending_state) && $task->pending_state !== '') {
-                try {
-                    $existing = AgentState::fromJson($task->pending_state);
-                    $existingQuestions = $existing->pendingQuestions;
-                    $existingToolCalls = $existing->pendingToolCalls;
-                    $existingSnapshot = $existing->messageSnapshot;
-                } catch (Throwable) {
-                    // Bad JSON or shape drift — fall through with empty defaults.
-                }
-            }
-            $mergedQuestions = array_merge($existingQuestions, [$batch]);
-            $mergedState = new AgentState(
-                taskId: $task->id,
-                agentId: $task->agent_id,
-                pendingToolCalls: $existingToolCalls,
-                messageSnapshot: $existingSnapshot,
-                stepCount: $task->step_count,
-                maxSteps: $task->max_steps,
-                pausedAt: gmdate(Orchestrator::ISO8601_UTC_FORMAT),
-                pendingQuestions: $mergedQuestions,
-            );
-
-            Capsule::table('tasks')
-                ->where('id', $task->id)
-                ->update([
-                    'status'        => 'AWAITING_INPUT',
-                    'pending_state' => $mergedState->toJson(),
-                ]);
+            $this->parkQuestionBatch($task, $toolCall->providerCallId, $toolCall->arguments);
         });
 
         return $result->success
             ? ToolCallDisposition::AwaitingInput
             : ToolCallDisposition::Executed;
+    }
+
+    /**
+     * Park the task on a question batch after an approved question call ran.
+     *
+     * The approval path has to reach the same waiting-for-input lifecycle
+     * the inline path parks on: the questions are persisted and the task
+     * flips to AWAITING_INPUT, so the operator's answers unblock it.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public function parkApprovedQuestion(
+        Task          $task,
+        ToolCallModel $toolCallRecord,
+        ToolResult    $result,
+        array         $arguments,
+    ): void {
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
+            context: new HistoryMessageContext(
+                toolCallId: (string) $toolCallRecord->provider_call_id,
+                toolName: (string) $toolCallRecord->tool_name,
+            ),
+        );
+
+        if (!$result->success) {
+            return;
+        }
+
+        $this->parkQuestionBatch($task, (string) $toolCallRecord->provider_call_id, $arguments);
+    }
+
+    /**
+     * Persist the questions and flip the task to AWAITING_INPUT.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function parkQuestionBatch(Task $task, string $providerCallId, array $arguments): void
+    {
+        // Build the PendingQuestionBatch from the validated input.
+        $questions = [];
+        foreach (($arguments['questions'] ?? []) as $rawQuestion) {
+            if (!is_array($rawQuestion)) {
+                continue;
+            }
+            $questions[] = PendingQuestion::fromLlmInput($rawQuestion);
+        }
+        $batch = PendingQuestionBatch::build($providerCallId, $questions);
+
+        // Merge into any existing pending_state (a later tool call in
+        // the same tick that lands as AwaitingApproval keeps its row in
+        // pending_tool_calls alongside the new batch).
+        /** @var list<PendingQuestionBatch> $existingQuestions */
+        $existingQuestions = [];
+        /** @var list<\Spora\Drivers\ValueObjects\ToolCall> $existingToolCalls */
+        $existingToolCalls = [];
+        $existingSnapshot = [];
+        if (is_string($task->pending_state) && $task->pending_state !== '') {
+            try {
+                $existing = AgentState::fromJson($task->pending_state);
+                $existingQuestions = $existing->pendingQuestions;
+                $existingToolCalls = $existing->pendingToolCalls;
+                $existingSnapshot = $existing->messageSnapshot;
+            } catch (Throwable) {
+                // Bad JSON or shape drift — fall through with empty defaults.
+            }
+        }
+        $mergedQuestions = array_merge($existingQuestions, [$batch]);
+        $mergedState = new AgentState(
+            taskId: $task->id,
+            agentId: $task->agent_id,
+            pendingToolCalls: $existingToolCalls,
+            messageSnapshot: $existingSnapshot,
+            stepCount: $task->step_count,
+            maxSteps: $task->max_steps,
+            pausedAt: gmdate(Orchestrator::ISO8601_UTC_FORMAT),
+            pendingQuestions: $mergedQuestions,
+        );
+
+        Capsule::table('tasks')
+            ->where('id', $task->id)
+            ->update([
+                'status'        => 'AWAITING_INPUT',
+                'pending_state' => $mergedState->toJson(),
+            ]);
+    }
+
+    /**
+     * Tell the LLM that its second proposal reused a call id.
+     */
+    private function recordDuplicateCallId(Task $task, DriverToolCall $toolCall): void
+    {
+        $this->orchestrator->appendHistory(
+            taskId: $task->id,
+            role: 'tool',
+            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString(
+                "Tool call id '{$toolCall->providerCallId}' is already used by another call in this task; this call was ignored.",
+            )),
+            context: new HistoryMessageContext(
+                toolCallId: $toolCall->providerCallId,
+                toolName: $toolCall->toolName,
+            ),
+        );
     }
 
     /**

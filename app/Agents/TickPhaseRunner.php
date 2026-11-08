@@ -23,6 +23,7 @@ use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
+use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
@@ -184,7 +185,7 @@ final class TickPhaseRunner
             $toolName      = (string) $row->getAttribute('tool_name');
             $operationName = $operationMap[$providerCallId] ?? null;
 
-            $this->executeOneApprovedPendingTool($task, $providerCallId, $toolName, $approvedArgs, $operationName);
+            $this->executeOneApprovedPendingTool($task, $row, $providerCallId, $toolName, $approvedArgs, $operationName);
         }
 
         // Worker-mode batch boundary — mirror the sync-mode boundary in
@@ -217,6 +218,7 @@ final class TickPhaseRunner
      */
     private function executeOneApprovedPendingTool(
         Task $task,
+        ToolCallModel $row,
         string $providerCallId,
         string $toolName,
         array $approvedArgs,
@@ -245,15 +247,33 @@ final class TickPhaseRunner
 
         if ($operationName !== null
             && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
-            && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $task->agent_id)
         ) {
-            $this->orchestrator->recordRevokedToolCall(
-                task: $task,
-                providerCallId: $providerCallId,
-                toolName: $toolName,
-                rejectReason: "operation '{$operationName}' of tool '{$toolName}' was disabled before approval was processed",
-            );
-            return;
+            // The approval may replace the arguments, and the replacement
+            // selects the operation on its own: `action=delete_folder`
+            // dispatches the folder deletion, whatever the proposal said.
+            // Authorize the operation the final arguments actually select,
+            // and refuse a call whose operation changed.
+            $approvedOperation = $this->orchestrator->resolveOperationName($toolInstance, $approvedArgs, $task->agent_id);
+
+            if ($approvedOperation !== $operationName) {
+                $this->orchestrator->recordRevokedToolCall(
+                    task: $task,
+                    providerCallId: $providerCallId,
+                    toolName: $toolName,
+                    rejectReason: "the approval changed operation '{$operationName}' to '{$approvedOperation}'",
+                );
+                return;
+            }
+
+            if (!$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $task->agent_id)) {
+                $this->orchestrator->recordRevokedToolCall(
+                    task: $task,
+                    providerCallId: $providerCallId,
+                    toolName: $toolName,
+                    rejectReason: "operation '{$operationName}' of tool '{$toolName}' was disabled before approval was processed",
+                );
+                return;
+            }
         }
 
         try {
@@ -275,6 +295,18 @@ final class TickPhaseRunner
                 'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
                 'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
             ]);
+
+        if ($toolInstance instanceof AskUserQuestionTool) {
+            // An approved question still has to park the task on its
+            // question batch — the operator answers it, not the approval.
+            $this->orchestrator->toolCallExecutor->parkApprovedQuestion(
+                $task,
+                $row,
+                $result,
+                $approvedArgs,
+            );
+            return;
+        }
 
         $this->orchestrator->appendHistory(
             taskId: $task->id,

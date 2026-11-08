@@ -23,6 +23,7 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
+use Spora\Services\MediaArchive\MediaAssetAccess;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalContext;
@@ -95,6 +96,9 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?PrincipalResolver $principalResolver;
     public readonly ?AuthService $authService;
 
+    /** The archive's ownership union, used to authorize task attachments. */
+    private readonly MediaAssetAccess $mediaAssetAccess;
+
     public function __construct(
         DriverFactory $driverFactory,
         ?OrchestratorConfig $config = null,
@@ -116,6 +120,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->subAgent              = $config->subAgent;
         $this->principalResolver     = $principalResolver ?? new PrincipalResolver();
         $this->authService           = $authService;
+        $this->mediaAssetAccess      = new MediaAssetAccess($authService, $this->principalResolver);
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
         $this->llmConfigResolver     = new LlmConfigResolver(
@@ -196,7 +201,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->appendHistory($task->id, 'user', $userPrompt);
 
         if ($mediaIds !== []) {
-            $this->appendAttachmentRow($task->id, $mediaIds);
+            $this->appendAttachmentRow($task->id, $mediaIds, $userId);
         }
 
         return $task->fresh();
@@ -227,13 +232,16 @@ final class Orchestrator implements OrchestratorInterface
      * state. The marker row carries `role=system`, `content=JSON`
      * `{"kind":"abort_marker","at":<UTC>}` so the frontend can render
      * a faint divider at the marker position in the chat timeline.
+     *
+     * `$userId` is the caller who sent the turn. It authorizes the
+     * attachments: a shared task's starter is attribution, not authority.
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task
     {
         $sourceStatus = null;
         $taskRef = null;
 
-        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, &$sourceStatus, &$taskRef): void {
+        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, $userId, &$sourceStatus, &$taskRef): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $sourceStatus = $task->status;
 
@@ -259,7 +267,7 @@ final class Orchestrator implements OrchestratorInterface
                 );
 
                 if ($mediaIds !== []) {
-                    $this->appendAttachmentRow($task->id, $mediaIds);
+                    $this->appendAttachmentRow($task->id, $mediaIds, $userId);
                 }
 
                 $taskRef = $this->statusWriter->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
@@ -273,7 +281,7 @@ final class Orchestrator implements OrchestratorInterface
             );
 
             if ($mediaIds !== []) {
-                $this->appendAttachmentRow($task->id, $mediaIds);
+                $this->appendAttachmentRow($task->id, $mediaIds, $userId);
             }
 
             $taskRef = $this->statusWriter->applyContinueTransition(
@@ -411,11 +419,14 @@ final class Orchestrator implements OrchestratorInterface
      * an `attachment` row to the task history. The MessageHistoryBuilder
      * expands this row into content blocks.
      *
+     * `$authorizingUserId` is the caller who chose the ids — the user who
+     * sent the turn, not whoever started the task. A task is shared, so the
+     * starter's identity is attribution, not authority.
+     *
      * @param list<string> $mediaIds
      */
-    private function appendAttachmentRow(int $taskId, array $mediaIds): void
+    private function appendAttachmentRow(int $taskId, array $mediaIds, ?int $authorizingUserId): void
     {
-        $userId = Task::find($taskId)?->triggerUserId() ?? 0;
         $refs = [];
         foreach ($mediaIds as $mid) {
             if ($mid === '') {
@@ -425,7 +436,7 @@ final class Orchestrator implements OrchestratorInterface
             if ($asset === null) {
                 continue;
             }
-            if ($asset->user_id !== null && $userId !== 0 && (int) $asset->user_id !== $userId) {
+            if ($authorizingUserId === null || !$this->mediaAssetAccess->canAttachAs($asset, $authorizingUserId)) {
                 throw new \Spora\Services\MediaArchive\MediaNotOwnedException(
                     "Media asset {$mid} is not owned by the current user.",
                 );
@@ -542,7 +553,10 @@ final class Orchestrator implements OrchestratorInterface
         $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
 
         $resolver = $this->principalResolver ?? new PrincipalResolver();
-        $context  = $resolver->resolveForToolExecute($agentId);
+        // The task being executed, not the agent's newest one: a shared
+        // agent's latest task may belong to another member, and a tool
+        // that acts on the caller's behalf must not borrow their identity.
+        $context  = $resolver->resolveForToolExecute($agentId, $taskId);
 
         // Arguments may contain PII — never log them.
         $this->logger?->debug('Tool dispatch', [
@@ -653,6 +667,19 @@ final class Orchestrator implements OrchestratorInterface
     public function isOperationEnabled(object $toolInstance, string $operationName, int $agentId): bool
     {
         return $this->toolOperations->isEnabled($toolInstance, $operationName, $agentId);
+    }
+
+    /**
+     * The operation a call dispatches to, given its arguments.
+     *
+     * The same resolution the dispatch path uses
+     * ({@see ToolOperationResolver::withResolvedDiscriminator()}), so a
+     * caller can compare the operation a set of arguments selects against
+     * the operation that was authorized.
+     */
+    public function resolveOperationName(object $toolInstance, array $arguments, int $agentId): string
+    {
+        return $this->toolOperations->resolveOperationName($toolInstance, $arguments, $agentId);
     }
 
     /**

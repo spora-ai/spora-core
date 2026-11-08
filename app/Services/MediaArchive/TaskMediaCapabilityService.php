@@ -7,6 +7,7 @@ namespace Spora\Services\MediaArchive;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
+use Spora\Services\PrincipalResolver;
 use Throwable;
 
 /**
@@ -28,10 +29,15 @@ use Throwable;
  */
 final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
 {
+    private readonly MediaAssetAccess $assetAccess;
+
     public function __construct(
         private readonly ?DriverFactory $driverFactory = null,
         private readonly ?MediaDerivativeService $derivatives = null,
-    ) {}
+        ?MediaAssetAccess $assetAccess = null,
+    ) {
+        $this->assetAccess = $assetAccess ?? new MediaAssetAccess(null, new PrincipalResolver());
+    }
 
     /**
      * Coerce the raw `media_ids` body field into a validated list of
@@ -74,6 +80,35 @@ final class TaskMediaCapabilityService implements TaskMediaCapabilityInterface
             throw new MediaCapabilityMismatchException(
                 'One or more attachments are images but the agent\'s LLM does not support image input.',
             );
+        }
+    }
+
+    /**
+     * Authorize every attached asset.
+     *
+     * The caller must be able to read what they attach: an asset they
+     * cannot read would otherwise have its bytes pulled into the shared
+     * conversation.
+     *
+     * @param list<string> $mediaIds
+     *
+     * @throws MediaNotOwnedException
+     */
+    public function ensureAttachmentsAccessible(array $mediaIds, int $userId): void
+    {
+        foreach ($mediaIds as $mediaId) {
+            if ($mediaId === '') {
+                continue;
+            }
+            $asset = MediaAsset::query()->find($mediaId);
+            if ($asset === null) {
+                continue;
+            }
+            if (!$this->assetAccess->canAttachAs($asset, $userId)) {
+                throw new MediaNotOwnedException(
+                    "Media asset {$mediaId} is not owned by the current user.",
+                );
+            }
         }
     }
 

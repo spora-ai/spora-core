@@ -1122,7 +1122,7 @@ describe('TaskService — continueTask', function (): void {
 
         $orchestrator->shouldReceive('continue')
             ->once()
-            ->with($task->id, 'more please', 10, [])
+            ->with($task->id, 'more please', 10, [], $userId)
             ->andReturnUsing(function (int $taskId, string $prompt, ?int $steps, array $mediaIds) use ($userId, $agent): Task {
                 return Task::create([
                     'principal_id' => createUserPrincipalPublic($userId),

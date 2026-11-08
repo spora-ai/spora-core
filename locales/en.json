@@ -359,6 +359,7 @@
     "The library root already holds a file named \"%s\".": "The library root already holds a file named \"%s\".",
     "The model returned no summary for the conversation, so the history was left unchanged.": "The model returned no summary for the conversation, so the history was left unchanged.",
     "The prompt template assigned to this scheduled run no longer exists.": "The prompt template assigned to this scheduled run no longer exists.",
+    "The prompt template does not belong to this agent.": "The prompt template does not belong to this agent.",
     "The provided email address is invalid.": "The provided email address is invalid.",
     "The provided password does not meet the minimum requirements.": "The provided password does not meet the minimum requirements.",
     "The requested resource was not found.": "The requested resource was not found.",

@@ -10,6 +10,7 @@ use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
+use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -141,6 +142,9 @@ final class TaskController
         array $mediaIds,
     ): JsonResponse {
         try {
+            // Before anything writes: an attachment the caller may not read
+            // must not reach the archive, not even as a minted derivative.
+            $this->mediaCapability->ensureAttachmentsAccessible($mediaIds, $userId);
             $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
             // After validation, before the turn is queued, so a binary
             // attachment has its `md` derivative by the time the message
@@ -149,6 +153,11 @@ final class TaskController
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
+        } catch (MediaNotOwnedException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_NOT_OWNED', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            );
         } catch (MediaCapabilityMismatchException $e) {
             return new JsonResponse(
                 ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],

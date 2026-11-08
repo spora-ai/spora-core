@@ -80,9 +80,11 @@ interface OrchestratorInterface
      * @param  int      $taskId
      * @param  string   $newPrompt
      * @param  int|null $additionalSteps  Override max_steps for this continuation.
+     * @param  int|null $userId  The caller who sent the turn — the identity
+     *                           the attachments are authorized against.
      * @return Task
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task;
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task;
 
     /**
      * Append a `task_history` row. Used by extracted services (e.g.

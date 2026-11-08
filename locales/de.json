@@ -359,6 +359,7 @@
   "The folder path may not exceed %d characters.": "Ein Ordnerpfad darf höchstens %d Zeichen lang sein.",
   "The model returned no summary for the conversation, so the history was left unchanged.": "Das Modell hat keine Zusammenfassung der Unterhaltung geliefert, daher wurde der Verlauf unverändert beibehalten.",
   "The prompt template assigned to this scheduled run no longer exists.": "Die diesem geplanten Lauf zugeordnete Prompt-Vorlage existiert nicht mehr.",
+  "The prompt template does not belong to this agent.": "Die Prompt-Vorlage gehört nicht zu diesem Agenten.",
   "The provided email address is invalid.": "Die angegebene E-Mail-Adresse ist ungültig.",
   "The provided password does not meet the minimum requirements.": "Das angegebene Passwort erfüllt die Mindestanforderungen nicht.",
   "The requested resource was not found.": "Die angeforderte Ressource wurde nicht gefunden.",

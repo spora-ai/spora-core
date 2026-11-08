@@ -131,12 +131,15 @@ final class TaskRunCommand extends Command
 
         // Notification is sent by Orchestrator.tick() — do not duplicate here.
         try {
-            while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
+            // Only a RUNNING task can make progress here. A task parked on
+            // PENDING_APPROVAL is quiescent — tick() returns without
+            // touching it — and the approval path re-queues it, so the
+            // daemon picks it up with a fresh child. Looping over a parked
+            // task spins a core at 100% for as long as the task waits for
+            // a human.
+            while ($task->status === 'RUNNING') {
                 $orchestrator->tick($task->id);
                 $task->refresh();
-                if ($task->status === 'ABORTED') {
-                    break;
-                }
             }
         } catch (Throwable $e) {
             $task->refresh();
