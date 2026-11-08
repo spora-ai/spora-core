@@ -121,10 +121,19 @@ final class ReadUrlTool extends AbstractTool
 
         $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
 
+        return $this->runOperation($op, $url, $settings, $screen['resolve']);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, string> $resolve the vetted address the request is pinned to
+     */
+    private function runOperation(string $op, string $url, array $settings, array $resolve): ToolResult
+    {
         try {
             return match ($op) {
-                'fetch_pdf' => $this->processFetchedPdfContent($url, $settings, $screen['resolve']),
-                default     => $this->processFetchedContent($url, $settings, $screen['resolve']),
+                'fetch_pdf' => $this->processFetchedPdfContent($url, $settings, $resolve),
+                default     => $this->processFetchedContent($url, $settings, $resolve),
             };
         } catch (Throwable $e) {
             $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'op' => $op, 'exception' => $e]);

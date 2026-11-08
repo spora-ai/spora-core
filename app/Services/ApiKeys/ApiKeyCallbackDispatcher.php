@@ -218,6 +218,17 @@ final class ApiKeyCallbackDispatcher
             return false;
         }
 
+        return $this->recordOutcome($row, $task, $response);
+    }
+
+    /**
+     * Judge the receiver's answer and record the outcome.
+     *
+     * A status outside 2xx is a failure, and so is a transport error while
+     * the status is being read.
+     */
+    private function recordOutcome(ApiCallback $row, Task $task, ResponseInterface $response): bool
+    {
         try {
             $statusCode = $response->getStatusCode();
         } catch (Throwable $e) {
@@ -304,26 +315,36 @@ final class ApiKeyCallbackDispatcher
         $timestamp = (string) time();
         $signature = $this->sign($timestamp . '.' . $payload, $secret);
 
+        return $this->send($row, [
+            'headers' => [
+                'Content-Type' => 'application/json',
+                self::KEY_HEADER => $row->key_id,
+                self::TIMESTAMP_HEADER => $timestamp,
+                self::SIGNATURE_HEADER => $signature,
+            ],
+            'body' => $payload,
+            'timeout' => self::TIMEOUT_SECONDS,
+            'max_duration' => self::MAX_DURATION_SECONDS,
+            // `SsrfGuard` screened the URL as supplied, once. Following a
+            // redirect would re-issue the POST to a host that was never
+            // screened — a `302` to the cloud metadata endpoint turns the
+            // guard into a comment. A 3xx falls through to
+            // `recordFailure()` and is retried, which is the right answer
+            // for a receiver that has no reason to redirect.
+            'max_redirects' => 0,
+            'resolve' => $screen['resolve'],
+        ]);
+    }
+
+    /**
+     * Issue the POST, or null when the transport failed.
+     *
+     * @param array<string, mixed> $options
+     */
+    private function send(ApiCallback $row, array $options): ?ResponseInterface
+    {
         try {
-            return $this->httpClient->request('POST', $row->url, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                    self::KEY_HEADER => $row->key_id,
-                    self::TIMESTAMP_HEADER => $timestamp,
-                    self::SIGNATURE_HEADER => $signature,
-                ],
-                'body' => $payload,
-                'timeout' => self::TIMEOUT_SECONDS,
-                'max_duration' => self::MAX_DURATION_SECONDS,
-                // `SsrfGuard` screened the URL as supplied, once. Following a
-                // redirect would re-issue the POST to a host that was never
-                // screened — a `302` to the cloud metadata endpoint turns the
-                // guard into a comment. A 3xx falls through to
-                // `recordFailure()` and is retried, which is the right answer
-                // for a receiver that has no reason to redirect.
-                'max_redirects' => 0,
-                'resolve' => $screen['resolve'],
-            ]);
+            return $this->httpClient->request('POST', $row->url, $options);
         } catch (Throwable $e) {
             $this->recordFailure($row, null, $e->getMessage());
 
