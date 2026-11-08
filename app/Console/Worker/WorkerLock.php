@@ -111,7 +111,7 @@ final class WorkerLock
     {
         $mutex = fopen($this->lockFile . self::TAKEOVER_SUFFIX, 'c');
         if ($mutex === false) {
-            throw new RuntimeException(sprintf('Could not open the worker lock file at %s.', $this->lockFile));
+            throw $this->openFailed();
         }
 
         return $mutex;
@@ -124,7 +124,7 @@ final class WorkerLock
     {
         $fd = fopen($this->lockFile, 'c');
         if ($fd === false) {
-            throw new RuntimeException(sprintf('Could not open the worker lock file at %s.', $this->lockFile));
+            throw $this->openFailed();
         }
 
         if (!flock($fd, LOCK_EX | LOCK_NB)) {
@@ -148,7 +148,7 @@ final class WorkerLock
 
         $fd = fopen($this->lockFile, 'c');
         if ($fd === false) {
-            throw new RuntimeException(sprintf('Could not open the worker lock file at %s.', $this->lockFile));
+            throw $this->openFailed();
         }
 
         if (!flock($fd, LOCK_EX | LOCK_NB)) {
@@ -160,6 +160,11 @@ final class WorkerLock
         $this->adopt($fd);
 
         return true;
+    }
+
+    private function openFailed(): RuntimeException
+    {
+        return new RuntimeException(sprintf('Could not open the worker lock file at %s.', $this->lockFile));
     }
 
     /**
