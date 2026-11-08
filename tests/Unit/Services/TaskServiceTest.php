@@ -161,7 +161,6 @@ describe('TaskService — getTasksForUser', function (): void {
             'user_prompt' => 'Old task',
             'max_steps' => 5,
         ]);
-        // Manually set updated_at to a past time
         Task::where('id', $oldTask->id)->update(['updated_at' => '2024-01-01 00:00:00']);
 
         $newTask = Task::create([
@@ -172,16 +171,13 @@ describe('TaskService — getTasksForUser', function (): void {
             'user_prompt' => 'New task',
             'max_steps' => 5,
         ]);
-        // Manually set updated_at to a recent time
         Task::where('id', $newTask->id)->update(['updated_at' => '2025-06-01 00:00:00']);
 
         $service = makeTaskService();
 
-        // Without since, both tasks are returned
         $all = $service->getTasksForUser($userId);
         expect($all)->toHaveCount(2);
 
-        // With since after old task but before new task, only new task is returned
         $since = '2024-06-01T00:00:00Z';
         $filtered = $service->getTasksForUser($userId, null, $since);
         expect($filtered)->toHaveCount(1);
@@ -260,7 +256,6 @@ describe('TaskService — getTasksForUser', function (): void {
         $result = $service->getTasksForUser($userId);
 
         expect($result)->toHaveCount(3);
-        // Most recently updated (task2) should be first
         expect($result[0]['id'])->toBe($task2->id);
         expect($result[1]['id'])->toBe($task3->id);
         expect($result[2]['id'])->toBe($task1->id);
@@ -280,14 +275,12 @@ describe('TaskService — getTasksForUser', function (): void {
             'is_active'    => true,
         ]);
 
-        // Create 5 tasks
         for ($i = 1; $i <= 5; $i++) {
             Task::create(['principal_id' => createUserPrincipalPublic($userId), 'trigger_user_id' => $userId, 'agent_id' => $agent->id, 'status' => 'COMPLETED', 'user_prompt' => "Task $i", 'max_steps' => 5]);
         }
 
         $service = makeTaskService();
 
-        // Request page 1 with per_page=2
         $result = $service->getTasksForUser($userId, null, null, 1, 2);
 
         expect($result)->toBeArray();
@@ -1398,7 +1391,6 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
             'step_count'       => 1,
         ]);
 
-        // Member A fetches — should see member B's run.
         $service = makeTaskService();
         $result  = $service->getTasksForUser($ownerId);
 
@@ -1435,7 +1427,6 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
             'max_steps'        => 5,
         ]);
 
-        // Member A deep-links to member B's run.
         $service = makeTaskService();
         $result  = $service->getTask($task->id, $ownerId);
 
@@ -1465,7 +1456,6 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
             'max_steps'        => 5,
         ]);
 
-        // Stranger — different user, no group in common.
         $service = makeTaskService();
         $result  = $service->getTasksForUser($strangerId);
 
@@ -1485,12 +1475,10 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
 
         $groupService = new Spora\Services\GroupService($principalService);
 
-        // Alice + Bob in group G1
         $g1 = $groupService->createGroup($aliceId, 'MultiG1');
         $groupService->addMember((int) $g1->id, (int) $bobId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $aliceId);
         $g1PrincipalId = (int) $principalService->ensureGroupPrincipal((int) $g1->id)->id;
 
-        // Alice + Carol in group G2
         $g2 = $groupService->createGroup($aliceId, 'MultiG2');
         $groupService->addMember((int) $g2->id, (int) $carolId, Spora\Models\GroupMembership::ROLE_MEMBER, (int) $aliceId);
         $g2PrincipalId = (int) $principalService->ensureGroupPrincipal((int) $g2->id)->id;
@@ -1509,7 +1497,6 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
             'user_prompt' => 'G2', 'max_steps' => 5,
         ]);
 
-        // Alice sees both.
         $service = makeTaskService();
         $result  = $service->getTasksForUser($aliceId);
 
@@ -1544,7 +1531,6 @@ describe('TaskService — group-shared run visibility (post-0071)', function ():
             'user_prompt' => 'inside', 'max_steps' => 5,
         ]);
 
-        // Outsider — not in the group, owns no group agents.
         $service = makeTaskService();
         $result  = $service->getTasksForUser($outsiderId);
 

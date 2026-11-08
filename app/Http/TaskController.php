@@ -345,7 +345,7 @@ final class TaskController
      * history row is appended carrying the formatted answers, the batch
      * is removed from `pending_state`, and the task either flips to
      * `QUEUED` (no more batches pending) or stays in `AWAITING_INPUT`
-     * (more batches still pending). Returns 204 No Content.
+     * (more batches still pending). Returns the updated task resource.
      */
     #[OA\Post(
         path: '/api/v1/tasks/{taskId}/answer',
@@ -622,8 +622,7 @@ final class TaskController
     }
 
     /**
-     * Canonical 404 JSON response for "task not found", shared by every
-     * endpoint that resolves the task through the service layer.
+     * Canonical 404 JSON response for "task not found".
      */
     private function notFoundResponse(): JsonResponse
     {

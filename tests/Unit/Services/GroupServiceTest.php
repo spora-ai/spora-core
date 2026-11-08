@@ -386,7 +386,6 @@ describe('GroupService::deleteGroup extended paths', function (): void {
             expect($e->agentIds)->toBe([]);
         }
 
-        // The refusal must not have deleted anything.
         expect(Capsule::table('groups')->where('id', $group->id)->count())->toBe(1);
         expect(Capsule::table('principals')->where('id', $principal->id)->count())->toBe(1);
         expect(Capsule::table('media_folders')->where('id', $folder->id)->count())->toBe(1);

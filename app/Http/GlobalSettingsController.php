@@ -109,9 +109,6 @@ final class GlobalSettingsController
         return new JsonResponse(['data' => ['updated' => $written]], Response::HTTP_OK);
     }
 
-    /**
-     * @return array<mixed>|JsonResponse
-     */
     private function incomingEntries(Request $request): array|JsonResponse
     {
         $body = $this->safeDecodeJson($request);
@@ -135,7 +132,6 @@ final class GlobalSettingsController
      * pass persisted everything before the failing entry and then answered
      * 422 saying nothing about those rows.
      *
-     * @param array<mixed> $incoming
      * @return list<array{0: SettingDefinition, 1: mixed}>|JsonResponse
      */
     private function admitAll(array $incoming): array|JsonResponse
@@ -190,7 +186,6 @@ final class GlobalSettingsController
      * `null` for the definition means "skip": an untouched secret, whose mask
      * came back as its value.
      *
-     * @param mixed $entry
      * @return array{0: ?SettingDefinition, 1: mixed}|JsonResponse
      */
     private function admit(mixed $entry): array|JsonResponse
@@ -208,11 +203,6 @@ final class GlobalSettingsController
         return $this->rejectInvalid($definition, $value) ?? [$definition, $value];
     }
 
-    /**
-     * Resolve one batch entry to the setting it names, or say why it cannot.
-     *
-     * @return SettingDefinition|JsonResponse
-     */
     private function lookUp(mixed $entry): SettingDefinition|JsonResponse
     {
         $key = is_array($entry) && isset($entry['key']) ? (string) $entry['key'] : null;
@@ -241,8 +231,9 @@ final class GlobalSettingsController
     {
         $isUndecryptable = in_array($definition->key, $undecryptable, true);
 
-        // An unreadable secret falls back to its declared default, so the page
-        // shows a usable value and says plainly that it needs re-entering.
+        // A secret is masked without being read, so a secret whose stored
+        // value can no longer be decrypted still renders. The
+        // `undecryptable` flag is what tells the page it needs re-entering.
         $value = $definition->secret ? self::MASK : $this->config->get($definition->key, $definition->default);
 
         return [
@@ -309,8 +300,6 @@ final class GlobalSettingsController
     }
 
     /**
-     * Why this value cannot be stored, or `null` when it can.
-     *
      * Separate from {@see self::rejectInvalid()} so this reads as a list of
      * reasons rather than a list of exits.
      */
@@ -335,8 +324,6 @@ final class GlobalSettingsController
 
     /**
      * The two rules that can only be applied to a single scalar value.
-     *
-     * @param bool $isList Whether the declared type is a list.
      */
     private function singleValueRejection(SettingDefinition $definition, mixed $value, bool $isList): ?string
     {

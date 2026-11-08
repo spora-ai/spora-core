@@ -20,9 +20,6 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
-/**
- * Plan §12 B2b — PublicMediaController coverage.
- */
 test('returns 200 with the bytes for the correct token', function (): void {
     [$service, $controller] = buildPublicController();
     $asset = $service->ingest(new MediaIngestRequest(
@@ -187,7 +184,8 @@ test('falls back to application/octet-stream when mime_type is empty', function 
     ));
     // Force mime_type to empty string in the DB so the controller's
     // fallback path is exercised. `''` passes through `??` (unlike
-    // null) so the asset store returns `''` and line 82 fires.
+    // null) so the asset store returns `''` and the default MIME
+    // applies.
     MediaAsset::query()->where('id', $asset->id)->update(['mime_type' => '']);
 
     $req = Request::create("/api/v1/public/media/{$asset->id}?token=tok-bin", 'GET');
@@ -220,8 +218,8 @@ test('returns 404 when the asset has no public_access_token', function (): void 
 });
 
 test('returns 200 when the asset_token points at a real file inside storage', function (): void {
-    // Exercise the BinaryFileResponse branch (line 108 onward) by
-    // making readFromAsset() return a real file inside the storage root.
+    // Exercise the BinaryFileResponse branch by making
+    // readFromAsset() return a real file inside the storage root.
     $tmp = sys_get_temp_dir() . '/spora-public-bfr-' . bin2hex(random_bytes(4));
     mkdir($tmp . '/assets', 0755, recursive: true);
     putenv("SPORA_STORAGE_DIR={$tmp}");

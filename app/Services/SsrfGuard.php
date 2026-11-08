@@ -8,11 +8,12 @@ namespace Spora\Services;
  * Blocks outbound requests to URLs that resolve inside the deployment's
  * own network.
  *
- * Three callers share it: the Agent API, which POSTs to a caller-supplied
- * `callback_url` and screens it again before every delivery, and
- * {@see \Spora\Tools\ReadUrlTool}, which fetches a URL an agent named. They
- * differ in what may be fetched and in how a refusal reads, so the guard
- * takes a policy. The Agent API's policy is the default, so `new SsrfGuard()`
+ * Callers share it: the Agent API, which POSTs to a caller-supplied
+ * `callback_url` and screens it again before every delivery, and the web
+ * fetchers — {@see \Spora\Tools\ReadUrlTool} and
+ * {@see \Spora\Services\MediaArchive\RemoteMediaFetcher}. They differ in
+ * what may be fetched and in how a refusal reads, so the guard takes a
+ * policy. The Agent API's policy is the default, so `new SsrfGuard()`
  * behaves as it did before the tool was wired in.
  *
  * The host is resolved here and the vetted address is handed back with the

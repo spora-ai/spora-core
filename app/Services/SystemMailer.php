@@ -77,13 +77,8 @@ final class SystemMailer implements MailerInterface
     /**
      * Send a templated email by name.
      *
-     * Loads the MailTemplate by name, renders subject/body with the provided variables,
-     * builds the email, and dispatches it via Symfony Mailer.
-     *
-     * @param string $templateName The MailTemplate.name to load
      * @param array<string, mixed> $variables Key-value pairs for template rendering
      * @param array<string> $to Array of recipient email addresses
-     * @return bool True if the email was sent successfully
      * @throws InvalidArgumentException if template is not found or mail config is missing
      */
     public function sendTemplatedEmail(string $templateName, array $variables, array $to): bool
@@ -122,10 +117,6 @@ final class SystemMailer implements MailerInterface
 
     /**
      * Send an account verification email.
-     *
-     * @param string $email Recipient email address
-     * @param string $verificationUrl Full URL the user clicks to verify their account
-     * @return bool True on success
      */
     public function sendVerificationEmail(string $email, string $verificationUrl): bool
     {
@@ -141,10 +132,6 @@ final class SystemMailer implements MailerInterface
      * the account holder. Renders the {@code email_change_verification}
      * template so the recipient sees change-specific wording rather than
      * signup-only phrasing ("if you did not create an account").
-     *
-     * @param string $email The new address the recipient will confirm
-     * @param string $verificationUrl Full URL the recipient clicks to confirm
-     * @return bool True on success
      */
     public function sendEmailChangeVerificationEmail(string $email, string $verificationUrl): bool
     {
@@ -157,10 +144,6 @@ final class SystemMailer implements MailerInterface
 
     /**
      * Send a password reset email.
-     *
-     * @param string $email Recipient email address
-     * @param string $resetUrl Full URL the user clicks to reset their password
-     * @return bool True on success
      */
     public function sendPasswordResetEmail(string $email, string $resetUrl): bool
     {
@@ -173,10 +156,6 @@ final class SystemMailer implements MailerInterface
 
     /**
      * Send a welcome email to a newly registered user.
-     *
-     * @param int $userId The new user's ID (reserved for future personalization)
-     * @param string $email Recipient email address
-     * @return bool True on success
      */
     public function sendWelcomeEmail(int $userId, string $email): bool
     {
@@ -224,9 +203,6 @@ final class SystemMailer implements MailerInterface
 
     /**
      * Send a simple test email to verify mail configuration.
-     *
-     * @param string $to Recipient email address
-     * @return bool True on success
      */
     public function sendTestEmail(string $to): bool
     {

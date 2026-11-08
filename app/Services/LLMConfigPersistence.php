@@ -126,7 +126,7 @@ final class LLMConfigPersistence
      * dropped before encryption. The schema (including inherited attributes)
      * is the single source of truth for what is allowed in the settings blob,
      * so stale keys from a removed ToolSetting (e.g. the dead
-     * `context_window` / `max_tokens_output` from PR #203) are pruned on
+     * `context_window` / `max_tokens_output`) are pruned on
      * every save rather than riding along forever.
      *
      * @param array<string, mixed> $settings

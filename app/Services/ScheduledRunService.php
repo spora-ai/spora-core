@@ -127,7 +127,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'updated_at'        => gmdate(self::DB_TIMESTAMP_FORMAT),
         ]);
 
-        // Insert first PENDING entry into scheduled_runs_next
         if ($nextRunAt !== null) {
             Capsule::table('scheduled_runs_next')->insert([
                 'scheduled_run_id' => $id,
@@ -358,7 +357,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             }
         }
 
-        // Determine prompt
         $prompt = '';
         if ($template !== null) {
             $variablesRaw = $template->getAttribute('variables');
@@ -369,7 +367,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $prompt = $this->expander->expand($prompt, [], $agent);
         }
 
-        // Determine max_steps
         if ($run->max_steps_override !== null) {
             $maxSteps = $run->max_steps_override;
         } elseif ($template !== null) {
@@ -386,7 +383,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
 
-        // Mark the current PENDING entry as DONE
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
@@ -396,7 +392,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'completed_at' => $lastRunAt,
             ]);
 
-        // Insert next PENDING entry for recurring schedules.
         if ($run->cron_expression !== null) {
             // Use wall-clock now as cron reference to avoid same-day skip (same fix as
             // in WorkerRunCommand). last_run_at is still tracked for historical accuracy.
@@ -427,7 +422,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'updated_at'       => $lastRunAt,
             ]);
 
-            // Update cached next_run_at on scheduled_runs
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
                 ->update([
@@ -436,7 +430,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                     'updated_at'  => $lastRunAt,
                 ]);
         } else {
-            // One-shot: update last_run_at, clear next_run_at cache, deactivate
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
                 ->update([
@@ -447,7 +440,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ]);
         }
 
-        // Publish Mercure update
         $taskData = [
             'id'          => $task->id,
             'agent_id'    => $task->agent_id,
@@ -495,7 +487,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ->first()
             : null;
 
-        // Get next_run_at from the next PENDING entry in scheduled_runs_next
         $nextEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
@@ -508,7 +499,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ->setTimezone(new DateTimeZone($run->timezone))
                 ->format('Y-m-d\TH:i:sP');
         } elseif ($run->next_run_at !== null) {
-            // Fall back to cached next_run_at when no PENDING entry exists
             $nextRunAt = (new DateTimeImmutable($run->next_run_at->toDateTimeString(), new DateTimeZone('UTC')))
                 ->setTimezone(new DateTimeZone($run->timezone))
                 ->format('Y-m-d\TH:i:sP');

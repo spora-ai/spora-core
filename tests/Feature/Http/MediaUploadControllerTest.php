@@ -29,9 +29,6 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
-/**
- * Plan §12 B2b — MediaUploadController end-to-end surface tests.
- */
 test('multipart upload with a text file stores the bytes with no derivative', function (): void {
     [, $service, , , , $controller] = buildUploadControllerFixtures();
     $tmp = tempnam(sys_get_temp_dir(), 'txt');

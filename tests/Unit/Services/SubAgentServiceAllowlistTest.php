@@ -94,7 +94,7 @@ describe('SubAgentService::publishParentState data projection', function (): voi
                 'spawned_sub_task_ids' => [10, 11],
                 'sub_agent_expected_count' => 2,
                 'run_id' => 'run_42',
-                // Below: not in allowlist, must be dropped
+                // Not in the allowlist — must be dropped
                 'secret_token' => 'should-not-leak',
                 'final_response' => 'oops',
             ],

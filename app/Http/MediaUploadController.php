@@ -153,9 +153,10 @@ final class MediaUploadController
                 'That folder does not exist.',
             );
         } catch (MediaFolderUniquenessException | MediaFolderValidationException $e) {
-            // The upload named a folder but carries no principal, so
-            // it cannot be filed — a field the server refuses, not a
-            // folder that is missing.
+            // The folder is named but the upload cannot be filed in it —
+            // no principal to file it under, or a filename the folder
+            // already holds. A field the server refuses, not a folder
+            // that is missing.
             return $this->error(
                 Response::HTTP_UNPROCESSABLE_ENTITY,
                 $e instanceof MediaFolderUniquenessException ? 'FOLDER_FILENAME_TAKEN' : 'VALIDATION_ERROR',
@@ -315,9 +316,6 @@ final class MediaUploadController
         return [$file, $bytes, $userId];
     }
 
-    /**
-     * @return JsonResponse|null
-     */
     private function validateUploadError(?int $userId, mixed $file): ?JsonResponse
     {
         $error = null;

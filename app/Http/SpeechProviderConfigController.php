@@ -396,9 +396,6 @@ final class SpeechProviderConfigController
     }
 
     /**
-     * Decode the JSON body or return a 422 envelope — callers check the
-     * type and return early on the error response.
-     *
      * @return array<string, mixed>|JsonResponse
      */
     private function decodeBody(Request $request): array|JsonResponse
@@ -562,11 +559,11 @@ final class SpeechProviderConfigController
     }
 
     /**
-     * Single error-envelope builder. Replaces the four fixed-shape
-     * helpers that previously lived on this class so the count stays
-     * under the SonarCloud S1448 20-method ceiling — the same
-     * rationale the class docblock (lines 40-43) cites for splitting
-     * the preference endpoints onto {@see SpeechPreferenceController}.
+     * Single error-envelope builder. One place builds the wire envelope
+     * so the count of error helpers stays under the SonarCloud S1448
+     * 20-method ceiling — the same rationale the class docblock cites
+     * for splitting the preference endpoints onto
+     * {@see SpeechPreferenceController}.
      */
     private function error(string $code, string $message, int $status): JsonResponse
     {

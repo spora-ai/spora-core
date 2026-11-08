@@ -14,8 +14,8 @@ use Spora\Models\Task;
 /**
  * Single seam for translating between agents, principals, and users.
  *
- * Replaces the old `$agent->user_id` access pattern at the 86+ consumer
- * sites in the codebase. Plugins must never read ownership directly off an
+ * Replaces the old `$agent->user_id` access pattern across the codebase.
+ * Plugins must never read ownership directly off an
  * Agent — they go through this service, which is the public API for
  * "who is the user context for this agent?" in the principals-and-groups
  * model.
@@ -131,9 +131,6 @@ final class PrincipalResolver
      * principal owns. Admins see everything (the controller layer is
      * responsible for the admin check — this method only models the
      * principal membership axis).
-     *
-     * @param  int $agentId
-     * @param  int $userId
      */
     public function isVisibleTo(int $agentId, int $userId): bool
     {

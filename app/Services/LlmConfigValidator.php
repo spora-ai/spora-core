@@ -70,10 +70,9 @@ final class LlmConfigValidator
     }
 
     /**
-     * Body validation for `PUT /llm-configs/{id}`. Closes the gap where the
-     * update endpoint skipped body validation entirely — only name and
-     * settings were checked. Now also enforces the limit bounds so a
-     * request like `{"max_tokens_output": 9999999}` is rejected with a 422.
+     * Body validation for `PUT /llm-configs/{id}`: the name, and the limit
+     * bounds — a request like `{"max_tokens_output": 9999999}` is rejected
+     * with a 422.
      */
     public function validateUpdateBody(array $body): ?JsonResponse
     {
