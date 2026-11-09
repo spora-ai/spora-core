@@ -470,17 +470,20 @@ final class TickPhaseRunner
     /**
      * Fail the task because a hard usage decision stopped the run.
      *
-     * The write is a compare-and-set on `RUNNING`: another path may have
-     * ended the task already, and the loser of that race must not overwrite
-     * the outcome. No retry is scheduled — a limit is terminal, not a
-     * transient failure, and `USAGE_LIMIT_REACHED` is not retryable.
+     * The write is a compare-and-set on the statuses a run is still in:
+     * another path may have ended the task already, and the loser of that
+     * race must not overwrite the outcome. A parent waiting for its
+     * sub-agents is in that set — it is quiescent, but its children are
+     * running and the run is not over, so the limit has to reach it there
+     * too. No retry is scheduled — a limit is terminal, not a transient
+     * failure, and `USAGE_LIMIT_REACHED` is not retryable.
      */
     private function abortForUsageLimit(int $taskId, UsageLimitExceededException $e): void
     {
         $reason = $e->decision()->reason;
 
         $updated = Task::where('id', $taskId)
-            ->where('status', 'RUNNING')
+            ->whereIn('status', TaskLifecyclePolicy::IN_PROGRESS_STATUSES)
             ->update([
                 'status'         => 'FAILED',
                 'failure_reason' => Utf8Sanitizer::scrubString($reason),

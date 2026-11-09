@@ -29,6 +29,18 @@ final class TaskLifecyclePolicy
     public const ACTIVE_STATUSES = ['RUNNING', 'QUEUED'];
 
     /**
+     * The statuses a run is still in.
+     *
+     * `RUNNING` is the worker driving the task. `AWAITING_SUB_AGENTS` is a
+     * parent whose children are running: quiescent in the sense that the
+     * worker does not drive it, but the run is **not over** — so a limit or
+     * a failure that has to end the task has to reach it there too.
+     *
+     * @var list<string>
+     */
+    public const IN_PROGRESS_STATUSES = ['RUNNING', 'AWAITING_SUB_AGENTS'];
+
+    /**
      * True when the status cannot transition any further (`COMPLETED`,
      * `FAILED`, `CANCELLED`). Worker cleanup treats these as "no orphan
      * candidates".
@@ -49,6 +61,15 @@ final class TaskLifecyclePolicy
     }
 
     /**
+     * True when the task is still in progress, so a run that has to stop
+     * can end it.
+     */
+    public function isInProgress(string $status): bool
+    {
+        return in_array($status, self::IN_PROGRESS_STATUSES, true);
+    }
+
+    /**
      * True when `abortTask()` may flip the status to `ABORTED`.
      * `PENDING_APPROVAL` and `AWAITING_INPUT` are rejected with 409 because
      * those states already offer dedicated approve/reject/answer affordances
@@ -56,7 +77,7 @@ final class TaskLifecyclePolicy
      */
     public function canAbortFrom(string $status): bool
     {
-        return in_array($status, ['RUNNING', 'AWAITING_SUB_AGENTS'], true);
+        return $this->isInProgress($status);
     }
 
     /**

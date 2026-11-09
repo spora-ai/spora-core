@@ -105,6 +105,20 @@ it('TaskLifecyclePolicy.canAbortFrom allows only RUNNING and AWAITING_SUB_AGENTS
         ->and($policy->canAbortFrom('QUEUED'))->toBeFalse();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+it('TaskLifecyclePolicy.isInProgress covers the two statuses a run is still in', function (): void {
+    $policy = new TaskLifecyclePolicy();
+
+    expect($policy->isInProgress('RUNNING'))->toBeTrue()
+        ->and($policy->isInProgress('AWAITING_SUB_AGENTS'))->toBeTrue()
+        ->and($policy->isInProgress('QUEUED'))->toBeFalse()
+        ->and($policy->isInProgress('PENDING_APPROVAL'))->toBeFalse()
+        ->and($policy->isInProgress('AWAITING_INPUT'))->toBeFalse()
+        ->and($policy->isInProgress('ABORTED'))->toBeFalse()
+        ->and($policy->isInProgress('COMPLETED'))->toBeFalse()
+        ->and($policy->isInProgress('FAILED'))->toBeFalse()
+        ->and($policy->isInProgress('CANCELLED'))->toBeFalse();
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 it('TaskLifecyclePolicy.canContinueFrom accepts the new sources only', function (): void {
     $policy = new TaskLifecyclePolicy();
 
