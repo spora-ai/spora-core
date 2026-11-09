@@ -96,8 +96,6 @@ function seedUserAndAgent(mixed $authService): array
     $agent = Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -149,7 +147,7 @@ it('store creates task via orchestrator and returns 201', function (): void {
     $taskService = Mockery::mock(TaskServiceInterface::class);
     $taskService->expects('startTask')
         ->once()
-        ->with(1, 1, 'Hello', null, null, [])
+        ->with(1, 1, 'Hello', null, null, [], null)
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -685,8 +683,6 @@ it('destroy returns 404 for task belonging to another user', function (): void {
     $otherAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Other Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -1003,7 +999,7 @@ it('continue returns 200 and resets task for completed task', function (): void 
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'COMPLETED', 'user_prompt' => 'p', 'final_response' => 'r', 'step_count' => 1, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'continue prompt', null, [])
+        ->with(1, 1, 'continue prompt', null, [], null)
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1044,7 +1040,7 @@ it('continue returns 200 and resets task for failed task', function (): void {
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'FAILED', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'retry prompt', 20, [])
+        ->with(1, 1, 'retry prompt', 20, [], null)
         ->andReturn($taskResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1140,7 +1136,7 @@ it('continue returns 200 with auto-abort when task is RUNNING', function (): voi
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'RUNNING', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'reset prompt', null, [])
+        ->with(1, 1, 'reset prompt', null, [], null)
         ->andReturn($abortedResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1183,7 +1179,7 @@ it('continue returns 200 when resuming from ABORTED', function (): void {
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'ABORTED', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'resume prompt', null, [])
+        ->with(1, 1, 'resume prompt', null, [], null)
         ->andReturn($resumedResource);
 
     [$controller, $authService] = makeTaskController($taskService);
@@ -1214,7 +1210,7 @@ it('continue returns 409 when task is in a non-resumable state (PENDING_APPROVAL
         ->andReturn(['id' => 1, 'agent_id' => 1, 'status' => 'PENDING_APPROVAL', 'user_prompt' => 'p', 'final_response' => null, 'step_count' => 5, 'max_steps' => 10, 'created_at' => null, 'updated_at' => null]);
     $taskService->expects('continueTask')
         ->once()
-        ->with(1, 1, 'test', null, [])
+        ->with(1, 1, 'test', null, [], null)
         ->andThrow(new InvalidArgumentException('Can only continue completed, failed, aborted, or running tasks.'));
 
     [$controller, $authService] = makeTaskController($taskService);

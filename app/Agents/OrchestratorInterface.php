@@ -18,16 +18,12 @@ interface OrchestratorInterface
     /**
      * @param  int     $maxSteps     Hard iteration cap. Copied to Task at creation.
      * @param  int|null $parentTaskId Optional parent task for follow-up chaining.
-     * @param  int|null $runId       Optional scheduled run ID for tracking.
-     * @param  int|null $userId      Optional explicit caller id for task
-     *                                attribution (`tasks.trigger_user_id`). When
-     *                                omitted, the orchestrator falls back
-     *                                to the agent's runner (used by worker
-     *                                and scheduled-run paths that legitimately
-     *                                run as the most-recent credential owner).
+     * @param  TaskStartOptions|null $options  The scheduled run id, the media
+     *                                          to attach, the calling user and
+     *                                          the reasoning effort.
      * @return Task                  The newly created Task (status: QUEUED).
      */
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task;
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?TaskStartOptions $options = null): Task;
 
     /**
      * One iteration of the loop. Called by the Symfony Messenger handler.
@@ -77,8 +73,12 @@ interface OrchestratorInterface
      * @param  int|null $additionalSteps  Override max_steps for this continuation.
      * @param  int|null $userId  The caller who sent the turn — the identity
      *                           the attachments are authorized against.
+     * @param  string|null $effort  The reasoning effort for this turn. Null
+     *                               leaves the choice to the configuration,
+     *                               an empty string asks for the model
+     *                               default.
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task;
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null, ?string $effort = null): Task;
 
     /**
      * Append a `task_history` row. Used by extracted services (e.g.

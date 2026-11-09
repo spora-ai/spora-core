@@ -6,6 +6,7 @@ use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Exceptions\InvalidTaskTransitionException;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
+use Spora\Agents\TaskStartOptions;
 use Spora\Agents\ValueObjects\AgentState;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\Exceptions\LLMProviderException;
@@ -3952,7 +3953,7 @@ describe('Orchestrator::start — attachment serialization round-trip', function
         // start() goes through appendHistory with non-null attachments, which
         // is the exact code path that double-encoded the JSON before the fix.
         // The caller id is what the attachments are authorized against.
-        $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, mediaIds: [$assetId], userId: $userId);
+        $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, options: new TaskStartOptions(mediaIds: [$assetId], userId: $userId));
 
         // Refetching from a fresh query (not the in-memory model) is
         // important — it forces Eloquent to apply the `array` cast on

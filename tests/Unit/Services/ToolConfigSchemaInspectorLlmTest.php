@@ -16,8 +16,6 @@ it('renders multi-select values as resolved "Name (#id)" strings for the LLM', f
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Legal Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
@@ -78,8 +76,6 @@ it('does NOT resolve agent names that belong to a different user (cross-tenant g
     $strangerAgent = Agent::create([
         'principal_id' => createUserPrincipalPublic($strangerId),
         'name'         => 'Stranger Secret Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

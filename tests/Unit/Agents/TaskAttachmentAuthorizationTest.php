@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
+use Spora\Agents\TaskStartOptions;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
@@ -119,7 +120,7 @@ it('refuses a continuation that attaches another member\'s private upload', func
     $privateAssetId = attachmentAuthAsset($memberOne, createUserPrincipalPublic($memberOne), null);
 
     $orchestrator = attachmentAuthOrchestrator();
-    $task = $orchestrator->start($agentId, 'First turn', userId: $memberOne);
+    $task = $orchestrator->start($agentId, 'First turn', options: new TaskStartOptions(userId: $memberOne));
     Task::where('id', $task->id)->update(['status' => 'COMPLETED']);
 
     // Member two continues the shared task and reaches for member one's
@@ -144,7 +145,7 @@ it('refuses an attachment whose asset has no attribution at all', function (): v
 
     $orchestrator = attachmentAuthOrchestrator();
 
-    expect(static fn() => $orchestrator->start($agentId, 'Attach it', mediaIds: [$orphanAssetId], userId: $memberOne))
+    expect(static fn() => $orchestrator->start($agentId, 'Attach it', options: new TaskStartOptions(mediaIds: [$orphanAssetId], userId: $memberOne)))
         ->toThrow(MediaNotOwnedException::class);
 });
 
@@ -164,7 +165,7 @@ it('lets a group member attach the group\'s own media', function (): void {
     $groupAssetId = attachmentAuthAsset($memberOne, $groupPrincipalId, null);
 
     $orchestrator = attachmentAuthOrchestrator();
-    $task = $orchestrator->start($agentId, 'First turn', userId: $memberOne);
+    $task = $orchestrator->start($agentId, 'First turn', options: new TaskStartOptions(userId: $memberOne));
     Task::where('id', $task->id)->update(['status' => 'COMPLETED']);
 
     $continued = $orchestrator->continue($task->id, 'Second turn', mediaIds: [$groupAssetId], userId: $memberTwo);
@@ -185,8 +186,8 @@ it('resolves the runner from the executing task, not the agent\'s newest one', f
     ]);
 
     $orchestrator = attachmentAuthOrchestrator();
-    $olderTask = $orchestrator->start($agentId, 'Older turn', userId: $memberOne);
-    $newerTask = $orchestrator->start($agentId, 'Newer turn', userId: $memberTwo);
+    $olderTask = $orchestrator->start($agentId, 'Older turn', options: new TaskStartOptions(userId: $memberOne));
+    $newerTask = $orchestrator->start($agentId, 'Newer turn', options: new TaskStartOptions(userId: $memberTwo));
 
     $resolver = new PrincipalResolver();
 
@@ -208,7 +209,7 @@ it('falls back to the agent-wide runner when the task carries no trigger user', 
     ]);
 
     $orchestrator = attachmentAuthOrchestrator();
-    $task = $orchestrator->start($agentId, 'A turn', userId: $memberOne);
+    $task = $orchestrator->start($agentId, 'A turn', options: new TaskStartOptions(userId: $memberOne));
 
     // A scheduled task: no trigger user on the row.
     Task::where('id', $task->id)->update(['trigger_user_id' => null]);

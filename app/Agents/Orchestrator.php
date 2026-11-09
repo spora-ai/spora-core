@@ -161,11 +161,13 @@ final class Orchestrator implements OrchestratorInterface
 
     // Public API
 
-    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task
+    public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?TaskStartOptions $options = null): Task
     {
+        $options ??= new TaskStartOptions();
+
         $agent = Agent::findOrFail($agentId);
 
-        $taskData = $runId !== null ? ['run_id' => $runId] : [];
+        $taskData = $options->runId !== null ? ['run_id' => $options->runId] : [];
 
         // Migration 0073 split the old conflated user_id into two:
         // - `tasks.principal_id` — the owning principal. Drives visibility and
@@ -178,7 +180,7 @@ final class Orchestrator implements OrchestratorInterface
         //   worker and scheduled paths leave it null and fall through to the
         //   agent's most recent trigger so the LLM still resolves a principal.
         $resolver = $this->principalResolver ?? new PrincipalResolver();
-        $resolvedUserId = $userId;
+        $resolvedUserId = $options->userId;
         if ($resolvedUserId === null) {
             $resolvedUserId = $resolver->runnerUserId($agentId) ?? $this->authService?->currentUserId();
         }
@@ -194,15 +196,39 @@ final class Orchestrator implements OrchestratorInterface
             'max_steps'        => $maxSteps,
             'parent_task_id'   => $parentTaskId,
             'data'             => $taskData,
+            'effort'           => $this->resolveEffort($agent, $options->effort),
         ]);
 
         $this->appendHistory($task->id, 'user', $userPrompt);
 
-        if ($mediaIds !== []) {
-            $this->appendAttachmentRow($task->id, $mediaIds, $userId);
+        if ($options->mediaIds !== []) {
+            $this->appendAttachmentRow($task->id, $options->mediaIds, $options->userId);
         }
 
         return $task->fresh();
+    }
+
+    /**
+     * The effort the turn is sent with, resolved once and stored on the row.
+     *
+     * The resolution lives here rather than in the service layer because the
+     * orchestrator is called directly by the sub-agent, handover and
+     * scheduled-run paths as well as by {@see \Spora\Services\TaskService}:
+     * resolving higher up would leave those four paths sending nothing where
+     * the chat path sends the configured default, and the same agent would
+     * behave differently depending on who started it.
+     *
+     * A message that names no effort gets the configuration's default; an
+     * empty string asks for the model default, which is stored as null
+     * because the column never holds an empty string.
+     */
+    private function resolveEffort(Agent $agent, ?string $requested): ?string
+    {
+        if ($requested === null) {
+            return $this->llmConfigResolver->resolveEffortDefault($agent);
+        }
+
+        return $requested === '' ? null : $requested;
     }
 
     /**
@@ -233,13 +259,19 @@ final class Orchestrator implements OrchestratorInterface
      *
      * `$userId` is the caller who sent the turn. It authorizes the
      * attachments: a shared task's starter is attribution, not authority.
+     *
+     * `$effort` is the reasoning effort for this turn; null leaves the
+     * choice to the configuration, an empty string asks for the model
+     * default. The rule is the same as on the create path, so a follow-up
+     * that names no effort gets the configured default rather than
+     * inheriting the previous turn's.
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null, ?string $effort = null): Task
     {
         $sourceStatus = null;
         $taskRef = null;
 
-        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, $userId, &$sourceStatus, &$taskRef): void {
+        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, $userId, $effort, &$sourceStatus, &$taskRef): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $sourceStatus = $task->status;
 
@@ -248,6 +280,8 @@ final class Orchestrator implements OrchestratorInterface
                     (new TaskLifecyclePolicy())->incomingSourceErrorMessage(),
                 );
             }
+
+            $resolvedEffort = $this->resolveEffort(Agent::findOrFail($task->agent_id), $effort);
 
             if ($task->status === 'RUNNING') {
                 $this->appendHistoryWithinTransaction(
@@ -268,7 +302,7 @@ final class Orchestrator implements OrchestratorInterface
                     $this->appendAttachmentRow($task->id, $mediaIds, $userId);
                 }
 
-                $taskRef = $this->statusWriter->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
+                $taskRef = $this->statusWriter->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false, effort: $resolvedEffort);
                 return;
             }
 
@@ -288,6 +322,7 @@ final class Orchestrator implements OrchestratorInterface
                 $additionalSteps,
                 targetStatus: 'QUEUED',
                 clearAbortedAt: $task->status === 'ABORTED',
+                effort: $resolvedEffort,
             );
         });
 

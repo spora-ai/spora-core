@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\TaskStartOptions;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Models\Agent;
 use Spora\Models\Task;
@@ -107,7 +108,7 @@ final class SubAgentService implements SubAgentServiceInterface
                 userPrompt: $prompt,
                 maxSteps: (int) ($targetAgent->max_steps ?? 10),
                 parentTaskId: $parent->id,
-                userId: $userId,
+                options: new TaskStartOptions(userId: $userId),
             );
         } catch (Throwable $e) {
             $recovered = Task::where('parent_task_id', $parent->id)

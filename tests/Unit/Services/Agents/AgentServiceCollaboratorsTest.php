@@ -202,8 +202,6 @@ describe('AgentToolOperationsResolver::getToolsOperations', function (): void {
         $agent  = Agent::create([
             'principal_id' => $this->createUserPrincipal($userId),
             'name'         => 'Rename Agent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ]);
