@@ -66,6 +66,24 @@ final class ModelFamily
     }
 
     /**
+     * Whether the model accepts a `configuration_update` input item.
+     *
+     * The item changes the reasoning effort without rewriting the
+     * request-level `reasoning.effort`, so the cached prompt prefix
+     * survives. OpenAI documents it for GPT-6 and later; on an earlier
+     * model the same change is a prefix edit that costs the cache.
+     */
+    public static function openAISupportsConfigurationUpdate(string $model): bool
+    {
+        $version = self::openAIGenerationVersion($model);
+        if ($version === null) {
+            return false;
+        }
+
+        return $version[0] >= 6;
+    }
+
+    /**
      * Whether the model has an adaptive thinking mode.
      *
      * Adaptive thinking arrived with the 4.6 generation; below it the
@@ -148,14 +166,14 @@ final class ModelFamily
     }
 
     /**
-     * The generation of a `gpt-5`/`gpt-6` id.
+     * The generation of a `gpt-<major>` id.
      *
-     * @return array{0: int, 1: int}|null null for every other family
+     * @return array{0: int, 1: int}|null null for every id that is not a GPT model
      */
     private static function openAIGenerationVersion(string $model): ?array
     {
         $id = self::stripProviderPrefix($model);
-        if (preg_match('/^gpt-(5|6)(?:\.(\d+))?(?:-|$)/', $id, $matches) !== 1) {
+        if (preg_match('/^gpt-(\d+)(?:\.(\d+))?(?:-|$)/', $id, $matches) !== 1) {
             return null;
         }
 

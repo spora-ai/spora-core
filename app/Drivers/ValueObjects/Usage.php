@@ -10,11 +10,18 @@ namespace Spora\Drivers\ValueObjects;
  * Field provenance (verify against vendor docs when bumping):
  *
  *   - `inputTokens`          OpenAI `usage.prompt_tokens` | Anthropic `usage.input_tokens`
+ *                            | Responses `usage.input_tokens`
  *   - `outputTokens`         OpenAI `usage.completion_tokens` | Anthropic `usage.output_tokens`
- *   - `reasoningTokens`      OpenAI `usage.completion_tokens_details.reasoning_tokens` (0 on Anthropic
- *                            — Anthropic emits reasoning as `thinking` blocks, not a counter)
- *   - `cachedTokens`         OpenAI `usage.prompt_tokens_details.cached_tokens` (0 on Anthropic)
- *   - `cacheCreationTokens`  Anthropic `usage.cache_creation_input_tokens` (0 on OpenAI)
+ *                            | Responses `usage.output_tokens`
+ *   - `reasoningTokens`      OpenAI `usage.completion_tokens_details.reasoning_tokens` |
+ *                            Responses `usage.output_tokens_details.reasoning_tokens` (0 on
+ *                            Anthropic — Anthropic emits reasoning as `thinking` blocks,
+ *                            not a counter)
+ *   - `cachedTokens`         OpenAI `usage.prompt_tokens_details.cached_tokens` |
+ *                            Responses `usage.input_tokens_details.cached_tokens` (0 on Anthropic)
+ *   - `cacheCreationTokens`  Anthropic `usage.cache_creation_input_tokens` |
+ *                            Responses `usage.input_tokens_details.cache_write_tokens` (0 on
+ *                            Chat Completions)
  *   - `cacheReadTokens`      Anthropic `usage.cache_read_input_tokens` (0 on OpenAI)
  *   - `provider`             `'openai' | 'anthropic' | 'unknown'` (legacy rows where usage wasn't captured)
  *   - `rawUsage`             The complete `usage` subobject the provider returned, preserved verbatim for
@@ -95,40 +102,85 @@ final readonly class Usage
     }
 
     /**
-     * Build a Usage from a provider `usage` subobject tagged with its provider.
+     * Build a Usage from a provider `usage` subobject tagged with the
+     * protocol it came from.
+     *
+     * The protocol picks the counter names; the stored `provider` tag
+     * says which provider the numbers came from. The two are different
+     * questions: both OpenAI protocols store `openai`, but they count
+     * tokens under different names, and a Responses payload that falls
+     * through to the Chat Completions branch records a silent zero for
+     * every counter.
      *
      * When `$usage` is null or empty the returned Usage carries the
      * `unknown` provider sentinel so it can still be merged via
      * {@see self::add()} without polluting the caller's provider tag.
-     * Concrete providers see their counters populated; the tag is what
-     * claims provenance.
      *
      * @param array<string, mixed>|null $usage
      */
-    public static function fromProviderUsage(?array $usage, string $provider): self
+    public static function fromProviderUsage(?array $usage, string $protocol): self
     {
         if ($usage === null || $usage === []) {
             return new self(provider: 'unknown');
         }
 
-        if ($provider === 'anthropic') {
-            $serviceTier = $usage['service_tier'] ?? null;
+        return match ($protocol) {
+            'anthropic' => self::fromAnthropicUsage($usage),
+            'openai_responses' => self::fromResponsesUsage($usage),
+            default => self::fromChatCompletionsUsage($usage),
+        };
+    }
 
-            return new self(
-                inputTokens: (int) ($usage['input_tokens'] ?? 0),
-                outputTokens: (int) ($usage['output_tokens'] ?? 0),
-                cacheCreationTokens: (int) ($usage['cache_creation_input_tokens'] ?? 0),
-                cacheReadTokens: (int) ($usage['cache_read_input_tokens'] ?? 0),
-                provider: 'anthropic',
-                rawUsage: $usage,
-                driverMetaInfo: $serviceTier !== null ? ['service_tier' => $serviceTier] : null,
-            );
-        }
+    /**
+     * @param array<string, mixed> $usage
+     */
+    private static function fromAnthropicUsage(array $usage): self
+    {
+        $serviceTier = $usage['service_tier'] ?? null;
 
-        // Default to OpenAI Chat Completions shape — `prompt_tokens_details.cached_tokens`
-        // and `completion_tokens_details.reasoning_tokens`. Same fields apply to the
-        // Responses API responses for the cache counter; reasoning moves to a different
-        // subkey there (handled when we land the Responses-API switch).
+        return new self(
+            inputTokens: (int) ($usage['input_tokens'] ?? 0),
+            outputTokens: (int) ($usage['output_tokens'] ?? 0),
+            cacheCreationTokens: (int) ($usage['cache_creation_input_tokens'] ?? 0),
+            cacheReadTokens: (int) ($usage['cache_read_input_tokens'] ?? 0),
+            provider: 'anthropic',
+            rawUsage: $usage,
+            driverMetaInfo: $serviceTier !== null ? ['service_tier' => $serviceTier] : null,
+        );
+    }
+
+    /**
+     * The Responses API names every counter differently: `input_tokens`
+     * and `output_tokens` instead of `prompt_tokens` and
+     * `completion_tokens`, with the cache and reasoning counters under
+     * their own `*_tokens_details` objects.
+     *
+     * @param array<string, mixed> $usage
+     */
+    private static function fromResponsesUsage(array $usage): self
+    {
+        $inputDetails = is_array($usage['input_tokens_details'] ?? null) ? $usage['input_tokens_details'] : [];
+        $outputDetails = is_array($usage['output_tokens_details'] ?? null) ? $usage['output_tokens_details'] : [];
+
+        return new self(
+            inputTokens: (int) ($usage['input_tokens'] ?? 0),
+            outputTokens: (int) ($usage['output_tokens'] ?? 0),
+            reasoningTokens: (int) ($outputDetails['reasoning_tokens'] ?? 0),
+            cachedTokens: (int) ($inputDetails['cached_tokens'] ?? 0),
+            // The Responses API reports the tokens it wrote to the cache
+            // next to the ones it read; that is what Anthropic calls a
+            // cache creation, so it lands on the same counter.
+            cacheCreationTokens: (int) ($inputDetails['cache_write_tokens'] ?? 0),
+            provider: 'openai',
+            rawUsage: $usage,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $usage
+     */
+    private static function fromChatCompletionsUsage(array $usage): self
+    {
         $promptDetails = is_array($usage['prompt_tokens_details'] ?? null) ? $usage['prompt_tokens_details'] : [];
         $completionDetails = is_array($usage['completion_tokens_details'] ?? null) ? $usage['completion_tokens_details'] : [];
 
