@@ -1,9 +1,7 @@
 {
     "\"%s\" is set in .env or config.php and cannot be edited here.": "\"%s\" is set in .env or config.php and cannot be edited here.",
-    "\"chat_id\" must be an integer when present.": "\"chat_id\" must be an integer when present.",
     "\"ids\" must be a non-empty array.": "\"ids\" must be a non-empty array.",
     "\"language\" must be a string when present.": "\"language\" must be a string when present.",
-    "\"text\" must be a string when present.": "\"text\" must be a string when present.",
     "%d tool(s) declare recommendsSkills slugs that are not on disk. See details for offenders.": "%d tool(s) declare recommendsSkills slugs that are not on disk. See details for offenders.",
     "%s URL: %s": "%s URL: %s",
     "%s.%s for %s is %d chars; column limit is %d.": "%s.%s for %s is %d chars; column limit is %d.",
@@ -435,7 +433,6 @@
     "agent_id is required.": "agent_id is required.",
     "answers must be a non-empty array.": "answers must be a non-empty array.",
     "arguments is required for approve decisions.": "arguments is required for approve decisions.",
-    "callback_url is not an acceptable https URL.": "callback_url is not an acceptable https URL.",
     "composer exited with code %d. See `details.stderr` or storage/spora.log for the full output.": "composer exited with code %d. See `details.stderr` or storage/spora.log for the full output.",
     "config_id must be an integer or null.": "config_id must be an integer or null.",
     "cron_expression and run_at are mutually exclusive.": "cron_expression and run_at are mutually exclusive.",

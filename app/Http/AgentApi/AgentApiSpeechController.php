@@ -105,13 +105,9 @@ final class AgentApiSpeechController
             $prepared['language'],
         );
 
-        if ($result instanceof JsonResponse) {
-            return $result;
-        }
-
-        return new JsonResponse([
-            'data' => $this->transcriptionPayload($prepared['mediaId'], $result),
-        ]);
+        return $result instanceof JsonResponse
+            ? $result
+            : new JsonResponse(['data' => $this->transcriptionPayload($prepared['mediaId'], $result)]);
     }
 
     #[OA\Post(
@@ -172,6 +168,24 @@ final class AgentApiSpeechController
             return $prepared;
         }
 
+        return $this->send($context, $prepared);
+    }
+
+    /**
+     * Transcribe, then put the transcript in front of the agent.
+     *
+     * @param array{
+     *     mediaId: string,
+     *     language: ?string,
+     *     extra: ?string,
+     *     chatId: ?int,
+     *     callbackUrl: ?string,
+     *     maxSteps: ?int,
+     *     additionalSteps: ?int
+     * } $prepared
+     */
+    private function send(ApiKeyContext $context, array $prepared): JsonResponse
+    {
         $result = $this->transcribeMedia(
             $context,
             $prepared['mediaId'],
@@ -190,11 +204,9 @@ final class AgentApiSpeechController
             return $this->unprocessable('VALIDATION_ERROR', 'Transcription returned no text, so nothing was sent.');
         }
 
-        if ($prepared['chatId'] !== null) {
-            return $this->continueChat($context, $prepared, $message, $result);
-        }
-
-        return $this->startChat($context, $prepared, $message, $result);
+        return $prepared['chatId'] !== null
+            ? $this->continueChat($context, $prepared, $message, $result)
+            : $this->startChat($context, $prepared, $message, $result);
     }
 
     /**
@@ -203,19 +215,20 @@ final class AgentApiSpeechController
      */
     private function prepareTranscribe(array $body): JsonResponse|array
     {
-        $mediaId = $this->stringField($body, 'media_id');
+        $mediaId = $this->mediaId($body);
 
         if ($mediaId === null) {
             return $this->unprocessable('VALIDATION_ERROR', 'media_id is required.');
         }
 
-        $language = $this->optionalString($body, 'language');
-
-        if ($language === false) {
+        if (!$this->isStringField($body, 'language')) {
             return $this->unprocessable('VALIDATION_ERROR', '"language" must be a string when present.');
         }
 
-        return ['mediaId' => $mediaId, 'language' => $language];
+        return [
+            'mediaId' => $mediaId,
+            'language' => $this->optionalString($body, 'language'),
+        ];
     }
 
     /**
@@ -232,44 +245,45 @@ final class AgentApiSpeechController
      */
     private function prepareSend(array $body): JsonResponse|array
     {
-        $mediaId = $this->stringField($body, 'media_id');
+        $mediaId = $this->mediaId($body);
 
         if ($mediaId === null) {
             return $this->unprocessable('VALIDATION_ERROR', 'media_id is required.');
         }
 
-        $language = $this->optionalString($body, 'language');
-        $extra = $this->optionalString($body, 'text');
+        $problem = match (true) {
+            !$this->isStringField($body, 'language') => '"language" must be a string when present.',
+            !$this->isStringField($body, 'text') => '"text" must be a string when present.',
+            !$this->isIntField($body, 'chat_id') => '"chat_id" must be an integer when present.',
+            $this->callbackUrlRefused($body) => 'callback_url is not an acceptable https URL.',
+            default => null,
+        };
 
-        if ($language === false) {
-            return $this->unprocessable('VALIDATION_ERROR', '"language" must be a string when present.');
-        }
-
-        if ($extra === false) {
-            return $this->unprocessable('VALIDATION_ERROR', '"text" must be a string when present.');
-        }
-
-        $chatId = $this->optionalInt($body, 'chat_id');
-
-        if ($chatId === false) {
-            return $this->unprocessable('VALIDATION_ERROR', '"chat_id" must be an integer when present.');
-        }
-
-        $callbackUrl = $this->stringField($body, 'callback_url');
-
-        if ($callbackUrl !== null && $this->ssrf->rejectReason($callbackUrl) !== null) {
-            return $this->unprocessable('VALIDATION_ERROR', 'callback_url is not an acceptable https URL.');
+        if ($problem !== null) {
+            return $this->unprocessable('VALIDATION_ERROR', $problem);
         }
 
         return [
             'mediaId'         => $mediaId,
-            'language'        => $language,
-            'extra'           => $extra,
-            'chatId'          => $chatId,
-            'callbackUrl'     => $callbackUrl,
+            'language'        => $this->optionalString($body, 'language'),
+            'extra'           => $this->optionalString($body, 'text'),
+            'chatId'          => $this->optionalInt($body, 'chat_id'),
+            'callbackUrl'     => $this->stringField($body, 'callback_url'),
             'maxSteps'        => $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
             'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
         ];
+    }
+
+    /**
+     * Whether the callback URL is one Spora will not call.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function callbackUrlRefused(array $body): bool
+    {
+        $callbackUrl = $this->stringField($body, 'callback_url');
+
+        return $callbackUrl !== null && $this->ssrf->rejectReason($callbackUrl) !== null;
     }
 
     /**
@@ -428,49 +442,80 @@ final class AgentApiSpeechController
     }
 
     /**
-     * A field that may be absent, may be null, and must be a string when
-     * it is there.
-     *
-     * `false` says "present but not a string" — a distinction a null
-     * cannot carry, because null is a value the field may legitimately
-     * hold. A blank string is a null: it carries no instruction and no
-     * language.
+     * The asset the request names, or null when it names none.
      *
      * @param array<string, mixed> $body
-     * @return string|false|null
      */
-    private function optionalString(array $body, string $name): string|false|null
+    private function mediaId(array $body): ?string
     {
-        if (!array_key_exists($name, $body) || $body[$name] === null) {
+        $value = $body['media_id'] ?? null;
+
+        if (!is_string($value)) {
             return null;
         }
 
-        if (!is_string($body[$name])) {
-            return false;
-        }
-
-        $value = trim($body[$name]);
+        $value = trim($value);
 
         return $value === '' ? null : $value;
     }
 
     /**
+     * A field that may be absent, may be null, and carries nothing when
+     * it is blank.
+     *
      * @param array<string, mixed> $body
-     * @return int|false|null
      */
-    private function optionalInt(array $body, string $name): int|false|null
+    private function optionalString(array $body, string $name): ?string
     {
-        if (!array_key_exists($name, $body) || $body[$name] === null) {
+        $value = $body[$name] ?? null;
+
+        if (!is_string($value)) {
             return null;
         }
 
-        $value = $body[$name];
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * Whether the field, when it is there, is a string.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function isStringField(array $body, string $name): bool
+    {
+        $value = $body[$name] ?? null;
+
+        return $value === null || is_string($value);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function optionalInt(array $body, string $name): ?int
+    {
+        $value = $body[$name] ?? null;
 
         if (is_int($value)) {
             return $value;
         }
 
-        return is_string($value) && $value !== '' && ctype_digit($value) ? (int) $value : false;
+        return is_string($value) && $value !== '' && ctype_digit($value) ? (int) $value : null;
+    }
+
+    /**
+     * Whether the field, when it is there, is an integer.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function isIntField(array $body, string $name): bool
+    {
+        $value = $body[$name] ?? null;
+
+        return $value === null
+            || is_int($value)
+            || (is_string($value) && $value !== '' && ctype_digit($value));
     }
 
     /**

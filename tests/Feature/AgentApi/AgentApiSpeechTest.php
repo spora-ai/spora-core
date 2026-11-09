@@ -349,6 +349,54 @@ describe('Agent API speech', function (): void {
         expect($provider->calls)->toBe([]);
     });
 
+    it('422s a chat id that is not an integer', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('bad-chat-id');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'bad-chat-id');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+        $before = Task::count();
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, [
+                'media_id' => $mediaId,
+                'chat_id' => 'not-a-number',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        expect(AgentApiTestSupport::decode($response)['error']['code'])->toBe('VALIDATION_ERROR');
+        expect(Task::count())->toBe($before);
+    });
+
+    it('422s a language that is not a string', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('bad-language');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'bad-language');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribe',
+            speechRequest('/api/v1/agent-api/transcribe', $key, [
+                'media_id' => $mediaId,
+                'language' => 42,
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        expect(AgentApiTestSupport::decode($response)['error']['code'])->toBe('VALIDATION_ERROR');
+    });
+
     it('sends the transcript as a new chat', function (): void {
         $seed = AgentApiTestSupport::seedAgent('send');
         [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'send');

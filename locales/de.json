@@ -1,9 +1,7 @@
 {
   "\"%s\" is set in .env or config.php and cannot be edited here.": "\"%s\" ist in .env oder config.php festgelegt und kann hier nicht bearbeitet werden.",
-  "\"chat_id\" must be an integer when present.": "\"chat_id\" muss eine ganze Zahl sein, wenn es angegeben ist.",
   "\"ids\" must be a non-empty array.": "\"ids\" muss ein nicht leeres Array sein.",
   "\"language\" must be a string when present.": "\"language\" muss eine Zeichenkette sein, wenn es angegeben ist.",
-  "\"text\" must be a string when present.": "\"text\" muss eine Zeichenkette sein, wenn es angegeben ist.",
   "%d tool(s) declare recommendsSkills slugs that are not on disk. See details for offenders.": "%d Tool(s) deklarieren recommendsSkills-Slugs, die nicht auf der Festplatte vorhanden sind. Die Verantwortlichen stehen in den Details.",
   "%s URL: %s": "%s-URL: %s",
   "%s.%s for %s is %d chars; column limit is %d.": "%s.%s für %s ist %d Zeichen lang; das Spaltenlimit ist %d.",
@@ -61,7 +59,6 @@
   "Base64 payload is not valid base64.": "Die Base64-Nutzdaten sind kein gültiges Base64.",
   "Bearer token for the OpenAI-compatible endpoint.": "Bearer-Token für den OpenAI-kompatiblen Endpunkt.",
   "Body must include an \"ids\" array.": "Der Body muss ein Array \"ids\" enthalten.",
-  "callback_url is not an acceptable https URL.": "callback_url ist keine akzeptierte HTTPS-URL.",
   "CSRF token is invalid.": "Der CSRF-Token ist ungültig.",
   "CSRF token is required.": "Ein CSRF-Token ist erforderlich.",
   "Calculator": "Taschenrechner",
