@@ -102,16 +102,16 @@ it('has many tasks, agent tools, and tool calls', function (): void {
         ->and($agent->toolCalls)->toHaveCount(1);
 });
 
-it('assertStringColumnsFit throws when llm_base_url exceeds VARCHAR(255)', function (): void {
+it('assertStringColumnsFit throws when a string column exceeds its limit', function (): void {
     $agent = new Agent();
-    $agent->llm_base_url = 'https://' . str_repeat('a', 250) . '.example.com';
+    $agent->name = str_repeat('a', 101);
 
     try {
         $agent->assertStringColumnsFit();
         $this->fail('Expected InvalidArgumentException was not thrown.');
     } catch (InvalidArgumentException $e) {
-        expect($e->getMessage())->toContain('agents.llm_base_url')
-            ->and($e->getMessage())->toContain('column limit is 255');
+        expect($e->getMessage())->toContain('agents.name')
+            ->and($e->getMessage())->toContain('column limit is 100');
     }
 });
 

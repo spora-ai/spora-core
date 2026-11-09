@@ -22,6 +22,7 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-4o, gpt-4-turbo, o1-preview).', required: false, default: 'gpt-4o')]
 #[ToolSetting(key: 'temperature', label: 'Temperature', type: 'text', description: 'Sampling temperature (0.0–2.0). Lower is more deterministic.', required: false, default: '0.7', validation: '/^[0-2](\.[0-9]+)?$/')]
+#[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: "Default reasoning effort. Empty = the model default. On GPT-5.4 and later, Chat Completions only accepts 'None' when the agent uses tools — use the OpenAI Responses driver for reasoning with tools.", options: ['' => 'Model default', 'none' => 'None', 'minimal' => 'Minimal', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
@@ -47,6 +48,7 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     /**
      * Vision-capable OpenAI-family model names. Conservative allowlist:
      *   - gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4-vision*
+     *   - gpt-4.1*, gpt-5*, gpt-6*
      *   - o1, o1-pro, o3, o3-mini, o4-mini
      *   - chatgpt-4o*
      *
@@ -64,10 +66,33 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         return str_starts_with($m, 'gpt-4o')
             || str_starts_with($m, 'gpt-4-turbo')
             || str_starts_with($m, 'gpt-4-vision')
+            || str_starts_with($m, 'gpt-4.1')
+            || str_starts_with($m, 'gpt-5')
+            || str_starts_with($m, 'gpt-6')
             || str_starts_with($m, 'o1')
             || str_starts_with($m, 'o3')
             || str_starts_with($m, 'o4')
             || str_starts_with($m, 'chatgpt-4o');
+    }
+
+    /**
+     * Chat Completions spells every level the way the canonical scale
+     * does, so the mapping is the identity — but it is written out so
+     * that a level this driver cannot express is visibly absent.
+     *
+     * @return array<string, string>
+     */
+    public function effortLevels(): array
+    {
+        return [
+            EffortLevel::None->value    => EffortLevel::None->value,
+            EffortLevel::Minimal->value => EffortLevel::Minimal->value,
+            EffortLevel::Low->value     => EffortLevel::Low->value,
+            EffortLevel::Medium->value  => EffortLevel::Medium->value,
+            EffortLevel::High->value    => EffortLevel::High->value,
+            EffortLevel::XHigh->value   => EffortLevel::XHigh->value,
+            EffortLevel::Max->value     => EffortLevel::Max->value,
+        ];
     }
 
     public function complete(LLMRequest $request): LLMResponse
@@ -95,8 +120,13 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildMessages(LLMRequest $request): array
     {
+        // `developer` replaced `system` from o1 onwards; older models
+        // reject the role outright, so it is only used for the
+        // reasoning families.
+        $systemRole = ModelFamily::isOpenAIReasoningModel($this->model) ? 'developer' : 'system';
+
         return array_merge(
-            [['role' => 'system', 'content' => $request->systemPrompt]],
+            [['role' => $systemRole, 'content' => $request->systemPrompt]],
             array_map(
                 static function (array $msg): array {
                     $content = $msg['content'] ?? null;
@@ -118,16 +148,50 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     private function buildRequestBody(LLMRequest $request, array $messages): array
     {
         $body = [
-            'model'       => $this->model,
-            'messages'    => $messages,
-            'max_tokens'  => $request->maxTokens,
-            'temperature' => $request->temperature,
+            'model'    => $this->model,
+            'messages' => $messages,
         ];
+
+        if (ModelFamily::isOpenAIReasoningModel($this->model)) {
+            // Reasoning models answer `400 Unsupported parameter:
+            // 'max_tokens'` and reject the sampling parameters outright.
+            $body['max_completion_tokens'] = $request->maxTokens;
+        } else {
+            $body['max_tokens']  = $request->maxTokens;
+            $body['temperature'] = $request->temperature;
+        }
+
         if ($request->tools !== []) {
             $body['tools'] = $request->tools;
             $body['tool_choice'] = 'auto';
         }
+
+        $effort = $this->resolveReasoningEffort($request);
+        if ($effort !== null) {
+            $body['reasoning_effort'] = $effort;
+        }
+
         return $body;
+    }
+
+    /**
+     * The `reasoning_effort` value for the request, or null when the
+     * request carries none and none is required.
+     */
+    private function resolveReasoningEffort(LLMRequest $request): ?string
+    {
+        $effort = $this->resolveEffort($request->effort);
+        if ($effort !== null) {
+            return $effort;
+        }
+
+        // Tools on a GPT-5.4+ model are only accepted at `none`, and the
+        // model's own default is `medium` — so silence is a 400 too.
+        if ($request->tools !== [] && ModelFamily::openAIRequiresNoneEffortForTools($this->model)) {
+            return $this->effortLevels()[EffortLevel::None->value];
+        }
+
+        return null;
     }
 
     /**
