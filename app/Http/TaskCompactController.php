@@ -76,14 +76,24 @@ final class TaskCompactController
 
         try {
             $result = $this->taskService->compactTask($taskId, $userId);
-        } catch (InvalidArgumentException $e) {
-            return $this->errorForException($e);
-        } catch (CompactionFailedException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'COMPACTION_FAILED', 'message' => $e->getMessage()]],
-                Response::HTTP_INTERNAL_SERVER_ERROR,
-            );
-        } catch (UsageLimitExceededException $e) {
+        } catch (InvalidArgumentException | CompactionFailedException | UsageLimitExceededException $e) {
+            return $this->failureResponse($e);
+        }
+
+        return new JsonResponse(['data' => $result]);
+    }
+
+    /**
+     * Map a compaction failure to the JSON error response the API contract
+     * uses.
+     *
+     * The three failures are told apart by their type rather than by three
+     * separate catches, so the response is built in one place.
+     */
+    private function failureResponse(
+        InvalidArgumentException | CompactionFailedException | UsageLimitExceededException $e,
+    ): JsonResponse {
+        if ($e instanceof UsageLimitExceededException) {
             // A quota refusal, not a server fault: the summary was never
             // requested, so the history is unchanged.
             return new JsonResponse(
@@ -92,7 +102,14 @@ final class TaskCompactController
             );
         }
 
-        return new JsonResponse(['data' => $result]);
+        if ($e instanceof CompactionFailedException) {
+            return new JsonResponse(
+                ['error' => ['code' => 'COMPACTION_FAILED', 'message' => $e->getMessage()]],
+                Response::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+
+        return $this->errorForException($e);
     }
 
     /**

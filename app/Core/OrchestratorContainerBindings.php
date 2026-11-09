@@ -106,7 +106,7 @@ final class OrchestratorContainerBindings
             // core's definitions are added and the container keeps the last
             // definition for a key, so the plugin's meter replaces this null
             // object.
-            UsageMeterInterface::class => static function (ContainerInterface $c): UsageMeterInterface {
+            UsageMeterInterface::class => static function (): UsageMeterInterface {
                 return new NullUsageMeter();
             },
 
