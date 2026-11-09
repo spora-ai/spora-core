@@ -6,6 +6,7 @@ namespace Spora\Services;
 
 use InvalidArgumentException;
 use Spora\Agents\Exceptions\CompactionFailedException;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 
 interface TaskServiceInterface
 {
@@ -179,6 +180,8 @@ interface TaskServiceInterface
      *                                   by the caller, or still running.
      * @throws CompactionFailedException  When the model returned no summary;
      *                                   the history is left unchanged.
+     * @throws UsageLimitExceededException  When a hard usage decision stopped
+     *                                        the summary request.
      */
     public function compactTask(int $taskId, int $userId): array;
 

@@ -8,6 +8,10 @@ use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\LlmUsage;
+use Spora\Metering\MeteringContext;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Models\Task;
@@ -110,7 +114,7 @@ describe('ConversationCompactor', function (): void {
         $factory  = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver($captured));
 
-        $compacted = (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        $compacted = (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         expect($compacted)->toBeTrue();
         expect($captured)->not->toBeNull();
@@ -168,7 +172,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver());
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         // The operator can still read every turn: the rows are only
         // replaced in the model's view, not in the transcript.
@@ -194,7 +198,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver());
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         $summaryRow = TaskHistory::where('task_id', $task->id)->where('role', 'summary')->first();
 
@@ -222,7 +226,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver());
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         $messages = (new MessageHistoryBuilder())->build($task->id);
 
@@ -248,7 +252,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->shouldNotReceive('makeFromAgent');
 
-        $compacted = (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        $compacted = (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         expect($compacted)->toBeFalse()
             ->and(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(0);
@@ -277,7 +281,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($driver);
 
-        expect(fn() => (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2))
+        expect(fn() => (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2))
             ->toThrow(Spora\Agents\Exceptions\CompactionFailedException::class);
 
         expect(TaskHistory::where('task_id', $task->id)->where('role', 'summary')->count())->toBe(0)
@@ -308,7 +312,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($driver);
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         // A cap of 1024 tokens left a reasoning model with nothing to write
         // the summary with.
@@ -334,7 +338,7 @@ describe('ConversationCompactor', function (): void {
         // An agent with a huge output budget must not hand that budget to
         // the summariser: the summary would grow past the point where it
         // is still a summary.
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 100000, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 100000, 0.2);
 
         expect($captured->maxTokens)->toBe(8192);
     });
@@ -373,7 +377,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn($driver);
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         // An unbounded tool dump makes the model think for tens of thousands
         // of tokens and exhaust its budget before it writes anything.
@@ -426,7 +430,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver());
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         $messages = (new MessageHistoryBuilder())->build($task->id);
 
@@ -465,7 +469,7 @@ describe('ConversationCompactor', function (): void {
         $factory  = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver($captured));
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         expect($captured)->not->toBeNull();
         $sent = $captured->messages;
@@ -499,7 +503,7 @@ describe('ConversationCompactor', function (): void {
         $factory  = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver($captured));
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         $contents = array_column($captured->messages, 'content');
         expect($contents)->toContain('First round summary.');
@@ -520,7 +524,7 @@ describe('ConversationCompactor', function (): void {
         $factory = Mockery::mock(DriverFactory::class);
         $factory->allows('makeFromAgent')->andReturn(compactionDriver());
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         // A second round re-summarises the rows the first one replaced plus
         // the ones that followed, so its range starts where the first one's
@@ -535,7 +539,7 @@ describe('ConversationCompactor', function (): void {
             ]);
         }
 
-        (new ConversationCompactor($factory))->compact($task->id, $agent, 4096, 0.2);
+        (new ConversationCompactor($factory))->compact($task, $agent, 4096, 0.2);
 
         $summaries = TaskHistory::where('task_id', $task->id)->where('role', 'summary')->get();
         expect($summaries)->toHaveCount(2)
@@ -547,5 +551,37 @@ describe('ConversationCompactor', function (): void {
         $contents = array_column($messages, 'content');
         expect($contents[0])->toBe('compacted.')
         ->and(array_filter($contents, static fn(string $c): bool => $c === 'compacted.'))->toHaveCount(1);
+    });
+
+    it('meters the summary request against the task being compacted', function (): void {
+        [$agent, $task] = seedCompactionTask();
+
+        for ($i = 0; $i < 8; $i++) {
+            TaskHistory::create([
+                'task_id'  => $task->id,
+                'sequence' => $i,
+                'role'     => $i % 2 === 0 ? 'user' : 'assistant',
+                'content'  => "Message {$i}",
+            ]);
+        }
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn(compactionDriver());
+
+        $meter = Mockery::mock(UsageMeterInterface::class);
+        $meter->allows('evaluate')->andReturn(null);
+        $meter->shouldReceive('recordLlmUsage')
+            ->once()
+            ->withArgs(static fn(MeteringContext $context, LlmUsage $usage): bool => $context->taskId === $task->id);
+
+        $compactor = new ConversationCompactor(
+            $factory,
+            null,
+            new LlmCallRunner($factory, $meter),
+        );
+
+        // The summary's tokens used to cost nothing and appear nowhere: the
+        // provider call bypassed every meter.
+        expect($compactor->compact($task, $agent, 4096, 0.2))->toBeTrue();
     });
 });

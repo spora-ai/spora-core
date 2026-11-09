@@ -8,6 +8,7 @@ use RuntimeException;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Models\Task;
 use Spora\Services\ContextWindowErrorParser;
 use Symfony\Contracts\HttpClient\Exception\TimeoutExceptionInterface;
@@ -22,7 +23,12 @@ use Throwable;
  */
 final class ErrorClassifier
 {
-    /** Error codes that qualify for auto-retry. */
+    /**
+     * Error codes that qualify for auto-retry.
+     *
+     * `USAGE_LIMIT_REACHED` is deliberately absent: a hard usage decision is
+     * terminal, and a retry would spend the very budget the decision refused.
+     */
     public const RETRYABLE_ERROR_CODES = [
         'RATE_LIMIT',
         'SERVER_OVERLOADED',
@@ -75,10 +81,11 @@ final class ErrorClassifier
     private function classifySpecificError(Throwable $e): ?string
     {
         return match (true) {
-            $e instanceof LLMRateLimitException  => 'RATE_LIMIT',
-            $e instanceof LLMRetryableException  => $this->classifyRetryableError($e),
-            $e instanceof LLMProviderException    => $this->classifyProviderError($e),
-            default                              => null,
+            $e instanceof UsageLimitExceededException => 'USAGE_LIMIT_REACHED',
+            $e instanceof LLMRateLimitException       => 'RATE_LIMIT',
+            $e instanceof LLMRetryableException       => $this->classifyRetryableError($e),
+            $e instanceof LLMProviderException        => $this->classifyProviderError($e),
+            default                                  => null,
         };
     }
 
@@ -122,6 +129,7 @@ final class ErrorClassifier
             'BAD_REQUEST'           => 'Invalid request. Please check your agent configuration.',
             'NO_LLM_CONFIGURATION'  => 'No LLM configuration set. Please configure an LLM driver or set a global default.',
             'TOOL_ERROR'           => 'A tool encountered an error. Check the task history for details.',
+            'USAGE_LIMIT_REACHED'  => 'The usage limit was reached, so the run stopped. Check your usage quota or raise the limit.',
             'UNKNOWN'           => 'An unexpected error occurred. Please try again.',
         ];
     }

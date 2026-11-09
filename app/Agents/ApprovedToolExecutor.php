@@ -138,7 +138,11 @@ final class ApprovedToolExecutor
         array $approvedArgs,
         ToolInterface $toolInstance,
     ): void {
-        // safeExecute() catches every Throwable internally — no outer try/catch needed.
+        // safeExecute() turns the tool's own failures into a failed ToolResult,
+        // so there is no outer try/catch here. The usage-limit gate is the
+        // exception: it throws out of safeExecute() and reaches
+        // TickPhaseRunner::executeApprovedPendingToolsForTask(), which fails
+        // the task.
         $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $task->agent_id, $task->id);
 
         // Query-builder update() bypasses Eloquent's `array` cast on

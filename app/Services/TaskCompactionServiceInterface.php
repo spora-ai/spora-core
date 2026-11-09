@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Agents\Exceptions\CompactionFailedException;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 
 /**
  * Compacts a task's history: everything but the last few rows is replaced by
@@ -23,6 +24,8 @@ interface TaskCompactionServiceInterface
      *
      * @throws CompactionFailedException  When the model returned no summary;
      *                                    the history is left unchanged.
+     * @throws UsageLimitExceededException  When a hard usage decision stopped
+     *                                        the summary request.
      */
     public function compact(int $taskId): bool;
 }

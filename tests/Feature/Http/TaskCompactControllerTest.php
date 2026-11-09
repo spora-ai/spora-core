@@ -304,3 +304,36 @@ it('POST /compact reports a failed summary and leaves the history alone', functi
     expect($body['error']['code'])->toBe('COMPACTION_FAILED')
         ->and($body['error']['message'])->toContain('left unchanged');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
+
+it('POST /compact returns 429 when the usage limit is reached', function (): void {
+    [$userId, $agent] = seedCompactEndpointFixtures();
+    $task = Task::create([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'trigger_user_id' => $userId,
+        'agent_id'  => $agent->id,
+        'status'    => 'COMPLETED',
+        'user_prompt' => 'done',
+        'max_steps' => 5,
+    ]);
+
+    $compaction = Mockery::mock(TaskCompactionServiceInterface::class);
+    $compaction->shouldReceive('compact')
+        ->once()
+        ->andThrow(new Spora\Metering\Exceptions\UsageLimitExceededException(
+            new Spora\Metering\UsageDecision('The monthly token budget is exhausted.'),
+        ));
+
+    [$service] = compactEndpointService($compaction);
+    $controller = compactEndpointController($service);
+
+    $req = new Request();
+    $req->attributes->set('taskId', $task->id);
+
+    $resp = $controller->compact($req);
+
+    // The limit is the operator's answer, not a server fault.
+    expect($resp->getStatusCode())->toBe(Response::HTTP_TOO_MANY_REQUESTS);
+    $body = json_decode($resp->getContent(), true);
+    expect($body['error']['code'])->toBe('USAGE_LIMIT_REACHED')
+        ->and($body['error']['message'])->toBe('The monthly token budget is exhausted.');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());

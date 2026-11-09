@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Agents;
 
 use Psr\Log\LoggerInterface;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
@@ -57,6 +58,11 @@ final class ContextWindowRecovery
 
         try {
             $compacted = $this->compactionService->compact($taskId);
+        } catch (UsageLimitExceededException $e) {
+            // A hard usage decision is terminal in its own right. Reporting it
+            // as a context-window error would send the task down the retry
+            // path the limit exists to stop.
+            throw $e;
         } catch (Throwable $e) {
             $this->logger?->warning('Compaction failed', ['task_id' => $taskId, 'exception' => $e->getMessage()]);
             throw $originalError;

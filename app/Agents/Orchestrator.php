@@ -15,6 +15,15 @@ use Spora\Agents\ValueObjects\AgentState;
 use Spora\Agents\ValueObjects\HistoryMessageContext;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
+use Spora\Metering\Exceptions\UsageLimitExceededException;
+use Spora\Metering\LlmCallRunner;
+use Spora\Metering\MeteringContext;
+use Spora\Metering\MeteringContextFactory;
+use Spora\Metering\MeteringGuard;
+use Spora\Metering\NullUsageMeter;
+use Spora\Metering\ToolSubject;
+use Spora\Metering\ToolUsage;
+use Spora\Metering\UsageMeterInterface;
 use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
@@ -62,6 +71,19 @@ final class Orchestrator implements OrchestratorInterface
     public readonly AgentStateResolver $agentStateResolver;
     public readonly TaskStatusWriter $statusWriter;
     public readonly ToolOperationResolver $toolOperations;
+
+    /** The meter this run is metered by, and the funnel every provider call
+     *  goes through. The fallback runner is built over the same meter, so
+     *  the two can never be metered by different meters. */
+    public readonly UsageMeterInterface $usageMeter;
+    public readonly LlmCallRunner $llmCallRunner;
+
+    /** The tool gate's collaborators. The guard fails open — a meter that
+     *  throws is logged and ignored — and the context factory costs one
+     *  query per metered call, so it is only consulted when a meter is
+     *  installed at all. */
+    private readonly MeteringGuard $meteringGuard;
+    private readonly MeteringContextFactory $meteringContextFactory;
 
     /** Lease config threaded through recursive ticks within the same
      *  HTTP request (or worker daemon). Set by the outermost `tick()`
@@ -133,10 +155,23 @@ final class Orchestrator implements OrchestratorInterface
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
+
+        // The fallback runner is built over the meter, so the meter is
+        // resolved first.
+        $this->usageMeter             = $config->usageMeter ?? new NullUsageMeter();
+        $this->meteringGuard          = new MeteringGuard($this->usageMeter, $config->logger);
+        $this->meteringContextFactory = new MeteringContextFactory();
+        $this->llmCallRunner          = $config->llmCallRunner ?? new LlmCallRunner(
+            $driverFactory,
+            $this->usageMeter,
+            $this->meteringContextFactory,
+            $config->logger,
+        );
+
         // A self-built service keeps the orchestrator usable on its own;
         // the container hands over the shared one.
         $this->taskCompactionService = $taskCompactionService ?? new TaskCompactionService(
-            new ConversationCompactor($driverFactory, $config->logger),
+            new ConversationCompactor($driverFactory, $config->logger, $this->llmCallRunner),
             $this->llmConfigResolver,
         );
         $this->contextWindowRecovery = new ContextWindowRecovery($this, $this->taskCompactionService, $config->logger, $config->notificationService);
@@ -151,6 +186,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolCallSerializer,
             $config->subAgent,
             $principalResolver ?? new PrincipalResolver(),
+            $this->llmCallRunner,
         );
         $this->toolOperations         = new ToolOperationResolver();
         $this->toolCallExecutor      = new ToolCallExecutor($this, $this->toolOperations);
@@ -545,9 +581,22 @@ final class Orchestrator implements OrchestratorInterface
         int $agentId,
         int $taskId,
     ): ToolResult {
-        $ref      = new ReflectionClass($toolInstance);
-        $attrs    = $ref->getAttributes(Tool::class);
-        $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
+        $ref       = new ReflectionClass($toolInstance);
+        $attrs     = $ref->getAttributes(Tool::class);
+        $toolName  = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
+        $toolClass = get_class($toolInstance);
+
+        // One context for the gate and the record. Building it costs a
+        // query, so an install without a metering plugin skips it.
+        $meteringContext = $this->meteringGuard->isActive()
+            ? $this->meteringContextFactory->forTaskId($taskId)
+            : null;
+
+        // Resolving the operation reads the agent's operation overrides, so
+        // it only runs when there is a meter to name the operation for.
+        $operation = $meteringContext !== null
+            ? $this->resolveOperationForMetering($toolInstance, $arguments, $agentId)
+            : null;
 
         $resolver = $this->principalResolver ?? new PrincipalResolver();
         // The task being executed, not the agent's newest one: a shared
@@ -563,6 +612,11 @@ final class Orchestrator implements OrchestratorInterface
             'task_id'   => $taskId,
             'arguments' => $arguments,
         ]);
+
+        // The gate sits outside the try below on purpose: inside it the
+        // limit would become a failed ToolResult, the LLM would read that
+        // as a tool error and keep spending.
+        $this->enforceUsageLimit($meteringContext, $toolName, $toolClass, $operation);
 
         try {
             $result = $toolInstance->execute(
@@ -580,8 +634,6 @@ final class Orchestrator implements OrchestratorInterface
                     'content'  => $result->content,
                 ]);
             }
-
-            return $result;
         } catch (Throwable $e) {
             $this->logger?->error('Tool threw exception', [
                 'tool'            => $toolName,
@@ -591,12 +643,74 @@ final class Orchestrator implements OrchestratorInterface
                 'message'         => $e->getMessage(),
             ]);
 
-            return new ToolResult(
+            $result = new ToolResult(
                 success: false,
                 content: 'System Error: The tool encountered a fatal exception: ' . $e->getMessage(),
                 data: ['exception_class' => get_class($e), 'trace' => $e->getTraceAsString()],
             );
         }
+
+        $this->recordToolUsage($meteringContext, $toolName, $toolClass, $operation, $result->success);
+
+        return $result;
+    }
+
+    /**
+     * The operation a call dispatches to, or null when it cannot be resolved.
+     *
+     * A tool that declares no operation makes the resolver throw. That is a
+     * property of the tool, not a usage question, so the metered subject
+     * simply names no operation.
+     */
+    private function resolveOperationForMetering(ToolInterface $toolInstance, array $arguments, int $agentId): ?string
+    {
+        try {
+            return $this->toolOperations->resolveOperationName($toolInstance, $arguments, $agentId);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The tool gate.
+     *
+     * @throws UsageLimitExceededException  The meter returned a hard decision.
+     */
+    private function enforceUsageLimit(
+        ?MeteringContext $meteringContext,
+        string $toolName,
+        string $toolClass,
+        ?string $operation,
+    ): void {
+        if ($meteringContext === null) {
+            return;
+        }
+
+        $decision = $this->meteringGuard->evaluate(
+            $meteringContext,
+            new ToolSubject($toolName, $toolClass, $operation),
+        );
+
+        if ($decision !== null && $decision->isHard()) {
+            throw new UsageLimitExceededException($decision);
+        }
+    }
+
+    private function recordToolUsage(
+        ?MeteringContext $meteringContext,
+        string $toolName,
+        string $toolClass,
+        ?string $operation,
+        bool $succeeded,
+    ): void {
+        if ($meteringContext === null) {
+            return;
+        }
+
+        $this->meteringGuard->recordToolUsage(
+            $meteringContext,
+            new ToolUsage($toolName, $toolClass, $operation, $succeeded),
+        );
     }
 
     /**
