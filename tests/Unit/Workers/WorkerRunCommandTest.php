@@ -1239,7 +1239,7 @@ describe('WorkerRunCommand — worker lock', function (): void {
         $acquired = invokeAcquireLock($command, $output);
 
         expect($acquired)->toBeFalse()
-            ->and($output->fetch())->toContain('Another worker instance is already running');
+            ->and($output->fetch())->toContain('Could not acquire the worker lock');
 
         fclose($holderFd);
     });

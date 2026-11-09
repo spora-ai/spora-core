@@ -64,7 +64,7 @@ final class WorkerRunCommand extends Command
 
     private int $principalScopeReadAt = 0;
 
-    /** How many scheduled runs the last loop iteration processed (testing hook). */
+    /** 1 once a scheduled run has been processed, 0 before that (testing hook). */
     public int $lastScheduledProcessedCount = 0;
 
     private readonly WorkerReaper $reaper;
@@ -120,8 +120,8 @@ final class WorkerRunCommand extends Command
     {
         $this->setDescription('Drain QUEUED tasks, process scheduled runs, or run as a persistent daemon.');
         $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon (default when no flag is given).');
-        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process one due scheduled run (and QUEUED tasks with --include-queue), then exit. Recurring backlogs are drained by the next cron fire. Ideal for cron-driven deployments.');
-        $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
+        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process one due scheduled run (and one QUEUED task with --include-queue), then exit. A backlog drains one task per run, so the cron frequency has to keep up.');
+        $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also process one QUEUED task in the same run');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
         $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes before a RUNNING task is orphaned (0 = disabled, omit to use config/default/60)', null);
@@ -491,8 +491,12 @@ final class WorkerRunCommand extends Command
         }
 
         if (!$acquired) {
-            $output->writeln('<error>Another worker instance is already running. Exiting.</error>');
-            $this->logger->warning('Could not acquire worker lock — another instance is running', [
+            // Two causes share this message: a live worker holds the lock,
+            // or a stale one is gone and its lock could not be replaced —
+            // the storage directory may not be writable. The holder's pid
+            // in the log line tells the two apart.
+            $output->writeln('<error>Could not acquire the worker lock — another worker instance is running, or a stale lock could not be replaced.</error>');
+            $this->logger->warning('Could not acquire worker lock', [
                 'holder_pid' => $this->lock->holderPid(),
             ]);
             return false;

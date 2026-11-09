@@ -75,8 +75,9 @@ final class WorkerLock
     }
 
     /**
-     * The flock lives on the descriptor, so unlocking without closing
-     * would keep the lock held for as long as the process runs.
+     * The unlock is what frees the lock. A child that inherited the
+     * descriptor shares the open file description, so the lock stays
+     * held until the last copy is closed.
      */
     public function release(): void
     {
