@@ -10,6 +10,8 @@ use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Http\Exceptions\EffortValidationException;
+use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffortService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
@@ -39,6 +41,8 @@ final class TaskController
         private readonly ContinueTaskDispatcher $continuationDispatcher,
         private readonly DecisionsRequestValidator $decisionsValidator,
         private readonly AnswerQuestionRequestValidator $answerValidator,
+        private readonly AgentServiceInterface $agentService,
+        private readonly EffortService $effortService,
     ) {}
 
     /**
@@ -106,7 +110,7 @@ final class TaskController
                     type: 'string',
                     nullable: true,
                     enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
                 ),
             ],
         ),
@@ -118,16 +122,29 @@ final class TaskController
         try {
             $body = $this->decodeJson($request);
             $effort = TaskEffortRequestValidator::parse($body);
+            $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
+
+            // The agent is resolved with the caller's visibility, so a
+            // request for an agent they cannot see is answered the same way
+            // as one that names no effort at all. The lookup only runs when
+            // a level was named: a request without one has nothing to
+            // check, and resolving the agent is not free.
+            $agent = null;
+            if ($effort !== null && $effort !== '' && $agentId !== null) {
+                $agent = $this->agentService->getAgent($agentId, $userId);
+            }
+
+            $this->effortService->assertLevel($effort, $agent);
         } catch (JsonException | EffortValidationException $e) {
-            // An unreadable body and an unusable field are two different
-            // refusals; the exception says which one this is.
+            // An unreadable body, an unusable field and a level the
+            // agent's driver does not offer are three different refusals;
+            // the exception says which one this is.
             return $e instanceof JsonException
                 ? $this->invalidJsonResponse()
                 : TaskEffortRequestValidator::errorResponse($e);
         }
 
         $prompt       = trim((string) ($body['prompt'] ?? ''));
-        $agentId      = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
         $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
@@ -498,7 +515,7 @@ final class TaskController
                     type: 'string',
                     nullable: true,
                     enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
                 ),
             ],
         ),

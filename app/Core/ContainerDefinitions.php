@@ -1299,6 +1299,8 @@ final class ContainerDefinitions
                     $c->get(ContinueTaskDispatcher::class),
                     $c->get(DecisionsRequestValidator::class),
                     $c->get(AnswerQuestionRequestValidator::class),
+                    $c->get(AgentServiceInterface::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -1349,6 +1351,7 @@ final class ContainerDefinitions
                 return new ContinueTaskDispatcher(
                     $c->get(TaskServiceInterface::class),
                     $c->get(TaskMediaCapabilityService::class),
+                    $c->get(EffortService::class),
                 );
             },
 
@@ -1561,6 +1564,7 @@ final class ContainerDefinitions
                     $c->get(ApiKeyCallbackRecorder::class),
                     $c->get(SsrfGuard::class),
                     $c->get(Config::class),
+                    $c->get(EffortService::class),
                 );
             },
 

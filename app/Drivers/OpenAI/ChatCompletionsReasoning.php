@@ -71,8 +71,11 @@ final class ChatCompletionsReasoning
             return $effort;
         }
 
-        // Tools on a GPT-5.4+ model are only accepted at `none`, and the
-        // model's own default is `medium` — so silence is a 400 too.
+        // Tools on a GPT-5.4+ model are only accepted at `none`, and from
+        // GPT-5.5 on the model's own default is `medium` — so silence is a
+        // 400 too. GPT-5.4 and GPT-5.2 default to `none`, and the escape
+        // hatch is a no-op there. A model whose tools need the Responses
+        // API is refused either way.
         if ($request->tools !== [] && ModelFamily::openAIRequiresNoneEffortForTools($this->model)) {
             return $levels[EffortLevel::None->value] ?? null;
         }

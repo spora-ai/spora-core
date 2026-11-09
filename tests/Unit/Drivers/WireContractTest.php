@@ -255,9 +255,9 @@ test('the Chat Completions body of a reasoning model carries exactly the documen
         ->and($withoutTools['reasoning_effort'])->toBe('high');
 
     // From GPT-5.4 on, Chat Completions rejects tools at any effort other
-    // than `none`, and the model's own default is `medium`, so silence is
-    // a 400 too. Without the tools there is nothing to reject, so nothing
-    // is sent and the model decides.
+    // than `none`, and from GPT-5.5 on the model's own default is `medium`,
+    // so silence is a 400 too. Without the tools there is nothing to
+    // reject, so nothing is sent and the model decides.
     $toolsWithoutEffort = wireContractChatBody('gpt-5.5', wireContractRequest(null));
     $noToolsWithoutEffort = wireContractChatBody('gpt-5.5', wireContractRequest(null, []));
 

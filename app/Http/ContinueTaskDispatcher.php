@@ -6,6 +6,8 @@ namespace Spora\Http;
 
 use InvalidArgumentException;
 use Spora\Http\Exceptions\EffortValidationException;
+use Spora\Models\Agent;
+use Spora\Services\EffortService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityInterface;
@@ -29,6 +31,7 @@ final class ContinueTaskDispatcher
     public function __construct(
         private readonly TaskServiceInterface $taskService,
         private readonly TaskMediaCapabilityInterface $mediaCapability,
+        private readonly EffortService $effortService,
     ) {}
 
     /**
@@ -38,22 +41,22 @@ final class ContinueTaskDispatcher
     {
         try {
             $validation = $this->validateBody($body);
+
+            if ($validation['result'] !== null) {
+                return $validation['result'];
+            }
+
+            return $this->dispatch(
+                $taskId,
+                $userId,
+                $validation['prompt'],
+                $validation['additionalSteps'],
+                $validation['mediaIds'],
+                $validation['effort'],
+            );
         } catch (EffortValidationException $e) {
             return TaskEffortRequestValidator::errorResponse($e);
         }
-
-        if ($validation['result'] !== null) {
-            return $validation['result'];
-        }
-
-        return $this->dispatch(
-            $taskId,
-            $userId,
-            $validation['prompt'],
-            $validation['additionalSteps'],
-            $validation['mediaIds'],
-            $validation['effort'],
-        );
     }
 
     /**
@@ -103,6 +106,9 @@ final class ContinueTaskDispatcher
         ];
     }
 
+    /**
+     * @throws EffortValidationException  When the task's agent does not offer the effort
+     */
     private function dispatch(
         int $taskId,
         int $userId,
@@ -115,6 +121,10 @@ final class ContinueTaskDispatcher
         if ($existing === null) {
             return $this->notFoundResponse();
         }
+
+        // The task is the caller's, so the agent it belongs to is the one
+        // the effort has to be checked against.
+        $this->effortService->assertLevel($effort, Agent::find((int) $existing['agent_id']));
 
         return $this->dispatchWithMediaCheck(
             $existing['agent_id'],

@@ -9,6 +9,7 @@ use Psr\Log\NullLogger;
 use Spora\Agents\Orchestrator;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Core\SecurityManager;
+use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Http\AnswerQuestionRequestValidator;
@@ -198,6 +199,52 @@ test('a continued task with an unknown effort level is refused with 422', functi
     expect($payload['error']['code'])->toBe('INVALID_EFFORT');
 });
 
+test('an effort the agent\'s driver does not offer is refused with 422', function (): void {
+    [$controller, , $agentId] = effortHttpController(null, AnthropicCompatibleDriver::class);
+
+    $response = $controller->store(effortJsonRequest([
+        'agent_id' => $agentId,
+        'prompt' => 'hello',
+        'effort' => 'none',
+    ]));
+
+    expect($response->getStatusCode())->toBe(422);
+
+    $payload = json_decode($response->getContent(), true);
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED')
+        ->and($payload['error']['message'])->toContain('Supported levels: low, medium, high, xhigh, max');
+});
+
+test('a continued task with an effort the driver does not offer is refused with 422', function (): void {
+    [$controller, , $agentId] = effortHttpController(null, AnthropicCompatibleDriver::class);
+
+    $controller->store(effortJsonRequest([
+        'agent_id' => $agentId,
+        'prompt' => 'hello',
+    ]));
+
+    $task = Task::query()->orderByDesc('id')->first();
+    Task::where('id', $task?->id)->update(['status' => 'COMPLETED']);
+
+    $request = Request::create(
+        '/api/v1/tasks/' . $task?->id . '/continue',
+        'POST',
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json'],
+        json_encode(['prompt' => 'again', 'effort' => 'none']),
+    );
+    $request->attributes->set('taskId', (int) $task?->id);
+
+    $response = $controller->continue($request);
+
+    expect($response->getStatusCode())->toBe(422);
+
+    $payload = json_decode($response->getContent(), true);
+    expect($payload['error']['code'])->toBe('EFFORT_LEVEL_UNSUPPORTED');
+});
+
 /**
  * @param array<string, mixed> $body
  */
@@ -220,7 +267,7 @@ function effortJsonRequest(array $body): Request
  *
  * @return array{0: TaskController, 1: int, 2: int} the controller, the user id and the agent id
  */
-function effortHttpController(?string $configuredEffort): array
+function effortHttpController(?string $configuredEffort, string $driverClass = OpenAICompatibleDriver::class): array
 {
     $authService = bootAuthLayer();
     $userId = bootAuth($authService);
@@ -237,7 +284,7 @@ function effortHttpController(?string $configuredEffort): array
     $config = LLMDriverConfiguration::create([
         'principal_id' => null,
         'name' => 'Effort Http Config',
-        'driver_class' => OpenAICompatibleDriver::class,
+        'driver_class' => $driverClass,
         'settings' => json_encode($settings),
         'is_global' => true,
         'is_default' => true,
@@ -252,7 +299,7 @@ function effortHttpController(?string $configuredEffort): array
     ]);
 
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
-    $llmConfigService = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+    $llmConfigService = new LLMConfigService($security, [OpenAICompatibleDriver::class, $driverClass]);
     $driverFactory = new DriverFactory(new NullLogger(), $llmConfigService, 60);
 
     $orchestrator = new Orchestrator(
@@ -279,9 +326,11 @@ function effortHttpController(?string $configuredEffort): array
             $authService,
             $taskService,
             $mediaCapability,
-            new ContinueTaskDispatcher($taskService, $mediaCapability),
+            new ContinueTaskDispatcher($taskService, $mediaCapability, makeEffortService()),
             new DecisionsRequestValidator($taskService),
             new AnswerQuestionRequestValidator(new PrincipalResolver()),
+            makeAgentService(),
+            makeEffortService(),
         ),
         $userId,
         (int) $agent->id,

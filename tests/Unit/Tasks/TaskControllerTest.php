@@ -32,9 +32,11 @@ function makeTaskController(?TaskServiceInterface $taskService = null): array
         $authService,
         $taskService,
         $mediaCapability,
-        new ContinueTaskDispatcher($taskService, $mediaCapability),
+        new ContinueTaskDispatcher($taskService, $mediaCapability, makeEffortService()),
         new DecisionsRequestValidator($taskService),
         new Spora\Http\AnswerQuestionRequestValidator(new Spora\Services\PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
     $authMiddleware = new Spora\Http\Middleware\AuthMiddleware($authService);
     $csrfService = new Spora\Security\CsrfTokenService();

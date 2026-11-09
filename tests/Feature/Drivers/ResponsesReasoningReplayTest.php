@@ -12,10 +12,10 @@ use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
  * A reasoning item is opaque: the provider decrypts `encrypted_content`
- * to restore the chain of thought. It has to survive the round trip
- * through `task_history` byte-identical, or the chain breaks on the next
- * turn — silently, because the API accepts a reasoning item without
- * one.
+ * to restore the chain of thought. The encrypted content has to survive
+ * the round trip through `task_history` byte-identical, or the chain
+ * breaks on the next turn — silently, because the API accepts a
+ * reasoning item without one.
  */
 test('a reasoning item survives a round trip through task_history and is replayed byte-identical', function (): void {
     $expectedBlob = 'encrypted-blob-abc';
@@ -117,7 +117,13 @@ test('a reasoning item survives a round trip through task_history and is replaye
     expect($captured)->not->toBeNull();
 
     $items = $captured['input'];
-    expect($items[0])->toBe([
+
+    // `toEqual()`, not `toBe()`: the row came back out of a native `json`
+    // column, and MySQL normalises an object by sorting its keys — so the
+    // key order here is the engine's, not the provider's. A JSON object has
+    // no order; the content has to survive the round trip, the sequence the
+    // column happens to store it in does not.
+    expect($items[0])->toEqual([
         'type' => 'reasoning',
         'id' => 'rs_abc',
         'summary' => [['type' => 'summary_text', 'text' => 'Weighing the options.']],

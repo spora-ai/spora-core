@@ -24,9 +24,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class TaskEffortRequestValidator
 {
-    /** The error code an unusable effort is answered with. */
-    public const ERROR_CODE = 'INVALID_EFFORT';
-
     /**
      * @param  array<string, mixed> $body
      * @return string|null null when the body names no effort at all, '' when the
@@ -42,7 +39,10 @@ final class TaskEffortRequestValidator
         }
 
         if (!is_string($value)) {
-            throw new EffortValidationException('effort must be a string.');
+            throw new EffortValidationException(
+                'effort must be a string.',
+                EffortValidationException::CODE_MALFORMED,
+            );
         }
 
         if ($value === '') {
@@ -52,6 +52,7 @@ final class TaskEffortRequestValidator
         if (EffortLevel::tryFrom($value) === null) {
             throw new EffortValidationException(
                 sprintf('effort must be one of: %s.', implode(', ', self::levels())),
+                EffortValidationException::CODE_MALFORMED,
             );
         }
 
@@ -65,7 +66,7 @@ final class TaskEffortRequestValidator
     public static function errorResponse(EffortValidationException $e): JsonResponse
     {
         return new JsonResponse(
-            ['error' => ['code' => self::ERROR_CODE, 'message' => $e->getMessage()]],
+            ['error' => ['code' => $e->errorCode(), 'message' => $e->getMessage()]],
             Response::HTTP_UNPROCESSABLE_ENTITY,
         );
     }

@@ -23,15 +23,16 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  *
  * The Chat Completions driver cannot run a reasoning model that calls
  * tools: from GPT-5.4 the API rejects tools at any effort other than
- * `none`, and the model's own default is `medium`, so silence is a 400
- * too. The Responses API is the endpoint where a reasoning model does
- * both.
+ * `none`, and from GPT-5.5 on silence is a 400 too, because the
+ * model's own default is `medium`. The GPT-6 models that require this
+ * endpoint cannot call tools over Chat Completions at all. The
+ * Responses API is where a reasoning model does both.
  */
 #[ToolSetting(key: 'api_key', label: 'API Key', type: 'password', description: 'API key for the OpenAI Responses endpoint. Leave empty for local models.', required: false)]
 #[ToolSetting(key: 'base_url', label: 'Base URL', type: 'text', description: 'Base URL of the API endpoint (e.g. https://api.openai.com/v1).', required: false, default: 'https://api.openai.com/v1')]
 #[ToolSetting(key: 'model', label: 'Model', type: 'text', description: 'Model identifier (e.g. gpt-6-astra, gpt-6.1-sol).', required: false, default: 'gpt-6-astra')]
 #[ToolSetting(key: 'effort', label: 'Effort', type: 'select', default: '', description: 'Default reasoning effort. Empty = the model default (nothing is sent).', options: ['' => 'Model default', 'none' => 'None', 'minimal' => 'Minimal', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High', 'xhigh' => 'xHigh', 'max' => 'Max'])]
-#[ToolSetting(key: 'store', label: 'Store responses', type: 'toggle', default: false, description: "Store the response on the provider's servers — OpenAI retains it for at least 30 days. When off, Spora replays the encrypted reasoning itself and the provider keeps nothing.")]
+#[ToolSetting(key: 'store', label: 'Store responses', type: 'toggle', default: false, description: "Store the response on the provider's servers as a retrievable object — OpenAI keeps it for at least 30 days. When off, Spora replays the encrypted reasoning itself; the response is not stored as a retrievable object, but prompts and responses still go into OpenAI's abuse-monitoring logs (up to 30 days) unless Zero Data Retention or Modified Abuse Monitoring is approved.")]
 #[ToolSetting(key: 'timeout', label: 'Timeout (seconds)', type: 'text', description: 'HTTP timeout per request. Increase for slow models (e.g. local Ollama).', required: false, default: '300')]
 final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements DriverOptionsAwareInterface
 {

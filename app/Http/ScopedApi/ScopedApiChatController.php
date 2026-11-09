@@ -18,6 +18,7 @@ use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
 use Spora\Services\ApiKeys\ApiKeyReach;
+use Spora\Services\EffortService;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -52,6 +53,7 @@ final class ScopedApiChatController
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
         private readonly ScopedApiChatBody $body,
+        private readonly EffortService $effortService,
     ) {}
 
     #[OA\Get(summary: 'List the chats this key may reach')]
@@ -105,7 +107,7 @@ final class ScopedApiChatController
                 type: 'string',
                 nullable: true,
                 enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
             ),
         ],
     ))]
@@ -221,7 +223,7 @@ final class ScopedApiChatController
                 type: 'string',
                 nullable: true,
                 enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
-                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
             ),
         ],
     ))]
@@ -266,7 +268,8 @@ final class ScopedApiChatController
      *
      * @param array<string, mixed> $body
      * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
-     * @throws EffortValidationException  When the body names an effort nobody knows
+     * @throws EffortValidationException  When the body names an effort nobody knows,
+     *                                   or one the agent's driver does not offer
      */
     private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
     {
@@ -283,6 +286,8 @@ final class ScopedApiChatController
         }
 
         $effort = TaskEffortRequestValidator::parse($body);
+
+        $this->effortService->assertLevel($effort, $agent);
 
         return $this->startValues($body, $agent, $effort);
     }
@@ -356,7 +361,8 @@ final class ScopedApiChatController
     /**
      * @param array<string, mixed> $body
      * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
-     * @throws EffortValidationException  When the body names an effort nobody knows
+     * @throws EffortValidationException  When the body names an effort nobody knows,
+     *                                   or one the agent's driver does not offer
      */
     private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
     {
@@ -373,6 +379,10 @@ final class ScopedApiChatController
         }
 
         $effort = TaskEffortRequestValidator::parse($body);
+
+        // The chat is inside the key's reach, so the agent it belongs to is
+        // the one the effort has to be checked against.
+        $this->effortService->assertLevel($effort, Agent::find((int) $task->agent_id));
 
         return [
             'text' => $text,

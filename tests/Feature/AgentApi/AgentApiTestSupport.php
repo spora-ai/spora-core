@@ -19,6 +19,7 @@ use Spora\Auth\AuthService;
 use Spora\Core\Config;
 use Spora\Core\ContainerDefinitions;
 use Spora\Drivers\DriverFactory;
+use Spora\Drivers\OpenAICompatibleDriver;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Models\Agent;
@@ -27,6 +28,7 @@ use Spora\Models\ApiKey;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\ApiKeys\ApiKeyCallbackDispatcher;
 use Spora\Services\ApiKeys\ApiKeyChatProjection;
+use Spora\Services\EffortService;
 use Spora\Services\GroupService;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\PrincipalResolver;
@@ -93,6 +95,11 @@ final class AgentApiTestSupport
         $container->set(HttpClientInterface::class, $http ?? new RecordingHttpClient());
         $container->set(WorkerRuntimeMode::class, WorkerRuntimeMode::Server);
 
+        // The effort capability is read from the *configuration's* driver,
+        // not from the scripted one, so it needs a driver factory that can
+        // build the real thing.
+        $container->set(EffortService::class, makeEffortService());
+
         // The container's own orchestrator builds its tool list from
         // `InstalledToolClasses`, which reflects over the production
         // `app/Tools` registry — the stub tools a test scripts with are not
@@ -136,13 +143,13 @@ final class AgentApiTestSupport
      *
      * @return array{userId: int, principalId: int, agentId: int}
      */
-    public static function seedAgent(string $suffix = 'a'): array
+    public static function seedAgent(string $suffix = 'a', string $driverClass = OpenAICompatibleDriver::class): array
     {
         $auth = bootAuthLayer();
         $userId = $auth->register("agentapi-{$suffix}@example.com", 'Password1!', "AgentApi {$suffix}");
 
         $principalId = createUserPrincipalPublic($userId);
-        $llm = self::llmConfig($suffix);
+        $llm = self::llmConfig($suffix, $driverClass);
 
         Agent::create([
             'principal_id' => $principalId,
@@ -163,11 +170,11 @@ final class AgentApiTestSupport
         return ['userId' => $userId, 'principalId' => $principalId, 'agentId' => (int) $agent->id];
     }
 
-    public static function llmConfig(string $suffix = 'a'): LLMDriverConfiguration
+    public static function llmConfig(string $suffix = 'a', string $driverClass = OpenAICompatibleDriver::class): LLMDriverConfiguration
     {
         return createTestGlobalConfig(
             "AgentApi LLM {$suffix}",
-            \Spora\Drivers\OpenAICompatibleDriver::class,
+            $driverClass,
             ['api_key' => 'test'],
             true,
         );
@@ -222,7 +229,7 @@ final class AgentApiTestSupport
      *
      * @return array{userId: int, groupId: int, principalId: int, agentIds: list<int>}
      */
-    public static function seedGroup(string $suffix = 'g', int $agentCount = 1, ?int $ownerUserId = null): array
+    public static function seedGroup(string $suffix = 'g', int $agentCount = 1, ?int $ownerUserId = null, string $driverClass = OpenAICompatibleDriver::class): array
     {
         $auth = bootAuthLayer();
         static $seq = 0;
@@ -248,7 +255,7 @@ final class AgentApiTestSupport
         $principalId = $principal === null ? 0 : (int) $principal->id;
 
         $agentIds = [];
-        $llm = self::llmConfig($suffix);
+        $llm = self::llmConfig($suffix, $driverClass);
 
         for ($i = 0; $i < $agentCount; $i++) {
             $agent = Agent::create([

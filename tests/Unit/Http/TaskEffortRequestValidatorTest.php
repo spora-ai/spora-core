@@ -41,6 +41,8 @@ it('answers an unusable effort with a 422', function (): void {
     try {
         TaskEffortRequestValidator::parse(['effort' => 'turbo']);
     } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('INVALID_EFFORT');
+
         $response = TaskEffortRequestValidator::errorResponse($e);
 
         expect($response->getStatusCode())->toBe(422);

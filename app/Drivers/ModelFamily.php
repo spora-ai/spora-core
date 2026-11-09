@@ -36,12 +36,20 @@ final class ModelFamily
      * Whether the model only accepts tool calls at `reasoning_effort: none`.
      *
      * From GPT-5.4 on, Chat Completions rejects a request that carries
-     * tools and an effort other than `none` — and the model's own default
-     * is `medium`, so silence is a 400 too. The escape hatch has to be
-     * sent explicitly.
+     * tools and an effort other than `none`, so the escape hatch has to
+     * be sent explicitly.
+     *
+     * The generation does not share one default: GPT-5.4 and GPT-5.2
+     * default to `none`, so there the escape hatch is a no-op, while
+     * from GPT-5.5 on the model's own default is `medium` and silence
+     * is a 400 as well.
      *
      * The o-series predates the restriction and does not accept `none`
      * at all, so the rule is scoped to the GPT-5.4+ generation.
+     *
+     * The escape hatch is no way around the endpoint: the GPT-6 models
+     * that require the Responses API cannot call tools over Chat
+     * Completions at all, and are refused whatever the effort says.
      */
     public static function openAIRequiresNoneEffortForTools(string $model): bool
     {

@@ -9,6 +9,7 @@ use Spora\Drivers\EffortAwareDriverInterface;
 use Spora\Drivers\Exceptions\DriverClassNotFoundException;
 use Spora\Drivers\Exceptions\LLMConfigDecryptFailedException;
 use Spora\Drivers\LLMDriverInterface;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Tools\ToolSettingSchema;
@@ -74,6 +75,68 @@ final class EffortService
         }
 
         return $driver->effortLevels();
+    }
+
+    /**
+     * The canonical levels the agent's effective driver can express.
+     *
+     * The same resolution {@see self::describe()} uses, so the levels a
+     * request is refused against are the levels the client was told about.
+     *
+     * @return list<string>
+     */
+    public function declaredLevels(Agent $agent): array
+    {
+        $config = $this->preferences->getEffectiveConfigForAgent($agent);
+
+        if ($config === null) {
+            return [];
+        }
+
+        return array_keys($this->supportedLevels($config));
+    }
+
+    /**
+     * Refuse an effort the agent's driver does not offer.
+     *
+     * A level the driver cannot express would be dropped on the way to the
+     * provider, and the request would run at the model's own default
+     * instead of the level the caller asked for. The API tells the client
+     * which levels the driver offers, so a level outside that set is
+     * refused here rather than silently downgraded.
+     *
+     * A level the driver *does* offer is not checked any further: the
+     * provider validates the level against the model it is talking to.
+     *
+     * A null agent is not an answer: the caller could not resolve the
+     * agent the request is for, and the request is refused for that
+     * reason further up.
+     *
+     * @throws EffortValidationException
+     */
+    public function assertLevel(?string $level, ?Agent $agent): void
+    {
+        if ($level === null || $level === '' || $agent === null) {
+            return;
+        }
+
+        $declared = $this->declaredLevels($agent);
+
+        if (in_array($level, $declared, true)) {
+            return;
+        }
+
+        if ($declared === []) {
+            throw new EffortValidationException(
+                sprintf('effort "%s" is not offered by this agent\'s LLM driver: it cannot express a reasoning effort.', $level),
+                EffortValidationException::CODE_UNSUPPORTED,
+            );
+        }
+
+        throw new EffortValidationException(
+            sprintf('effort "%s" is not offered by this agent\'s LLM driver. Supported levels: %s.', $level, implode(', ', $declared)),
+            EffortValidationException::CODE_UNSUPPORTED,
+        );
     }
 
     /**

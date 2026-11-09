@@ -89,14 +89,14 @@ test('the store toggle controls the store flag', function (): void {
     expect($captured['body']['store'])->toBeTrue();
 });
 
-test('an untouched store setting means the provider keeps nothing', function (): void {
+test('an untouched store setting means the response is not stored', function (): void {
     $captured = [];
     responsesDriverWithBody($captured)->complete(responsesSettingsRequest());
 
     expect($captured['body']['store'])->toBeFalse();
 });
 
-test('a settings blob without the store key means the provider keeps nothing', function (): void {
+test('a settings blob without the store key means the response is not stored', function (): void {
     $captured = [];
     $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
         $captured['body'] = json_decode($options['body'], true);

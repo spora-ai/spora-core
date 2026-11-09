@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-13-gbee7f27d"
+        "version": "0.32.0-22-gf954785e"
     },
     "servers": [
         {
@@ -2054,7 +2054,7 @@
                                         }
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -2328,7 +2328,7 @@
                                         }
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -3783,7 +3783,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -3928,7 +3928,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -4915,7 +4915,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -5058,7 +5058,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -5680,7 +5680,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
@@ -5823,7 +5823,7 @@
                                         "type": "integer"
                                     },
                                     "effort": {
-                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.",
+                                        "description": "The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent's LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.",
                                         "type": "string",
                                         "nullable": true,
                                         "enum": [
