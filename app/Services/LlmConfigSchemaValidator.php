@@ -120,7 +120,16 @@ final class LlmConfigSchemaValidator
             return null;
         }
 
-        $value = (string) $settings[$key];
+        return $this->valueError($field, (string) $settings[$key]);
+    }
+
+    /**
+     * The reason a value does not fit the field, or null.
+     *
+     * @param array<string, mixed> $field
+     */
+    private function valueError(array $field, string $value): ?string
+    {
         $validation = $field['validation'] ?? '';
 
         if ($validation !== '' && !preg_match($validation, $value)) {
@@ -129,8 +138,8 @@ final class LlmConfigSchemaValidator
 
         // A select's option list is the only description of what it
         // accepts, so a value outside it is refused here rather than
-        // reaching the provider. The empty string is skipped above:
-        // it is a legitimate option on most selects — the "model
+        // reaching the provider. The empty string never reaches this
+        // method: it is a legitimate option on most selects — the "model
         // default" one on the effort setting.
         $options = $field['options'] ?? [];
 

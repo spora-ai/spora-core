@@ -78,33 +78,12 @@ final class ResponsesResponseParser
         foreach ($items as $item) {
             $type = (string) ($item['type'] ?? '');
 
-            if ($type === 'message') {
-                $messageText = $this->messageText($item);
-                $text .= $messageText;
-                if ($messageText !== '') {
-                    // The history replays an assistant row from its
-                    // content blocks when it has any, so the text has to
-                    // be a block of its own — a reasoning block alone
-                    // would replace it.
-                    $contentBlocks[] = ContentBlock::text($messageText);
-                }
-                continue;
-            }
-
-            if ($type === 'reasoning') {
-                $block = $this->reasoningBlock($item);
-                if ($block !== null) {
-                    $contentBlocks[] = $block;
-                }
-                continue;
-            }
-
-            if ($type === 'function_call') {
-                $call = $this->toolCall($item, $toolNames);
-                if ($call !== null) {
-                    $toolCalls[] = $call;
-                }
-            }
+            match ($type) {
+                'message' => $this->appendMessage($item, $text, $contentBlocks),
+                'reasoning' => $this->appendReasoning($item, $contentBlocks),
+                'function_call' => $this->appendToolCall($item, $toolNames, $toolCalls),
+                default => null,
+            };
         }
 
         return [
@@ -112,6 +91,52 @@ final class ResponsesResponseParser
             'toolCalls' => $toolCalls,
             'contentBlocks' => $contentBlocks,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param list<ContentBlock>    $contentBlocks
+     */
+    private function appendMessage(array $item, string &$text, array &$contentBlocks): void
+    {
+        $messageText = $this->messageText($item);
+        $text .= $messageText;
+
+        if ($messageText === '') {
+            return;
+        }
+
+        // The history replays an assistant row from its content blocks
+        // when it has any, so the text has to be a block of its own — a
+        // reasoning block alone would replace it.
+        $contentBlocks[] = ContentBlock::text($messageText);
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param list<ContentBlock>    $contentBlocks
+     */
+    private function appendReasoning(array $item, array &$contentBlocks): void
+    {
+        $block = $this->reasoningBlock($item);
+
+        if ($block !== null) {
+            $contentBlocks[] = $block;
+        }
+    }
+
+    /**
+     * @param array<string, mixed>  $item
+     * @param array<string, string> $toolNames
+     * @param list<ToolCall>        $toolCalls
+     */
+    private function appendToolCall(array $item, array $toolNames, array &$toolCalls): void
+    {
+        $call = $this->toolCall($item, $toolNames);
+
+        if ($call !== null) {
+            $toolCalls[] = $call;
+        }
     }
 
     /**
