@@ -510,6 +510,12 @@ final class TickPhaseRunner
                 'exception' => $notificationError->getMessage(),
             ]);
         }
+
+        // A child task that failed still counts as "terminal" for the
+        // parent's wait — the parent will resume with the failure message
+        // as the tool result. Without this the parent stays
+        // AWAITING_SUB_AGENTS after its last child is gone.
+        $this->maybeResumeParentForChild($taskId);
     }
 
     /**
