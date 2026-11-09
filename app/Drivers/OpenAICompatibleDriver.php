@@ -8,6 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
+use Spora\Drivers\OpenAI\ChatCompletionsContent;
+use Spora\Drivers\OpenAI\ChatCompletionsReasoning;
 use Spora\Drivers\Utilities\LLMContentParser;
 use Spora\Drivers\Utilities\ThinkingTagExtractor;
 use Spora\Drivers\ValueObjects\ContentBlock;
@@ -28,6 +30,8 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
 {
     private const PROVIDER_KEY = 'openai_compatible';
 
+    private readonly ChatCompletionsReasoning $reasoning;
+
     public function __construct(
         string              $apiKey,
         string              $model,
@@ -38,6 +42,8 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
         ?bool               $supportsImageInput = null,
     ) {
         parent::__construct($apiKey, $model, $baseUrl, $httpClient, $logger, $timeout, $supportsImageInput);
+
+        $this->reasoning = new ChatCompletionsReasoning($model);
     }
 
     public function getProviderName(): string
@@ -120,20 +126,15 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildMessages(LLMRequest $request): array
     {
-        // `developer` replaced `system` from o1 onwards; older models
-        // reject the role outright, so it is only used for the
-        // reasoning families.
-        $systemRole = ModelFamily::isOpenAIReasoningModel($this->model) ? 'developer' : 'system';
-
         return array_merge(
-            [['role' => $systemRole, 'content' => $request->systemPrompt]],
+            [['role' => $this->reasoning->systemRole(), 'content' => $request->systemPrompt]],
             array_map(
                 static function (array $msg): array {
                     $content = $msg['content'] ?? null;
                     if ($content === null || is_string($content)) {
                         return $msg;
                     }
-                    $msg['content'] = self::normalizeContent($content);
+                    $msg['content'] = ChatCompletionsContent::normalize($content);
                     return $msg;
                 },
                 $request->messages,
@@ -147,51 +148,25 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
      */
     private function buildRequestBody(LLMRequest $request, array $messages): array
     {
-        $body = [
-            'model'    => $this->model,
-            'messages' => $messages,
-        ];
-
-        if (ModelFamily::isOpenAIReasoningModel($this->model)) {
-            // Reasoning models answer `400 Unsupported parameter:
-            // 'max_tokens'` and reject the sampling parameters outright.
-            $body['max_completion_tokens'] = $request->maxTokens;
-        } else {
-            $body['max_tokens']  = $request->maxTokens;
-            $body['temperature'] = $request->temperature;
-        }
+        $body = array_merge(
+            [
+                'model'    => $this->model,
+                'messages' => $messages,
+            ],
+            $this->reasoning->tokenParameters($request),
+        );
 
         if ($request->tools !== []) {
             $body['tools'] = $request->tools;
             $body['tool_choice'] = 'auto';
         }
 
-        $effort = $this->resolveReasoningEffort($request);
+        $effort = $this->reasoning->effort($request, $this->effortLevels());
         if ($effort !== null) {
             $body['reasoning_effort'] = $effort;
         }
 
         return $body;
-    }
-
-    /**
-     * The `reasoning_effort` value for the request, or null when the
-     * request carries none and none is required.
-     */
-    private function resolveReasoningEffort(LLMRequest $request): ?string
-    {
-        $effort = $this->resolveEffort($request->effort);
-        if ($effort !== null) {
-            return $effort;
-        }
-
-        // Tools on a GPT-5.4+ model are only accepted at `none`, and the
-        // model's own default is `medium` — so silence is a 400 too.
-        if ($request->tools !== [] && ModelFamily::openAIRequiresNoneEffortForTools($this->model)) {
-            return $this->effortLevels()[EffortLevel::None->value];
-        }
-
-        return null;
     }
 
     /**
@@ -392,70 +367,5 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     public static function getDisplayName(): string
     {
         return 'OpenAI Compatible';
-    }
-
-    /**
-     * Translate a message's `content` to OpenAI's wire shape. Strings
-     * pass through; ContentBlock lists become OpenAI's content-part
-     * format: `{type:"text", text}` and
-     * `{type:"image_url", image_url:{url:"data:..." | <url>}}`.
-     */
-    private static function normalizeContent(mixed $content): mixed
-    {
-        if ($content === null || is_string($content)) {
-            return $content;
-        }
-        if (!is_array($content)) {
-            return (string) $content;
-        }
-        $parts = [];
-        foreach ($content as $b) {
-            if (!is_array($b)) {
-                continue;
-            }
-            $part = self::contentBlockToPart($b);
-            if ($part !== null) {
-                $parts[] = $part;
-            }
-        }
-        return $parts === [] ? '' : $parts;
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private static function contentBlockToPart(array $block): ?array
-    {
-        $type = $block['type'] ?? null;
-        return match ($type) {
-            ContentBlock::TYPE_TEXT,
-            ContentBlock::TYPE_THINKING => ['type' => 'text', 'text' => (string) ($block['text'] ?? '')],
-            ContentBlock::TYPE_REDACTED_THINKING => ['type' => 'text', 'text' => '[Redacted Thinking]'],
-            ContentBlock::TYPE_IMAGE => self::imageBlockToPart($block),
-            default => null,
-        };
-    }
-
-    /**
-     * @param array<string, mixed> $block
-     * @return array<string, mixed>|null
-     */
-    private static function imageBlockToPart(array $block): ?array
-    {
-        if (isset($block['base64']) && is_string($block['base64']) && $block['base64'] !== '' && isset($block['mediaType'])) {
-            return [
-                'type'     => 'image_url',
-                'image_url' => ['url' => 'data:' . $block['mediaType'] . ';base64,' . $block['base64']],
-            ];
-        }
-        if (isset($block['url']) && is_string($block['url']) && $block['url'] !== '') {
-            return [
-                'type'     => 'image_url',
-                'image_url' => ['url' => $block['url']],
-            ];
-        }
-
-        return null;
     }
 }

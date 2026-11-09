@@ -29,17 +29,13 @@ final class TaskEffortRequestValidator
 
     /**
      * @param  array<string, mixed> $body
-     * @return string|null null when the key is absent, '' when the message
-     *                     explicitly asks for the model default, otherwise the level
+     * @return string|null null when the body names no effort at all, '' when the
+     *                     message explicitly asks for the model default, otherwise the level
      * @throws EffortValidationException  When the value is not a known level
      */
     public static function parse(array $body): ?string
     {
-        if (!array_key_exists('effort', $body)) {
-            return null;
-        }
-
-        $value = $body['effort'];
+        $value = $body['effort'] ?? null;
 
         if ($value === null) {
             return null;

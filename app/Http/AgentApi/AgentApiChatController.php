@@ -114,9 +114,13 @@ final class AgentApiChatController
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
-        // `prepareStart` answers the error, so both rejections leave by the
-        // same door and the happy path below reads as the path.
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($body, $context);
+        // The unreadable body and `prepareStart`'s own refusal leave by the
+        // same door, so the happy path below reads as the path.
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($body, $context);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
@@ -150,6 +154,7 @@ final class AgentApiChatController
      *
      * @param array<string, mixed> $body
      * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function prepareStart(array $body, ApiKeyContext $context): JsonResponse|array
     {
@@ -166,11 +171,7 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', $problem);
         }
 
-        try {
-            $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
-        }
+        $effort = TaskEffortRequestValidator::parse($body);
 
         $mediaIds = $this->readableMediaIds($body, $context);
 
@@ -285,18 +286,30 @@ final class AgentApiChatController
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
 
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($body, $context);
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($body, $context);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
+        return $this->queueContinue($context, $chatId, $prepared);
+    }
+
+    /**
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
+     */
+    private function queueContinue(ApiKeyContext $context, int $chatId, array $prepared): JsonResponse
+    {
         try {
             $task = $this->scope->continueChat(
                 $context,
                 $chatId,
                 $prepared['text'],
-                $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
+                $prepared['additionalSteps'],
                 $prepared['mediaIds'],
                 $prepared['effort'],
             );
@@ -309,7 +322,8 @@ final class AgentApiChatController
 
     /**
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, mediaIds: list<string>, effort: ?string}
+     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function prepareContinue(array $body, ApiKeyContext $context): JsonResponse|array
     {
@@ -319,11 +333,7 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
         }
 
-        try {
-            $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
-        }
+        $effort = TaskEffortRequestValidator::parse($body);
 
         $mediaIds = $this->readableMediaIds($body, $context);
 
@@ -331,7 +341,12 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
         }
 
-        return ['text' => $text, 'mediaIds' => $mediaIds, 'effort' => $effort];
+        return [
+            'text' => $text,
+            'additionalSteps' => $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
+            'mediaIds' => $mediaIds,
+            'effort' => $effort,
+        ];
     }
 
     /**

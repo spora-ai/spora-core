@@ -116,12 +116,25 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($context, $body);
+
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($context, $body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
+        return $this->queueChat($context, $prepared);
+    }
+
+    /**
+     * @param array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
+     */
+    private function queueChat(ApiKeyContext $context, array $prepared): JsonResponse
+    {
         $task = $this->start($context, $prepared);
 
         if ($task === null) {
@@ -219,12 +232,25 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($context, $chatId, $body);
+
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($context, $chatId, $body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
+        return $this->acceptContinue($context, $chatId, $prepared);
+    }
+
+    /**
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
+     */
+    private function acceptContinue(ApiKeyContext $context, int $chatId, array $prepared): JsonResponse
+    {
         $outcome = $this->continue($context, $chatId, $prepared);
 
         if ($outcome instanceof JsonResponse) {
@@ -240,6 +266,7 @@ final class ScopedApiChatController
      *
      * @param array<string, mixed> $body
      * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
     {
@@ -255,11 +282,7 @@ final class ScopedApiChatController
             return $problem;
         }
 
-        try {
-            $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
-        }
+        $effort = TaskEffortRequestValidator::parse($body);
 
         return $this->startValues($body, $agent, $effort);
     }
@@ -333,6 +356,7 @@ final class ScopedApiChatController
     /**
      * @param array<string, mixed> $body
      * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
     {
@@ -348,11 +372,7 @@ final class ScopedApiChatController
             return $task;
         }
 
-        try {
-            $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
-        }
+        $effort = TaskEffortRequestValidator::parse($body);
 
         return [
             'text' => $text,

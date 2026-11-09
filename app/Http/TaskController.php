@@ -117,17 +117,13 @@ final class TaskController
 
         try {
             $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        }
-
-        try {
             $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return TaskEffortRequestValidator::errorResponse($e);
+        } catch (JsonException | EffortValidationException $e) {
+            // An unreadable body and an unusable field are two different
+            // refusals; the exception says which one this is.
+            return $e instanceof JsonException
+                ? $this->invalidJsonResponse()
+                : TaskEffortRequestValidator::errorResponse($e);
         }
 
         $prompt       = trim((string) ($body['prompt'] ?? ''));

@@ -40,11 +40,42 @@ final class ResponsesResponseParser
     {
         $this->assertUsable($data);
 
+        $parsed = $this->parseOutputItems($this->outputItems($data), $toolNames);
+
+        $usage = Usage::fromProviderUsage(
+            is_array($data['usage'] ?? null) ? $data['usage'] : null,
+            'openai_responses',
+        );
+
+        return new LLMResponse(
+            content: $parsed['content'],
+            toolCalls: $parsed['toolCalls'],
+            inputTokens: $usage->inputTokens,
+            outputTokens: $usage->outputTokens,
+            completionId: (string) ($data['id'] ?? ''),
+            contentBlocks: $parsed['contentBlocks'],
+            usage: $usage,
+        );
+    }
+
+    /**
+     * The text, the tool calls and the content blocks the output items
+     * carry.
+     *
+     * A tool call carries no content of its own, so a response that holds
+     * only tool calls has no content rather than an empty one.
+     *
+     * @param list<array<string, mixed>> $items
+     * @param array<string, string> $toolNames
+     * @return array{content: ?string, toolCalls: list<ToolCall>, contentBlocks: list<ContentBlock>}
+     */
+    private function parseOutputItems(array $items, array $toolNames): array
+    {
         $text = '';
         $toolCalls = [];
         $contentBlocks = [];
 
-        foreach ($this->outputItems($data) as $item) {
+        foreach ($items as $item) {
             $type = (string) ($item['type'] ?? '');
 
             if ($type === 'message') {
@@ -76,20 +107,11 @@ final class ResponsesResponseParser
             }
         }
 
-        $usage = Usage::fromProviderUsage(
-            is_array($data['usage'] ?? null) ? $data['usage'] : null,
-            'openai_responses',
-        );
-
-        return new LLMResponse(
-            content: $toolCalls !== [] ? ($text !== '' ? $text : null) : $text,
-            toolCalls: $toolCalls,
-            inputTokens: $usage->inputTokens,
-            outputTokens: $usage->outputTokens,
-            completionId: (string) ($data['id'] ?? ''),
-            contentBlocks: $contentBlocks,
-            usage: $usage,
-        );
+        return [
+            'content' => $toolCalls !== [] && $text === '' ? null : $text,
+            'toolCalls' => $toolCalls,
+            'contentBlocks' => $contentBlocks,
+        ];
     }
 
     /**

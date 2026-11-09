@@ -36,7 +36,12 @@ final class ContinueTaskDispatcher
      */
     public function handleContinue(int $taskId, int $userId, array $body): JsonResponse
     {
-        $validation = $this->validateBody($body);
+        try {
+            $validation = $this->validateBody($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
+
         if ($validation['result'] !== null) {
             return $validation['result'];
         }
@@ -54,6 +59,7 @@ final class ContinueTaskDispatcher
     /**
      * @param array<string, mixed> $body
      * @return array{result: ?JsonResponse, prompt: ?string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows
      */
     private function validateBody(array $body): array
     {
@@ -86,17 +92,7 @@ final class ContinueTaskDispatcher
             ];
         }
 
-        try {
-            $effort = TaskEffortRequestValidator::parse($body);
-        } catch (EffortValidationException $e) {
-            return [
-                'result' => TaskEffortRequestValidator::errorResponse($e),
-                'prompt' => null,
-                'additionalSteps' => null,
-                'mediaIds' => [],
-                'effort' => null,
-            ];
-        }
+        $effort = TaskEffortRequestValidator::parse($body);
 
         return [
             'result' => null,

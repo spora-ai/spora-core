@@ -44,13 +44,7 @@ final class EffortService
         }
 
         $default = $this->defaultEffort($config);
-        $driver = $this->driverFor($config);
-
-        if (!$driver instanceof EffortAwareDriverInterface) {
-            return ['supported' => false, 'levels' => [], 'default' => $default];
-        }
-
-        $levels = $driver->effortLevels();
+        $levels = $this->supportedLevels($config);
 
         if ($levels === []) {
             return ['supported' => false, 'levels' => [], 'default' => $default];
@@ -61,6 +55,25 @@ final class EffortService
             'levels' => $this->labelled($config->driver_class, $levels),
             'default' => $default,
         ];
+    }
+
+    /**
+     * The levels the configuration's driver can express, or none.
+     *
+     * A driver that does not speak effort, and one that speaks it without
+     * naming a level, both leave the agent without a picker.
+     *
+     * @return array<string, string>
+     */
+    private function supportedLevels(LLMDriverConfiguration $config): array
+    {
+        $driver = $this->driverFor($config);
+
+        if (!$driver instanceof EffortAwareDriverInterface) {
+            return [];
+        }
+
+        return $driver->effortLevels();
     }
 
     /**

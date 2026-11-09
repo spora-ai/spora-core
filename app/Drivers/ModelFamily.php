@@ -18,26 +18,18 @@ final class ModelFamily
      * OpenAI's reasoning families.
      *
      * `gpt-5`, `gpt-5.1`, `gpt-6`, `gpt-6.1` and their variants, plus
-     * the o-series (`o1`, `o3`, `o4`). The `-chat-latest` ids are the
-     * non-reasoning ChatGPT Instant models and are excluded by name.
+     * the o-series (`o1`, `o3`, `o4`).
      */
     public static function isOpenAIReasoningModel(string $model): bool
     {
         $id = self::stripProviderPrefix($model);
 
-        if (str_contains($id, '-chat-')) {
+        if (self::isExcludedFromReasoning($id)) {
             return false;
         }
 
-        if (str_starts_with($id, 'gpt-oss')) {
-            return false;
-        }
-
-        if (preg_match('/^gpt-(5|6)(\.\d+)?(-|$)/', $id) === 1) {
-            return true;
-        }
-
-        return preg_match('/^o(1|3|4)(-|$)/', $id) === 1;
+        return preg_match('/^gpt-[56](\.\d+)?(-|$)/', $id) === 1
+            || preg_match('/^o[134](-|$)/', $id) === 1;
     }
 
     /**
@@ -178,6 +170,17 @@ final class ModelFamily
         }
 
         return [(int) $matches[1], (int) ($matches[2] ?? 0)];
+    }
+
+    /**
+     * The ids that name a reasoning family but are not one.
+     *
+     * The `-chat-latest` ids are the non-reasoning ChatGPT Instant models
+     * and `gpt-oss` is an open-weight model that answers without one.
+     */
+    private static function isExcludedFromReasoning(string $id): bool
+    {
+        return str_contains($id, '-chat-') || str_starts_with($id, 'gpt-oss');
     }
 
     /**

@@ -261,36 +261,51 @@ final class ResponsesRequestBuilder
      */
     private function isStrictNode(array $node): bool
     {
+        $types = $this->strictTypes($node);
+
+        if ($types === null) {
+            return false;
+        }
+
+        $items = $node['items'] ?? null;
+
+        return match (true) {
+            in_array('object', $types, true) => $this->isStrictObject($node),
+            in_array('array', $types, true) => is_array($items) && $this->isStrictNode($items),
+            default => true,
+        };
+    }
+
+    /**
+     * The types the node declares, or null when the node is not one strict
+     * mode can enforce.
+     *
+     * A keyword outside the strict set disqualifies the node as a whole, so
+     * it is refused here rather than by the caller.
+     *
+     * @param array<string, mixed> $node
+     * @return list<string>|null
+     */
+    private function strictTypes(array $node): ?array
+    {
         foreach (array_keys($node) as $keyword) {
             if (!in_array($keyword, self::STRICT_KEYWORDS, true)) {
-                return false;
+                return null;
             }
         }
 
         $type = $node['type'] ?? null;
-        if (is_array($type)) {
-            foreach ($type as $entry) {
-                if (!is_string($entry) || !in_array($entry, self::STRICT_TYPES, true)) {
-                    return false;
-                }
+        $entries = is_array($type) ? $type : [$type];
+
+        $types = [];
+        foreach ($entries as $entry) {
+            if (!is_string($entry) || !in_array($entry, self::STRICT_TYPES, true)) {
+                return null;
             }
-        } elseif (!is_string($type) || !in_array($type, self::STRICT_TYPES, true)) {
-            return false;
+            $types[] = $entry;
         }
 
-        $types = is_array($type) ? $type : [$type];
-
-        if (in_array('object', $types, true)) {
-            return $this->isStrictObject($node);
-        }
-
-        if (in_array('array', $types, true)) {
-            $items = $node['items'] ?? null;
-
-            return is_array($items) && $this->isStrictNode($items);
-        }
-
-        return true;
+        return $types;
     }
 
     /**
@@ -298,26 +313,22 @@ final class ResponsesRequestBuilder
      */
     private function isStrictObject(array $node): bool
     {
-        if (($node['additionalProperties'] ?? null) !== false) {
-            return false;
-        }
-
         $properties = $node['properties'] ?? null;
         $required = $node['required'] ?? null;
-        if (!is_array($properties) || !is_array($required)) {
+
+        if (($node['additionalProperties'] ?? null) !== false
+            || !is_array($properties)
+            || !is_array($required)
+        ) {
             return false;
         }
 
-        foreach ($properties as $name => $property) {
-            if (!in_array($name, $required, true)) {
-                return false;
-            }
-            if (!is_array($property) || !$this->isStrictNode($property)) {
-                return false;
-            }
-        }
-
-        return true;
+        return array_all(
+            $properties,
+            fn(mixed $property, mixed $name): bool => in_array($name, $required, true)
+                && is_array($property)
+                && $this->isStrictNode($property),
+        );
     }
 
     /**

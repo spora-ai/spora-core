@@ -91,30 +91,51 @@ final class LlmConfigSchemaValidator
     public function validateSettings(array $settings, array $schema): ?string
     {
         foreach ($schema as $field) {
-            $key = $field['key'];
-            $required = $field['required'] ?? false;
+            $error = $this->validateField($field, $settings);
 
-            if ($required && (! array_key_exists($key, $settings) || $settings[$key] === '')) {
-                return "Field '{$field['label']}' is required.";
+            if ($error !== null) {
+                return $error;
             }
+        }
 
-            if (array_key_exists($key, $settings) && $settings[$key] !== '') {
-                $value = (string) $settings[$key];
-                $validation = $field['validation'] ?? '';
-                if ($validation !== '' && !preg_match($validation, $value)) {
-                    return "Field '{$field['label']}' has an invalid value.";
-                }
+        return null;
+    }
 
-                // A select's option list is the only description of what it
-                // accepts, so a value outside it is refused here rather than
-                // reaching the provider. The empty string is skipped above:
-                // it is a legitimate option on most selects — the "model
-                // default" one on the effort setting.
-                $options = $field['options'] ?? [];
-                if (($field['type'] ?? '') === 'select' && $options !== [] && !array_key_exists($value, $options)) {
-                    return "Field '{$field['label']}' has an invalid value.";
-                }
-            }
+    /**
+     * The reason one field cannot be accepted, or null.
+     *
+     * @param array<string, mixed> $field
+     * @param array<string, mixed> $settings
+     */
+    private function validateField(array $field, array $settings): ?string
+    {
+        $key = $field['key'];
+        $required = $field['required'] ?? false;
+
+        if ($required && (! array_key_exists($key, $settings) || $settings[$key] === '')) {
+            return "Field '{$field['label']}' is required.";
+        }
+
+        if (!array_key_exists($key, $settings) || $settings[$key] === '') {
+            return null;
+        }
+
+        $value = (string) $settings[$key];
+        $validation = $field['validation'] ?? '';
+
+        if ($validation !== '' && !preg_match($validation, $value)) {
+            return "Field '{$field['label']}' has an invalid value.";
+        }
+
+        // A select's option list is the only description of what it
+        // accepts, so a value outside it is refused here rather than
+        // reaching the provider. The empty string is skipped above:
+        // it is a legitimate option on most selects — the "model
+        // default" one on the effort setting.
+        $options = $field['options'] ?? [];
+
+        if (($field['type'] ?? '') === 'select' && $options !== [] && !array_key_exists($value, $options)) {
+            return "Field '{$field['label']}' has an invalid value.";
         }
 
         return null;
