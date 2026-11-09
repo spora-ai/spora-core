@@ -312,7 +312,15 @@ final class WorkerQueueProcessor
         $stdoutExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stdout));
         $stderrExcerpt = $this->sanitizeExcerpt($this->truncateExcerpt($stderr));
 
-        $level = $exitCode === 0 ? 'info' : 'error';
+        // The status decides the level, not the exit code: a child that
+        // exits non-zero because the task is waiting for a human is not an
+        // error. `task:run` exits 1 for every task that did not reach
+        // COMPLETED, and a paused task is a quiescent outcome — the
+        // approval path re-queues it for a fresh child.
+        $finalStatus = $this->resolveFinalStatus($taskId);
+        $quiescent   = in_array($finalStatus, ['PENDING_APPROVAL', 'AWAITING_INPUT', 'AWAITING_SUB_AGENTS'], true);
+
+        $level = $exitCode === 0 || $quiescent ? 'info' : 'error';
         $this->logger->{$level}('child_exit', [
             'task_id'        => $taskId,
             'pid'            => $pid,
@@ -340,7 +348,7 @@ final class WorkerQueueProcessor
         $output->writeln(sprintf(
             '<info>Task %d finished with status: %s</info>',
             $taskId,
-            $this->resolveFinalStatus($taskId),
+            $finalStatus,
         ));
 
         unset(

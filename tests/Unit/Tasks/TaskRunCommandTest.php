@@ -15,6 +15,7 @@ use Spora\Core\SecurityManager;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\LLMDriverInterface;
 use Spora\Drivers\ValueObjects\LLMResponse;
+use Spora\Drivers\ValueObjects\ToolCall as DriverToolCall;
 use Spora\Models\Agent;
 use Spora\Models\AgentTool;
 use Spora\Models\LLMDriverConfiguration;
@@ -27,17 +28,13 @@ use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\ToolConfigService;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
-
-// Helpers
+use Tests\Fixtures\StubOutputTool;
 
 defined('SQLITE_MEMORY') || define('SQLITE_MEMORY', ':memory:');
 const PLUGINS_PATH = '/plugins';
 const TEST_PASSWORD_RUN = 'Password1!';
 const TEST_GLOBAL_CONFIG_NAME = 'Test Global Config';
 
-/**
- * Create a mock LLM driver that returns a text response.
- */
 function makeTextResponseDriver(string $content): LLMDriverInterface
 {
     $driver = Mockery::mock(LLMDriverInterface::class);
@@ -54,9 +51,6 @@ function makeTextResponseDriver(string $content): LLMDriverInterface
     return $driver;
 }
 
-/**
- * Create a mock LLM driver that throws.
- */
 function makeThrowingDriver(Throwable $e): LLMDriverInterface
 {
     $driver = Mockery::mock(LLMDriverInterface::class);
@@ -535,7 +529,6 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
             new OrchestratorConfig(),
         );
 
-        // Run one tick — task should complete.
         $orchestrator->tick($task->id);
         $task->refresh();
 
@@ -603,6 +596,124 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
         $task->refresh();
         expect($task->status)->toBe('FAILED');
     });
+
+    it('stops ticking when the task pauses for approval instead of spinning on it', function (): void {
+        // A task paused for approval is quiescent: tick() returns without
+        // changing anything. The worker must stop there — the approval
+        // path re-queues the task and the daemon picks it up with a fresh
+        // child. Looping over a paused task burns a core at 100% for as
+        // long as the task waits for a human.
+        $agent = Agent::create([
+            'principal_id' => createUserPrincipalPublic($this->userId),
+            'name'                 => 'ApprovalAgent',
+            'llm_driver_config_id' => $this->llmConfig->id,
+            'max_steps'            => 10,
+            'is_active'           => true,
+        ]);
+
+        $task = Task::create([
+            'agent_id'    => $agent->id,
+            'principal_id' => createUserPrincipalPublic($this->userId),
+            'trigger_user_id' => $this->userId,
+            'status'      => 'QUEUED',
+            'user_prompt' => 'Needs approval',
+            'max_steps'   => 10,
+            'step_count'  => 0,
+        ]);
+
+        // The agent must have the tool enabled, or the LLM's call names a
+        // tool the agent does not have.
+        AgentTool::insert([
+            'agent_id'   => $agent->id,
+            'tool_class' => StubOutputTool::class,
+            'tool_name'  => 'stub_output',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $db = new Database(
+            new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]),
+            new Spora\Plugins\PluginLoader([BASE_PATH . PLUGINS_PATH]),
+        );
+        $db->bootDatabaseConnectionOnly();
+
+        // The tool's only operation requires approval by default, so the
+        // first tick pauses the task instead of executing it.
+        $driver = Mockery::mock(LLMDriverInterface::class);
+        $driver->allows('complete')->andReturn(new LLMResponse(
+            content: null,
+            toolCalls: [new DriverToolCall('call_out', 'stub_output', ['key' => 'val'])],
+            inputTokens: 10,
+            outputTokens: 5,
+            completionId: 'cmp_1',
+        ));
+        $driver->allows('getProviderName')->andReturn('mock');
+        $driver->allows('getModelName')->andReturn('mock-model');
+
+        $factory = Mockery::mock(DriverFactory::class);
+        $factory->allows('makeFromAgent')->andReturn($driver);
+
+        $container = Mockery::mock(ContainerInterface::class);
+        $container->allows('get')->with(Config::class)->andReturn(new Config());
+        $container->allows('get')->with(Database::class)->andReturn($db);
+        $container->allows('get')->with(DriverFactory::class)->andReturn($factory);
+        $container->allows('get')->with('tool_instances')->andReturn([new StubOutputTool()]);
+        $container->allows('get')->with(Spora\Settings\SettingsRegistry::class)
+            ->andReturn(new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)));
+        $container->allows('get')->with(Spora\Settings\SettingsRepository::class)
+            ->andReturn(new Spora\Settings\SettingsRepository(
+                Mockery::mock(Spora\Core\SecurityManagerInterface::class),
+                new Spora\Settings\SettingsRegistry(new Spora\Core\Paths(BASE_PATH)),
+            ));
+        $container->allows('get')->with(NotificationService::class)
+            ->andReturn(Mockery::mock(NotificationService::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(ToolConfigService::class)->andReturnNull();
+        $container->allows('get')->with(LLMConfigService::class)->andReturn(
+            new LLMConfigService(Mockery::mock(Spora\Core\SecurityManagerInterface::class), []),
+        );
+        $container->allows('get')->with(MercurePublisherInterface::class)
+            ->andReturn(Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(LoggerInterface::class)
+            ->andReturn(Mockery::mock(LoggerInterface::class)->shouldIgnoreMissing());
+        $container->allows('get')->with(AgentServiceInterface::class)->andReturnNull();
+        $container->allows('get')->with(SubAgentServiceInterface::class)
+            ->andReturn(Mockery::mock(SubAgentServiceInterface::class)->shouldIgnoreMissing());
+
+        $mercure = Mockery::mock(MercurePublisherInterface::class);
+        $mercure->allows('publishForPrincipal')->andReturn(true);
+        $mercure->allows('publishToUser')->andReturn(true);
+
+        $command = new TaskRunCommand($db, $container, $mercure, WorkerRuntimeMode::Server);
+        $command->setName('task:run');
+        $tester = new CommandTester($command);
+
+        // A loop that never ends would hang the suite instead of failing
+        // it, so the query count is capped: exceeding the cap means the
+        // worker kept ticking after the task went quiescent.
+        $budget = 400;
+        $guard  = new class {
+            public int $queries = 0;
+            public bool $live = true;
+        };
+        Capsule::connection()->beforeExecuting(function () use ($guard, $budget): void {
+            if (!$guard->live) {
+                return;
+            }
+            $guard->queries++;
+            if ($guard->queries > $budget) {
+                throw new RuntimeException('The worker kept ticking after the task paused for approval.');
+            }
+        });
+
+        $tester->execute(['taskId' => $task->id]);
+        $guard->live = false;
+
+        expect($guard->queries)->toBeLessThan($budget);
+
+        $task->refresh();
+        expect($task->status)->toBe('PENDING_APPROVAL')
+            ->and($tester->getStatusCode())->toBe(Command::FAILURE);
+    });
 });
 
 // TaskRunCommand — abort handling (TASK_RUN_COMMAND_ABORTED_EXIT = 2)
@@ -626,7 +737,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
         $this->authService = bootAuthLayer();
         $this->userId = $this->authService->register('toolconfig@example.com', TEST_PASSWORD_RUN, 'ToolConfig');
 
-        // Create a global LLM config
         $this->llmConfig = LLMDriverConfiguration::create([
             'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
@@ -638,7 +748,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'max_tokens_output' => 4096,
         ]);
 
-        // Set up ToolConfigService with TestTool
         $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
         $this->security = new SecurityManager($key);
         $this->toolConfigService = new ToolConfigService(
@@ -647,7 +756,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
             [Tests\Fixtures\TestTool::class],
         );
 
-        // Set up LLMConfigService (required by Orchestrator.getTemperatureFromSettings)
+        // Set up LLMConfigService (required by LlmConfigResolver::getTemperatureFromSettings)
         $this->llmConfigService = new LLMConfigService(
             $this->security,
             [
@@ -656,7 +765,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             ],
         );
 
-        // Set up LLM config for the agent
         $this->agent = Agent::create([
             'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'ToolConfigAgent',
@@ -665,7 +773,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'is_active'            => true,
         ]);
 
-        // Enable TestTool for the agent
         AgentTool::create([
             'agent_id'   => $this->agent->id,
             'tool_class' => Tests\Fixtures\TestTool::class,
@@ -679,7 +786,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'allowed_target_agents'       => ['agent-1', 'agent-2'],
         ]);
 
-        // Use reflection to call private buildToolDefinitions
         $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(
@@ -722,7 +828,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $orchestrator->tick($task->id);
 
-        // Verify the email tool description includes the config block
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
         $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, new Spora\Services\PrincipalContext($this->agent->principal_id, 'user', $this->userId, $this->userId));
@@ -738,8 +843,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
     })->afterEach(fn() => Database::resetBootState());
 
     it('buildToolDefinitions shows (not configured) for unset exposeToLlm settings', function (): void {
-        // No settings stored — all exposeToLlm fields should show as (not configured)
-
         $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(

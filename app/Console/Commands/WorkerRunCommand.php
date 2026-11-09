@@ -6,10 +6,12 @@ namespace Spora\Console\Commands;
 
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Agents\ValueObjects\WorkerRuntimeMode;
 use Spora\Console\Concerns\AppliesSettingsOverlay;
 use Spora\Console\Worker\ScheduledRunProcessor;
+use Spora\Console\Worker\WorkerLock;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Console\Worker\WorkerReaper;
 use Spora\Console\WorkerLoopOptions;
@@ -30,8 +32,8 @@ use Throwable;
 /**
  * Queue drain and persistent daemon worker.
  *
- * Cron mode (drains queue and exits): php bin/worker.php worker:run
- * Daemon mode (runs forever):         php bin/worker.php worker:run --daemon
+ * Cron mode (one pass, then exits): php bin/spora worker:run --once
+ * Daemon mode (runs forever):       php bin/spora worker:run
  *
  * Delegates the actual work to:
  *   - WorkerReaper:          orphan task reaper
@@ -56,26 +58,29 @@ final class WorkerRunCommand extends Command
     private const PRINCIPAL_SCOPE_REFRESH_SECONDS = 60;
 
     private bool $shouldQuit = false;
-    private mixed $lockFd = null;
 
     /** @var list<int>|null */
     private ?array $principalScope = null;
 
     private int $principalScopeReadAt = 0;
 
-    /** Tracks how many scheduled runs were processed in the last processScheduledRuns() call (testing hook). */
+    /** 1 once a scheduled run has been processed, 0 before that (testing hook). */
     public int $lastScheduledProcessedCount = 0;
 
     private readonly WorkerReaper $reaper;
     private readonly WorkerQueueProcessor $queueProcessor;
     private readonly ScheduledRunProcessor $scheduledRunProcessor;
+    private readonly WorkerLock $lock;
 
-    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?ApiKeyCallbackDispatcher $callbackDispatcher;
 
-    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?DueWorkDispatcher $dueWorkDispatcher;
 
+    /**
+     * The two dispatchers are resolved from the container and are
+     * optional: a test container that does not know them must still be
+     * able to build this command.
+     */
     public function __construct(
         private readonly Database            $database,
         OrchestratorInterface                $orchestrator,
@@ -83,14 +88,11 @@ final class WorkerRunCommand extends Command
         private readonly ContainerInterface     $container,
         MercurePublisherInterface            $mercure,
         NotificationService                  $notificationService,
-        private readonly Paths                $paths,
+        Paths                                $paths,
         private readonly WorkerRuntimeMode    $workerRuntimeMode,
     ) {
+        $this->lock = new WorkerLock($paths->storage('spora-worker.lock'));
         $this->reaper = $container->get(WorkerReaper::class);
-        // Resolved from the container rather than injected, for the same
-        // reason the reaper is: the command's constructor is already long and
-        // positional. Optional, because a test container that does not know
-        // the class must still be able to build this.
         $this->callbackDispatcher = $container->has(ApiKeyCallbackDispatcher::class)
             ? $container->get(ApiKeyCallbackDispatcher::class)
             : null;
@@ -118,8 +120,8 @@ final class WorkerRunCommand extends Command
     {
         $this->setDescription('Drain QUEUED tasks, process scheduled runs, or run as a persistent daemon.');
         $this->addOption('daemon', 'd', InputOption::VALUE_NONE, 'Run as a persistent daemon (default when no flag is given).');
-        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process one due scheduled run (and QUEUED tasks with --include-queue), then exit. Recurring backlogs are drained by the next cron fire. Ideal for cron-driven deployments.');
-        $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also drain the QUEUED task queue in the same run');
+        $this->addOption('once', null, InputOption::VALUE_NONE, 'Run once: process one due scheduled run (and one QUEUED task with --include-queue), then exit. A backlog drains one task per run, so the cron frequency has to keep up.');
+        $this->addOption('include-queue', null, InputOption::VALUE_NONE, 'With --once: also process one QUEUED task in the same run');
         $this->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Max QUEUED tasks to process per run (0 = unlimited)', '0');
         $this->addOption('sleep', 's', InputOption::VALUE_REQUIRED, 'Microseconds to sleep when the queue is empty', '500000');
         $this->addOption('stale-minutes', null, InputOption::VALUE_REQUIRED, 'Minutes before a RUNNING task is orphaned (0 = disabled, omit to use config/default/60)', null);
@@ -224,7 +226,7 @@ final class WorkerRunCommand extends Command
         $this->dispatchAgentApiCallbacks();
 
         $this->queueProcessor->shutdownParent();
-        $this->releaseLock();
+        $this->lock->release();
 
         if (!$isDaemon || !$this->shouldQuit) {
             $output->writeln(sprintf('<info>Worker run complete. Processed %d task(s).</info>', $processed));
@@ -236,8 +238,8 @@ final class WorkerRunCommand extends Command
 
     /**
      * Run the early-exit gates and side-effect setup shared by every mode:
-     * mode-flag validation, daemon lock acquisition, signal-handler wiring,
-     * the startup banner, and the initial orphan reaping sweep.
+     * mode-flag validation, the single-instance lock (skipped in
+     * --reap-only), signal-handler wiring and the startup banner.
      *
      * Returns Command::FAILURE on validation/lock failure, or null once it
      * is safe to proceed with mode-specific work.
@@ -331,10 +333,6 @@ final class WorkerRunCommand extends Command
         $this->logger->info('Worker run (--reap-only)');
     }
 
-    /**
-     * Run the main worker loop, handling periodic orphan reaping, scheduled
-     * runs, child reaping, queue processing, and the once-mode break.
-     */
     private function runWorkerLoop(
         WorkerLoopOptions $options,
         OutputInterface $output,
@@ -430,11 +428,8 @@ final class WorkerRunCommand extends Command
             return;
         }
 
-        // The principal list is a full scan of the principals table, and the
-        // daemon runs the loop twice a second by default — reading it on
-        // every iteration would cost two table scans a second for the life
-        // of the daemon. A principal created while the daemon runs is picked
-        // up within the refresh interval.
+        // A principal created while the daemon runs is picked up within the
+        // refresh interval.
         $now = time();
         if ($this->principalScope === null
             || ($now - $this->principalScopeReadAt) >= self::PRINCIPAL_SCOPE_REFRESH_SECONDS) {
@@ -471,10 +466,6 @@ final class WorkerRunCommand extends Command
         }
     }
 
-    /**
-     * Handle the tail of each loop iteration: sleep in daemon mode, signal
-     * break in --once mode. Returns true when the caller should exit the loop.
-     */
     private function endOfIteration(bool $isOnce, int $sleep): bool
     {
         if ($isOnce) {
@@ -485,36 +476,40 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Acquire an exclusive flock() lock to ensure only one daemon runs at a time.
-     * Returns false if the lock cannot be acquired (another instance is running).
+     * Acquire the single-instance lock, so only one worker runs at a time.
+     * Returns false if the lock cannot be acquired — the file could not be
+     * opened, or another instance holds it.
      */
     private function acquireLock(OutputInterface $output): bool
     {
-        $lockFile = $this->paths->storage('spora-worker.lock');
-
-        $this->lockFd = fopen($lockFile, 'c');
-        if (!flock($this->lockFd, LOCK_EX | LOCK_NB)) {
-            $output->writeln('<error>Another worker instance is already running. Exiting.</error>');
-            $this->logger->warning('Could not acquire worker lock — another instance is running');
-            fclose($this->lockFd);
-            $this->lockFd = null;
+        try {
+            $acquired = $this->lock->acquire();
+        } catch (RuntimeException $e) {
+            $output->writeln(sprintf('<error>%s</error>', $e->getMessage()));
+            $this->logger->error('Could not open the worker lock file', ['exception' => $e->getMessage()]);
             return false;
         }
 
-        // Write PID for debugging/observability
-        file_put_contents($lockFile, (string) getmypid());
-        return true;
-    }
-
-    /**
-     * Release the flock lock if held.
-     */
-    private function releaseLock(): void
-    {
-        if ($this->lockFd !== null) {
-            flock($this->lockFd, LOCK_UN);
-            fclose($this->lockFd);
-            $this->lockFd = null;
+        if (!$acquired) {
+            // Two causes share this message: a live worker holds the lock,
+            // or a stale one is gone and its lock could not be replaced —
+            // the storage directory may not be writable. The holder's pid
+            // in the log line tells the two apart.
+            $output->writeln('<error>Could not acquire the worker lock — another worker instance is running, or a stale lock could not be replaced.</error>');
+            $this->logger->warning('Could not acquire worker lock', [
+                'holder_pid' => $this->lock->holderPid(),
+            ]);
+            return false;
         }
+
+        $deadHolderPid = $this->lock->takenOverFrom();
+        if ($deadHolderPid !== null) {
+            $this->logger->warning('Took over a stale worker lock', [
+                'path'            => $this->lock->path(),
+                'dead_holder_pid' => $deadHolderPid,
+            ]);
+        }
+
+        return true;
     }
 }

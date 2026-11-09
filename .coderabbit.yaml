@@ -1,0 +1,39 @@
+# CodeRabbit configuration for spora-core.
+#
+# The repository's comment policy is the single source of truth for comments:
+# https://docs.spora-ai.com/reference/concepts/code-documentation.html
+#
+# `inheritance: true` keeps the organization's settings. It is off by default,
+# and a repository file without it replaces the organization configuration
+# instead of overriding single keys in it.
+inheritance: true
+
+reviews:
+  # The docstring-coverage check counts the *presence* of a docblock on every
+  # function it flags, so it rewards exactly the restating docblocks the
+  # comment policy deletes. The policy governs; the check would only argue
+  # with it.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+
+  # The generator carries the same bias — a docblock on every changed
+  # function, whether it earns its place or not.
+  finishing_touches:
+    docstrings:
+      enabled: false
+
+  path_instructions:
+    - path: "app/**/*.php"
+      instructions: |
+        Judge comments by the repository's comment policy
+        (https://docs.spora-ai.com/reference/concepts/code-documentation.html).
+
+        A comment earns its place only when it says WHY: a security
+        rationale, a non-obvious rule, an API contract (@throws, an array
+        shape the native type cannot carry), or an architectural invariant.
+
+        Do not ask for a docblock where the code needs none. Do not ask for a
+        comment that restates the code below it, or that repeats what the
+        name already says. Report a comment as drift only when it claims
+        something the code does not do.

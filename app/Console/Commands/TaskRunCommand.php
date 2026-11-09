@@ -26,7 +26,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 /**
- * Spawned via proc_open() by WorkerRunCommand when running in --daemon --workers mode.
+ * Spawned via proc_open() by WorkerRunCommand in --daemon mode.
  * Each invocation is a fresh PHP interpreter — no shared static state.
  *
  * Usage: php bin/spora task:run {taskId}
@@ -85,6 +85,14 @@ final class TaskRunCommand extends Command
         $output->writeln('<comment>Tasks are driven by your browser. Use Retry from the UI instead.</comment>');
     }
 
+    /**
+     * Claim the task and tick it until it leaves `RUNNING`.
+     *
+     * The exit code follows the task's final status: `COMPLETED` is a
+     * success, `ABORTED` has its own code, and anything else is a
+     * failure — a task that pauses for approval ends in
+     * `PENDING_APPROVAL`, and the approval path re-queues it.
+     */
     private function runTask(InputInterface $input, OutputInterface $output): int
     {
         $taskId = (int) $input->getArgument('taskId');
@@ -131,12 +139,15 @@ final class TaskRunCommand extends Command
 
         // Notification is sent by Orchestrator.tick() — do not duplicate here.
         try {
-            while (in_array($task->status, ['RUNNING', 'PENDING_APPROVAL'], true)) {
+            // The loop runs only while the task is RUNNING. A task that
+            // pauses for approval (PENDING_APPROVAL) is quiescent —
+            // tick() returns without touching it — and the approval path
+            // re-queues the task, so the daemon picks it up with a fresh
+            // child. Continuing to loop here would spin a core at 100% for
+            // as long as the task waits for a human.
+            while ($task->status === 'RUNNING') {
                 $orchestrator->tick($task->id);
                 $task->refresh();
-                if ($task->status === 'ABORTED') {
-                    break;
-                }
             }
         } catch (Throwable $e) {
             $task->refresh();
@@ -182,7 +193,7 @@ final class TaskRunCommand extends Command
                 agentService: $this->container->get(\Spora\Services\AgentServiceInterface::class),
                 // Wire SubAgentService so the worker-mode batch-boundary hook
                 // (executeApprovedPendingToolsForTask → maybeResumeParentFromBatchBoundary)
-                // and the per-child hook (completeResponse → maybeResumeParentForChild)
+                // and the per-child hook (completeTaskWithResponse → maybeResumeParentForChild)
                 // can wake up a parent in AWAITING_SUB_AGENTS once every spawned
                 // sub-agent has reached a terminal state. Without this wiring
                 // both hooks short-circuit on the null guard and the parent

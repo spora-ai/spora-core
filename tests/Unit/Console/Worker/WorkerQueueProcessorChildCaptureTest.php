@@ -8,6 +8,8 @@ use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorInterface;
 use Spora\Console\Worker\WorkerQueueProcessor;
 use Spora\Core\Paths;
+use Spora\Models\Agent;
+use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Symfony\Component\Console\Output\BufferedOutput;
@@ -177,6 +179,54 @@ describe('WorkerQueueProcessor — child stdio capture + reap log', function ():
         foreach (['pid', 'exit_code', 'signal', 'task_id', 'stdout_excerpt', 'stderr_excerpt'] as $key) {
             expect($context)->toHaveKey($key);
         }
+    });
+
+    it('logs child_exit at info level when the task paused for approval', function (): void {
+        // `task:run` exits 1 for every task that did not reach COMPLETED,
+        // and a task waiting for a human is a quiescent outcome — the
+        // approval path re-queues it for a fresh child. An error-level
+        // line for that would page the operator for a routine approval.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('worker-quiescent@example.com', 'Password1!', 'Worker Quiescent');
+
+        $agent = Agent::create([
+            'principal_id' => createUserPrincipalPublic($userId),
+            'name'      => 'Worker Quiescent Agent',
+            'max_steps' => 5,
+            'is_active' => true,
+        ]);
+
+        $task = Task::create([
+            'principal_id'    => createUserPrincipalPublic($userId),
+            'trigger_user_id' => $userId,
+            'agent_id'        => $agent->id,
+            'status'          => 'PENDING_APPROVAL',
+            'user_prompt'     => 'needs approval',
+            'max_steps'       => 5,
+        ]);
+
+        [$logger, $handler] = makeCapturingLogger();
+        $cmdFactory = static fn(int $taskId): array => [
+            PHP_BINARY,
+            '-r',
+            'exit(1);',
+        ];
+
+        $processor = makeChildCaptureProcessor($logger, $cmdFactory);
+        $processor->spawnChild($task->id);
+
+        $output = new BufferedOutput();
+        $deadline = microtime(true) + 3.0;
+        while (microtime(true) < $deadline && findRecord($handler, 'child_exit') === null) {
+            $processor->reapChildren($output);
+            usleep(20_000);
+        }
+
+        $record = findRecord($handler, 'child_exit');
+        expect($record)->not->toBeNull()
+            ->and($record->level)->toBe(Monolog\Level::Info)
+            ->and($record->context['exit_code'])->toBe(1)
+            ->and($record->context['task_id'])->toBe($task->id);
     });
 
     it('aborts gracefully when proc_open fails and the worker does not crash', function (): void {
