@@ -38,16 +38,12 @@ it('decodes a JSON-string multi-select setting on read and accepts a target in t
     $sourceAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $targetAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Target',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
@@ -111,24 +107,18 @@ it('still rejects a target NOT in the allowlist when the value is stored as a JS
     $sourceAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source2',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $allowedAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $otherAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Other',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

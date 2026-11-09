@@ -104,6 +104,16 @@ final class LlmConfigSchemaValidator
                 if ($validation !== '' && !preg_match($validation, $value)) {
                     return "Field '{$field['label']}' has an invalid value.";
                 }
+
+                // A select's option list is the only description of what it
+                // accepts, so a value outside it is refused here rather than
+                // reaching the provider. The empty string is skipped above:
+                // it is a legitimate option on most selects — the "model
+                // default" one on the effort setting.
+                $options = $field['options'] ?? [];
+                if (($field['type'] ?? '') === 'select' && $options !== [] && !array_key_exists($value, $options)) {
+                    return "Field '{$field['label']}' has an invalid value.";
+                }
             }
         }
 

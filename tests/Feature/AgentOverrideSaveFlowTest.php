@@ -24,16 +24,12 @@ it('clears the agent override when the form is saved with an empty multi-select'
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $allowed = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

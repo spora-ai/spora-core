@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
@@ -100,6 +101,13 @@ final class TaskController
                     items: new OA\Items(type: 'string', format: 'uuid'),
                     description: 'Media Archive UUIDs to attach to the user turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
                 ),
+                new OA\Property(
+                    property: 'effort',
+                    type: 'string',
+                    nullable: true,
+                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+                ),
             ],
         ),
     )]
@@ -116,6 +124,12 @@ final class TaskController
             );
         }
 
+        try {
+            $effort = TaskEffortRequestValidator::parse($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
+
         $prompt       = trim((string) ($body['prompt'] ?? ''));
         $agentId      = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
@@ -127,7 +141,7 @@ final class TaskController
             return $validation;
         }
 
-        return $this->startTaskWithCapability($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+        return $this->startTaskWithCapability($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds, $effort);
     }
 
     /**
@@ -140,6 +154,7 @@ final class TaskController
         ?int $maxSteps,
         ?int $parentTaskId,
         array $mediaIds,
+        ?string $effort,
     ): JsonResponse {
         try {
             // Before anything writes: an attachment the caller may not read
@@ -151,7 +166,7 @@ final class TaskController
             // builder reads it. See
             // {@see \Spora\Services\MediaArchive\TaskMediaCapabilityService}.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
-            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds, $effort);
         } catch (MediaNotOwnedException|MediaCapabilityMismatchException|InvalidArgumentException $e) {
             [$code, $status] = match (true) {
                 $e instanceof MediaNotOwnedException            => ['MEDIA_NOT_OWNED', Response::HTTP_FORBIDDEN],
@@ -481,6 +496,13 @@ final class TaskController
                     type: 'array',
                     items: new OA\Items(type: 'string', format: 'uuid'),
                     description: 'Media Archive UUIDs to attach to the follow-up turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
+                ),
+                new OA\Property(
+                    property: 'effort',
+                    type: 'string',
+                    nullable: true,
+                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
                 ),
             ],
         ),

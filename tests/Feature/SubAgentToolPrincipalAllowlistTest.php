@@ -75,16 +75,12 @@ function subAgentAllowlistGroupFixture(): array
     $sourceAgentId = (int) Agent::create([
         'principal_id' => $groupPrincipalId,
         'name'         => 'Group Source',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ])->id;
     $targetAgentId = (int) Agent::create([
         'principal_id' => $groupPrincipalId,
         'name'         => 'Group Target',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ])->id;

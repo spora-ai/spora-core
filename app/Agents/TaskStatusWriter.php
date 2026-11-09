@@ -43,6 +43,8 @@ final class TaskStatusWriter
      *
      * @param bool $clearAbortedAt true on ABORTED → RUNNING so the
      *                             column is wiped before the next loop
+     * @param string|null $effort The resolved reasoning effort for this
+     *                             turn; null sends nothing.
      */
     public function applyContinueTransition(
         Task $task,
@@ -50,6 +52,7 @@ final class TaskStatusWriter
         ?int $additionalSteps,
         string $targetStatus,
         bool $clearAbortedAt,
+        ?string $effort,
     ): Task {
         $data = is_array($task->data) ? $task->data : [];
 
@@ -92,6 +95,7 @@ final class TaskStatusWriter
             'error_code'       => null,
             'error_message'    => null,
             'failure_reason'   => null,
+            'effort'           => $effort,
         ]);
 
         return Task::find($task->id);
@@ -150,6 +154,10 @@ final class TaskStatusWriter
      * (status-only flip with aborted_at). Centralising the row layout
      * keeps the SQL UPDATE site small enough that a future column
      * doesn't double-edit half a dozen call sites.
+     *
+     * The write goes through the query builder, so it bypasses
+     * `$fillable`: a column has to be named here to be written at all, and
+     * a model-level `update()` on the same row would be silently dropped.
      *
      * @param array<string, mixed> $data
      * @param array<string, mixed> $extraColumns

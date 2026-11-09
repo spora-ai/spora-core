@@ -7,7 +7,9 @@ namespace Spora\Http\AgentApi;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Core\Config;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Http\TaskEffortRequestValidator;
 use Spora\Models\Task;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
 use Spora\Services\ApiKeys\ApiKeyChatAccess;
@@ -96,6 +98,13 @@ final class AgentApiChatController
             new OA\Property(property: 'files', type: 'array', items: new OA\Items(type: 'object'), description: 'Inline attachments as data URLs.'),
             new OA\Property(property: 'callback_url', type: 'string', format: 'uri'),
             new OA\Property(property: 'max_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The chat was queued.')]
@@ -119,6 +128,7 @@ final class AgentApiChatController
             $prepared['text'],
             $this->boundedInt($this->intField($body, 'max_steps'), 1, 100),
             $prepared['mediaIds'],
+            $prepared['effort'],
         );
 
         // Recorded after the chat exists: a failed insert leaves a queued chat
@@ -139,7 +149,7 @@ final class AgentApiChatController
      * its body should not have written anything first.
      *
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>}
+     * @return JsonResponse|array{text: string, callbackUrl: ?string, mediaIds: list<string>, effort: ?string}
      */
     private function prepareStart(array $body, ApiKeyContext $context): JsonResponse|array
     {
@@ -154,6 +164,12 @@ final class AgentApiChatController
 
         if ($problem !== null) {
             return $this->unprocessable('VALIDATION_ERROR', $problem);
+        }
+
+        try {
+            $effort = TaskEffortRequestValidator::parse($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
         }
 
         $mediaIds = $this->readableMediaIds($body, $context);
@@ -176,6 +192,7 @@ final class AgentApiChatController
             'text' => (string) $this->requiredText($body),
             'callbackUrl' => $callbackUrl,
             'mediaIds' => $mediaIds,
+            'effort' => $effort,
         ];
     }
 
@@ -251,6 +268,13 @@ final class AgentApiChatController
             new OA\Property(property: 'prompt', type: 'string', description: 'Alias for `text`.'),
             new OA\Property(property: 'media_ids', type: 'array', items: new OA\Items(type: 'string')),
             new OA\Property(property: 'additional_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The follow-up was queued.')]
@@ -274,6 +298,7 @@ final class AgentApiChatController
                 $prepared['text'],
                 $this->boundedInt($this->intField($body, 'additional_steps'), 1, 100),
                 $prepared['mediaIds'],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException $e) {
             return $this->chatConflict($chatId, $context, $e);
@@ -284,7 +309,7 @@ final class AgentApiChatController
 
     /**
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, mediaIds: list<string>}
+     * @return JsonResponse|array{text: string, mediaIds: list<string>, effort: ?string}
      */
     private function prepareContinue(array $body, ApiKeyContext $context): JsonResponse|array
     {
@@ -294,13 +319,19 @@ final class AgentApiChatController
             return $this->unprocessable('VALIDATION_ERROR', 'text is required.');
         }
 
+        try {
+            $effort = TaskEffortRequestValidator::parse($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
+
         $mediaIds = $this->readableMediaIds($body, $context);
 
         if ($mediaIds === null) {
             return $this->unprocessable('VALIDATION_ERROR', 'media_ids may carry at most ' . self::MAX_MEDIA_IDS . ' ids.');
         }
 
-        return ['text' => $text, 'mediaIds' => $mediaIds];
+        return ['text' => $text, 'mediaIds' => $mediaIds, 'effort' => $effort];
     }
 
     /**

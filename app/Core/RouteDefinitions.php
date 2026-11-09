@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use Spora\Http\AgentController;
+use Spora\Http\AgentEffortController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
 use Spora\Http\AgentTemplateController;
@@ -68,6 +69,7 @@ final class RouteDefinitions
     public const ROUTE_MEDIA_FOLDER_ITEM = '/api/v1/media/folders/{id}';
 
     public const ROUTE_AGENTS_ID = '/api/v1/agents/{id}';
+    public const ROUTE_AGENTS_EFFORT = '/api/v1/agents/{id}/effort';
     public const ROUTE_AGENTS_TRANSFER = '/api/v1/agents/{id}/transfer';
     public const ROUTE_AGENTS_TOOL_OVERRIDE = '/api/v1/agents/{id}/tools/{toolId}/override';
     public const ROUTE_TOOLS_SETTINGS = '/api/v1/tools/{toolId}/settings';
@@ -178,6 +180,7 @@ final class RouteDefinitions
         $r->addRoute('GET', '/api/v1/agents', [AgentController::class, 'index'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents', [AgentController::class, 'store'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('GET', self::ROUTE_AGENTS_ID, [AgentController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
+        $r->addRoute('GET', self::ROUTE_AGENTS_EFFORT, [AgentEffortController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('PATCH', self::ROUTE_AGENTS_ID, [AgentController::class, 'update'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('DELETE', self::ROUTE_AGENTS_ID, [AgentController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
         $r->addRoute('POST', '/api/v1/agents/{id}/favorite', [AgentController::class, 'favorite'], [AuthMiddleware::class, CsrfMiddleware::class]);

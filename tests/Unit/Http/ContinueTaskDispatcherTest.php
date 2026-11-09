@@ -46,7 +46,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $tasks->shouldReceive('getTask')->once()->with(1, 1)->andReturn(['id' => 1, 'agent_id' => 7]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, ['mid-image-1', 'mid-image-2'])
+            ->with(1, 1, 'go', null, ['mid-image-1', 'mid-image-2'], null)
             ->andReturn(['id' => 1, 'agent_id' => 7, 'status' => 'PENDING']);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
@@ -69,7 +69,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $tasks->shouldReceive('getTask')->once()->andReturn(['id' => 1, 'agent_id' => 7]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, [])
+            ->with(1, 1, 'go', null, [], null)
             ->andReturn(['id' => 1, 'agent_id' => 7]);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
@@ -323,7 +323,7 @@ describe('ContinueTaskDispatcher — input shape', function (): void {
         $tasks->shouldReceive('getTask')->once()->andReturn(['id' => 1, 'agent_id' => 5]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, [])
+            ->with(1, 1, 'go', null, [], null)
             ->andReturn(['id' => 1, 'agent_id' => 5]);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);

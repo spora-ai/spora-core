@@ -23,6 +23,7 @@ use Spora\Models\Concerns\HasStringColumnLengthValidation;
  * @property string|null $final_response
  * @property int         $step_count
  * @property int         $max_steps
+ * @property string|null $effort
  * @property string|null $pending_state
  * @property string|null $failure_reason
  * @property string|null $error_code
@@ -53,6 +54,7 @@ final class Task extends Model
         'final_response',
         'step_count',
         'max_steps',
+        'effort',
         'pending_state',
         'failure_reason',
         'error_code',

@@ -7,7 +7,9 @@ namespace Spora\Http\ScopedApi;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Core\Config;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Http\TaskEffortRequestValidator;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
@@ -98,6 +100,13 @@ final class ScopedApiChatController
             new OA\Property(property: 'files', type: 'array', items: new OA\Items(type: 'object'), description: 'Inline attachments as data URLs.'),
             new OA\Property(property: 'callback_url', type: 'string', format: 'uri'),
             new OA\Property(property: 'max_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The chat was queued.')]
@@ -194,6 +203,13 @@ final class ScopedApiChatController
             new OA\Property(property: 'text', type: 'string'),
             new OA\Property(property: 'media_ids', type: 'array', items: new OA\Items(type: 'string')),
             new OA\Property(property: 'additional_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The follow-up was queued.')]
@@ -223,7 +239,7 @@ final class ScopedApiChatController
      * that survive the check.
      *
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
      */
     private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
     {
@@ -239,7 +255,13 @@ final class ScopedApiChatController
             return $problem;
         }
 
-        return $this->startValues($body, $agent);
+        try {
+            $effort = TaskEffortRequestValidator::parse($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
+
+        return $this->startValues($body, $agent, $effort);
     }
 
     /**
@@ -287,9 +309,9 @@ final class ScopedApiChatController
      * The values that survive the check.
      *
      * @param array<string, mixed> $body
-     * @return array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     * @return array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
      */
-    private function startValues(array $body, Agent $agent): array
+    private function startValues(array $body, Agent $agent, ?string $effort): array
     {
         $mediaIds = $this->body->readableMediaIds($body, (int) $agent->id);
         $ownerUserId = (int) $this->reach->ownerUserId($agent);
@@ -304,12 +326,13 @@ final class ScopedApiChatController
             'callbackUrl' => $this->body->string($body, 'callback_url'),
             'maxSteps' => $this->boundedInt($this->body->int($body, 'max_steps'), 1, 100),
             'mediaIds' => $mediaIds,
+            'effort' => $effort,
         ];
     }
 
     /**
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>}
+     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
      */
     private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
     {
@@ -325,15 +348,22 @@ final class ScopedApiChatController
             return $task;
         }
 
+        try {
+            $effort = TaskEffortRequestValidator::parse($body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
+
         return [
             'text' => $text,
             'additionalSteps' => $this->boundedInt($this->body->int($body, 'additional_steps'), 1, 100),
             'mediaIds' => $this->body->readableMediaIds($body, (int) $task->agent_id),
+            'effort' => $effort,
         ];
     }
 
     /**
-     * @param array{text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, agentId: int} $prepared
+     * @param array{text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, agentId: int, effort: ?string} $prepared
      */
     private function start(ApiKeyContext $context, array $prepared): ?Task
     {
@@ -344,6 +374,7 @@ final class ScopedApiChatController
                 $prepared['text'],
                 $prepared['maxSteps'],
                 $prepared['mediaIds'],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException) {
             return null;
@@ -351,7 +382,7 @@ final class ScopedApiChatController
     }
 
     /**
-     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>} $prepared
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
      * @return Task|JsonResponse
      */
     private function continue(ApiKeyContext $context, int $chatId, array $prepared): Task|JsonResponse
@@ -363,6 +394,7 @@ final class ScopedApiChatController
                 $prepared['text'],
                 $prepared['additionalSteps'],
                 $prepared['mediaIds'],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException $e) {
             return $this->chatConflict($context, $chatId, $e);
