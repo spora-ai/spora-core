@@ -424,7 +424,15 @@ final class TickPhaseRunner
         ]);
 
         if ($this->orchestrator->errorClassifier->isContextWindowError($e)) {
-            $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            try {
+                $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
+            } catch (UsageLimitExceededException $limit) {
+                // The recovery's own compaction hit a limit. That is what
+                // stopped the run, and it is terminal — reporting it as a
+                // context-window error would send the task down a recovery
+                // path that spends the budget the limit just refused.
+                $this->abortForUsageLimit($taskId, $limit);
+            }
             return;
         }
 

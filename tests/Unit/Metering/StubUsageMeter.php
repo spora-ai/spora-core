@@ -33,12 +33,27 @@ final class StubUsageMeter implements UsageMeterInterface
     public ?Throwable $evaluateThrows = null;
     public ?Throwable $recordThrows = null;
 
+    /**
+     * Answers to give on successive evaluations, in order.
+     *
+     * A test that needs the meter to answer differently on its first and
+     * second call — a compaction blocked after the agent's turn was
+     * allowed — uses this instead of `decision`.
+     *
+     * @var list<UsageDecision|null>
+     */
+    public array $decisionSequence = [];
+
     public function evaluate(MeteringContext $context, MeteringSubject $subject): ?UsageDecision
     {
         $this->evaluations[] = [$context, $subject];
 
         if ($this->evaluateThrows !== null) {
             throw $this->evaluateThrows;
+        }
+
+        if ($this->decisionSequence !== []) {
+            return array_shift($this->decisionSequence);
         }
 
         return $this->decision;
