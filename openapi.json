@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-10-gf63b03e8"
+        "version": "0.32.0-14-gc6c4ef18"
     },
     "servers": [
         {
@@ -4186,6 +4186,7 @@
                                         "nullable": true
                                     },
                                     "callback_url": {
+                                        "description": "New chat only — ignored when `chat_id` is supplied.",
                                         "type": "string",
                                         "format": "uri",
                                         "nullable": true
