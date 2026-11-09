@@ -48,8 +48,6 @@ final class WorkerLock
     ) {}
 
     /**
-     * Take the lock, replacing one whose recorded holder is gone.
-     *
      * @throws RuntimeException when the lock file cannot be opened.
      */
     public function acquire(): bool
@@ -63,7 +61,7 @@ final class WorkerLock
                 return true;
             }
 
-            // The lock is held. It may only be taken over when its recorded
+            // The lock is held; it may only be taken over when its recorded
             // holder is gone.
             $holderPid = $this->readHolderPid();
 
@@ -77,8 +75,6 @@ final class WorkerLock
     }
 
     /**
-     * Unlock and close the descriptor.
-     *
      * The flock lives on the descriptor, so unlocking without closing
      * would keep the lock held for as long as the process runs.
      */
@@ -93,19 +89,12 @@ final class WorkerLock
         $this->fd = null;
     }
 
-    /**
-     * The pid recorded in the lock file by the process that took the lock.
-     * Null when the file holds no usable pid.
-     */
     public function holderPid(): ?int
     {
         return $this->readHolderPid();
     }
 
-    /**
-     * The pid of the dead holder whose lock this acquisition replaced, or
-     * null when the lock was taken as it stood.
-     */
+    /** Null when the lock was taken as it stood rather than taken over. */
     public function takenOverFrom(): ?int
     {
         return $this->takenOverFromPid;
@@ -121,10 +110,6 @@ final class WorkerLock
         return $this->openFile($this->lockFile . self::TAKEOVER_SUFFIX);
     }
 
-    /**
-     * Lock the file as it stands. Fails when the lock is already held —
-     * by a live worker, or by an orphan that inherited the descriptor.
-     */
     private function tryTake(): bool
     {
         $fd = $this->openFile($this->lockFile);
@@ -139,11 +124,6 @@ final class WorkerLock
         return true;
     }
 
-    /**
-     * Replace the lock file so the lock lives on an inode nobody holds.
-     *
-     * The orphan keeps its lock on the old inode, which no longer has a path.
-     */
     private function replaceStaleLock(int $deadHolderPid): bool
     {
         // Removing the file is what gives the lock a new inode. Where the

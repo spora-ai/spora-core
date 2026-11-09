@@ -72,10 +72,8 @@ final class WorkerRunCommand extends Command
     private readonly ScheduledRunProcessor $scheduledRunProcessor;
     private readonly WorkerLock $lock;
 
-    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?ApiKeyCallbackDispatcher $callbackDispatcher;
 
-    /** Null when the container cannot build it — a test harness, or a trimmed runtime. */
     private readonly ?DueWorkDispatcher $dueWorkDispatcher;
 
     /**
@@ -152,12 +150,6 @@ final class WorkerRunCommand extends Command
         $output->writeln('<comment>See https://docs.spora-ai.com/deploy/shared-host/client-worker-mode</comment>');
     }
 
-    /**
-     * Run the worker in the mode the flags select.
-     *
-     * `--once` stops after a single pass; the daemon loops until it is
-     * asked to stop.
-     */
     private function runWorker(InputInterface $input, OutputInterface $output): int
     {
         $this->applyRuntimeSettings($this->container, $this->database);
@@ -341,10 +333,6 @@ final class WorkerRunCommand extends Command
         $this->logger->info('Worker run (--reap-only)');
     }
 
-    /**
-     * One pass is one iteration of the loop body. `--once` makes exactly
-     * one; the daemon sleeps between passes and keeps going.
-     */
     private function runWorkerLoop(
         WorkerLoopOptions $options,
         OutputInterface $output,
@@ -478,12 +466,6 @@ final class WorkerRunCommand extends Command
         }
     }
 
-    /**
-     * The tail of a pass.
-     *
-     * True means the caller leaves the loop; false means it sleeps and
-     * goes round again.
-     */
     private function endOfIteration(bool $isOnce, int $sleep): bool
     {
         if ($isOnce) {
