@@ -18,43 +18,26 @@
 !.env.example
 !.env.local.example
 
-# ── Encryption key ───────────────────────────────────────────────────────────
-# The key is deliberately stored outside the project by install.php.
-# If it ends up inside storage/ as a last resort, make sure it stays out of git.
-storage/secret.key
-
-# ── Database ─────────────────────────────────────────────────────────────────
-storage/database.sqlite
-storage/database-backup.sqlite
-storage/database.sqlite-shm
-storage/database.sqlite-wal
-storage/database.sqlite-journal
-
-# Schema installer stamp — regenerated on every migration run, not source
-storage/.schema_stamp
-
-# Plugin loader stamp + sidecar — regenerated on every plugin boot, not source
-storage/.plugins_stamp
-storage/.plugins_stamp.cache.json
-
-# Plugin catalog HTTP cache. Written into `Paths::storage()`, and the full suite
-# leaks one into the repo's own storage/ — a test in a run other than
-# PluginsCatalogControllerTest, which correctly uses a temp root.
-storage/.spora_plugin_catalog.json
-
-# Keep the empty storage/ directory in the repo
+# ── Runtime state ────────────────────────────────────────────────────────────
+# Everything under storage/ is runtime state, never source: the database,
+# the secret key, the schema and plugin stamps, the plugin catalog cache,
+# the asset payloads, the logs, and the worker lock with its takeover
+# mutex.
+#
+# The blanket rule is deliberate. The framework's own test suite writes
+# into the repo's storage/, and a worker run here leaves
+# `spora-worker.lock` and `spora-worker.lock.takeover` behind. Listing
+# the files one by one meant every new runtime file had to be added here
+# too, and the takeover mutex was missed — the one rule that had to
+# cover a file that does not end in `.lock`.
+#
+# The skeleton (the operator-facing app) tracks an empty storage/.gitkeep;
+# the rule keeps that placeholder addable here too.
+storage/*
 !storage/.gitkeep
 
-# Runtime asset payloads — written by DerivativePayloadStoreTest and the
-# ingest pipeline, never source
-storage/assets/
-
 # ── Logs ─────────────────────────────────────────────────────────────────────
-storage/*.log
 *.log
-
-# ── Locks ─────────────────────────────────────────────────────────────────────
-storage/*.lock
 
 # ── Composer ─────────────────────────────────────────────────────────────────
 /vendor/
