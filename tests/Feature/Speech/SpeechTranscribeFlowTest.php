@@ -31,6 +31,7 @@ use Spora\Services\ToolConfigService;
 use Spora\Services\ToolIconResolver;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextRegistry;
+use Spora\Speech\SpeechTranscriber;
 use stdClass;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -89,12 +90,14 @@ function buildFlowController(
     string $providerClass = OpenAiCompatibleTranscriber::class,
 ): SpeechTranscribeController {
     return new SpeechTranscribeController(
-        registry: new SpeechToTextRegistry(
-            [new OpenAiCompatibleTranscriber($http, $toolConfig)],
-            $principalService,
+        transcriber: new SpeechTranscriber(
+            registry: new SpeechToTextRegistry(
+                [new OpenAiCompatibleTranscriber($http, $toolConfig)],
+                $principalService,
+            ),
+            mediaReader: $reader,
+            mediaArchive: $mediaArchive,
         ),
-        mediaReader: $reader,
-        mediaArchive: $mediaArchive,
         auth: $auth,
         agentService: $agentService,
     );
@@ -133,9 +136,11 @@ function buildFlowControllerWithSpeechPersistence(
     $persistenceRef->persistence = $persistence;
 
     return new SpeechTranscribeController(
-        registry: $registry,
-        mediaReader: $reader,
-        mediaArchive: $mediaArchive,
+        transcriber: new SpeechTranscriber(
+            registry: $registry,
+            mediaReader: $reader,
+            mediaArchive: $mediaArchive,
+        ),
         auth: $auth,
         agentService: $agentService,
     );

@@ -49,6 +49,7 @@ use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
 use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
+use Spora\Http\AgentApi\AgentApiSpeechController;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentPictureController;
@@ -208,6 +209,7 @@ use Spora\Skills\SkillProviderRegistry;
 use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
+use Spora\Speech\SpeechTranscriber;
 use Spora\Todo\TodoStoreRegistry;
 use Spora\Tools\AgentTool;
 use Spora\Tools\AgentTool\SkillCatalogPresenter;
@@ -1552,6 +1554,17 @@ final class ContainerDefinitions
                     $c->get(ApiKeyMediaAccess::class),
                     $c->get(AssetStreamer::class),
                     $c->get(MediaAssetSerializer::class),
+                );
+            },
+
+            AgentApiSpeechController::class => static function (ContainerInterface $c): AgentApiSpeechController {
+                return new AgentApiSpeechController(
+                    $c->get(ApiKeyChatAccess::class),
+                    $c->get(ApiKeyChatProjection::class),
+                    $c->get(ApiKeyMediaAccess::class),
+                    $c->get(ApiKeyCallbackRecorder::class),
+                    $c->get(SpeechTranscriber::class),
+                    $c->get(SsrfGuard::class),
                 );
             },
 

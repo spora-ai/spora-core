@@ -29,6 +29,7 @@ use Spora\Speech\InvalidAudioException;
 use Spora\Speech\SpeechToTextException;
 use Spora\Speech\SpeechToTextProviderInterface;
 use Spora\Speech\SpeechToTextRegistry;
+use Spora\Speech\SpeechTranscriber;
 use Spora\Speech\TranscriptionResult;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -173,9 +174,11 @@ function buildTransFixtures(SpeechToTextProviderInterface $provider): array
     );
 
     $controller = new SpeechTranscribeController(
-        registry: new SpeechToTextRegistry([$provider], new PrincipalService(new PrincipalResolver())),
-        mediaReader: $reader,
-        mediaArchive: $service,
+        transcriber: new SpeechTranscriber(
+            registry: new SpeechToTextRegistry([$provider], new PrincipalService(new PrincipalResolver())),
+            mediaReader: $reader,
+            mediaArchive: $service,
+        ),
         auth: $auth,
         agentService: $agentService,
     );
