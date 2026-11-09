@@ -22,8 +22,6 @@ it('casts boolean and integer fields', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'                 => 'Cast Agent',
-        'llm_provider'         => 'mock',
-        'llm_model'            => 'mock',
         'max_steps'            => 7,
         'is_active'            => true,
         'allow_followup'       => true,
@@ -40,8 +38,6 @@ it('belongs to a principal', function (): void {
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Owner Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -55,8 +51,6 @@ it('has many tasks, agent tools, and tool calls', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'HasMany Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -121,8 +115,6 @@ it('save() rejects an agent whose name exceeds VARCHAR(100)', function (): void 
     expect(fn() => Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => str_repeat('a', 101),
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]))->toThrow(InvalidArgumentException::class);
@@ -134,8 +126,6 @@ it('legacy user_id accessor resolves the user-principal owner', function (): voi
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Legacy User Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -168,8 +158,6 @@ it('legacy user_id accessor falls back to the first group owner for a group-prin
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Group Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -213,8 +201,6 @@ it('legacy user attribute returns the resolved user via the principal', function
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Legacy User Attr',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -260,8 +246,6 @@ it('user() resolves the owner user when the principal is a group with an owner',
     $agent = Agent::create([
         'principal_id' => $groupPrincipalId,
         'name'         => 'Group Owned Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -285,8 +269,6 @@ it('user() returns null when the principal is a group with no owner', function (
     $agent = Agent::create([
         'principal_id' => $groupPrincipalId,
         'name'         => 'Ownerless Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -300,8 +282,6 @@ it('getUserAttribute returns the resolved User instance', function (): void {
     $agent = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Attr Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);

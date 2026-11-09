@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\Responses\OpenAIResponsesDriver;
 use Spora\Tools\ToolSettingSchema;
 use Symfony\Component\HttpClient\MockHttpClient;
 
@@ -41,5 +42,5 @@ test('the effort levels a driver declares are the options its effort setting off
 })->with([
     OpenAICompatibleDriver::class,
     AnthropicCompatibleDriver::class,
-    // The OpenAI Responses driver joins this list when it lands.
+    OpenAIResponsesDriver::class,
 ]);
