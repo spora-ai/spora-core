@@ -143,7 +143,7 @@ final class AgentApiSpeechController
                         type: 'string',
                         format: 'uri',
                         nullable: true,
-                        description: 'New chat only — ignored when `chat_id` is supplied.',
+                        description: 'Screened as on POST /chats. Used only when a new chat is started — with `chat_id` the URL is still validated, but nothing is called.',
                     ),
                     new OA\Property(property: 'max_steps', type: 'integer', nullable: true, description: 'New chat only.'),
                     new OA\Property(property: 'additional_steps', type: 'integer', nullable: true, description: 'Existing chat only.'),

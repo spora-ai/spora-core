@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-14-gc6c4ef18"
+        "version": "0.32.0-15-gcf8398e1"
     },
     "servers": [
         {
@@ -4186,7 +4186,7 @@
                                         "nullable": true
                                     },
                                     "callback_url": {
-                                        "description": "New chat only — ignored when `chat_id` is supplied.",
+                                        "description": "Screened as on POST /chats. Used only when a new chat is started — with `chat_id` the URL is still validated, but nothing is called.",
                                         "type": "string",
                                         "format": "uri",
                                         "nullable": true

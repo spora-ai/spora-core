@@ -569,6 +569,74 @@ describe('Agent API speech', function (): void {
         expect(Task::count())->toBe($before);
     });
 
+    it('validates the callback url even when the chat already exists', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('callback-existing');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'callback-existing');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+
+        $task = Task::create([
+            'agent_id' => $seed['agentId'],
+            'principal_id' => $seed['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'the first question',
+        ]);
+
+        // A private address is refused whether the URL will be called or
+        // not: the screening happens before the chat is touched, so a
+        // caller cannot learn that a URL was accepted by sending one
+        // that is not.
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, [
+                'media_id' => $mediaId,
+                'chat_id' => (int) $task->id,
+                'callback_url' => 'http://localhost:3000/hooks/spora',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+        expect(AgentApiTestSupport::decode($response)['error']['code'])->toBe('VALIDATION_ERROR');
+    });
+
+    it('calls the callback url only for a chat it starts', function (): void {
+        $seed = AgentApiTestSupport::seedAgent('callback-new');
+        [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'callback-new');
+
+        $container = speechContainer([new StubSpeechProvider()]);
+        registerDriver(StubSpeechProvider::class);
+
+        $mediaId = ingestRecording($container, $seed);
+
+        $task = Task::create([
+            'agent_id' => $seed['agentId'],
+            'principal_id' => $seed['principalId'],
+            'status' => 'COMPLETED',
+            'user_prompt' => 'the first question',
+        ]);
+
+        $response = AgentApiTestSupport::call(
+            $container,
+            AgentApiSpeechController::class,
+            'transcribeAndSend',
+            speechRequest('/api/v1/agent-api/transcribe-and-send', $key, [
+                'media_id' => $mediaId,
+                'chat_id' => (int) $task->id,
+                'callback_url' => 'https://example.com/hooks/spora',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_ACCEPTED);
+
+        // The chat existed already, so nothing is owed to the receiver.
+        expect(Capsule::table('api_callbacks')->where('chat_id', $task->id)->count())->toBe(0);
+    });
+
     it('records the callback for the chat it starts', function (): void {
         $seed = AgentApiTestSupport::seedAgent('callback');
         [, $key] = AgentApiTestSupport::mintKey($seed['agentId'], 'callback');
