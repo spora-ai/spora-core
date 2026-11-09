@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\Usage;
 use Spora\Models\TaskHistory;
 use Spora\Models\Usage as UsageModel;
@@ -174,6 +175,11 @@ final class TaskHistorySerializer
      * Strips server-side-only fields so the admin UI never sees Anthropic
      * signatures or encrypted redacted-thinking payloads.
      *
+     * A reasoning block's `metadata` is stripped at the same boundary:
+     * it carries the provider-side item id and the raw summary parts,
+     * which are the handle the provider correlates the item by. The
+     * frontend renders the block's `text`, so nothing is lost.
+     *
      * @param list<mixed> $blocks
      * @return list<array<string, mixed>>
      */
@@ -185,6 +191,9 @@ final class TaskHistorySerializer
                 continue;
             }
             unset($block['signature'], $block['data']);
+            if (($block['type'] ?? '') === ContentBlock::TYPE_REASONING) {
+                unset($block['metadata']);
+            }
             $sanitized[] = $block;
         }
 

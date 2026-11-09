@@ -43,6 +43,7 @@ use Spora\Core\Extension\PluginManager;
 use Spora\Drivers\AnthropicCompatibleDriver;
 use Spora\Drivers\DriverFactory;
 use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\Responses\OpenAIResponsesDriver;
 use Spora\Events\EventDispatcherFactory;
 use Spora\Extensions\AppLoader;
 use Spora\Http\AgentApi\AgentApiChatActionController;
@@ -736,6 +737,7 @@ final class ContainerDefinitions
             'llm_driver_classes' => [
                 OpenAICompatibleDriver::class,
                 AnthropicCompatibleDriver::class,
+                OpenAIResponsesDriver::class,
             ],
 
             // Plugin and App LLM drivers used to be merged into this entry at
