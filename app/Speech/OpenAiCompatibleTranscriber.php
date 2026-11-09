@@ -35,7 +35,7 @@ use Throwable;
  * its own `display_name` that surfaces in the Capability endpoint and
  * the recording button.
  *
- * v1 trade-offs (per the plan):
+ * v1 trade-offs:
  *
  *  - No `diarize`, `context_bias[]`, `file_id`, or `file_url` fields.
  *    If a future operator needs Mistral's `diarize`, a thin subclass of
@@ -43,16 +43,15 @@ use Throwable;
  *    `extendMultipartBody(array $body, array $settings): array` hook that
  *    a future patch can introduce without disturbing the v1 schema.
  *  - One config per Capability endpoint row. Multi-config view lives in
- *    the operator-facing `/settings/speech` page (separate plan).
- *  - Optimistic {@see isConfigured()} — the real key check happens at
- *    transcribe time so settings edited via the UI after registry
- *    construction are picked up on the next call (matches the
- *    `MistralTranscribeProvider::isConfigured()` contract).
+ *    the operator-facing `/settings/speech` page.
+ *  - {@see isConfigured()} — optimistic on the legacy path, where the real
+ *    key check happens at transcribe time so settings edited via the UI
+ *    after registry construction are picked up on the next call. On the
+ *    v2-cascade path the gate is the bound `api_key` instead.
  *
  * Operators who set their API key via direct SQL inserts into the
- * `tool_configurations` table during the v1 testing window need to
- * manually re-create the config in the operator UI post-upgrade. There
- * is no auto-migration; this is documented at the call site.
+ * `tool_configurations` table need to re-create the config in the
+ * operator UI; there is no auto-migration.
  */
 #[ToolSetting(
     key: 'api_key',
@@ -150,7 +149,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * {@see \Spora\Services\SpeechProviderConfigPersistence::decodeSettings()})
      * so {@see transcribe()} and {@see isConfigured()} consult the
      * `speech_provider_configurations` cascade — the single source of
-     * truth post-{@see https://github.com/spora-ai/spora-core/pull/238 PR #238}.
+     * truth for the v2 rows.
      * Falls back to `ToolConfigService` only when no bound settings
      * are present (legacy v1 `tool_user_settings` operators keep
      * working without an admin-side re-save). The registry resets
@@ -237,6 +236,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      *   url: string,
      *   headers: array<string, string>,
      *   multipart: list<array<string, mixed>>,
+     *   staged_path: string,
      *   timeout: int
      * }
      */
@@ -273,10 +273,11 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
         }
 
         return [
-            'url'       => rtrim($baseUrl, '/') . '/audio/transcriptions',
-            'headers'   => ['Authorization' => 'Bearer ' . $apiKey],
-            'multipart' => $multipart,
-            'timeout'   => $timeout,
+            'url'         => rtrim($baseUrl, '/') . '/audio/transcriptions',
+            'headers'     => ['Authorization' => 'Bearer ' . $apiKey],
+            'multipart'   => $multipart,
+            'staged_path' => $uploadPath,
+            'timeout'     => $timeout,
         ];
     }
 
@@ -297,8 +298,8 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
 
     /**
      * Read a string setting with trim/empty fallback to `$default`.
-     * Shared by every non-key, non-language text setting so the
-     * trim+is_string+empty-default dance lives in one place.
+     * Shared by every text setting so the trim+is_string+empty-default
+     * dance lives in one place.
      *
      * @param array<string, mixed> $settings
      */
@@ -334,7 +335,7 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * content-type detector from `application/x-www-form-urlencoded`
      * to `multipart/form-data`. Text fields pass through as scalars.
      *
-     * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, timeout: int} $request
+     * @param array{url: string, headers: array<string, string>, multipart: list<array<string, mixed>>, staged_path: string, timeout: int} $request
      * @return array<string, mixed>
      */
     private function sendTranscribeRequest(array $request): array
@@ -347,8 +348,9 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 if (isset($part['filename'], $part['contents']) && is_string($part['contents']) && is_file($part['contents'])) {
                     // File field — open the temp file so Symfony's
                     // `normalizeBody()` sees a `resource` and emits a
-                    // proper multipart body. Reaps the handle in the
-                    // finally below so it survives across the call.
+                    // proper multipart body. The handle has to stay open
+                    // until the request is dispatched, so it is closed in
+                    // the finally below rather than here.
                     $openedStreams[] = $handle = fopen((string) $part['contents'], 'rb');
                     $body[$name] = $handle;
                 } else {
@@ -360,6 +362,10 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 'headers' => $request['headers'],
                 'body'    => $body,
                 'timeout' => $request['timeout'],
+                // The provider is the one the operator configured. A redirect
+                // would take the recording — and the API key that travels
+                // with it — to a host nobody vetted.
+                'max_redirects' => 0,
             ]);
             $payload = $response->toArray(false);
         } catch (Throwable $e) {
@@ -369,6 +375,11 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
                 if (is_resource($handle)) {
                     fclose($handle);
                 }
+            }
+            // The staged copy is the whole asset on disk. It leaves with the
+            // request, whether the request succeeded or not.
+            if (is_file($request['staged_path'])) {
+                unlink($request['staged_path']);
             }
         }
 
@@ -419,22 +430,25 @@ final class OpenAiCompatibleTranscriber implements SpeechToTextProviderInterface
      * stream the file off-disk rather than buffering it; an explicit
      * path also avoids the `UploadedFile` round-trip, which the
      * multipart API doesn't accept (it expects a file path or a stream,
-     * not a `UploadedFile` wrapper).
+     * not an `UploadedFile` wrapper).
      *
-     * The temp file is left in place — `HttpClient` opens it, reads
-     * it, and the OS reclaims it when nothing references it. The path
-     * is returned to the caller for inclusion in the multipart entry.
+     * The file is removed once the request is done — see
+     * {@see self::sendTranscribeRequest()}.
      *
      * @return array{0: string, 1: string} [path, filename]
      */
     private function writeTempUpload(string $bytes, string $mimeType): array
     {
+        // The MIME is checked before anything is written: a rejected
+        // recording must not leave a copy of the asset behind.
+        $ext = $this->extensionFor($mimeType);
+
         $tmp = tempnam(sys_get_temp_dir(), 'spora_oai_stt_');
         if ($tmp === false) {
             throw new InvalidAudioException('Failed to stage audio for upload.');
         }
         file_put_contents($tmp, $bytes);
-        $ext = $this->extensionFor($mimeType);
+
         return [$tmp, 'recording.' . $ext];
     }
 

@@ -30,6 +30,9 @@ final class MercurePublisher implements MercurePublisherInterface
      * Publish a task state change keyed by principal owner.
      * Topic: principal/{principalId}/tasks — every principal viewer
      * (group members included) with `subscribe` rights receives the event.
+     *
+     * The update is published as private, so the hub delivers it only to the
+     * subscribers whose token names the topic.
      */
     public function publishForPrincipal(int $taskId, int $principalId, array $taskData): bool
     {
@@ -74,6 +77,11 @@ final class MercurePublisher implements MercurePublisherInterface
                 'body'         => [
                     'topic' => $topic,
                     'data'  => json_encode(['topic' => $topic, 'data' => $payload], JSON_THROW_ON_ERROR),
+                    // A private update reaches only the subscribers whose
+                    // token carries the topic. Without it the hub treats the
+                    // update as public, and the topic — a principal's task
+                    // stream — is readable by anyone who can subscribe to it.
+                    'private' => 'on',
                 ],
             ]);
             $kind = str_ends_with($topic, '/notifications') ? 'user notification' : 'task event';

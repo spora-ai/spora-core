@@ -62,7 +62,7 @@ describe('Agent API callback arming', function (): void {
             'store',
             AgentApiTestSupport::bearer($key, [
                 'text' => 'hi',
-                'callback_url' => 'https://hooks.example.test/spora',
+                'callback_url' => 'https://93.184.216.34/spora',
             ]),
         );
 

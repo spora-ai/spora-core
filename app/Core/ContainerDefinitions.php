@@ -421,6 +421,7 @@ final class ContainerDefinitions
                     $c->get(DelightAuth::class),
                     $config->getString('SPORA_APP_URL') ?? '',
                     $config->getString('SPORA_APP_PREFIX') ?? '/spora',
+                    $c->get(LoggerInterface::class),
                 );
                 $authService->setSystemMailer($c->get(SystemMailer::class));
                 return $authService;
@@ -532,8 +533,7 @@ final class ContainerDefinitions
     }
 
     /**
-     * Definitions for the MediaArchive service stack. Extracted from
-     * `coreServiceDefinitions()` so that function stays under the
+     * Extracted from `coreServiceDefinitions()` so that function stays under the
      * SonarQube S138 line cap. The bindings share config-driven setup
      * (`media_archive.*`) so they live together.
      *
@@ -542,8 +542,6 @@ final class ContainerDefinitions
     private static function mediaArchiveServiceDefinitions(): array
     {
         return [
-            // MediaArchive service stack — see app/Services/MediaArchive.
-            // Keys are the `SPORA_MEDIA_ARCHIVE_*` registry entries.
             MimeSniffer::class => static fn(ContainerInterface $c): MimeSniffer => new MimeSniffer(
                 $c->get(LoggerInterface::class),
             ),
@@ -669,8 +667,6 @@ final class ContainerDefinitions
     }
 
     /**
-     * Definitions for the selectable binary asset storage strategies.
-     *
      * @return array<string, callable>
      */
     private static function assetStoreDefinitions(): array
@@ -923,6 +919,7 @@ final class ContainerDefinitions
                     $c->get(UserServiceInterface::class),
                     $c->get(CsrfTokenService::class),
                     $c->get(AuthValidator::class),
+                    $c->get(LoggerInterface::class),
                 );
             },
 
@@ -1249,6 +1246,7 @@ final class ContainerDefinitions
                 return new AgentPictureController(
                     $c->get(AuthService::class),
                     $c->get(AgentServiceInterface::class),
+                    $c->get(PrincipalResolver::class),
                     $c->get(AgentPictureService::class),
                     $c->get(MediaArchiveService::class),
                     $c->get(MimeSniffer::class),
@@ -1630,7 +1628,7 @@ final class ContainerDefinitions
                 );
             },
 
-            // ScheduleTool bundles 12 LLM-facing operations across two
+            // ScheduleTool bundles its LLM-facing operations across two
             // sub-domains: scheduled_runs + agent_prompt_templates. The
             // collaborators bundle is optional (zero-arg constructor
             // exists) — wiring the PrincipalResolver + PrincipalService

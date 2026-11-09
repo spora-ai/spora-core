@@ -14,8 +14,8 @@ use Spora\Models\Task;
 /**
  * Single seam for translating between agents, principals, and users.
  *
- * Replaces the old `$agent->user_id` access pattern at the 86+ consumer
- * sites in the codebase. Plugins must never read ownership directly off an
+ * Replaces the old `$agent->user_id` access pattern across the codebase.
+ * Plugins must never read ownership directly off an
  * Agent — they go through this service, which is the public API for
  * "who is the user context for this agent?" in the principals-and-groups
  * model.
@@ -70,9 +70,26 @@ final class PrincipalResolver
      * (`principal_id`). Resolving credentials from `trigger_user_id`
      * preserves the original "clicker runs the tick" semantic even
      * after the agent is transferred to a new owner.
+     *
+     * With `$taskId`, the runner is that task's own trigger user: a
+     * shared agent's newest task may belong to somebody else, and a
+     * tool that acts on the caller's behalf must not borrow their
+     * identity. The task must belong to the agent, so a mismatched id
+     * falls through to the agent-wide lookup instead of naming a
+     * stranger.
      */
-    public function runnerUserId(int $agentId): ?int
+    public function runnerUserId(int $agentId, ?int $taskId = null): ?int
     {
+        if ($taskId !== null) {
+            $taskTriggerUserId = Task::where('id', $taskId)
+                ->where('agent_id', $agentId)
+                ->value('trigger_user_id');
+
+            if ($taskTriggerUserId !== null) {
+                return (int) $taskTriggerUserId;
+            }
+        }
+
         $triggerUserId = Task::where('agent_id', $agentId)
             ->orderByDesc('id')
             ->value('trigger_user_id');
@@ -114,9 +131,6 @@ final class PrincipalResolver
      * principal owns. Admins see everything (the controller layer is
      * responsible for the admin check — this method only models the
      * principal membership axis).
-     *
-     * @param  int $agentId
-     * @param  int $userId
      */
     public function isVisibleTo(int $agentId, int $userId): bool
     {
@@ -210,7 +224,8 @@ final class PrincipalResolver
     /**
      * Bundle up the principal context for a tool execution. Resolves the
      * agent's principal once, then fills `ownerUserId` from the principal
-     * and `runnerUserId` from the latest task. Either may be `null` for a
+     * and `runnerUserId` from the executing task — or, when no task is
+     * named, the agent's latest task. Either may be `null` for a
      * stale principal or a cold agent; callers fall back to defaults.
      *
      * **Two unresolvable sentinels, both of which reach callers.** When the
@@ -223,7 +238,7 @@ final class PrincipalResolver
      * `PrincipalResolverSentinelTest`; changing either is a deliberate,
      * visible diff rather than an accident.
      */
-    public function resolveForToolExecute(int $agentId): PrincipalContext
+    public function resolveForToolExecute(int $agentId, ?int $taskId = null): PrincipalContext
     {
         $agent = Agent::find($agentId);
         if ($agent === null) {
@@ -239,7 +254,7 @@ final class PrincipalResolver
             principalId: (int) $principal->id,
             type: (string) $principal->type,
             ownerUserId: $this->ownerUserId((int) $principal->id),
-            runnerUserId: $this->runnerUserId($agentId),
+            runnerUserId: $this->runnerUserId($agentId, $taskId),
         );
     }
 

@@ -86,13 +86,27 @@ final class ConfigFactory
             // — which is how `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES=`
             // disables image uploads outright. That is the documented meaning
             // of an empty value, not an accident.
-            $raw = $_ENV[$key] ?? (getenv($key) ?: null);
+            $raw = $_ENV[$key] ?? self::processEnvValue($key);
             if ($raw !== null) {
                 $out[$key] = $raw;
             }
         }
 
         return $out;
+    }
+
+    /**
+     * The process environment's value for a key, or null when it is unset.
+     *
+     * `getenv()` answers `false` for an unset variable and a string for
+     * every other one — `"0"` included, which a truthiness check would
+     * discard and turn `SPORA_ALLOW_REGISTRATION=0` into the default.
+     */
+    private static function processEnvValue(string $key): ?string
+    {
+        $value = getenv($key);
+
+        return $value === false ? null : $value;
     }
 
     /**

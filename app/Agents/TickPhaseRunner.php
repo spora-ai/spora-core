@@ -19,11 +19,9 @@ use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalResolver;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\Text\Utf8Sanitizer;
 use Spora\Services\ToolCallSerializer;
-use Spora\Tools\Traits\HasOperations;
 use Throwable;
 
 /**
@@ -48,6 +46,7 @@ final class TickPhaseRunner
         private readonly ?ToolCallSerializer $toolCallSerializer = null,
         private readonly ?SubAgentServiceInterface $subAgent = null,
         private readonly ?PrincipalResolver $principalResolver = null,
+        private ?ApprovedToolExecutor $approvedToolExecutor = null,
         public readonly LeaseGuard $leaseGuard = new LeaseGuard(),
     ) {}
 
@@ -65,6 +64,15 @@ final class TickPhaseRunner
      * automatically.
      */
     public bool $singleStep = false;
+
+    /**
+     * The executor for approved calls. Built here when the container did
+     * not supply one, so a hand-built runner still works.
+     */
+    private function approvedToolExecutor(): ApprovedToolExecutor
+    {
+        return $this->approvedToolExecutor ??= new ApprovedToolExecutor($this->orchestrator);
+    }
 
     public function runTick(int $taskId): void
     {
@@ -182,9 +190,15 @@ final class TickPhaseRunner
                 ? json_decode((string) $row->getAttribute('approved_arguments'), true, 512, JSON_THROW_ON_ERROR)
                 : (array) $row->getAttribute('approved_arguments');
             $toolName      = (string) $row->getAttribute('tool_name');
-            $operationName = $operationMap[$providerCallId] ?? null;
 
-            $this->executeOneApprovedPendingTool($task, $providerCallId, $toolName, $approvedArgs, $operationName);
+            // The row's own operation first. A reused call id makes the map
+            // ambiguous — it would name the other call's operation.
+            $ownOperation = $row->getAttribute('operation');
+            $operationName = is_string($ownOperation) && $ownOperation !== ''
+                ? $ownOperation
+                : ($operationMap[$providerCallId] ?? null);
+
+            $this->approvedToolExecutor()->execute($task, $row, $providerCallId, $toolName, $approvedArgs, $operationName);
         }
 
         // Worker-mode batch boundary — mirror the sync-mode boundary in
@@ -212,106 +226,6 @@ final class TickPhaseRunner
         }
     }
 
-    /**
-     * @param array<string, mixed> $approvedArgs
-     */
-    private function executeOneApprovedPendingTool(
-        Task $task,
-        string $providerCallId,
-        string $toolName,
-        array $approvedArgs,
-        ?string $operationName,
-    ): void {
-        $toolInstance = $this->orchestrator->resolveToolByName($toolName);
-
-        // Re-check authorization at execution time: between the user approving
-        // the batch and the daemon picking it up here, an admin may have revoked
-        // this tool from the agent or disabled the specific op. The
-        // proposal-time gate in {@see ToolCallExecutor::executeOrQueue()} only
-        // runs at proposal time and cannot defend against drift.
-        $toolClass = get_class($toolInstance);
-        $enabledClasses = AgentTool::where('agent_id', $task->agent_id)
-            ->pluck('tool_class')->all();
-
-        if (!in_array($toolClass, $enabledClasses, true)) {
-            $this->orchestrator->recordRevokedToolCall(
-                task: $task,
-                providerCallId: $providerCallId,
-                toolName: $toolName,
-                rejectReason: "tool '{$toolName}' was revoked from this agent before approval was processed",
-            );
-            return;
-        }
-
-        if ($operationName !== null
-            && in_array(HasOperations::class, class_uses_recursive($toolClass), true)
-            && !$this->orchestrator->isOperationEnabled($toolInstance, $operationName, $task->agent_id)
-        ) {
-            $this->orchestrator->recordRevokedToolCall(
-                task: $task,
-                providerCallId: $providerCallId,
-                toolName: $toolName,
-                rejectReason: "operation '{$operationName}' of tool '{$toolName}' was disabled before approval was processed",
-            );
-            return;
-        }
-
-        try {
-            SchemaValidator::validate($approvedArgs, $toolInstance->getParametersSchema(), $operationName);
-        } catch (Throwable $e) {
-            $this->recordApprovedFailure($task, $providerCallId, $toolName, 'Validation Error: ' . $e->getMessage());
-            return;
-        }
-
-        // safeExecute() catches every Throwable internally — no outer try/catch needed.
-        $result = $this->orchestrator->safeExecute($toolInstance, $approvedArgs, $task->agent_id, $task->id);
-
-        // Query-builder update() bypasses Eloquent's `array` cast on `approved_arguments`,
-        // which would double-encode the JSON string. Same anti-pattern PR #150 fixed.
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'result_content' => ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-                'result_data'    => $result->data ? json_encode($result->data, JSON_THROW_ON_ERROR) : null,
-                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($result->content)),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
-    }
-
-    private function recordApprovedFailure(
-        Task $task,
-        string $providerCallId,
-        string $toolName,
-        string $message,
-    ): void {
-        $scrubbed = ScrubDataUrls::scrub(Utf8Sanitizer::scrubString($message));
-
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'result_content' => $scrubbed,
-                'executed_at'    => date(Orchestrator::DB_TIMESTAMP_FORMAT),
-            ]);
-
-        $this->orchestrator->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: $scrubbed,
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
-    }
 
     private function lockRunningTaskForTick(int $taskId): ?Task
     {

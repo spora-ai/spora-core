@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Delight\Auth\Status;
 use Spora\Models\User;
 use Spora\Services\UserService;
 
@@ -79,6 +80,36 @@ describe('UserService::updateUser / deleteUser', function (): void {
         $user = User::find($userId);
         expect((int) $user->verified)->toBe(1);
         expect((int) $user->force_logout)->toBe(0);
+    });
+
+    it('records a suspension in the account state and revokes the open sessions', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+
+        $service->updateUser($userId, ['suspended' => true]);
+
+        $user = User::find($userId);
+        expect((int) $user->status)->toBe(Status::SUSPENDED)
+            ->and((int) $user->force_logout)->toBe(1);
+    });
+
+    it('revokes the sessions again when a suspension is repeated', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+
+        $service->updateUser($userId, ['suspended' => true]);
+        $service->updateUser($userId, ['suspended' => true]);
+
+        expect((int) User::find($userId)->force_logout)->toBe(2);
+    });
+
+    it('clears the suspension without lowering the revocation counter', function (): void {
+        [$service, $userId] = makeUserServiceWithUser();
+
+        $service->updateUser($userId, ['suspended' => true]);
+        $service->updateUser($userId, ['suspended' => false]);
+
+        $user = User::find($userId);
+        expect((int) $user->status)->not()->toBe(Status::SUSPENDED)
+            ->and((int) $user->force_logout)->toBe(1);
     });
 
     it('returns null when updating a non-existent user', function (): void {

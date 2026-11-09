@@ -41,8 +41,8 @@ final class AgentTemplateToolsApplier
      * Walk the template's tools array and return the per-tool summary.
      * For each entry:
      * - tool_class not registered → TOOL_PLUGIN_MISSING warning, no row.
-     * - tool disabled → no row.
-     * - tool enabled + missing global config → row + TOOL_NEEDS_CONFIGURATION warning.
+     * - tool disabled → the agent's assignment for that tool is revoked.
+     * - tool enabled + missing required settings → row + TOOL_NEEDS_CONFIGURATION warning.
      *
      * Returns the tools-enabled list and pushes any per-tool warnings
      * onto $warnings. Returning (instead of using a by-ref parameter)
@@ -94,8 +94,6 @@ final class AgentTemplateToolsApplier
         int $toolIndex,
         array &$warnings,
     ): array {
-        $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
-
         $toolClass = (string) ($toolEntry['tool_class'] ?? '');
         $missingWarning = $this->buildToolPluginMissingWarning($toolClass, $registeredTools);
 
@@ -108,11 +106,57 @@ final class AgentTemplateToolsApplier
             ];
         }
 
-        if ($toolClass === '' || !(bool) ($toolEntry['enabled'] ?? false)) {
+        return $this->applyKnownTool($agentId, $toolClass, $toolEntry, $toolIndex, $warnings);
+    }
+
+    /**
+     * Apply an entry whose tool class is known to the registry, and the
+     * entries that name no tool at all.
+     *
+     * @param array<string, mixed> $toolEntry
+     * @param array<int, array{code: string, severity: string, message: string, path?: string}> $warnings
+     * @return array{skipped: bool, enabled: bool, warning: ?array{code: string, severity: string, message: string, path?: string}, summary: ?array{tool_class: string, enabled: bool, operations_applied: int, settings_applied: int, warnings: list<array{code: string, severity: string, message: string, path?: string}>}}
+     */
+    private function applyKnownTool(
+        int $agentId,
+        string $toolClass,
+        array $toolEntry,
+        int $toolIndex,
+        array &$warnings,
+    ): array {
+        $empty = ['skipped' => false, 'enabled' => false, 'warning' => null, 'summary' => null];
+
+        if ($toolClass === '' || !array_key_exists('enabled', $toolEntry)) {
+            // The entry names no tool, or says nothing about it, so the
+            // agent's current state stands.
+            return $empty;
+        }
+
+        if (!(bool) $toolEntry['enabled']) {
+            $this->revokeTool($agentId, $toolClass);
             return $empty;
         }
 
         return $this->applyEnabledTool($agentId, $toolClass, $toolEntry, $toolIndex, $warnings);
+    }
+
+    /**
+     * Drop the records that authorise the tool for this agent.
+     *
+     * The `agent_tools` row is the enablement gate the executor checks
+     * before every call, and the operation overrides are the permissions
+     * that ride on it. Leaving them in place would keep a tool the
+     * template just disabled executable.
+     */
+    private function revokeTool(int $agentId, string $toolClass): void
+    {
+        AgentTool::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->delete();
+
+        AgentToolOperationOverride::where('agent_id', $agentId)
+            ->where('tool_class', $toolClass)
+            ->delete();
     }
 
     /**

@@ -253,11 +253,6 @@ test('changeEmail() throws NotLoggedInException when not logged in', function ()
         ->toThrow(Delight\Auth\NotLoggedInException::class);
 });
 
-// ---------------------------------------------------------------------------
-// Coverage added for the AuthService split in Phase 3 PR 3.4. The methods
-// exercised here will move into AuthEmailFlow / AuthRoleAdmin; these tests
-// pin the public contract so the split is a pure refactor (php:S1448).
-// ---------------------------------------------------------------------------
 
 describe('AuthService::changeEmail', function (): void {
     test('logged-in user can request an email change and the verification URL follows the app URL', function (): void {
@@ -325,7 +320,7 @@ describe('AuthService::forgotPassword', function (): void {
         [$mailer, $captured] = makeCapturingMailer();
         $service->setSystemMailer($mailer);
 
-        $service->forgotPassword('forgot-existing@example.com');
+        $service->forgotPassword('forgot-existing@example.com', 'https://spora.test');
 
         expect($captured['reset'])->toBeString();
         expect($captured['reset'])->toContain('/auth/reset-password/');
@@ -340,10 +335,25 @@ describe('AuthService::forgotPassword', function (): void {
         // The current implementation does not catch InvalidEmailException, so
         // unknown addresses surface as a typed exception. The AuthController
         // layer is responsible for the "no enumeration" guarantee.
-        expect(fn() => $service->forgotPassword('ghost@example.com'))
+        expect(fn() => $service->forgotPassword('ghost@example.com', 'https://spora.test'))
             ->toThrow(Delight\Auth\InvalidEmailException::class);
 
         expect($captured['reset'])->toBeNull();
+    });
+
+    test('builds the reset link on the origin it is given, not on the detected one', function (): void {
+        // The detected app URL comes from the request's Host header, which
+        // the client chooses — the reset link carries the credential.
+        $service = bootAuthLayer('https://detected.example.com');
+        $service->register('forgot-origin@example.com', 'ValidPass1!', 'Forgot Origin');
+
+        [$mailer, $captured] = makeCapturingMailer();
+        $service->setSystemMailer($mailer);
+
+        $service->forgotPassword('forgot-origin@example.com', 'https://spora.test');
+
+        expect($captured['reset'])->toStartWith('https://spora.test/');
+        expect($captured['reset'])->not()->toContain('detected.example.com');
     });
 });
 
@@ -466,10 +476,8 @@ describe('AuthService typed exception flow', function (): void {
     });
 });
 
-// Smoke test added for the AuthService split in Phase 3 PR 3.4. The facade
-// must wire up the two new collaborators (AuthEmailFlow, AuthRoleAdmin) so
-// that delegated calls reach the right collaborator (php:S1448).
-// ---------------------------------------------------------------------------
+// The facade must wire up AuthEmailFlow and AuthRoleAdmin so that
+// delegated calls reach the right collaborator.
 
 test('AuthService wires AuthEmailFlow and AuthRoleAdmin collaborators (split smoke test)', function (): void {
     $service = bootAuthLayer();

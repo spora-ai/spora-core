@@ -407,6 +407,15 @@ final class AttachmentRowRenderer
     private const MAX_INLINE_ROW_TEXT_BYTES = 512 * 1024;
 
     /**
+     * The ceiling on the image bytes one row forwards.
+     *
+     * The per-asset cap bounds one image; this bounds the row. An image
+     * block is a base64 copy of the asset, so a row of images costs the
+     * worker its own bytes before the provider request is even built.
+     */
+    private const MAX_INLINE_ROW_IMAGE_BYTES = 32 * 1024 * 1024;
+
+    /**
      * Leading bytes we sample to confirm the asset really is text
      * before inlining it. A NUL byte anywhere in the sample flags the
      * file as binary so a mislabeled mime cannot poison the LLM context.
@@ -446,6 +455,7 @@ final class AttachmentRowRenderer
     public function __construct(
         private readonly ?LLMDriverInterface $driver,
         private readonly string $basePath,
+        private readonly int $maxRowImageBytes = self::MAX_INLINE_ROW_IMAGE_BYTES,
     ) {}
 
     /**
@@ -498,6 +508,10 @@ final class AttachmentRowRenderer
      * {@see AttachmentRowRenderer::MAX_INLINE_TEXT_BYTES} was read as
      * forbidding.
      *
+     * The row's image bytes are capped as a whole
+     * ({@see MAX_INLINE_ROW_IMAGE_BYTES}), because the per-asset cap bounds
+     * one image and not the row.
+     *
      * @return array{text: list<array<string, mixed>>, image: list<array<string, mixed>>, metadata: list<array<string, mixed>>}
      */
     private function collectAttachmentBlocks(TaskHistory $row): array
@@ -512,19 +526,22 @@ final class AttachmentRowRenderer
         $metadataBlocks = [];
         $derivatives    = $this->resolveTextDerivatives($row->attachments);
         $remaining      = self::MAX_INLINE_ROW_TEXT_BYTES;
+        $imageBytes     = 0;
 
-        foreach ($row->attachments as $ref) {
-            $asset = $this->resolveAttachmentAsset($ref);
+        foreach ($this->uniqueAttachments($row->attachments) as $attachment) {
+            $asset = $this->resolveAttachmentAsset($attachment['media_id']);
             if ($asset === null) {
                 continue;
             }
             $metadataBlocks[] = $this->attachmentMetadataBlock($asset);
-            $kind = (string) ($ref['kind'] ?? 'text');
-            if ($kind === 'image') {
-                $image = $this->buildImageBlock($asset, $supportsImages);
-                if ($image !== null) {
-                    $imageBlocks[] = $image;
+            if ($attachment['kind'] === 'image') {
+                $image = $this->buildImageBlock($asset, $supportsImages, $imageBytes);
+                if ($image === null) {
+                    continue;
                 }
+                [$imageBlock, $bytes] = $image;
+                $imageBlocks[] = $imageBlock;
+                $imageBytes    += $bytes;
                 continue;
             }
             [$block, $inlined] = $this->buildTextBlock($asset, $derivatives[$asset->id] ?? null, $remaining);
@@ -536,14 +553,54 @@ final class AttachmentRowRenderer
     }
 
     /**
+     * The attachments of a row, each asset once.
+     *
+     * One asset is one attachment: the blocks are built from the asset,
+     * so a repeated id would duplicate them — and an image would be
+     * loaded and base64-encoded again for every occurrence. The first
+     * reference to an asset decides its kind.
+     *
+     * @param  array<array-key, mixed> $refs
+     * @return list<array{media_id: string, kind: string}>
+     */
+    private function uniqueAttachments(array $refs): array
+    {
+        $seen   = [];
+        $unique = [];
+
+        foreach ($refs as $ref) {
+            if (!is_array($ref)) {
+                continue;
+            }
+            $mediaId = $this->mediaIdOf($ref);
+            if ($mediaId === null || isset($seen[$mediaId])) {
+                continue;
+            }
+            $seen[$mediaId] = true;
+            $unique[]       = [
+                'media_id' => $mediaId,
+                'kind'     => (string) ($ref['kind'] ?? 'text'),
+            ];
+        }
+
+        return $unique;
+    }
+
+    /**
      * @param array<string, mixed> $ref
      */
-    private function resolveAttachmentAsset(array $ref): ?MediaAsset
+    private function mediaIdOf(array $ref): ?string
     {
         $mediaId = $ref['media_id'] ?? null;
-        if (!is_string($mediaId) || $mediaId === '') {
-            return null;
-        }
+
+        return is_string($mediaId) && $mediaId !== '' ? $mediaId : null;
+    }
+
+    /**
+     * The asset an attachment names, or null when the row is gone.
+     */
+    private function resolveAttachmentAsset(string $mediaId): ?MediaAsset
+    {
         return MediaAsset::query()->find($mediaId);
     }
 
@@ -604,24 +661,45 @@ final class AttachmentRowRenderer
     }
 
     /**
-     * Returns null when the image isn't forwarded (non-vision driver or
-     * oversized payload) so the caller can drop it without branching.
+     * The image block and the bytes it spent on the row's image budget.
      *
-     * @return array<string, mixed>|null
+     * Returns null when the image isn't forwarded — a non-vision driver,
+     * no room in the row's image budget, or a payload over the per-asset
+     * cap — so the caller can drop it without branching.
+     *
+     * The recorded size decides whether the image fits the row's budget,
+     * so an image that does not fit is never read off disk — the same
+     * order the text branch uses. An asset whose size was not recorded is
+     * measured after it is loaded, and the loaded bytes are measured
+     * again, because the recorded size can be stale.
+     *
+     * @return array{0: array<string, mixed>, 1: int}|null
      */
-    private function buildImageBlock(MediaAsset $asset, bool $supportsImages): ?array
+    private function buildImageBlock(MediaAsset $asset, bool $supportsImages, int $imageBytes): ?array
     {
-        if (!$supportsImages) {
+        $size = (int) ($asset->byte_size ?? 0);
+        $fits = $size > 0
+            ? $imageBytes + $size <= $this->maxRowImageBytes
+            : $imageBytes < $this->maxRowImageBytes;
+
+        // An image that does not fit is never read off disk — the same order
+        // the text branch uses.
+        $bytes = $supportsImages && $fits ? $this->loadAssetBytes($asset) : null;
+
+        if ($bytes === null
+            || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES
+            || $imageBytes + strlen($bytes) > $this->maxRowImageBytes
+        ) {
             return null;
         }
-        $bytes = $this->loadInlineImageBytes($asset);
-        if ($bytes === null) {
-            return null;
-        }
+
         return [
-            'type'      => 'image',
-            'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
-            'base64'    => base64_encode($bytes),
+            [
+                'type'      => 'image',
+                'mediaType' => (string) ($asset->mime_type ?? 'application/octet-stream'),
+                'base64'    => base64_encode($bytes),
+            ],
+            strlen($bytes),
         ];
     }
 
@@ -859,22 +937,6 @@ final class AttachmentRowRenderer
             $bytes >= 1_024     => number_format($bytes / 1_024, 1) . ' KB',
             default             => $bytes . ' B',
         };
-    }
-
-    /**
-     * Returns the asset bytes when they fit within the inline-image cap,
-     * otherwise null. The cap (20 MiB) prevents a single oversized
-     * attachment from OOM-ing the LLM request — see
-     * {@see self::MAX_INLINE_IMAGE_BYTES}.
-     */
-    private function loadInlineImageBytes(MediaAsset $asset): ?string
-    {
-        $bytes = $this->loadAssetBytes($asset);
-        if ($bytes === null || strlen($bytes) > self::MAX_INLINE_IMAGE_BYTES) {
-            return null;
-        }
-
-        return $bytes;
     }
 
     private function loadAssetBytes(MediaAsset $asset): ?string

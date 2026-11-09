@@ -26,6 +26,22 @@ function makePng(int $width, int $height, int $red = 200, int $green = 100, int 
     return $bytes;
 }
 
+/**
+ * A PNG that declares its dimensions and carries no pixels.
+ *
+ * The budget is read from the header, so a source over it is refused
+ * before the decoder allocates anything — the header alone is enough to
+ * make the case, and a real raster of that size is not something a test
+ * should allocate.
+ */
+function makePngHeader(int $width, int $height): string
+{
+    $ihdr  = pack('N', $width) . pack('N', $height) . "\x08\x02\x00\x00\x00";
+    $chunk = 'IHDR' . $ihdr;
+
+    return "\x89PNG\r\n\x1a\n" . pack('N', strlen($ihdr)) . $chunk . pack('N', crc32($chunk));
+}
+
 function seedImageAsset(string $bytes, string $mime, string $storageMode = 'data_url', ?string $assetToken = null): MediaAsset
 {
     // Real UUIDv4 (version + variant nibbles set) — MySQL/MariaDB's `uuid`
@@ -117,6 +133,34 @@ test('format-jpeg re-encodes as JPEG with the source dimensions', function (): v
     expect($out->height)->toBe(480);
 });
 
+test('the derivative carries no EXIF profile from the source', function (): void {
+    if (!extension_loaded('imagick')) {
+        // GD writes no metadata of its own, so only the Imagick driver
+        // can carry a profile into the derivative.
+        $this->markTestSkipped('This environment has no Imagick driver.');
+    }
+
+    // A JPEG whose EXIF profile is a place the camera was.
+    $imagick = new Imagick();
+    $imagick->newImage(64, 48, new ImagickPixel('rgb(200, 120, 60)'));
+    $imagick->setImageFormat('jpeg');
+    $imagick->setImageProfile('exif', "Exif\x00\x00MM\x00*\x00\x00\x00\x08\x00\x00");
+    $bytes = (string) $imagick->getImagesBlob();
+    $imagick->clear();
+
+    expect($bytes)->toContain('Exif');
+
+    $producer = new ImageDerivativeProducer();
+    $source = seedImageAsset($bytes, 'image/jpeg');
+
+    // The derivative is served to everyone who can read the asset, and
+    // an EXIF profile can carry the GPS coordinates of whoever took the
+    // photo.
+    $out = $producer->produce($source, 'format-jpeg');
+
+    expect($out->bytes)->not->toContain('Exif');
+});
+
 test('format-webp re-encodes as WebP with the source dimensions', function (): void {
     $producer = new ImageDerivativeProducer();
     $source = seedImageAsset(makePng(320, 200), 'image/png');
@@ -127,6 +171,17 @@ test('format-webp re-encodes as WebP with the source dimensions', function (): v
     expect($out->width)->toBe(320);
     expect($out->height)->toBe(200);
     expect(substr($out->bytes, 0, 4))->toBe('RIFF');
+});
+
+test('produce refuses a source whose pixel count is over the budget', function (): void {
+    // The decoder allocates the whole raster before the thumbnail size is
+    // applied, so a small compressed image can otherwise ask for a very
+    // large allocation inside the request.
+    $producer = new ImageDerivativeProducer();
+    $source = seedImageAsset(makePngHeader(10000, 10000), 'image/png');
+
+    expect(fn() => $producer->produce($source, 'thumbnail-256'))
+        ->toThrow(RuntimeException::class, 'pixel budget');
 });
 
 test('produce throws InvalidArgumentException for an unknown format key', function (): void {
@@ -148,7 +203,6 @@ test('produce throws InvalidArgumentException for an unsupported source MIME', f
 test('produce throws when the data_url payload column is empty', function (): void {
     $producer = new ImageDerivativeProducer();
     $source = seedImageAsset('', 'image/png', 'data_url');
-    // seedImageAsset refused empty bytes; force-create one with payload='':
     $source->payload = '';
     $source->save();
 

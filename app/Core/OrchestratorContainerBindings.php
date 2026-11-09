@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Spora\Core;
 
 use League\CommonMark\Environment\Environment as CommonMarkEnvironment;
-use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
-use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
 use League\CommonMark\MarkdownConverter;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -142,12 +140,13 @@ final class OrchestratorContainerBindings
 
     /**
      * Single-instance services for the client-worker housekeeping path.
-     * DbRateLimiter + HousekeepingLock are stateless wrappers around the
-     * `ratelimit_hits` and `worker_housekeeping_locks` tables (see migrations
-     * 0071/0072). WorkerReaper and ScheduledRunProcessor are also used by the
-     * CLI `worker:run --scheduled` flow but were constructed inline in
-     * WorkerRunCommand before this slice — they now live in the container so
-     * the HTTP controller and the CLI share the same singletons.
+     * DbRateLimiter wraps the `ratelimit_hits` table (migration 0072) and
+     * HousekeepingLock the `worker_housekeeping_locks` table (migration 0071).
+     *
+     * WorkerReaper is resolved from the container by the CLI as well, so both
+     * entry points build it the same way. ScheduledRunProcessor is registered
+     * here for the HTTP path; `worker:run --once` and `worker:run --daemon`
+     * build their own.
      */
     private static function workerRuntime(): array
     {
@@ -240,13 +239,12 @@ final class OrchestratorContainerBindings
 
             // Markdown → HTML pipeline. CommonMarkCore + GFM gives tables,
             // strikethrough, autolinks, task lists. Used by SystemMailer and
-            // by anything that renders a MailTemplate body.
-            CommonMarkEnvironment::class => static function (): CommonMarkEnvironment {
-                $env = new CommonMarkEnvironment();
-                $env->addExtension(new CommonMarkCoreExtension());
-                $env->addExtension(new GithubFlavoredMarkdownExtension());
-                return $env;
-            },
+            // by anything that renders a MailTemplate body. The environment
+            // comes from the renderer's own factory so the escaping policy
+            // (raw HTML escaped, unsafe link schemes stripped) is the one the
+            // renderer documents — a container-built converter must not be
+            // laxer than the fallback.
+            CommonMarkEnvironment::class => static fn(): CommonMarkEnvironment => MailTemplateRenderer::createEnvironment(),
 
             MarkdownConverter::class => static function (ContainerInterface $c): MarkdownConverter {
                 return new MarkdownConverter($c->get(CommonMarkEnvironment::class));

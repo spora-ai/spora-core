@@ -26,6 +26,18 @@ interface TaskMediaCapabilityInterface
     public function ensureMediaCapabilityCompatible(int $agentId, array $mediaIds): void;
 
     /**
+     * Throw {@see MediaNotOwnedException} when the caller may not read one
+     * of the attached assets.
+     *
+     * Runs before the derivative mint: minting writes a derivative and a
+     * parent association into the archive, so a caller who may not read
+     * the source must not be able to leave a trace there either.
+     *
+     * @param list<string> $mediaIds
+     */
+    public function ensureAttachmentsAccessible(array $mediaIds, int $userId): void;
+
+    /**
      * Mint the `md` derivative of every attached binary document that lacks
      * one, so the turn's prompt is built from text that is already there.
      *

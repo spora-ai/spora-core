@@ -204,9 +204,6 @@ it('treats a tool setting of 0 as unset rather than as a zero-second timeout', f
     assertTimeoutReachesHttpClient(['http_timeout' => 0], 7, 7);
 });
 
-// ---------------------------------------------------------------------
-// fetch_pdf: extraction + the SSRF / size guards on the way in
-// ---------------------------------------------------------------------
 
 it('fetches a PDF and returns its text as markdown', function () {
     $client = Mockery::mock(HttpClientInterface::class);
@@ -422,6 +419,38 @@ it('still fetches a public https URL', function () {
         ->and($result->content)->toContain('Public page');
 });
 
+it('pins the request to the address the guard vetted', function () {
+    $vetted = SsrfGuard::forWebFetch()->screen('https://example.com/pinned')['resolve'];
+
+    if ($vetted === []) {
+        $this->markTestSkipped('This environment resolves no public name.');
+    }
+
+    $captured = null;
+
+    $client = Mockery::mock(HttpClientInterface::class);
+    $response = Mockery::mock(ResponseInterface::class);
+    $response->allows('getStatusCode')->andReturn(200);
+    $response->allows('getHeaders')->andReturn(['content-type' => ['text/plain']]);
+    $response->allows('getContent')->andReturn('body text');
+
+    $client->expects('request')->andReturnUsing(
+        static function (string $method, string $url, array $options) use (&$captured, $response): ResponseInterface {
+            $captured = $options;
+
+            return $response;
+        },
+    );
+
+    $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), ssrfGuard: SsrfGuard::forWebFetch());
+    $tool->execute(['url' => 'https://example.com/pinned'], 1);
+
+    // The name resolves to a public address now, and the request has to go
+    // there rather than to whatever the name answers with a moment later.
+    expect($captured['resolve'] ?? null)->toHaveKey('example.com');
+    expect(filter_var($captured['resolve']['example.com'], FILTER_VALIDATE_IP))->not->toBeFalse();
+});
+
 it('returns a helpful error when the fetch_pdf URL has no hostname after validation', function () {
     // `http://` with a URL-encoded whitespace host (`%20`) passes
     // `filter_var`/`parse_url` but `gethostbynamel` returns false; the
@@ -430,8 +459,6 @@ it('returns a helpful error when the fetch_pdf URL has no hostname after validat
     $client->shouldNotReceive('request');
 
     $tool = new ReadUrlTool($client, makeReadUrlToolConfig(), makeReadUrlTimeoutResolver(), null, makePdfExtractor('unused'));
-    // `http://%20/path` is a syntactically valid URL whose host part
-    // (%20) cannot resolve; verify it isn't fetched.
     $result = $tool->execute(['op' => 'fetch_pdf', 'url' => 'http://%20/path.pdf'], 1);
 
     expect($result->success)->toBeFalse();

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Services;
 
+use ReflectionClass;
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\SecurityManagerInterface;
 use Spora\Core\ValueObjects\EncryptedValue;
@@ -24,10 +25,14 @@ use Spora\Services\Exceptions\PrincipalNotAccessibleException;
  * In the principals-and-groups model the caller passes two ids:
  *   - `$principalId` is the principal on which the config lives
  *     (own user-principal, or a group the caller controls).
- *   - `$callerUserId` is the authenticated user — used for the
- *     `PrincipalResolver::visiblePrincipalIds` cross-call approval gate
- *     so a caller cannot create or delete a personal config under a
- *     principal they don't act as.
+ *   - `$callerUserId` is the authenticated user — the create path gates
+ *     on `PrincipalResolver::visiblePrincipalIds` so a caller cannot
+ *     create a personal config under a principal they don't act as; the
+ *     delete path gates on `PrincipalResolver::isPrincipalOwner`, and
+ *     the update path on `PrincipalResolver::canManagePrincipal`,
+ *     because a principal that is merely *visible* (an ordinary member
+ *     of a group) is not authorised to change or remove the group's own
+ *     configuration.
  */
 final class LLMConfigPersistence
 {
@@ -59,9 +64,9 @@ final class LLMConfigPersistence
         );
     }
 
-    public function updateConfiguration(int $configId, array $data, bool $isAdmin): ?LLMDriverConfiguration
+    public function updateConfiguration(int $configId, int $callerUserId, array $data, bool $isAdmin): ?LLMDriverConfiguration
     {
-        $config = $this->loadEditableConfiguration($configId, $isAdmin);
+        $config = $this->loadEditableConfiguration($configId, $callerUserId, $isAdmin);
         if ($config === null) {
             return null;
         }
@@ -121,7 +126,7 @@ final class LLMConfigPersistence
      * dropped before encryption. The schema (including inherited attributes)
      * is the single source of truth for what is allowed in the settings blob,
      * so stale keys from a removed ToolSetting (e.g. the dead
-     * `context_window` / `max_tokens_output` from PR #203) are pruned on
+     * `context_window` / `max_tokens_output`) are pruned on
      * every save rather than riding along forever.
      *
      * @param array<string, mixed> $settings
@@ -202,6 +207,12 @@ final class LLMConfigPersistence
             return null;
         }
 
+        // PHP accepts a leading backslash and a different case for a
+        // class name, but the driver registry is keyed by the canonical
+        // spelling — store that one so a lookup by class name cannot
+        // miss the schema the row was written with.
+        $driverClass = (new ReflectionClass($driverClass))->getName();
+
         return [
             'name' => $name,
             'driver_class' => $driverClass,
@@ -251,18 +262,34 @@ final class LLMConfigPersistence
         return $config;
     }
 
-    private function loadEditableConfiguration(int $configId, bool $isAdmin): ?LLMDriverConfiguration
+    private function loadEditableConfiguration(int $configId, int $callerUserId, bool $isAdmin): ?LLMDriverConfiguration
     {
         $config = LLMDriverConfiguration::find($configId);
         if ($config === null) {
             return null;
         }
 
-        if (!$isAdmin && $config->is_global) {
-            return null;
+        return $this->isEditableConfiguration($config, $callerUserId, $isAdmin) ? $config : null;
+    }
+
+    /**
+     * Whether the caller may change this configuration.
+     *
+     * A global configuration is admin-only, and a principal-scoped one
+     * belongs to the principal that pays for it. Read visibility
+     * through group membership is not edit authority: an ordinary
+     * member who can see the group's configuration must not be able
+     * to repoint its provider endpoint while the stored API key
+     * stays behind.
+     */
+    private function isEditableConfiguration(LLMDriverConfiguration $config, int $callerUserId, bool $isAdmin): bool
+    {
+        if ($isAdmin) {
+            return true;
         }
 
-        return $config;
+        return !$config->is_global
+            && $this->principalResolver->canManagePrincipal((int) $config->principal_id, $callerUserId);
     }
 
     private function applyConfigurationUpdates(LLMDriverConfiguration $config, array $data): ?bool

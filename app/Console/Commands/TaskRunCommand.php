@@ -85,14 +85,6 @@ final class TaskRunCommand extends Command
         $output->writeln('<comment>Tasks are driven by your browser. Use Retry from the UI instead.</comment>');
     }
 
-    /**
-     * Claim the task and tick it until it leaves `RUNNING`.
-     *
-     * The exit code follows the task's final status: `COMPLETED` is a
-     * success, `ABORTED` has its own code, and anything else is a
-     * failure — a task that pauses for approval ends in
-     * `PENDING_APPROVAL`, and the approval path re-queues it.
-     */
     private function runTask(InputInterface $input, OutputInterface $output): int
     {
         $taskId = (int) $input->getArgument('taskId');

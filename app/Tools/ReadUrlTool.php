@@ -34,8 +34,10 @@ use Throwable;
  *
  * Every operation passes {@see \Spora\Services\SsrfGuard} before a request
  * goes out: an agent may name any URL, and the guard refuses the ones that
- * resolve inside the deployment's own network. Both operations share the
- * 40 000-character output cap (`MAX_OUTPUT_CHARS`).
+ * resolve inside the deployment's own network. The request is pinned to the
+ * address the guard vetted, so a name that answers with a private address a
+ * moment later is not reached. Both operations share the 40 000-character
+ * output cap (`MAX_OUTPUT_CHARS`).
  */
 #[Tool(
     name: 'read_url',
@@ -105,27 +107,6 @@ final class ReadUrlTool extends AbstractTool
         $url = trim((string) ($arguments['url'] ?? ''));
         $op = (string) ($arguments['op'] ?? 'fetch');
 
-        $rejection = $this->screenUrl($url);
-        if ($rejection !== null) {
-            return $rejection;
-        }
-
-        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
-
-        try {
-            return match ($op) {
-                'fetch_pdf' => $this->processFetchedPdfContent($url, $settings),
-                default     => $this->processFetchedContent($url, $settings),
-            };
-        } catch (Throwable $e) {
-            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'op' => $op, 'exception' => $e]);
-            return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
-        }
-    }
-
-    /** `null` when the URL may be fetched; otherwise the failure to report. */
-    private function screenUrl(string $url): ?ToolResult
-    {
         $validation = $this->validateUrl($url);
         if ($validation instanceof ToolResult) {
             return $validation;
@@ -133,9 +114,31 @@ final class ReadUrlTool extends AbstractTool
 
         // Every operation is screened, not just the PDF one: an agent names
         // the URL, and an internal endpoint's body would reach the model.
-        $reason = $this->ssrfGuard->rejectReason($url);
+        $screen = $this->ssrfGuard->screen($url);
+        if ($screen['reason'] !== null) {
+            return new ToolResult(false, $screen['reason']);
+        }
 
-        return $reason === null ? null : new ToolResult(false, $reason);
+        $settings = $this->configService->getEffectiveSettings(static::class, $agentId, $userId);
+
+        return $this->runOperation($op, $url, $settings, $screen['resolve']);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, string> $resolve the vetted address the request is pinned to
+     */
+    private function runOperation(string $op, string $url, array $settings, array $resolve): ToolResult
+    {
+        try {
+            return match ($op) {
+                'fetch_pdf' => $this->processFetchedPdfContent($url, $settings, $resolve),
+                default     => $this->processFetchedContent($url, $settings, $resolve),
+            };
+        } catch (Throwable $e) {
+            $this->logger?->error('ReadUrlTool Exception', ['url' => $url, 'op' => $op, 'exception' => $e]);
+            return new ToolResult(false, 'Failed to read URL: ' . $e->getMessage());
+        }
     }
 
     private function validateUrl(string $url): ?ToolResult
@@ -157,8 +160,9 @@ final class ReadUrlTool extends AbstractTool
 
     /**
      * @param array<string, mixed> $settings
+     * @param array<string, string> $resolve the vetted address the request is pinned to
      */
-    private function processFetchedContent(string $url, array $settings): ToolResult
+    private function processFetchedContent(string $url, array $settings, array $resolve): ToolResult
     {
         $timeout = $this->timeoutResolver->resolve($settings['http_timeout'] ?? null);
         $headers = [
@@ -178,6 +182,8 @@ final class ReadUrlTool extends AbstractTool
             'headers' => $headers,
             // The guard screened the URL as given; a redirect target is unscreened.
             'max_redirects' => 0,
+            // The address the guard vetted is the address the request goes to.
+            'resolve' => $resolve,
         ]);
 
         $statusCode = $response->getStatusCode();
@@ -193,14 +199,15 @@ final class ReadUrlTool extends AbstractTool
 
     /**
      * @param array<string, mixed> $settings
+     * @param array<string, string> $resolve the vetted address the request is pinned to
      */
-    private function processFetchedPdfContent(string $url, array $settings): ToolResult
+    private function processFetchedPdfContent(string $url, array $settings, array $resolve): ToolResult
     {
         if ($this->pdfExtractor === null) {
             return new ToolResult(false, 'PDF fetching is unavailable: no PDF extractor is wired.');
         }
 
-        $payload = $this->fetchPdfBytes($url, $settings);
+        $payload = $this->fetchPdfBytes($url, $settings, $resolve);
         if ($payload instanceof ToolResult) {
             return $payload;
         }
@@ -208,8 +215,11 @@ final class ReadUrlTool extends AbstractTool
         return $this->convertPdf($payload, $url);
     }
 
-    /** @param array<string, mixed> $settings */
-    private function fetchPdfBytes(string $url, array $settings): string|ToolResult
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, string> $resolve the vetted address the request is pinned to
+     */
+    private function fetchPdfBytes(string $url, array $settings, array $resolve): string|ToolResult
     {
         $timeout = $this->timeoutResolver->resolve($settings['http_timeout'] ?? null);
         $this->logger?->debug('ReadUrlTool: fetching PDF', ['url' => $url, 'timeout' => $timeout]);
@@ -222,6 +232,7 @@ final class ReadUrlTool extends AbstractTool
             ],
             // The guard screened the URL as given; a redirect target is unscreened.
             'max_redirects' => 0,
+            'resolve' => $resolve,
         ]);
 
         return $this->validatePdfResponse($response);

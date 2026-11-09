@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use InvalidArgumentException;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
+use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityInterface;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -30,8 +31,6 @@ final class ContinueTaskDispatcher
     ) {}
 
     /**
-     * Validate the request body and dispatch `continueTask`.
-     *
      * @param array<string, mixed> $body Decoded request body.
      */
     public function handleContinue(int $taskId, int $userId, array $body): JsonResponse
@@ -125,6 +124,9 @@ final class ContinueTaskDispatcher
         array $mediaIds,
     ): JsonResponse {
         try {
+            // Before anything writes: an attachment the caller may not read
+            // must not reach the archive, not even as a minted derivative.
+            $this->mediaCapability->ensureAttachmentsAccessible($mediaIds, $userId);
             $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
             // Same attach-time seam as TaskController::store(), and the
             // ordering matters: after the ids are validated, before the
@@ -133,14 +135,16 @@ final class ContinueTaskDispatcher
             $task = $this->taskService->continueTask($taskId, $userId, $prompt, $additionalSteps, $mediaIds);
 
             return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_OK);
+        } catch (MediaNotOwnedException $e) {
+            return new JsonResponse(
+                ['error' => ['code' => 'MEDIA_NOT_OWNED', 'message' => $e->getMessage()]],
+                Response::HTTP_FORBIDDEN,
+            );
         } catch (MediaCapabilityMismatchException | InvalidArgumentException $e) {
             return $this->exceptionResponse($e);
         }
     }
 
-    /**
-     * @param MediaCapabilityMismatchException|InvalidArgumentException $e
-     */
     private function exceptionResponse(
         MediaCapabilityMismatchException|InvalidArgumentException $e,
     ): JsonResponse {

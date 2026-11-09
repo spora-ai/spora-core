@@ -20,6 +20,7 @@ use Spora\Models\Task;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalResolver;
+use Spora\Services\PromptTemplateExpander;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
@@ -34,12 +35,16 @@ final class ScheduledRunProcessor
     /** Tracks how many scheduled runs were processed in the last process() call (testing hook). */
     public int $lastProcessed = 0;
 
+    private readonly PromptTemplateExpander $expander;
+
     public function __construct(
         private readonly OrchestratorInterface $orchestrator,
         private readonly LoggerInterface $logger,
         private readonly MercurePublisherInterface $mercure,
         private readonly NotificationService $notificationService,
-    ) {}
+    ) {
+        $this->expander = new PromptTemplateExpander();
+    }
 
     public function process(OutputInterface $output): void
     {
@@ -52,14 +57,6 @@ final class ScheduledRunProcessor
         $run = $context['run'];
         $agent = $context['agent'];
 
-        $template = null;
-        if ($run->template_id !== null) {
-            $template = AgentPromptTemplate::find($run->template_id);
-        }
-
-        $prompt = $this->buildPrompt($run, $template, $agent);
-        $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-
         $this->logger->info('Triggering scheduled run', [
             'run_id' => $run->id,
             'agent_id' => $run->agent_id,
@@ -67,6 +64,16 @@ final class ScheduledRunProcessor
         $output->writeln(sprintf('<info>Triggering scheduled run %d for agent %d...</info>', $run->id, $run->agent_id));
 
         try {
+            // Building the prompt is inside the try: the expansion has a
+            // ceiling, and a template that exceeds it must fail the run
+            // the same way a failing orchestrator does — with the entry
+            // marked SKIPPED and the next occurrence queued. An exception
+            // escaping here would leave the entry CLAIMED and the
+            // schedule silent from now on.
+            $template = $this->findTemplate($run);
+            $prompt   = $this->buildPrompt($run, $template, $agent);
+            $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+
             $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps, null, $run->id);
         } catch (Throwable $e) {
             $this->logger->error('Scheduled run failed', [
@@ -120,7 +127,7 @@ final class ScheduledRunProcessor
         // before issuing the session token). If for any reason it doesn't — e.g.
         // a mid-flight logout or a manual SQL poke — visiblePrincipalIds() returns
         // [] and we skip the call without erroring. The next /housekeeping call
-        // (within 5 min) will retry once auth has settled.
+        // will retry once auth has settled.
         $resolver = new PrincipalResolver();
         $visiblePrincipalIds = $resolver->visiblePrincipalIds($userId);
         if ($visiblePrincipalIds === []) {
@@ -149,14 +156,6 @@ final class ScheduledRunProcessor
         $run = $context['run'];
         $agent = $context['agent'];
 
-        $template = null;
-        if ($run->template_id !== null) {
-            $template = AgentPromptTemplate::find($run->template_id);
-        }
-
-        $prompt = $this->buildPrompt($run, $template, $agent);
-        $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
-
         $this->logger->info('Triggering scheduled run (client mode)', [
             'run_id'         => $run->id,
             'agent_id'       => $run->agent_id,
@@ -172,6 +171,14 @@ final class ScheduledRunProcessor
         $task = null;
 
         try {
+            // Inside the try for the same reason as in process(): a
+            // template whose expansion exceeds the ceiling must fail the
+            // run the way a failing orchestrator does, not leave the
+            // entry CLAIMED and the schedule silent.
+            $template = $this->findTemplate($run);
+            $prompt   = $this->buildPrompt($run, $template, $agent);
+            $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
+
             // Explicit caller id lands in `trigger_user_id`; null would fall
             // back to the agent's most-recent trigger for credential
             // resolution. `principal_id` comes from the agent, not this arg.
@@ -244,7 +251,7 @@ final class ScheduledRunProcessor
                         'lease_owner'      => null,
                         'lease_expires_at' => null,
                     ]);
-                $this->mercure->publishForPrincipal($task->id, $userId, [
+                $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), [
                     'task_id'    => $task->id,
                     'status'     => 'FAILED',
                     'error_code' => 'UNKNOWN',
@@ -513,70 +520,25 @@ final class ScheduledRunProcessor
             ]);
     }
 
-    /**
-     * Substitute {{variable}} placeholders in a template string.
-     */
     private function substituteVariables(string $template, array $variables, ?Agent $agent = null): string
     {
-        // Convert the JSON list to a map of key => default_value
-        $defaults = [];
-        foreach ($variables as $v) {
-            if (isset($v['key'])) {
-                $defaults[$v['key']] = $v['default_value'] ?? null;
-            }
-        }
-
-        return preg_replace_callback('/\{\{(\w+)(?::([^}]*))?\}\}/', function (array $m) use ($defaults, $agent): string {
-            return $this->resolveTemplateVariable($m, $defaults, $agent);
-        }, $template);
+        return $this->expander->expand($template, $variables, $agent);
     }
 
     /**
-     * @param array<string, string|null> $defaults
+     * The run's template, looked up through the run's own agent.
+     *
+     * A schedule may only reference a template of the agent it runs on, so
+     * a foreign template's text is never copied into the agent's task.
      */
-    private function resolveTemplateVariable(array $match, array $defaults, ?Agent $agent): string
+    private function findTemplate(ScheduledRun $run): ?AgentPromptTemplate
     {
-        $key = $match[1];
-        $inlineDefault = $match[2] ?? null;
-
-        $builtin = $this->resolveBuiltinDateVariable($key);
-        if ($builtin !== null) {
-            return $builtin;
+        if ($run->template_id === null) {
+            return null;
         }
 
-        if ($agent !== null && ($key === 'agent_name' || $key === 'user_name')) {
-            return $key === 'agent_name'
-                ? $agent->name
-                : $this->resolveUserName($agent, $key);
-        }
-
-        return (isset($defaults[$key]) && $defaults[$key] !== '' ? (string) $defaults[$key] : null)
-            ?? $inlineDefault
-            ?? $match[0];
-    }
-
-    private function resolveBuiltinDateVariable(string $key): ?string
-    {
-        return match (true) {
-            $key === 'current_date' || $key === 'date'        => date('Y-m-d'),
-            $key === 'current_time' || $key === 'time'        => date('H:i'),
-            $key === 'current_datetime' || $key === 'datetime' => date('Y-m-d\TH:i'),
-            $key === 'day_of_week'    => date('l'),
-            $key === 'day_of_month'   => date('j'),
-            $key === 'month'          => date('F'),
-            $key === 'year'           => date('Y'),
-            default                   => null,
-        };
-    }
-
-    private function resolveUserName(Agent $agent, string $key): string
-    {
-        $resolver = new PrincipalResolver();
-        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
-        if ($ownerUserId === null) {
-            return $key;
-        }
-        $user = \Spora\Models\User::find($ownerUserId);
-        return $user instanceof \Spora\Models\User ? ($user->username ?? $key) : $key;
+        return AgentPromptTemplate::where('id', $run->template_id)
+            ->where('agent_id', $run->agent_id)
+            ->first();
     }
 }

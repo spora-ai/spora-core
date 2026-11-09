@@ -13,15 +13,14 @@ use Spora\Services\PrincipalService;
 use Throwable;
 
 /**
- * Walks the five-tier speech provider cascade and answers the
- * resolved-class / source / config-id triple the
- * {@see SpeechToTextRegistry} exposes.
+ * Walks the speech provider cascade and answers the resolved-class /
+ * source / config-id triple the {@see SpeechToTextRegistry} exposes.
  *
  * Pulled out of {@see SpeechToTextRegistry} so the registry stays
  * under the SonarCloud S1448 20-method-per-class ceiling. The
- * registry keeps only the public surface (all / allProviders /
- * configuredProvider / describeWithConfig / describe / bindProviderLabel)
- * and delegates the cascade walk to this helper.
+ * registry keeps only its public surface (all / allProviders /
+ * configuredProvider / describeWithConfig / describe) and delegates the
+ * cascade walk to this helper.
  *
  * The cascade (per-agent path with `agentId > 0`):
  *   1. **Agent override** — `agents.speech_driver_config_id` →
@@ -87,8 +86,8 @@ final readonly class SpeechToTextCascadeResolver
      * Pick the configuration row that resolved the given provider
      * class for the caller, so the capability widget can show the
      * operator's per-config `display_name` next to the resolved
-     * class. Returns `null` when the class was resolved via the
-     * tier-5 fallback (no FK behind the choice).
+     * class. Returns `null` when no configuration row backs the
+     * resolved class.
      */
     public function resolveConfigForClass(string $providerClass, int $userId, int $agentId): ?SpeechProviderConfiguration
     {
@@ -129,9 +128,9 @@ final readonly class SpeechToTextCascadeResolver
         $config = $this->loadAgentSpeechConfig($agentId);
         if ($config === null) {
             // The agent row exists but doesn't pin a `speech_driver_config_id`
-            // — distinct from the tier-5 fallback (no FK behind the choice).
-            // Use 'unconfigured' so any future caller that doesn't gate on
-            // `$class !== null` can disambiguate.
+            // — there is no FK behind the choice. Use 'unconfigured' so any
+            // future caller that doesn't gate on `$class !== null` can
+            // disambiguate.
             return [null, 'unconfigured', null];
         }
         if (!in_array($config->provider_class, $this->registeredSttClasses(), true)) {
@@ -145,15 +144,21 @@ final readonly class SpeechToTextCascadeResolver
 
     private function loadAgentSpeechConfig(int $agentId): ?SpeechProviderConfiguration
     {
-        if ($agentId <= 0) {
-            return null;
-        }
-        $agent = Agent::find($agentId);
+        $agent = $agentId > 0 ? Agent::find($agentId) : null;
         if ($agent === null || $agent->speech_driver_config_id === null) {
             return null;
         }
 
-        return SpeechProviderConfiguration::find($agent->speech_driver_config_id);
+        $config = SpeechProviderConfiguration::find($agent->speech_driver_config_id);
+
+        // The override belongs to the agent's own principal (or is
+        // global) — the same scope the preference tiers use. A reference
+        // to another principal's configuration would spend their
+        // provider account.
+        $belongsToAgent = $config !== null
+            && ($config->is_global || (int) $config->principal_id === (int) $agent->principal_id);
+
+        return $belongsToAgent ? $config : null;
     }
 
     /**
@@ -272,7 +277,7 @@ final readonly class SpeechToTextCascadeResolver
                 return [$config->provider_class, 'user_preference', (int) $config->id];
             }
         } catch (Throwable) {
-            // fall through to the not-set tuple
+            // The principal could not be materialised — the tier stays unset.
         }
 
         return [null, 'fallback', null];

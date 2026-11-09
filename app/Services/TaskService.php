@@ -275,7 +275,7 @@ final class TaskService implements TaskServiceInterface
         }
 
         try {
-            $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds);
+            $continuedTask = $this->orchestrator->continue($task->id, $prompt, $additionalSteps, $mediaIds, $userId);
         } catch (InvalidTaskTransitionException $e) {
             throw new InvalidArgumentException($e->getMessage(), 0, $e);
         }
@@ -343,7 +343,7 @@ final class TaskService implements TaskServiceInterface
             throw new InvalidArgumentException(self::ERR_TASK_NOT_FOUND, 0, $e);
         }
 
-        $this->cascadeAbortToAncestors((int) $child->parent_task_id);
+        $this->cascadeAbortToAncestors((int) $child->parent_task_id, $visiblePrincipalIds);
 
         $fresh = $abortedChild->fresh();
         $resource = $this->resources->taskResource($fresh);
@@ -358,14 +358,12 @@ final class TaskService implements TaskServiceInterface
      * `QUEUED` (or leaves it in `AWAITING_INPUT` if other batches are
      * still pending), and publishes the new state to Mercure.
      *
-     * Mercure publish is best-effort: the controller has already
-     * returned 204 by the time this method is reached, so a publish
-     * failure must not fail an otherwise-successful answer submit.
+     * Mercure publish is best-effort: a wedged hub must not turn an
+     * otherwise-successful answer submit into a 502.
      * `MercurePublisher::doPublish` logs the underlying transport
      * error internally and returns `false`; this method additionally
      * catches anything that escapes that layer (interface swaps,
-     * pluggable implementations) so a wedged hub cannot regress a
-     * correct answer into a 502. Clients whose subscription is the
+     * pluggable implementations). Clients whose subscription is the
      * Mercure SSE event still see the new state on the next poll of
      * `GET /api/v1/tasks/{id}` after the row flips.
      *
@@ -383,10 +381,9 @@ final class TaskService implements TaskServiceInterface
     }
 
     /**
-     * Best-effort Mercure publish — see method docblock. The controller
-     * returns 200 with the new task resource; a publish failure here is
-     * logged by MercurePublisher and the next poll of GET
-     * /api/v1/tasks/{id} re-syncs the client.
+     * Best-effort Mercure publish — see {@see self::answerTask()}. A
+     * publish failure here is logged by MercurePublisher and the next
+     * poll of GET /api/v1/tasks/{id} re-syncs the client.
      *
      * @param array<string, mixed> $resource
      */
@@ -395,8 +392,7 @@ final class TaskService implements TaskServiceInterface
         try {
             $this->mercure->publishForPrincipal($taskId, $principalId, $resource);
         } catch (Throwable) {
-            // Mirrors MercurePublisher::doPublish's own try/catch
-            // (app/Services/MercurePublisher.php:122) — nothing else to
+            // Mirrors MercurePublisher::doPublish's own try/catch — nothing else to
             // do here; the row state is already committed.
         }
     }
@@ -409,8 +405,16 @@ final class TaskService implements TaskServiceInterface
      * per affected ancestor inside the loop — one Mercure event per
      * cascaded parent keeps the live stream useful. Already-ABORTED
      * ancestors are skipped before reaching `orchestrator->abort`.
+     *
+     * The link alone is not authority: an ancestor outside the caller's
+     * visible principals is left running. A `parent_task_id` can point at
+     * a task the caller can no longer reach — a group task they left, or
+     * one that was transferred — and aborting it would be a write
+     * outside their authority.
+     *
+     * @param list<int> $visiblePrincipalIds
      */
-    private function cascadeAbortToAncestors(?int $parentTaskId): void
+    private function cascadeAbortToAncestors(?int $parentTaskId, array $visiblePrincipalIds): void
     {
         $cursor = $parentTaskId;
         $cascadeTargets = [];
@@ -429,7 +433,9 @@ final class TaskService implements TaskServiceInterface
                 break;
             }
 
-            if ($row->status === 'AWAITING_SUB_AGENTS') {
+            if ($row->status === 'AWAITING_SUB_AGENTS'
+                && in_array((int) $row->principal_id, $visiblePrincipalIds, true)
+            ) {
                 $cascadeTargets[] = $row;
             }
 
@@ -466,10 +472,33 @@ final class TaskService implements TaskServiceInterface
             }
             TaskHistory::where('task_id', $task->id)->delete();
             ToolCall::where('task_id', $task->id)->delete();
+            $this->detachDescendants($task->id);
             $task->delete();
         });
 
         return true;
+    }
+
+    /**
+     * Detach every descendant of `$taskId` from its parent link.
+     *
+     * `tasks.parent_task_id` cascades on delete, so deleting the row would
+     * take its whole subtree with it — including tasks owned by a
+     * principal the caller has no authority over, since a task may name a
+     * parent belonging to a different principal. Clearing the link leaves
+     * the descendants as roots, so the delete means "this task".
+     */
+    private function detachDescendants(int $taskId): void
+    {
+        $frontier = [$taskId];
+        $childIds = Task::whereIn('parent_task_id', $frontier)->pluck('id')->all();
+
+        while ($childIds !== []) {
+            Task::whereIn('id', $childIds)->update(['parent_task_id' => null]);
+
+            $frontier = array_map(static fn(mixed $id): int => (int) $id, $childIds);
+            $childIds = Task::whereIn('parent_task_id', $frontier)->pluck('id')->all();
+        }
     }
 
     /**

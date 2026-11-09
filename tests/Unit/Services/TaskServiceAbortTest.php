@@ -155,7 +155,6 @@ it('abortSubAgentAndCascade aborts the child and walks the parent chain', functi
         'is_active' => true,
     ]);
 
-    // Build a 3-deep chain: grandparent → parent → child
     $grandparent = Task::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'trigger_user_id' => $userId,
@@ -267,7 +266,7 @@ it('continueTask persists aborted_at in buildBaseTaskResource', function (): voi
 
     $orch = Mockery::mock(OrchestratorInterface::class);
     $orch->shouldReceive('continue')
-        ->with($task->id, 'redirect', null, [])
+        ->with($task->id, 'redirect', null, [], $userId)
         ->andReturnUsing(static function (int $id): Task {
             $t = Task::find($id);
             $t->status = 'ABORTED';

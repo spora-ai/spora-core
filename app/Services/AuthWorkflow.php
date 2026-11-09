@@ -6,8 +6,14 @@ namespace Spora\Services;
 
 use DateTime;
 use Delight\Auth\AuthException;
+use Delight\Auth\EmailNotVerifiedException;
+use Delight\Auth\InvalidEmailException;
+use Delight\Auth\ResetDisabledException;
+use Delight\Auth\TooManyRequestsException as DelightTooManyRequestsException;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use InvalidArgumentException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Spora\Auth\AuthService;
 use Spora\Auth\Exceptions\AccountUnverifiedException;
 use Spora\Auth\Exceptions\EmailTakenException;
@@ -40,12 +46,26 @@ final class AuthWorkflow
 
     private const MSG_EMAIL_REQUIRED = 'The field "email" is required.';
 
+    /**
+     * The fields a signed-in user may change on their own account.
+     *
+     * Verification and suspension are account-security state: they belong to
+     * the administrator's user update. A session that could write them could
+     * undo a decision that was made against it.
+     */
+    private const SELF_SERVICE_FIELDS = ['username', 'name'];
+
+    private readonly LoggerInterface $logger;
+
     public function __construct(
         private readonly AuthService $authService,
         private readonly UserServiceInterface $userService,
         private readonly CsrfTokenService $csrfService,
         private readonly AuthValidator $validator,
-    ) {}
+        ?LoggerInterface $logger = null,
+    ) {
+        $this->logger = $logger ?? new NullLogger();
+    }
 
     /**
      * Decode the body, then validate the registration payload. Delegates the
@@ -134,6 +154,13 @@ final class AuthWorkflow
         }
 
         $userId = $this->authService->currentUserId();
+        if ($userId === null) {
+            // The login was accepted and the session closed right after —
+            // the account was suspended in the meantime. The caller gets
+            // the same answer a wrong password gets.
+            return $this->validator->error('INVALID_CREDENTIALS', 'The email address or password is incorrect.', Response::HTTP_UNAUTHORIZED);
+        }
+
         $result = $this->userService->getUser($userId);
         $userData = $result !== null ? $result['user'] : ['id' => $userId, 'email' => (string) $body['email'], 'username' => null];
 
@@ -218,7 +245,7 @@ final class AuthWorkflow
             return $body;
         }
 
-        $result = $this->userService->updateUser($userId, $body);
+        $result = $this->userService->updateUser($userId, array_intersect_key($body, array_flip(self::SELF_SERVICE_FIELDS)));
         if ($result === null) {
             return $this->validator->error('NOT_FOUND', 'User not found.', Response::HTTP_NOT_FOUND);
         }
@@ -247,7 +274,7 @@ final class AuthWorkflow
         ], Response::HTTP_OK);
     }
 
-    public function handleForgotPassword(Request $request, string $clientIp): JsonResponse
+    public function handleForgotPassword(Request $request, string $clientIp, string $baseUrl): JsonResponse
     {
         $body = $this->validator->decodeBodyOrFail($request);
         if ($body instanceof JsonResponse) {
@@ -258,7 +285,21 @@ final class AuthWorkflow
             return $this->validator->error('VALIDATION_ERROR', self::MSG_EMAIL_REQUIRED, Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->authService->forgotPassword((string) $body['email']);
+        try {
+            $this->authService->forgotPassword((string) $body['email'], $baseUrl);
+        } catch (EmailNotVerifiedException | InvalidEmailException | ResetDisabledException | DelightTooManyRequestsException) {
+            // A missing, unverified or ineligible account answers exactly like
+            // an eligible one: the outcome depends on the account, and the
+            // response must not.
+        } catch (TransportExceptionInterface | InvalidArgumentException $e) {
+            // A mail failure reaches here only for an eligible account, so
+            // it must not change the answer. The request still counts
+            // against the rate limit below.
+            $this->logger->error('Password reset email could not be sent', [
+                'exception_class' => get_class($e),
+                'message'         => $e->getMessage(),
+            ]);
+        }
 
         // Count the attempt even on success to prevent brute-forcing valid emails
         RateLimiter::attempt($clientIp, self::RATE_LIMIT_MAX_ATTEMPTS, self::RATE_LIMIT_WINDOW_SECONDS);
@@ -294,9 +335,9 @@ final class AuthWorkflow
         try {
             $this->authService->resendVerificationEmail((string) $body['email']);
             RateLimiter::clear($clientIp);
-        } catch (\Delight\Auth\EmailNotVerifiedException) {
+        } catch (EmailNotVerifiedException) {
             // Silently succeed — we don't reveal whether the email is verified
-        } catch (\Delight\Auth\InvalidEmailException) {
+        } catch (InvalidEmailException) {
             // Silently succeed
         }
 

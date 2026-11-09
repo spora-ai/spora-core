@@ -11,7 +11,7 @@ use Throwable;
 /**
  * Computes the dynamic set of MIME types accepted by the upload UI.
  *
- * Five sources, combined:
+ * The sources, combined:
  *
  *  1. Static text allowlist — file types an LLM can read directly
  *     (TXT, MD, CSV, JSON, XML, YAML). Always allowed, and
@@ -49,14 +49,20 @@ use Throwable;
  *     target MIME can be allowlisted. Nothing structurally enforces the
  *     pairing.
  *
+ *     A producer's claim does not widen the operator's active-content
+ *     decision: a script-capable type a producer advertises stays out of
+ *     the allowlist while source 5 forbids it.
+ *
  *  4. Configurable image MIME types — `image/*` is **additionally** allowed
  *     when the requesting user's agent's LLM reports
- *     `LLMDriverInterface::supportsImageInput() === true`. The allowed
- *     extensions are resolved by the container from
- *     `config['media_archive']['allowed_image_types']` (default
- *     `['png', 'jpeg', 'webp']`). Operators can extend the list via
- *     config.php or `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` env var.
- *     An empty list explicitly disables image uploads.
+ *     `LLMDriverInterface::supportsImageInput() === true`, and when the
+ *     caller names no agent at all — there is no LLM in the loop to ask.
+ *     The allowed extensions are resolved by the container from the
+ *     `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` setting
+ *     (`config['media_archive']['allowed_image_types']` in config.php,
+ *     default `['png', 'jpeg', 'webp']`). Operators can extend the list
+ *     via config.php or the env var. An empty list explicitly disables
+ *     image uploads.
  *
  *  5. The script-capable formats — HTML and SVG are allowed **only** when
  *     the operator enables `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES`. A
@@ -72,10 +78,11 @@ use Throwable;
 final class MediaAllowedTypesService
 {
     /**
-     * Built-in image-type default when no configuration is supplied. The
-     * actual value used at runtime comes from `MediaArchiveConfig::imageExtensions()`,
-     * which is wired by the container. Kept here as a public constant so
-     * tests and the config layer have one canonical source.
+     * Built-in image-type default, used when the constructor is given no
+     * list. The deployment's own default comes from the
+     * `SPORA_MEDIA_ARCHIVE_ALLOWED_IMAGE_TYPES` setting, which the
+     * container reads and passes in; the setting's default lists the same
+     * extensions.
      */
     public const DEFAULT_IMAGE_EXTENSIONS = ['png', 'jpeg', 'webp'];
 
@@ -168,6 +175,23 @@ final class MediaAllowedTypesService
         return $this->activeTypes?->allowActiveTypes() ?? false;
     }
 
+    /**
+     * Whether a MIME may be created.
+     *
+     * A producer's claim to handle a format does not widen the operator's
+     * active-content decision: a producer that advertises `text/html`
+     * would otherwise make HTML uploadable while the operator has
+     * forbidden it.
+     */
+    private function permitsCreationOf(string $mime): bool
+    {
+        if ($this->activeTypes !== null) {
+            return $this->activeTypes->permitsCreationOf($mime);
+        }
+
+        return !MediaScriptableTypes::isScriptable($mime);
+    }
+
     /** @var list<string> */
     private readonly array $imageExtensions;
 
@@ -207,19 +231,39 @@ final class MediaAllowedTypesService
             }
         }
         foreach ($this->derivatives->producerSourceMimeTypes() as $mime) {
+            if (!$this->permitsCreationOf($mime)) {
+                continue;
+            }
             $set[strtolower($mime)] = true;
         }
-        $agentSupportsImages = $agentId === null
-            || $this->agentSupportsImages($agentId);
-        if ($agentSupportsImages && $this->imageExtensions !== []) {
-            foreach ($this->imageExtensions as $ext) {
-                $mime = self::imageMimeForExtension($ext);
-                if ($mime !== null) {
-                    $set[$mime] = true;
-                }
+        foreach ($this->allowedImageMimeTypes($agentId) as $mime) {
+            $set[$mime] = true;
+        }
+
+        return array_keys($set);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function allowedImageMimeTypes(?int $agentId): array
+    {
+        if ($agentId !== null && !$this->agentSupportsImages($agentId)) {
+            return [];
+        }
+        if ($this->imageExtensions === []) {
+            return [];
+        }
+
+        $mimes = [];
+        foreach ($this->imageExtensions as $ext) {
+            $mime = self::imageMimeForExtension($ext);
+            if ($mime !== null) {
+                $mimes[] = $mime;
             }
         }
-        return array_keys($set);
+
+        return $mimes;
     }
 
     /**

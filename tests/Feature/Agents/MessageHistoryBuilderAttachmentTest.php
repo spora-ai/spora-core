@@ -20,9 +20,6 @@ use Tests\Support\MediaArchiveTestSupport;
 
 defined('TEST_PASSWORD') || define('TEST_PASSWORD', 'Password1!');
 
-/**
- * Plan §12 B2b — attachment row → content-block expansion.
- */
 function seedAttachmentAgent(): int
 {
     $authService = bootAuthLayer();
@@ -208,7 +205,6 @@ test('attachment row referencing a missing asset skips the block gracefully', fu
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // No blocks produced — fall back to content string.
     expect($messages[0]['content'])->toBe('fallback content');
 });
 
@@ -225,7 +221,6 @@ test('attachment row with empty attachments JSON still emits a user message (bug
     $messages = (new MessageHistoryBuilder())->build($task->id);
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
-    // No attachment refs → fall through to row content as plain text.
     expect($messages[0]['content'])->toBe('operator typed prompt');
 });
 
@@ -270,7 +265,6 @@ test('attachment + following user row merge into one user message', function ():
         'content'  => 'Summarize this paper',
     ]);
     $messages = (new MessageHistoryBuilder())->build($task->id);
-    // Two rows in → one merged user message out (no `role: attachment`).
     expect($messages)->toHaveCount(1);
     expect($messages[0]['role'])->toBe('user');
     expect($messages[0]['content'])->toBeArray();
@@ -390,7 +384,6 @@ test('attachment with image is dropped but metadata prefix still surfaces when d
         'role'     => 'user',
         'content'  => 'Describe this',
     ]);
-    // Driver with vision capability explicitly turned off.
     $driver = new AnthropicCompatibleDriver(
         apiKey: 'test',
         model: 'claude-3-5-sonnet-20241022',
@@ -733,7 +726,6 @@ test('attachment skips raw-byte inline for a binary mime with no derivative (PDF
     expect($composed['text'])->toContain('# cv.pdf (no inline text)');
     expect($composed['text'])->toContain('get_source');
     expect($composed['text'])->not->toContain('[no extractable text]');
-    // And the raw bytes do NOT leak into the body.
     expect($composed['text'])->not->toContain('%PDF-1.4');
 });
 
@@ -1007,7 +999,6 @@ test('attachment rejects mislabeled binary content (text mime with NUL bytes) an
     $composed = $messages[0]['content'][1];
     expect($composed['text'])->toContain('# fake.txt (no inline text)');
     expect($composed['text'])->toContain('get_source');
-    // The binary content must not leak into the body.
     expect($composed['text'])->not->toContain("\x00\x01\x02\x03");
 });
 
@@ -1185,4 +1176,93 @@ test('a summary that covers both halves of a turn drops the whole turn', functio
     expect($rendered)->not->toContain('[Attached asset_id=');
     expect($rendered)->toContain('The operator asked to ship the release notes.');
     expect($rendered)->toContain('Shipped.');
+});
+
+test('a repeated image id is rendered once', function (): void {
+    // The blocks are built from the asset, so a repeated id would
+    // duplicate them — and load and base64-encode the image again for
+    // every occurrence.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [
+            ['media_id' => $asset->id, 'kind' => 'image'],
+            ['media_id' => $asset->id, 'kind' => 'image'],
+            ['media_id' => $asset->id, 'kind' => 'image'],
+        ],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+    $messages = (new MessageHistoryBuilder($driver))->build($task->id);
+
+    $blocks = $messages[0]['content'];
+    $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+    expect($images)->toHaveCount(1);
+});
+
+test('the row forwards no more image bytes than the budget', function (): void {
+    // The per-asset cap bounds one image; the row's budget bounds the
+    // row. An image that does not fit is not loaded at all.
+    $agentId = seedAttachmentAgent();
+    $task = makeAttachmentTask($agentId);
+    $service = buildAttachmentService();
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        strict: true,
+    );
+    $asset = $service->ingest(new MediaIngestRequest(
+        bytes: $png,
+        mime: 'image/png',
+        filename: 'pixel.png',
+        userId: 1,
+        uploadSource: 'upload',
+    ));
+    $row = TaskHistory::create([
+        'task_id'      => $task->id,
+        'sequence'     => 0,
+        'role'         => 'attachment',
+        'content'      => '',
+        'attachments'  => [['media_id' => $asset->id, 'kind' => 'image']],
+    ]);
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-3-5-sonnet-20241022',
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: new MockHttpClient(),
+        logger: new \Psr\Log\NullLogger(),
+        timeout: 60,
+    );
+
+    // The renderer lives beside the builder in its file; loading the
+    // builder's class is what makes it available.
+    expect(class_exists(MessageHistoryBuilder::class))->toBeTrue();
+
+    $renderer = new \Spora\Agents\AttachmentRowRenderer($driver, BASE_PATH, maxRowImageBytes: 1);
+    $blocks = $renderer->render($row->fresh());
+
+    expect($blocks)->not->toBeNull();
+    $images = array_values(array_filter($blocks, static fn(array $block): bool => $block['type'] === 'image'));
+    expect($images)->toHaveCount(0);
 });

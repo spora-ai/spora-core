@@ -31,14 +31,14 @@ afterEach(function (): void {
 });
 
 /**
- * Regression for the v0.11.0 auto-archive bug: a tool that calls
+ * Regression for the auto-archive bug: a tool that calls
  * `MediaArchiveService::ingest()` with a URL that the resolver can fetch
  * was getting back an `external`-mode row (preserving the raw CDN URL
  * as `asset_url`) instead of the local `/api/v1/assets/<uuid>` opaque
  * URL, because downstream pipeline steps threw on synthetic test payloads
  * with new columns the test fixture didn't define.
  *
- * The fix: `MediaArchiveService::insertNew()` now probes the schema
+ * The fix: the ingest pipeline's `insertNew()` probes the schema
  * before writing optional columns. Test fixtures and pre-existing
  * installations without the new columns keep working.
  */
@@ -55,7 +55,7 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     ]);
     $capsule->setAsGlobal();
     $capsule->bootEloquent();
-    // The minimal pre-#137 schema — does NOT include user_id, filename,
+    // The minimal legacy schema — does NOT include user_id, filename,
     // upload_source, tags, metadata, public_access_token, asset_token.
     // The fix's Schema::hasColumn() probes must skip these so the
     // insert doesn't throw.
@@ -124,7 +124,7 @@ test('URL ingest returns the local archive URL even when optional columns are mi
     $service  = new MediaArchiveService($pipeline, $derivatives);
 
     $asset = $service->ingest(new MediaIngestRequest(
-        url: 'https://cdn.example/song.mp3',
+        url: 'https://93.184.216.34/song.mp3',
         mime: 'audio/mpeg',
         pluginSlug: 'test',
         toolName: 'regression',
@@ -132,5 +132,5 @@ test('URL ingest returns the local archive URL even when optional columns are mi
 
     expect($asset->asset_url)->toStartWith('/api/v1/assets/')
         ->and($asset->storage_mode)->toBe('local')
-        ->and($asset->source_url)->toBe('https://cdn.example/song.mp3');
+        ->and($asset->source_url)->toBe('https://93.184.216.34/song.mp3');
 });

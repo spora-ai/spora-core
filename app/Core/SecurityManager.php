@@ -6,34 +6,47 @@ namespace Spora\Core;
 
 use Spora\Core\Exceptions\DecryptionFailedException;
 use Spora\Core\Exceptions\DecryptKeyMissingException;
+use Spora\Core\Exceptions\InvalidSecretKeyException;
 use Spora\Core\ValueObjects\EncryptedValue;
 
 /**
  * Singleton. Registered via PHP-DI factory.
- * Loads master key once at construction. Fails immediately if key is invalid.
+ * Holds the master key in memory: the constructor takes the raw key, and
+ * {@see self::fromKeyFile()} is the one that reads a key file. An invalid
+ * key fails immediately.
  */
 final class SecurityManager implements SecurityManagerInterface
 {
     private readonly string $masterKey;
 
     /**
-     * @param string $keyOrPath  Either:
-     *                           - A raw 32-byte key string (SPORA_SECRET_KEY env var decoded from base64)
-     *                           - An absolute file path to secret.key (contains '/' or length > 32)
-     *
-     * @throws DecryptKeyMissingException  If key file is missing/unreadable/wrong size.
+     * @throws InvalidSecretKeyException if the key is not the right length
      */
-    public function __construct(string $keyOrPath)
+    public function __construct(string $key)
     {
-        // A raw 32-byte binary key is exactly SODIUM_CRYPTO_SECRETBOX_KEYBYTES bytes.
-        // File paths are always a different length in practice (any meaningful absolute path
-        // is either shorter or longer). We intentionally do NOT check for '/' because a
-        // random binary key can contain 0x2F ('/'), which would cause a false positive.
-        if (strlen($keyOrPath) === SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
-            $this->masterKey = $keyOrPath;
-        } else {
-            $this->masterKey = $this->loadFromFile($keyOrPath);
+        if (strlen($key) !== SODIUM_CRYPTO_SECRETBOX_KEYBYTES) {
+            throw new InvalidSecretKeyException(sprintf(
+                'Secret key must be exactly %d bytes, got %d.',
+                SODIUM_CRYPTO_SECRETBOX_KEYBYTES,
+                strlen($key),
+            ));
         }
+
+        $this->masterKey = $key;
+    }
+
+    /**
+     * The manager for a key file: the file's contents are the key.
+     *
+     * A path and a raw key are told apart by the caller, not by their
+     * length — a 32-character path is a path, and reading it as a key would
+     * encrypt every stored secret with the installation's pathname.
+     *
+     * @throws DecryptKeyMissingException if the file is missing, unreadable or the wrong size
+     */
+    public static function fromKeyFile(string $path): self
+    {
+        return new self(self::loadFromFile($path));
     }
 
     public function encrypt(string $plaintext): EncryptedValue
@@ -95,7 +108,8 @@ final class SecurityManager implements SecurityManagerInterface
         return strlen($decoded) >= $minLength;
     }
 
-    private function loadFromFile(string $path): string
+    /** @throws DecryptKeyMissingException */
+    private static function loadFromFile(string $path): string
     {
         if (!file_exists($path) || !is_readable($path)) {
             throw new DecryptKeyMissingException(

@@ -40,8 +40,8 @@ use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
- * Coverage for {@see MediaArchiveService} — the foundation that PRs 4 and 5
- * depend on. Each describe block locks in one contract slice.
+ * Coverage for {@see MediaArchiveService}. Each describe block locks in
+ * one contract slice.
  */
 function mediaArchiveTestSetup(): array
 {
@@ -121,8 +121,6 @@ if (!function_exists('seedGroupPrincipal')) {
     }
 }
 
-// ----- Sniff -----------------------------------------------------------------
-
 describe('MediaArchiveService::sniff', function (): void {
     it('sniffs PNG magic bytes', function (): void {
         [$ctx] = [mediaArchiveTestSetup()];
@@ -158,16 +156,14 @@ describe('MediaArchiveService::sniff', function (): void {
     it('sniffs extensions when only a URL is available', function (): void {
         [$ctx] = [mediaArchiveTestSetup()];
         try {
-            expect($ctx['sniffer']->sniffFromExtension('https://cdn.example/foo.png'))->toBe('image/png');
-            expect($ctx['sniffer']->sniffFromExtension('https://cdn.example/foo.mp4'))->toBe('video/mp4');
-            expect($ctx['sniffer']->sniffFromExtension('https://cdn.example/foo.unknown'))->toBe('application/octet-stream');
+            expect($ctx['sniffer']->sniffFromExtension('https://93.184.216.34/foo.png'))->toBe('image/png');
+            expect($ctx['sniffer']->sniffFromExtension('https://93.184.216.34/foo.mp4'))->toBe('video/mp4');
+            expect($ctx['sniffer']->sniffFromExtension('https://93.184.216.34/foo.unknown'))->toBe('application/octet-stream');
         } finally {
             $ctx['restore']();
         }
     });
 });
-
-// ----- Metadata --------------------------------------------------------------
 
 describe('MetadataExtractor', function (): void {
     it('returns null duration for MP4 when ffprobe is disabled (never throws)', function (): void {
@@ -198,8 +194,6 @@ describe('MetadataExtractor', function (): void {
         expect($result['height'])->toBeNull();
     });
 });
-
-// ----- Ingest: input forms ---------------------------------------------------
 
 describe('MediaArchiveService::ingest input forms', function (): void {
     it('accepts raw bytes', function (): void {
@@ -296,8 +290,6 @@ describe('MediaArchiveService::ingest input forms', function (): void {
     });
 });
 
-// ----- Ingest: URL branch ----------------------------------------------------
-
 describe('MediaArchiveService::ingest URL branch', function (): void {
     it('promotes CDN URLs to local storage when promote_external = true', function (): void {
         $png = base64_decode(
@@ -315,10 +307,10 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/test.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/test.png'));
             expect($asset->media_type)->toBe('image');
             expect($asset->storage_mode)->toBeIn(['data_url', 'local']);
-            expect($asset->source_url)->toBe('https://cdn.example/test.png');
+            expect($asset->source_url)->toBe('https://93.184.216.34/test.png');
         } finally {
             $ctx['restore']();
         }
@@ -327,15 +319,15 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
     it('stores CDN URLs as external when promote_external = false', function (): void {
         $ctx = makeMediaArchiveService(['promoteExternal' => false]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/test.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/test.png'));
             expect($asset->storage_mode)->toBe('external');
-            // Asset URL is always the opaque `/api/v1/assets/<uuid>.<ext>` form
-            // after fix/opaque-asset-urls — the upstream CDN URL is now
-            // preserved in `source_url` for operator audit. The sniffed
-            // mime (image/png from the .png extension) maps to .png so
-            // browsers use the right filename on download.
+            // Asset URL is always the opaque `/api/v1/assets/<uuid>.<ext>`
+            // form — the upstream CDN URL is preserved in `source_url`
+            // for operator audit. The sniffed mime (image/png from the
+            // .png extension) maps to .png so browsers use the right
+            // filename on download.
             expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id . '.png');
-            expect($asset->source_url)->toBe('https://cdn.example/test.png');
+            expect($asset->source_url)->toBe('https://93.184.216.34/test.png');
         } finally {
             $ctx['restore']();
         }
@@ -357,7 +349,7 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher, 'maxPromoteBytes' => 100 * 1024 * 1024]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/big.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/big.png'));
             expect($asset->storage_mode)->toBe('external');
         } finally {
             $ctx['restore']();
@@ -374,16 +366,14 @@ describe('MediaArchiveService::ingest URL branch', function (): void {
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/missing.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/missing.png'));
             expect($asset->storage_mode)->toBe('external');
-            expect($asset->source_url)->toBe('https://cdn.example/missing.png');
+            expect($asset->source_url)->toBe('https://93.184.216.34/missing.png');
         } finally {
             $ctx['restore']();
         }
     });
 });
-
-// ----- Idempotency -----------------------------------------------------------
 
 describe('MediaArchiveService::ingest idempotency', function (): void {
     it('does not insert duplicates for the same input form when toolCallId is null', function (): void {
@@ -411,8 +401,6 @@ describe('MediaArchiveService::ingest idempotency', function (): void {
         }
     });
 });
-
-// ----- List / find / delete --------------------------------------------------
 
 describe('MediaArchiveService::list', function (): void {
     it('filters by media_type', function (): void {
@@ -720,8 +708,6 @@ describe('MediaArchiveService::find / delete / countForAgent', function (): void
     });
 });
 
-// ----- Batch resolution: existence-hiding + visibility union --------------------
-
 describe('MediaArchiveService::resolveMany', function (): void {
     beforeEach(function (): void {
         $ctx = makeMediaArchiveService();
@@ -797,8 +783,6 @@ describe('MediaArchiveService::resolveMany', function (): void {
     });
 });
 
-// ----- Idempotency: tool_call_id upsert path ----------------------------------
-
 describe('MediaArchiveService::ingest idempotency without tool_call_id', function (): void {
     it('persists the same URL twice as separate rows when neither has a tool_call_id (no dedup without the key)', function (): void {
         // promote_external=false short-circuits the URL branch before any
@@ -807,10 +791,10 @@ describe('MediaArchiveService::ingest idempotency without tool_call_id', functio
         $ctx = makeMediaArchiveService(['promoteExternal' => false]);
         try {
             $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/no-tool.png',
+                url: 'https://93.184.216.34/no-tool.png',
             ));
             $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/no-tool.png',
+                url: 'https://93.184.216.34/no-tool.png',
             ));
             // Two separate external rows — without a toolCallId the
             // (tool_call_id, source_url) key can't match, so each ingest
@@ -821,8 +805,6 @@ describe('MediaArchiveService::ingest idempotency without tool_call_id', functio
         }
     });
 });
-
-// ----- Idempotency: tool_call_id present ------------------------------------
 
 describe('MediaArchiveService::ingest idempotency with tool_call_id', function (): void {
     it('returns the existing row when the same (tool_call_id, url) is re-ingested', function (): void {
@@ -874,14 +856,13 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
         $ctx = makeMediaArchiveService(['promoteExternal' => false]);
         try {
             // Seed a row whose `asset_url` matches the URL the ingest
-            // service will look up. The short-circuit at the top of
-            // `ingest()` is keyed on `(tool_call_id, request->url)` and
-            // the persist() helper re-checks via `findExisting()`. Both
-            // paths converge on `asset_url`, so planting a row with the
-            // raw CDN URL as `asset_url` exercises the dedup.
+            // service will look up. The dedup key is
+            // `(tool_call_id, source_url)`; the legacy fallback still
+            // matches on `asset_url`, so planting a row with the raw CDN
+            // URL as `asset_url` exercises that path.
             $existing = MediaAsset::create([
                 'id'                       => '11111111-2222-3333-4444-555555555555',
-                'asset_url'                => 'https://cdn.example/idem.png',
+                'asset_url'                => 'https://93.184.216.34/idem.png',
                 'storage_mode'             => 'external',
                 'mime_type'                => 'image/png',
                 'media_type'               => 'image',
@@ -894,7 +875,7 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
             ]);
 
             $second = $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/idem.png',
+                url: 'https://93.184.216.34/idem.png',
                 toolCallId: $toolCall->id,
             ));
 
@@ -907,8 +888,6 @@ describe('MediaArchiveService::ingest idempotency with tool_call_id', function (
         }
     });
 });
-
-// ----- Decoding failure modes -------------------------------------------------
 
 describe('MediaArchiveService::ingest decoding failure modes', function (): void {
     it('rejects hex with odd length', function (): void {
@@ -943,8 +922,6 @@ describe('MediaArchiveService::ingest decoding failure modes', function (): void
     });
 });
 
-// ----- URL branch coverage ---------------------------------------------------
-
 describe('MediaArchiveService::ingest URL branch — extension/head interaction', function (): void {
     it('sniffs external MIME from URL extension when extension is recognised', function (): void {
         $client = new MockHttpClient(function (string $method): MockResponse {
@@ -956,7 +933,7 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/photo.jpg'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/photo.jpg'));
             expect($asset->storage_mode)->toBe('external');
             expect($asset->mime_type)->toBe('image/jpeg');
             expect($asset->media_type)->toBe('image');
@@ -978,7 +955,7 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/noext'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/noext'));
             expect($asset->storage_mode)->toBe('external');
             expect($asset->mime_type)->toBe('image/png');
         } finally {
@@ -997,7 +974,7 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
             $asset = $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/noext',
+                url: 'https://93.184.216.34/noext',
                 mime: 'application/pdf',
             ));
             expect($asset->storage_mode)->toBe('external');
@@ -1017,7 +994,7 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/noext'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/noext'));
             expect($asset->storage_mode)->toBe('external');
             expect($asset->mime_type)->toBe('application/octet-stream');
         } finally {
@@ -1035,17 +1012,15 @@ describe('MediaArchiveService::ingest URL branch — extension/head interaction'
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/broken.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/broken.png'));
             expect($asset->storage_mode)->toBe('external');
             expect($asset->asset_url)->toBe('/api/v1/assets/' . $asset->id . '.png');
-            expect($asset->source_url)->toBe('https://cdn.example/broken.png');
+            expect($asset->source_url)->toBe('https://93.184.216.34/broken.png');
         } finally {
             $ctx['restore']();
         }
     });
 });
-
-// ----- Local-mode failure: AssetStore rejection --------------------------------
 
 describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveException', function (): void {
     it('throws MediaArchiveException when the asset store rejects the bytes', function (): void {
@@ -1095,8 +1070,6 @@ describe('MediaArchiveService::ingest local-mode failure surfaces MediaArchiveEx
         expect(new MediaArchiveException('boom'))->toBeInstanceOf(RuntimeException::class);
     });
 });
-
-// ----- List filter branches --------------------------------------------------
 
 describe('MediaArchiveService::list', function (): void {
     it('returns an empty page when no rows exist', function (): void {
@@ -1150,7 +1123,6 @@ describe('MediaArchiveService::list', function (): void {
                 strict: true,
             );
             $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
-            // Whitespace-only search must not throw and must match all rows.
             expect($ctx['service']->list(new ListMediaQuery(search: '   '))->total())->toBe(1);
         } finally {
             $ctx['restore']();
@@ -1213,8 +1185,6 @@ describe('MediaArchiveService::list', function (): void {
     });
 });
 
-// ----- Idempotency on (tool_call_id, asset_url) -----------------------------
-
 describe('MediaArchiveService::ingest idempotency on the URL branch', function (): void {
     it('upserts when both ingest calls share the same URL (URL branch, no toolCallId FK constraint)', function (): void {
         // toolCallId is omitted (it's a FK to the tasks table — without a
@@ -1225,10 +1195,10 @@ describe('MediaArchiveService::ingest idempotency on the URL branch', function (
         $ctx = makeMediaArchiveService(['promoteExternal' => false]);
         try {
             $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/same.png',
+                url: 'https://93.184.216.34/same.png',
             ));
             $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/same.png',
+                url: 'https://93.184.216.34/same.png',
             ));
             // Without a toolCallId, each ingest is fresh — two rows.
             expect(MediaAsset::query()->count())->toBe(2);
@@ -1237,8 +1207,6 @@ describe('MediaArchiveService::ingest idempotency on the URL branch', function (
         }
     });
 });
-
-// ----- URL branch: missing Content-Length -----------------------------------
 
 describe('MediaArchiveService::ingest URL branch — Content-Length absent', function (): void {
     it('promotes a URL response without a Content-Length header (size unknown → local)', function (): void {
@@ -1263,7 +1231,7 @@ describe('MediaArchiveService::ingest URL branch — Content-Length absent', fun
         $fetcher = new RemoteMediaFetcher($client, new NullLogger(), 30, 100 * 1024 * 1024);
         $ctx = makeMediaArchiveService(['fetcher' => $fetcher]);
         try {
-            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://cdn.example/sizeless.png'));
+            $asset = $ctx['service']->ingest(new MediaIngestRequest(url: 'https://93.184.216.34/sizeless.png'));
             // No content-length means the headSaysTooLarge() guard can't fire,
             // so the body is fetched and the asset is promoted to local/data_url.
             expect($asset->storage_mode)->toBeIn(['data_url', 'local']);
@@ -1273,8 +1241,6 @@ describe('MediaArchiveService::ingest URL branch — Content-Length absent', fun
         }
     });
 });
-
-// ----- Bytes branch: idempotency on (tool_call_id, source_url) ---------------
 
 describe('MediaArchiveService::ingest bytes branch — repeated bytes without toolCallId', function (): void {
     it('persists two separate rows when the same bytes are ingested without a toolCallId', function (): void {
@@ -1297,8 +1263,6 @@ describe('MediaArchiveService::ingest bytes branch — repeated bytes without to
         }
     });
 });
-
-// ----- Dedup by (tool_call_id, source_url) post refactor --------------------
 
 describe('MediaArchiveService::ingest idempotency by source_url', function (): void {
     it('returns the existing row when the same URL is re-ingested against the same toolCallId (matches by source_url)', function (): void {
@@ -1357,7 +1321,7 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
             $existing = MediaAsset::create([
                 'id'                       => '22222222-3333-4444-5555-666666666666',
                 'asset_url'                => '/api/v1/assets/22222222-3333-4444-5555-666666666666.png',
-                'source_url'               => 'https://cdn.example/idem2.png',
+                'source_url'               => 'https://93.184.216.34/idem2.png',
                 'storage_mode'             => 'external',
                 'mime_type'                => 'image/png',
                 'media_type'               => 'image',
@@ -1370,7 +1334,7 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
             ]);
 
             $second = $ctx['service']->ingest(new MediaIngestRequest(
-                url: 'https://cdn.example/idem2.png',
+                url: 'https://93.184.216.34/idem2.png',
                 toolCallId: $toolCall->id,
             ));
 
@@ -1385,8 +1349,6 @@ describe('MediaArchiveService::ingest idempotency by source_url', function (): v
     });
 });
 
-// ----- AssetStore behaviour on the local-mode bytes branch -----------------
-
 describe('MediaArchiveService::ingest bytes branch — asset_url carries the store result', function (): void {
     it('records the AssetReference url and mode on the persisted row', function (): void {
         $ctx = makeMediaArchiveService();
@@ -1398,8 +1360,8 @@ describe('MediaArchiveService::ingest bytes branch — asset_url carries the sto
 
             $asset = $ctx['service']->ingest(new MediaIngestRequest(bytes: $png, mime: 'image/png'));
 
-            // asset_url is the canonical URL the AssetReference returned
-            // (data: URL for small payloads in this configuration).
+            // asset_url is the opaque `/api/v1/assets/<uuid>.<ext>` form,
+            // not the store's own data: URL.
             expect($asset->asset_url)->not->toBe('');
             expect($asset->storage_mode)->toBeIn(['data_url', 'local']);
             expect($asset->byte_size)->toBe(strlen($png));

@@ -19,13 +19,13 @@ use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Support\MediaArchiveTestSupport;
+use Tests\Support\TempDirectory;
 
 beforeEach(function (): void {
-    $tmp = sys_get_temp_dir() . '/spora-retention-' . bin2hex(random_bytes(4));
-    mkdir($tmp, 0755, recursive: true);
-    putenv("SPORA_STORAGE_DIR={$tmp}");
-    $_ENV['SPORA_STORAGE_DIR']    = $tmp;
-    $_SERVER['SPORA_STORAGE_DIR'] = $tmp;
+    $this->storageDir = TempDirectory::create('spora-retention-');
+    putenv("SPORA_STORAGE_DIR={$this->storageDir}");
+    $_ENV['SPORA_STORAGE_DIR']    = $this->storageDir;
+    $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir;
 
     // Seed the principal + agent pair the controller's principal/agent
     // chain will resolve against.
@@ -67,17 +67,24 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-retention-*') ?: [] as $dir) {
-        if (!is_dir($dir)) {
-            continue;
-        }
-        foreach (new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST,
-        ) as $f) {
-            $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
-        }
-        @rmdir($dir);
+    TempDirectory::remove((string) $this->storageDir);
+});
+
+test('the cleanup removes the directory it was given, not every directory sharing the prefix', function (): void {
+    // A directory the test did not create must survive the cleanup: the
+    // shared temp directory is not the test's to wipe.
+    $decoy = sys_get_temp_dir() . '/spora-retention-decoy-' . bin2hex(random_bytes(4));
+    mkdir($decoy, 0755, true);
+    file_put_contents($decoy . '/marker.txt', 'not mine');
+
+    try {
+        TempDirectory::remove((string) $this->storageDir);
+
+        expect(is_dir($this->storageDir))->toBeFalse()
+            ->and(file_get_contents($decoy . '/marker.txt'))->toBe('not mine');
+    } finally {
+        @unlink($decoy . '/marker.txt');
+        @rmdir($decoy);
     }
 });
 

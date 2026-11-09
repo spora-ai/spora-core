@@ -10,6 +10,7 @@ use Spora\Http\SpeechCapabilityController;
 use Spora\Models\Agent;
 use Spora\Models\GroupMembership;
 use Spora\Models\Principal;
+use Spora\Services\AgentService;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
@@ -83,7 +84,7 @@ final class CapUnconfiguredProvider implements SpeechToTextProviderInterface
  * callers can stub `currentUserId()`.
  *
  * @param list<SpeechToTextProviderInterface> $providers
- * @return array{0: SpeechCapabilityController, 1: Mockery\MockInterface}
+ * @return array{0: SpeechCapabilityController, 1: Mockery\MockInterface, 2: int|null} The global default's id.
  */
 function buildSpeechCapabilityController(array $providers): array
 {
@@ -91,8 +92,9 @@ function buildSpeechCapabilityController(array $providers): array
 
     // Write a v2-cascade global default so tier 3 resolves to a
     // registered provider; the silent tier-5 fallback is gone.
+    $globalDefaultId = null;
     if ($providers !== []) {
-        \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insert([
+        $globalDefaultId = (int) \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
             'provider_class' => $providers[0]::class,
             'display_name'   => 'Test Global Default',
             'principal_id'   => null,
@@ -108,8 +110,10 @@ function buildSpeechCapabilityController(array $providers): array
         new SpeechCapabilityController(
             new SpeechToTextRegistry($providers, new PrincipalService(new PrincipalResolver())),
             $auth,
+            new AgentService(null, null, new PrincipalResolver()),
         ),
         $auth,
+        $globalDefaultId,
     ];
 }
 
@@ -130,7 +134,7 @@ test('capability reports available=true and configured=true with effective_sourc
     // The tier-5 fallback is gone; the cascade now resolves via tier 3
     // (the fixture's global default), so `effective_source` is
     // `global_default`, not the misleading `fallback`.
-    [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
+    [$controller, $auth, $globalDefaultId] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 
     $resp = $controller->index(Request::create('/api/v1/speech/capability', 'GET'));
@@ -147,7 +151,7 @@ test('capability reports available=true and configured=true with effective_sourc
                 'configured' => true,
                 'effective_class' => CapConfiguredProvider::class,
                 'effective_source' => 'global_default',
-                'effective_config_id' => 1,
+                'effective_config_id' => $globalDefaultId,
                 'preferred_audio_mimes' => [
                     'audio/webm;codecs=opus',
                     'audio/ogg;codecs=opus',
@@ -247,7 +251,7 @@ test('capability with ?agent_id forwards the agent id into the registry resoluti
 test('capability ignores malformed ?agent_id values and falls back to caller-scoped resolution', function (): void {
     // Tier 5 no longer bridges — with a global default configured the
     // cascade resolves via tier 3 with `effective_source = 'global_default'`.
-    [$controller, $auth] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
+    [$controller, $auth, $globalDefaultId] = buildSpeechCapabilityController([new CapConfiguredProvider()]);
     $auth->shouldReceive('currentUserId')->andReturn(7);
 
     foreach (['agent_id=abc', 'agent_id=0', 'agent_id=-1', 'agent_id='] as $query) {
@@ -256,4 +260,41 @@ test('capability ignores malformed ?agent_id values and falls back to caller-sco
             ->and(json_decode($resp->getContent(), true)['data']['providers'][0]['effective_source'])
                 ->toBe('global_default');
     }
+});
+
+test('capability returns 404 for an agent the caller cannot see', function (): void {
+    $oai = new \Spora\Speech\OpenAiCompatibleTranscriber(new MockHttpClient(), Mockery::mock(ToolConfigService::class));
+
+    $callerId = 60;
+    createUserPrincipalPublic($callerId);
+
+    // Another user's agent, pinned to that user's private speech config.
+    $ownerId = 61;
+    $ownerPrincipalId = createUserPrincipalPublic($ownerId);
+    $configId = (int) \Illuminate\Database\Capsule\Manager::table('speech_provider_configurations')->insertGetId([
+        'principal_id'   => $ownerPrincipalId,
+        'provider_class' => $oai::class,
+        'display_name'   => 'Owner Private Config',
+        'settings'       => '{}',
+        'is_default'     => false,
+        'is_global'      => false,
+        'created_at'     => date('Y-m-d H:i:s'),
+        'updated_at'     => date('Y-m-d H:i:s'),
+    ]);
+    $agentId = (int) Agent::create([
+        'principal_id'           => $ownerPrincipalId,
+        'name'                   => 'OwnerOnlyAgent',
+        'max_steps'              => 5,
+        'is_active'              => true,
+        'speech_driver_config_id' => $configId,
+    ])->id;
+
+    [$controller, $auth] = buildSpeechCapabilityController([$oai]);
+    $auth->shouldReceive('currentUserId')->andReturn($callerId);
+
+    $resp = $controller->index(Request::create('/api/v1/speech/capability?agent_id=' . $agentId, 'GET'));
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
+    expect($resp->getContent())->not->toContain('Owner Private Config');
+    expect($resp->getContent())->not->toContain((string) $configId);
 });

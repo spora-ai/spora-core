@@ -30,11 +30,17 @@ use Spora\Services\MediaArchive\Exceptions\MediaFolderValidationException;
  * Each rule is checked before the write, and a write's own constraint
  * violation is converted into {@see MediaFolderUniquenessException}, so a
  * caller never sees a raw database exception.
+ *
+ * The tree itself — the subtree of a folder, the rewrite that keeps a
+ * subtree's paths in step, and the write of a folder row — lives in
+ * {@see MediaFolderTree}, so this class stays under the Sonar 20-method
+ * cap.
  */
 final class MediaFolderService
 {
     public function __construct(
         private readonly MediaFolderPaths $paths = new MediaFolderPaths(),
+        private readonly MediaFolderTree $tree = new MediaFolderTree(),
     ) {}
 
     /**
@@ -100,7 +106,7 @@ final class MediaFolderService
         $folder->parent_id = $parent?->id;
         $folder->name = $name;
         $folder->path = $path;
-        $this->saveFolder($folder);
+        $this->tree->save($folder);
 
         return $folder;
     }
@@ -120,7 +126,7 @@ final class MediaFolderService
             ? $this->parentFor($principalId, (string) $folder->parent_id)
             : null;
 
-        $this->repath($folder, $this->paths->pathFor($parent, $name), $name);
+        $this->tree->repath($folder, $this->paths->pathFor($parent, $name), $name);
 
         return $folder;
     }
@@ -132,26 +138,34 @@ final class MediaFolderService
      */
     public function move(int $principalId, string $folderId, ?string $parentId): MediaFolder
     {
-        $folder = $this->requireFolder($principalId, $folderId);
-        $parent = $this->parentFor($principalId, $parentId);
+        // The ancestry check and the parent write share one transaction, so
+        // a move that is refused leaves the tree as it was.
+        return Capsule::connection()->transaction(
+            function () use ($principalId, $folderId, $parentId): MediaFolder {
+                $this->tree->lockHierarchy($principalId);
 
-        if ($parent !== null) {
-            $descendants = $this->descendantsWithPaths($folder, (string) $folder->path);
-            $inside = (string) $parent->id === (string) $folder->id
-                || array_key_exists((string) $parent->id, $descendants);
-            if ($inside) {
-                throw new MediaFolderValidationException(
-                    'A folder cannot be moved inside itself.',
-                );
-            }
-        }
+                $folder = $this->requireFolder($principalId, $folderId);
+                $parent = $this->parentFor($principalId, $parentId);
 
-        // The parent changes before the path is rewritten, so the single
-        // save in `repath()` persists both.
-        $folder->parent_id = $parent?->id;
-        $this->repath($folder, $this->paths->pathFor($parent, (string) $folder->name), (string) $folder->name);
+                if ($parent !== null) {
+                    $descendants = $this->tree->descendantsWithPaths($folder, (string) $folder->path);
+                    $inside = (string) $parent->id === (string) $folder->id
+                        || array_key_exists((string) $parent->id, $descendants);
+                    if ($inside) {
+                        throw new MediaFolderValidationException(
+                            'A folder cannot be moved inside itself.',
+                        );
+                    }
+                }
 
-        return $folder;
+                // The parent changes before the path is rewritten, so the single
+                // save in `repath()` persists both.
+                $folder->parent_id = $parent?->id;
+                $this->tree->repath($folder, $this->paths->pathFor($parent, (string) $folder->name), (string) $folder->name);
+
+                return $folder;
+            },
+        );
     }
 
     /**
@@ -182,7 +196,7 @@ final class MediaFolderService
     public function delete(int $principalId, string $folderId): void
     {
         $folder = $this->requireFolder($principalId, $folderId);
-        $descendants = $this->descendantsWithPaths($folder, (string) $folder->path);
+        $descendants = $this->tree->descendantsWithPaths($folder, (string) $folder->path);
         $folderIds = array_merge([(string) $folder->id], array_keys($descendants));
 
         // The assets fall back to the root here rather than through the
@@ -276,7 +290,7 @@ final class MediaFolderService
         try {
             $asset->save();
         } catch (QueryException $e) {
-            if (!$this->isUniqueViolation($e)) {
+            if (!$this->tree->isUniqueViolation($e)) {
                 throw $e;
             }
             throw new MediaFolderUniquenessException(sprintf(
@@ -355,113 +369,6 @@ final class MediaFolderService
         }
 
         return $this->requireFolder($principalId, $parentId);
-    }
-
-    /**
-     * The descendants' paths are recomputed from their names under the
-     * new root path rather than patched, so a rename or a move can never
-     * leave a stale segment behind.
-     *
-     * @throws MediaFolderUniquenessException
-     */
-    private function repath(MediaFolder $folder, string $path, string $name): void
-    {
-        // A folder and its descendants are rewritten as one unit: a write
-        // that fails half way through would leave a subtree whose paths
-        // no longer follow from its root.
-        Capsule::connection()->transaction(function () use ($folder, $path, $name): void {
-            $principalId = (int) $folder->principal_id;
-            $descendants = $this->descendantsWithPaths($folder, $path);
-            $exceptIds = array_merge([(string) $folder->id], array_keys($descendants));
-
-            $this->paths->assertFree($principalId, $path, $exceptIds);
-            foreach ($descendants as $descendant) {
-                $this->paths->assertFree($principalId, $descendant['path'], $exceptIds);
-            }
-
-            $folder->name = $name;
-            $folder->path = $path;
-            $this->saveFolder($folder);
-
-            foreach ($descendants as $descendant) {
-                $descendant['folder']->path = $descendant['path'];
-                $this->saveFolder($descendant['folder']);
-            }
-        });
-    }
-
-    /**
-     * The folder's descendants and the path each one takes under
-     * `$rootPath`.
-     *
-     * @return array<string, array{folder: MediaFolder, path: string}>
-     */
-    private function descendantsWithPaths(MediaFolder $root, string $rootPath): array
-    {
-        $all = MediaFolder::query()
-            ->where('principal_id', $root->principal_id)
-            ->get();
-
-        $byParent = [];
-        foreach ($all as $folder) {
-            $byParent[(string) $folder->parent_id][] = $folder;
-        }
-
-        $descendants = [];
-        $stack = [[(string) $root->id, $rootPath]];
-        while ($stack !== []) {
-            [$parentId, $parentPath] = array_pop($stack);
-            foreach ($byParent[$parentId] ?? [] as $child) {
-                $childPath = $parentPath . MediaFolderPaths::SEPARATOR . (string) $child->name;
-                $descendants[(string) $child->id] = [
-                    'folder' => $child,
-                    'path'   => $childPath,
-                ];
-                $stack[] = [(string) $child->id, $childPath];
-            }
-        }
-
-        return $descendants;
-    }
-
-    /**
-     * @throws MediaFolderUniquenessException
-     */
-    private function saveFolder(MediaFolder $folder): void
-    {
-        try {
-            $folder->save();
-        } catch (QueryException $e) {
-            if (!$this->isUniqueViolation($e)) {
-                throw $e;
-            }
-            throw new MediaFolderUniquenessException(sprintf(
-                'A folder already exists at "%s".',
-                (string) $folder->path,
-            ), 0, $e);
-        }
-    }
-
-    /**
-     * True for the driver errors that mean "this unique key is taken".
-     *
-     * MySQL reports 1062 (ER_DUP_ENTRY), MariaDB the same, PostgreSQL
-     * SQLSTATE 23505, and SQLite says so in the message.
-     */
-    private function isUniqueViolation(QueryException $e): bool
-    {
-        $errorInfo = $e->errorInfo;
-        $driverCode = is_array($errorInfo) ? (int) ($errorInfo[1] ?? 0) : 0;
-        if ($driverCode === 1062 || $driverCode === 1586) {
-            return true;
-        }
-
-        $sqlState = is_array($errorInfo) ? (string) ($errorInfo[0] ?? '') : '';
-        if ($sqlState === '23505') {
-            return true;
-        }
-
-        return str_contains($e->getMessage(), 'UNIQUE constraint failed');
     }
 
     /**

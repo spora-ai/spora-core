@@ -151,6 +151,39 @@ test('buildMailer with smtp driver produces an smtps DSN for implicit TLS', func
     expect($dsn)->toContain(':465');
 });
 
+/**
+ * `tls` means STARTTLS, and STARTTLS is a negotiation: a peer that does not
+ * advertise it gets the credentials in clear. `require_tls` makes the
+ * transport give up before the AUTH and the DATA instead.
+ */
+test('buildMailer with smtp driver requires TLS of the peer', function (): void {
+    $mailer = new SystemMailer(new Config([
+        'SPORA_MAIL_DRIVER'     => 'smtp',
+        'SPORA_MAIL_HOST'       => 'smtp.example.com',
+        'SPORA_MAIL_PORT'       => 587,
+        'SPORA_MAIL_USERNAME'   => 'user',
+        'SPORA_MAIL_PASSWORD'   => 'secret',
+        'SPORA_MAIL_ENCRYPTION' => 'tls',
+    ]));
+
+    $dsn = (new ReflectionMethod($mailer, 'buildSmtpDsn'))->invoke($mailer);
+
+    expect($dsn)->toContain('require_tls=true');
+});
+
+test('buildMailer with smtp driver requires TLS of the peer on the implicit-TLS scheme too', function (): void {
+    $mailer = new SystemMailer(new Config([
+        'SPORA_MAIL_DRIVER'     => 'smtp',
+        'SPORA_MAIL_HOST'       => 'smtp.example.com',
+        'SPORA_MAIL_PORT'       => 465,
+        'SPORA_MAIL_ENCRYPTION' => 'ssl',
+    ]));
+
+    $dsn = (new ReflectionMethod($mailer, 'buildSmtpDsn'))->invoke($mailer);
+
+    expect($dsn)->toContain('require_tls=true');
+});
+
 test('buildMailer with smtp driver renders the registry default port 587 into the DSN', function (): void {
     // 587 is `SettingsRegistry`'s SPORA_MAIL_PORT default. The mailer supplies
     // no port of its own any more, so this proves the shipped default survives
@@ -164,7 +197,7 @@ test('buildMailer with smtp driver renders the registry default port 587 into th
 
     $dsn = (new ReflectionMethod($mailer, 'buildSmtpDsn'))->invoke($mailer);
 
-    expect($dsn)->toBe('smtp://smtp.example.com:587');
+    expect($dsn)->toBe('smtp://smtp.example.com:587?require_tls=true');
 });
 
 test('buildMailer with smtp driver and username only (no password) returns Mailer', function (): void {

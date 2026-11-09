@@ -366,7 +366,6 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
 
         $service->sendEmailForScheduledRun($task);
 
-        // No exception and no notification created (different method)
         expect(Notification::where('user_id', $userId)->count())->toBe(0);
     });
 
@@ -466,5 +465,62 @@ describe('NotificationService::sendEmailForScheduledRun', function (): void {
         $service->sendEmailForScheduledRun($task);
 
         expect($testHandler->hasInfoThatContains('Mail sent via log driver'))->toBeTrue();
+    });
+
+    it('does not email a subscriber who cannot act for the task\'s principal', function (): void {
+        // The row is a standing opt-in, not a permanent grant: a subscriber
+        // who never had (or has lost) access to the task's principal must
+        // not receive its prompt.
+        MailTemplate::create([
+            'name'      => 'scheduled_run_completed',
+            'subject'   => 'Run completed: {{agent_name}}',
+            'body'      => 'Agent {{agent_name}} finished task {{task_id}}.',
+            'body_html' => null,
+        ]);
+
+        [$service, , $userId] = makeNotificationServiceWithUser();
+        $task = makeTaskForUser($userId);
+
+        $auth = bootAuthLayer();
+        $outsiderId = $auth->register('notif-outsider@example.com', NOTIF_TEST_PASSWORD, 'Outsider');
+
+        NotificationSubscription::create([
+            'user_id'     => $userId,
+            'target_type' => NotificationSubscription::TARGET_PRINCIPAL,
+            'target_id'   => (int) $task->principal_id,
+        ]);
+        NotificationSubscription::create([
+            'user_id'     => $outsiderId,
+            'target_type' => NotificationSubscription::TARGET_PRINCIPAL,
+            'target_id'   => (int) $task->principal_id,
+        ]);
+
+        $testHandler = new TestHandler();
+        $logger = new Logger('test', [$testHandler]);
+        $systemMailer = new SystemMailer(new Config([
+            'SPORA_MAIL_DRIVER'     => 'log',
+            'SPORA_MAIL_FROM_NAME' => 'Spora',
+        ]), $logger);
+
+        $service = new NotificationService(
+            new TestCapturingMercure(),
+            new Spora\Services\PrincipalResolver(),
+            new Config([
+                'SPORA_NOTIFICATIONS_EMAIL_ENABLED' => true,
+                'SPORA_APP_NAME'                    => 'Spora',
+            ]),
+            $systemMailer,
+            new NotificationSubscriptionService(),
+        );
+
+        $service->sendEmailForScheduledRun($task);
+
+        $owner = User::find($userId);
+        $outsider = User::find($outsiderId);
+
+        $records = $testHandler->getRecords();
+        expect($records)->toHaveCount(1);
+        expect($records[0]->context['to'])->toContain($owner->email);
+        expect($records[0]->context['to'])->not->toContain($outsider->email);
     });
 });

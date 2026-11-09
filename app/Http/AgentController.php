@@ -8,6 +8,8 @@ use JsonException;
 use Spora\Auth\AuthService;
 use Spora\Drivers\DriverFactory;
 use Spora\Models\Agent;
+use Spora\Models\LLMDriverConfiguration;
+use Spora\Models\SpeechProviderConfiguration;
 use Spora\Services\AgentFavoriteServiceInterface;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentResource;
@@ -79,8 +81,6 @@ final class AgentController
                 array_map('trim', explode(',', $select)),
                 static fn(string $c): bool => $c !== '',
             ));
-            // Only safe-for-picker columns are exposed via ?select. Anything
-            // else is silently dropped so future schema additions don't leak.
             $columns = array_values(array_intersect($requested, self::SELECTABLE_COLUMNS));
             if ($columns !== []) {
                 $principalIds = $this->principalResolver?->visiblePrincipalIds($userId) ?? [];
@@ -106,21 +106,13 @@ final class AgentController
     }
 
     /**
-     * Parse `?principal_id=` (single or repeated) and intersect with the
-     * user's visible principals. Returns null when the caller didn't ask
-     * for a filter (the agent service returns every visible agent in that
-     * case). Returns an empty list when the user asked for a filter
-     * but every requested principal is outside their visibility scope —
-     * the agent service then returns an empty payload without exposing
-     * the existence of out-of-scope principals.
+     * The `?principal_id=` filter, narrowed to the principals the caller
+     * can see. Null when the request carried no filter; an empty list
+     * when every requested principal is out of scope.
      *
-     * Accepts all three syntaxes Symfony exposes:
-     *   `?principal_id=10`              — single value, scalar.
-     *   `?principal_id=10&principal_id=20` — repeated, becomes array.
-     *   `?principal_id[]=10&principal_id[]=20` — explicit array.
-     * `query->all('principal_id')` throws on a single string, so we read
-     * the whole bag and pull the slot — that path yields scalar OR array
-     * without complaint.
+     * Symfony's `query->all('principal_id')` throws on a scalar, so
+     * the parser reads the whole bag and pulls the slot — one path then
+     * yields a scalar or an array.
      *
      * @return list<int>|null
      */
@@ -143,10 +135,6 @@ final class AgentController
         }
 
         $name = trim((string) ($body['name'] ?? ''));
-        if ($name === '') {
-            return $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY);
-        }
-
         $principalId = $this->resolvePrincipalIdForCreate($userId, $body);
 
         $data = [
@@ -173,6 +161,14 @@ final class AgentController
             'voice_message_retention_count' => (int) ($body['voice_message_retention_count'] ?? 5),
         ];
 
+        $earlyExit = ($name === ''
+                ? $this->error('VALIDATION_ERROR', 'name is required.', Response::HTTP_UNPROCESSABLE_ENTITY)
+                : null)
+            ?? $this->validateProviderConfigReferences($principalId, $data);
+        if ($earlyExit !== null) {
+            return $earlyExit;
+        }
+
         $agent = $this->agentService->createAgent($userId, $data, $principalId);
 
         return new JsonResponse(
@@ -184,25 +180,23 @@ final class AgentController
     /**
      * Resolve the owning principal for {@see store()}. Accepts an
      * explicit `principal_id` in the body when the caller is admin or
-     * owns the target principal; otherwise defaults to the caller's
-     * user-principal. Returns null when the field is omitted and no
-     * PrincipalService is wired (legacy test path).
+     * owns the target principal; otherwise the caller's user-principal.
+     * Returns null when no PrincipalService is wired (legacy test path).
      *
      * @param  array<string, mixed> $body
      */
     private function resolvePrincipalIdForCreate(int $userId, array $body): ?int
     {
-        $requested = $body['principal_id'] ?? null;
-        if ($requested === null || (int) $requested <= 0) {
-            return null;
-        }
-        $requested = (int) $requested;
-
         if ($this->principalService === null) {
             return null;
         }
 
-        return $this->authorisePrincipalIdOrFallback($userId, $requested);
+        $requested = $body['principal_id'] ?? null;
+        if ($requested === null || (int) $requested <= 0) {
+            return (int) $this->principalService->ensureUserPrincipal($userId)->id;
+        }
+
+        return $this->authorisePrincipalIdOrFallback($userId, (int) $requested);
     }
 
     private function authorisePrincipalIdOrFallback(int $userId, int $requested): int
@@ -262,12 +256,13 @@ final class AgentController
      *
      * The `profile_picture` payload is validated *before* the agents-row
      * write so an invalid picture never partially overwrites the name /
-     * description / system_prompt. The two writes are kept in a single
-     * service call so either both succeed or the agents row is unchanged.
+     * description / system_prompt. The picture update itself runs after
+     * the agents row is written, so a throw there leaves the row already
+     * updated.
      */
     private function applyAgentPatch(int $agentId, int $userId, array $body): Agent|JsonResponse
     {
-        // Plan A: `is_favorite` is gone from this allowlist — the column
+        // `is_favorite` is gone from this allowlist — the column
         // no longer exists on `agents`. The toggle is per-user via
         // `POST /agents/{id}/favorite` / `DELETE /agents/{id}/favorite`.
         $allowed = ['name', 'description', 'system_prompt', 'notes', 'llm_driver_config_id', 'speech_driver_config_id', 'max_steps', 'allow_followup', 'retry_after_minutes', 'max_retries', 'voice_message_retention_count', 'is_pinned', 'is_archived'];
@@ -280,7 +275,15 @@ final class AgentController
         // runs first so the precedence matches the previous short-
         // circuit order. Consolidated into one guard so this method
         // stays under the S1142 3-return ceiling.
-        $earlyExit = $validationError ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null);
+        $visibleAgent = $this->agentService->getAgent($agentId, $userId);
+        $referenceError = $visibleAgent === null
+            ? null
+            : $this->validateProviderConfigReferences((int) $visibleAgent->principal_id, $data);
+
+        $earlyExit = $validationError
+            ?? ($picturePayload instanceof JsonResponse ? $picturePayload : null)
+            ?? ($visibleAgent === null ? $this->notFound("AGENT_NOT_FOUND", self::MSG_AGENT_NOT_FOUND) : null)
+            ?? $referenceError;
         if ($earlyExit !== null) {
             return $earlyExit;
         }
@@ -296,19 +299,51 @@ final class AgentController
     }
 
     /**
-     * Coerce the boolean-flag PATCH fields (is_pinned / is_archived /
-     * is_favorite) to real bools. Booleans arrive as either real bools or
-     * boolean-strings (the form layer + curl both send 'true'/'false').
-     * FILTER_VALIDATE_BOOLEAN normalises both to a real bool regardless of
-     * transport. notes stays a raw string (markdown) — never coerced.
+     * A provider reference is only usable when the configuration is
+     * global or owned by the agent's own principal: a private
+     * configuration belongs to the principal that pays for it, and
+     * pointing an agent at another principal's would spend their
+     * provider account.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function validateProviderConfigReferences(?int $principalId, array $data): ?JsonResponse
+    {
+        $llmConfigId = $data['llm_driver_config_id'] ?? null;
+        $speechConfigId = $data['speech_driver_config_id'] ?? null;
+
+        $llmConfig = $llmConfigId === null ? null : LLMDriverConfiguration::find((int) $llmConfigId);
+        $speechConfig = $speechConfigId === null ? null : SpeechProviderConfiguration::find((int) $speechConfigId);
+
+        $llmIneligible = $principalId !== null && $llmConfigId !== null
+            && ($llmConfig === null || (!$llmConfig->is_global && (int) $llmConfig->principal_id !== $principalId));
+        $speechIneligible = $principalId !== null && $speechConfigId !== null
+            && ($speechConfig === null || (!$speechConfig->is_global && (int) $speechConfig->principal_id !== $principalId));
+
+        if (!$llmIneligible && !$speechIneligible) {
+            return null;
+        }
+
+        return $this->unprocessable(
+            'VALIDATION_ERROR',
+            'Configuration not found or does not belong to the requested principal.',
+        );
+    }
+
+    /**
+     * Coerce the boolean-flag PATCH fields (is_pinned / is_archived) to
+     * real bools. Booleans arrive as either real bools or boolean-strings
+     * (the form layer + curl both send 'true'/'false'). FILTER_VALIDATE_BOOLEAN
+     * normalises both to a real bool regardless of transport. notes stays a
+     * raw string (markdown) — never coerced.
      *
      * @param array<string, mixed> $data
      */
     private function coerceBooleanFlags(array &$data): void
     {
-        // Plan A: `is_favorite` is no longer in this list — the column
-        // was dropped in migration 0079 and the per-user pivot is set via
-        // dedicated endpoints (not PATCH).
+        // `is_favorite` is not a PATCH field — the column was dropped in
+        // migration 0079 and the per-user pivot is set via dedicated
+        // endpoints (not PATCH).
         foreach (['is_pinned', 'is_archived'] as $boolKey) {
             if (array_key_exists($boolKey, $data)) {
                 $data[$boolKey] = filter_var($data[$boolKey], FILTER_VALIDATE_BOOLEAN);
@@ -357,10 +392,6 @@ final class AgentController
      * so the wire contract lives in one place — the same path runs
      * for {@see GroupController}.
      *
-     * The `profile_picture` payload is validated *before* the agents-row
-     * write so an invalid picture never partially overwrites the name /
-     * description / system_prompt.
-     *
      * @param  array<string, mixed> $body
      * @return array<string, string>|JsonResponse
      */
@@ -382,9 +413,8 @@ final class AgentController
      * palette_key) when the payload is a well-formed object. No-op for
      * missing / null / scalar / list payloads — the validator in
      * {@see applyAgentPatch()} ensures we never reach this helper
-     * with anything else. Both writes share the agents table update,
-     * so a throw on the picture path surfaces a 5xx and the operator
-     * can re-issue the PATCH.
+     * with anything else. The picture row lives in its own table, so a
+     * throw here surfaces a 5xx after the agents row was written.
      *
      * @param array<string, string> $picture
      */
@@ -403,8 +433,8 @@ final class AgentController
 
     /**
      * Decode the JSON body, returning a 400 JsonResponse on parse failure.
-     * Extracted from `update()` so the controller body stays under the
-     * cognitive-complexity ceiling (S1142's 3-return limit).
+     * Extracted from `update()` so the controller stays under the 3-return
+     * ceiling (S1142).
      *
      * @return array<string, mixed>|JsonResponse
      */
@@ -491,7 +521,7 @@ final class AgentController
 
     private function agentResourceContext(Agent $agent): AgentResourceContext
     {
-        // Plan A: pre-load the caller's favourited set so the per-viewer
+        // Pre-load the caller's favourited set so the per-viewer
         // `is_favorite` field is correct on every single-agent response
         // (show, store, update, transfer). Without this the field would
         // default to false (the legacy shared column is gone) and the

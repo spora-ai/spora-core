@@ -12,10 +12,7 @@ use League\CommonMark\MarkdownConverter;
 final class MailTemplateRenderer
 {
     /**
-     * Construct a renderer with the default CommonMark + GFM environment.
-     * Used by callers that don't have a DI container handy (e.g. `MailTemplate::render()`,
-     * tests, and the `SystemMailer` no-container fallback) so the dependency
-     * can be optional at the constructor level.
+     * The CommonMark environment every mail renderer uses.
      *
      * Both {@code html_input=escape} and {@code allow_unsafe_links=false} are
      * intentional: system emails render operator-authored Markdown where
@@ -24,10 +21,14 @@ final class MailTemplateRenderer
      * entities (`<script>` → `&lt;script&gt;`) so payloads render as visible
      * text in the recipient's client rather than executing, and the default
      * `javascript:` and `vbscript:` hrefs are stripped. Operators needing a
-     * raw-HTML shell can opt in via {@code body_html}, which is trusted and
-     * never substituted from request data.
+     * raw-HTML shell can opt in via {@code body_html}, which is trusted
+     * markup — the values substituted into it are not.
+     *
+     * The production container builds its converter from this factory, so
+     * the policy cannot differ between the shipped renderer and the one the
+     * container hands out.
      */
-    public static function createDefault(): self
+    public static function createEnvironment(): Environment
     {
         $env = new Environment([
             'html_input'         => 'escape',
@@ -36,7 +37,18 @@ final class MailTemplateRenderer
         $env->addExtension(new CommonMarkCoreExtension());
         $env->addExtension(new GithubFlavoredMarkdownExtension());
 
-        return new self(new MarkdownConverter($env));
+        return $env;
+    }
+
+    /**
+     * Construct a renderer with the default CommonMark + GFM environment.
+     * Used by callers that don't have a DI container handy (e.g. `MailTemplate::render()`,
+     * tests, and the `SystemMailer` no-container fallback) so the dependency
+     * can be optional at the constructor level.
+     */
+    public static function createDefault(): self
+    {
+        return new self(new MarkdownConverter(self::createEnvironment()));
     }
 
     public function __construct(
@@ -48,18 +60,29 @@ final class MailTemplateRenderer
      */
     public function render(array $variables, string $subject, ?string $bodyMarkdown, ?string $bodyHtml): RenderedTemplate
     {
-        $replace = static function (string $content) use ($variables): string {
+        $replace = static function (string $content, bool $htmlContext) use ($variables): string {
             return preg_replace_callback(
                 '/\{\{(\w+)\}\}/',
-                static fn(array $m): string => array_key_exists($m[1], $variables)
-                    ? (string) $variables[$m[1]]
-                    : $m[0],
+                static function (array $m) use ($variables, $htmlContext): string {
+                    if (!array_key_exists($m[1], $variables)) {
+                        return $m[0];
+                    }
+
+                    $value = (string) $variables[$m[1]];
+
+                    return $htmlContext
+                        ? htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                        : $value;
+                },
                 $content,
             );
         };
 
-        $substitutedMarkdown = $bodyMarkdown !== null ? $replace($bodyMarkdown) : null;
-        $substitutedHtmlShell = $bodyHtml !== null ? $replace($bodyHtml) : null;
+        // The Markdown body is a document the converter escapes; the HTML
+        // shell is markup, so the values that land in it are encoded for
+        // the context they are substituted into.
+        $substitutedMarkdown = $bodyMarkdown !== null ? $replace($bodyMarkdown, false) : null;
+        $substitutedHtmlShell = $bodyHtml !== null ? $replace($bodyHtml, true) : null;
 
         $renderedHtml = $substitutedMarkdown !== null
             ? $this->converter->convert($substitutedMarkdown)->getContent()
@@ -79,7 +102,7 @@ final class MailTemplateRenderer
             ? self::htmlToText($renderedHtml)
             : '';
 
-        $finalSubject = $replace($subject);
+        $finalSubject = $replace($subject, false);
 
         return new RenderedTemplate($finalSubject, $finalText, $finalHtml);
     }

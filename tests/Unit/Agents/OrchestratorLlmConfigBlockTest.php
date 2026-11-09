@@ -3,21 +3,19 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
-use Spora\Agents\Orchestrator;
+use Spora\Agents\LlmConfigBlockRenderer;
 use Spora\Services\ToolConfigSchemaInspector;
 use Spora\Tools\SubAgentTool;
 
 /**
  * The orchestrator injects the LLM-visible tool settings into the tool
- * description via a private `buildLlmConfigBlock` helper. These tests pin
+ * description via the `LlmConfigBlockRenderer`. These tests pin
  * the rendering: multi-select values must come out as resolved "Name (#id)"
  * strings, not "Array" (the result of a bare (string) cast on a list).
  */
 function invokeLlmConfigBlock(array $llmSettings): string
 {
-    $orchestrator = (new ReflectionClass(Orchestrator::class))->newInstanceWithoutConstructor();
-    $method = (new ReflectionClass(Orchestrator::class))->getMethod('buildLlmConfigBlock');
-    return $method->invoke($orchestrator, $llmSettings);
+    return (new LlmConfigBlockRenderer())->render($llmSettings);
 }
 
 it('renders a multi-select LLM value as resolved "Name (#id)" strings', function (): void {
@@ -95,9 +93,9 @@ it('renders a real SubAgentTool LLM projection end-to-end', function (): void {
         'is_active'    => true,
     ]);
 
-    // Migration 0067 cut agents.user_id but ToolConfigSchemaInspector still
-    // queries Agent::where('user_id', …). Bridge the gap so the projection
-    // can resolve the just-created agent's name.
+    // The inspector resolves agents by `principal_id`; the `agents.user_id`
+    // column this adds is a leftover from the pre-0067 schema and is not
+    // consulted.
     if (!Capsule::schema()->hasColumn('agents', 'user_id')) {
         Capsule::schema()->table('agents', function ($table): void {
             $table->unsignedBigInteger('user_id')->nullable();

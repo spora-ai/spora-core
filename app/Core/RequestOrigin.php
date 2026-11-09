@@ -39,9 +39,6 @@ final class RequestOrigin
      */
     private const DEFAULT_APP_PREFIX = '/spora';
 
-    /**
-     * Resolve the public base URL.
-     */
     public static function detect(?Config $config = null): string
     {
         $configured = $config?->getString('SPORA_APP_URL') ?? '';
@@ -54,6 +51,26 @@ final class RequestOrigin
         }
 
         return self::buildFromServer($_SERVER);
+    }
+
+    /**
+     * The origin the operator pinned, or null when the app URL is only
+     * auto-detected.
+     *
+     * A detected origin is built from the request's `Host` header, which the
+     * client chooses. A link that carries a credential — a password-reset
+     * link — must not be built on it: the host in the link decides who
+     * receives the credential.
+     */
+    public static function configured(Config $config): ?string
+    {
+        if ($config->sourceOf('SPORA_APP_URL') === Config::SOURCE_DEFAULT) {
+            return null;
+        }
+
+        $url = rtrim((string) $config->getString('SPORA_APP_URL', ''), '/');
+
+        return $url !== '' ? $url : null;
     }
 
     /**

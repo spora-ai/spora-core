@@ -109,7 +109,6 @@ test('LocalAssetStore writes a file and returns a local URL', function (): void 
         expect($ref->token)->not->toBeNull();
         expect($ref->url)->toStartWith('/api/v1/assets/');
         expect($ref->url)->toEndWith('.mp3');
-        // File must exist on disk under <SPORA_STORAGE_DIR>/assets.
         $onDisk = glob($dir . '/assets/*') ?: [];
         expect($onDisk)->toHaveCount(1);
         expect(file_get_contents($onDisk[0]))->toBe($bytes);
@@ -153,6 +152,28 @@ test('LocalAssetStore::readFromAsset() resolves Typst files by MIME', function (
         $resolved = $store->readFromAsset($asset);
         expect($resolved['mime'])->toBe('text/x-typst');
         expect(file_get_contents($resolved['path']))->toBe('= Hello\n');
+    } finally {
+        $restore();
+    }
+});
+
+test('LocalAssetStore::readFromAsset() serves the row MIME, not the filename extension', function (): void {
+    // The extension locates the file; the row's MIME decides how a browser
+    // reads it. An uploader-supplied `.html` name must not turn an
+    // accepted `text/plain` upload into an HTML response.
+    [$store, , $restore] = buildLocalStore();
+    try {
+        $ref = $store->store('<script>alert(1)</script>', mime: 'text/plain', filename: 'note.html');
+
+        $asset = new MediaAsset();
+        $asset->asset_token  = $ref->token;
+        $asset->mime_type    = 'text/plain';
+        $asset->filename     = 'note.html';
+        $asset->storage_mode = 'local';
+
+        $resolved = $store->readFromAsset($asset);
+        expect($resolved['path'])->toEndWith('.html');
+        expect($resolved['mime'])->toBe('text/plain');
     } finally {
         $restore();
     }
@@ -220,7 +241,10 @@ describe('LocalAssetStore extension agreement with the archive', function (): vo
             $asset->mime_type    = 'application/x-unknown-thing';
             $asset->storage_mode = 'local';
 
-            expect($store->readFromAsset($asset)['mime'])->toBe('application/octet-stream');
+            // The row's own MIME is what the response carries: the
+            // extension locates the file, it does not decide how a browser
+            // reads it.
+            expect($store->readFromAsset($asset)['mime'])->toBe('application/x-unknown-thing');
         } finally {
             $restore();
         }

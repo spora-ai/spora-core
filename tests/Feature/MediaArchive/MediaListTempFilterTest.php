@@ -9,6 +9,7 @@ use Spora\Models\Principal;
 use Spora\Models\User;
 use Spora\Services\MediaArchive\ListMediaQuery;
 use Tests\Support\MediaArchiveTestSupport;
+use Tests\Support\TempDirectory;
 
 /**
  * Coverage for `?include_temporary=true|false` on the listing endpoint.
@@ -21,11 +22,10 @@ use Tests\Support\MediaArchiveTestSupport;
  */
 
 beforeEach(function (): void {
-    $tmp = sys_get_temp_dir() . '/spora-list-temp-' . bin2hex(random_bytes(4));
-    mkdir($tmp, 0755, recursive: true);
-    putenv("SPORA_STORAGE_DIR={$tmp}");
-    $_ENV['SPORA_STORAGE_DIR']    = $tmp;
-    $_SERVER['SPORA_STORAGE_DIR'] = $tmp;
+    $this->storageDir = TempDirectory::create('spora-list-temp-');
+    putenv("SPORA_STORAGE_DIR={$this->storageDir}");
+    $_ENV['SPORA_STORAGE_DIR']    = $this->storageDir;
+    $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir;
 
     // Materialise a user row + user-principal so the ingest pipeline's
     // PrincipalService::ensureUserPrincipal() chain resolves cleanly.
@@ -50,17 +50,24 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
-    foreach (glob(sys_get_temp_dir() . '/spora-list-temp-*') ?: [] as $dir) {
-        if (!is_dir($dir)) {
-            continue;
-        }
-        foreach (new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST,
-        ) as $f) {
-            $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
-        }
-        @rmdir($dir);
+    TempDirectory::remove((string) $this->storageDir);
+});
+
+test('the cleanup removes the directory it was given, not every directory sharing the prefix', function (): void {
+    // A directory the test did not create must survive the cleanup: the
+    // shared temp directory is not the test's to wipe.
+    $decoy = sys_get_temp_dir() . '/spora-list-temp-decoy-' . bin2hex(random_bytes(4));
+    mkdir($decoy, 0755, true);
+    file_put_contents($decoy . '/marker.txt', 'not mine');
+
+    try {
+        TempDirectory::remove((string) $this->storageDir);
+
+        expect(is_dir($this->storageDir))->toBeFalse()
+            ->and(file_get_contents($decoy . '/marker.txt'))->toBe('not mine');
+    } finally {
+        @unlink($decoy . '/marker.txt');
+        @rmdir($decoy);
     }
 });
 
@@ -94,7 +101,6 @@ test('list excludes temp rows by default', function (): void {
     seedTempAsset(1, (int) $agent->id, true, 'temp');
     seedTempAsset(1, (int) $agent->id, false, 'perm');
 
-    // Default includeTemporary=false → only the permanent row survives.
     $page = $service->list(new ListMediaQuery(agentOwnerUserId: 1));
     expect($page->total())->toBe(1);
     $items = collect($page->items());

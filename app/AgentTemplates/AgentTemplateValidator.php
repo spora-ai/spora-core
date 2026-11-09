@@ -248,7 +248,31 @@ final class AgentTemplateValidator
             ]);
         }
 
-        if (isset($agent['max_steps']) && is_int($agent['max_steps']) && ($agent['max_steps'] < 1 || $agent['max_steps'] > 100)) {
+        if (array_key_exists('max_steps', $agent)) {
+            $this->validateMaxSteps($agent['max_steps'], $result);
+        }
+    }
+
+    /**
+     * `max_steps` bounds how many model turns a task may take, so it has
+     * to be an integer inside the supported range. A numeric string is
+     * refused rather than cast: the updater casts whatever it is given,
+     * so a string that skipped this check would persist as the budget it
+     * spells — and `null` would persist as `0`, a budget no task may run.
+     */
+    private function validateMaxSteps(mixed $value, ValidationResult $result): void
+    {
+        if (!is_int($value)) {
+            $result->addError([
+                'code'     => 'MAX_STEPS_INVALID',
+                'severity' => 'error',
+                'message'  => "Field 'agent.max_steps' must be an integer between 1 and 100.",
+                'path'     => 'agent.max_steps',
+            ]);
+            return;
+        }
+
+        if ($value < 1 || $value > 100) {
             $result->addError([
                 'code'     => 'MAX_STEPS_RANGE',
                 'severity' => 'error',
@@ -291,9 +315,6 @@ final class AgentTemplateValidator
     {
         $path = "tools[{$index}]";
 
-        // After the outer loop in validateTools() filters out non-list
-        // payloads, every $tool entry is either an array or a non-array
-        // (a scalar). The !is_array branch handles the latter.
         if (!is_array($tool)) {
             $result->addError([
                 'code'     => 'TOOL_NOT_OBJECT',

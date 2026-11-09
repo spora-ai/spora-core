@@ -15,7 +15,6 @@ use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
 use Spora\Models\ScheduledRunNext;
-use Spora\Models\User;
 use Spora\Services\Exceptions\AgentNotFoundException;
 use Spora\Services\Exceptions\PromptTemplateMissingException;
 use Spora\Services\Exceptions\ScheduledRunNotFoundException;
@@ -54,6 +53,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             : static fn(): OrchestratorInterface => $orchestrator;
         $this->principalService = $principalService ?? new PrincipalService(new PrincipalResolver());
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
+        $this->expander = new PromptTemplateExpander();
     }
 
     /** @var Closure(): OrchestratorInterface */
@@ -61,6 +61,7 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     private readonly PrincipalService $principalService;
     private readonly PrincipalResolver $principalResolver;
+    private readonly PromptTemplateExpander $expander;
 
     public function getRunsForAgent(int $agentId, int $userId): ?array
     {
@@ -103,9 +104,14 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             default                     => 0,
         };
 
+        $templateId = isset($data['template_id']) ? (int) $data['template_id'] : null;
+        if ($templateId !== null) {
+            $this->assertTemplateBelongsToAgent($templateId, $agentId);
+        }
+
         $id = Capsule::table('scheduled_runs')->insertGetId([
             'agent_id'          => $agentId,
-            'template_id'       => isset($data['template_id']) ? (int) $data['template_id'] : null,
+            'template_id'       => $templateId,
             'raw_prompt'        => isset($data['raw_prompt']) ? trim((string) $data['raw_prompt']) : null,
             'cron_expression'   => $isRecurring ? trim((string) $data['cron_expression']) : null,
             'run_at'            => !$isRecurring && isset($data['run_at'])
@@ -121,7 +127,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             'updated_at'        => gmdate(self::DB_TIMESTAMP_FORMAT),
         ]);
 
-        // Insert first PENDING entry into scheduled_runs_next
         if ($nextRunAt !== null) {
             Capsule::table('scheduled_runs_next')->insert([
                 'scheduled_run_id' => $id,
@@ -166,6 +171,15 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         if ($updateData !== []) {
             $this->normalizeUpdateFields($updateData);
+
+            // Before anything writes: rescheduling rewrites the queue
+            // entries, and a foreign template that fails the check
+            // afterwards would leave the schedule and its entries
+            // disagreeing.
+            if (isset($updateData['template_id'])) {
+                $this->assertTemplateBelongsToAgent((int) $updateData['template_id'], $agentId);
+            }
+
             $this->recomputeNextRunAtIfNeeded($updateData, $run);
 
             Capsule::table('scheduled_runs')
@@ -175,6 +189,28 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         }
 
         return ['scheduled_run' => $this->resource($run)];
+    }
+
+    /**
+     * A schedule may only reference a template of its own agent.
+     *
+     * Without the check, a caller who controls the destination agent can
+     * name another principal's private template and have its text copied
+     * into a task of their own.
+     *
+     * @throws PromptTemplateMissingException
+     */
+    private function assertTemplateBelongsToAgent(int $templateId, int $agentId): void
+    {
+        $exists = AgentPromptTemplate::where('id', $templateId)
+            ->where('agent_id', $agentId)
+            ->exists();
+
+        if (!$exists) {
+            throw new PromptTemplateMissingException(
+                'The prompt template does not belong to this agent.',
+            );
+        }
     }
 
     /**
@@ -313,24 +349,24 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
         $template = null;
         if ($run->template_id !== null) {
-            $template = AgentPromptTemplate::find($run->template_id);
+            $template = AgentPromptTemplate::where('id', $run->template_id)
+                ->where('agent_id', $agentId)
+                ->first();
             if ($template === null) {
                 throw new PromptTemplateMissingException('The prompt template assigned to this scheduled run no longer exists.');
             }
         }
 
-        // Determine prompt
         $prompt = '';
         if ($template !== null) {
             $variablesRaw = $template->getAttribute('variables');
             $variables = is_array($variablesRaw) ? $variablesRaw : [];
-            $prompt = $this->substituteVariables($template->prompt_template ?? '', $variables, $agent);
+            $prompt = $this->expander->expand($template->prompt_template ?? '', $variables, $agent);
         } else {
             $prompt = $run->raw_prompt ?? '';
-            $prompt = $this->substituteVariables($prompt, [], $agent);
+            $prompt = $this->expander->expand($prompt, [], $agent);
         }
 
-        // Determine max_steps
         if ($run->max_steps_override !== null) {
             $maxSteps = $run->max_steps_override;
         } elseif ($template !== null) {
@@ -339,11 +375,14 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
             $maxSteps = $agent->max_steps;
         }
 
-        $task = ($this->orchestratorProvider)()->start($agent->id, $prompt, (int) $maxSteps);
+        // The trigger is an authenticated action: the task records the caller
+        // as its trigger user, so the tools the run executes resolve their
+        // authority from that caller rather than from whoever happened to
+        // run on the agent last.
+        $task = ($this->orchestratorProvider)()->start($agent->id, $prompt, (int) $maxSteps, null, null, [], $userId);
 
         $lastRunAt = gmdate(self::DB_TIMESTAMP_FORMAT);
 
-        // Mark the current PENDING entry as DONE
         Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
@@ -353,7 +392,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'completed_at' => $lastRunAt,
             ]);
 
-        // Insert next PENDING entry for recurring schedules.
         if ($run->cron_expression !== null) {
             // Use wall-clock now as cron reference to avoid same-day skip (same fix as
             // in WorkerRunCommand). last_run_at is still tracked for historical accuracy.
@@ -384,7 +422,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 'updated_at'       => $lastRunAt,
             ]);
 
-            // Update cached next_run_at on scheduled_runs
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
                 ->update([
@@ -393,7 +430,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                     'updated_at'  => $lastRunAt,
                 ]);
         } else {
-            // One-shot: update last_run_at, clear next_run_at cache, deactivate
             Capsule::table('scheduled_runs')
                 ->where('id', $run->id)
                 ->update([
@@ -404,7 +440,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ]);
         }
 
-        // Publish Mercure update
         $taskData = [
             'id'          => $task->id,
             'agent_id'    => $task->agent_id,
@@ -444,11 +479,14 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
 
     private function resource(ScheduledRun $run): array
     {
-        $run->loadMissing('template');
-        /** @var AgentPromptTemplate|null */
-        $template = $run->getRelation('template');
+        // Scoped to the run's own agent: a legacy row that points at another
+        // principal's template must not leak that template's name.
+        $template = $run->template_id !== null
+            ? AgentPromptTemplate::where('id', $run->template_id)
+                ->where('agent_id', $run->agent_id)
+                ->first()
+            : null;
 
-        // Get next_run_at from the next PENDING entry in scheduled_runs_next
         $nextEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
@@ -461,7 +499,6 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
                 ->setTimezone(new DateTimeZone($run->timezone))
                 ->format('Y-m-d\TH:i:sP');
         } elseif ($run->next_run_at !== null) {
-            // Fall back to cached next_run_at when no PENDING entry exists
             $nextRunAt = (new DateTimeImmutable($run->next_run_at->toDateTimeString(), new DateTimeZone('UTC')))
                 ->setTimezone(new DateTimeZone($run->timezone))
                 ->format('Y-m-d\TH:i:sP');
@@ -525,77 +562,5 @@ final class ScheduledRunService implements ScheduledRunServiceInterface
         } catch (Throwable) {
             return false;
         }
-    }
-
-    /**
-     * Substitute {{variable}} placeholders in a template string.
-     */
-    private function substituteVariables(string $template, array $variables, ?Agent $agent = null): string
-    {
-        $defaults = [];
-        foreach ($variables as $v) {
-            if (isset($v['key'])) {
-                $defaults[$v['key']] = $v['default_value'] ?? null;
-            }
-        }
-
-        return preg_replace_callback('/\{\{(\w+)(?::([^}]*))?\}\}/', function (array $m) use ($defaults, $agent): string {
-            $key = $m[1];
-            $inlineDefault = $m[2] ?? null;
-
-            $resolved = $this->resolveBuiltInPlaceholder($key, $agent);
-            if ($resolved !== null) {
-                return $resolved;
-            }
-
-            if (isset($defaults[$key]) && $defaults[$key] !== '') {
-                return $defaults[$key];
-            }
-
-            return $inlineDefault ?? $m[0];
-        }, $template);
-    }
-
-    private function resolveBuiltInPlaceholder(string $key, ?Agent $agent): ?string
-    {
-        $dateFormats = [
-            'current_date'    => 'Y-m-d',
-            'date'            => 'Y-m-d',
-            'current_time'    => 'H:i',
-            'time'            => 'H:i',
-            'current_datetime' => 'Y-m-d\TH:i',
-            'datetime'        => 'Y-m-d\TH:i',
-            'day_of_week'     => 'l',
-            'day_of_month'    => 'j',
-            'month'           => 'F',
-            'year'            => 'Y',
-        ];
-        $agentKeys = ['agent_name' => true, 'user_name' => true];
-
-        if (isset($dateFormats[$key])) {
-            $result = date($dateFormats[$key]);
-        } elseif ($agent !== null && isset($agentKeys[$key])) {
-            $result = $this->resolveAgentPlaceholder($key, $agent);
-        } else {
-            $result = null;
-        }
-
-        return $result;
-    }
-
-    private function resolveAgentPlaceholder(string $key, Agent $agent): string
-    {
-        if ($key === 'agent_name') {
-            return $agent->name;
-        }
-
-        // $key === 'user_name'
-        $resolver = new PrincipalResolver();
-        $ownerUserId = $resolver->ownerUserId((int) $agent->principal_id);
-        if ($ownerUserId === null) {
-            return $key;
-        }
-        $user = User::find($ownerUserId);
-        return $user instanceof User ? ($user->username ?? $key) : $key;
     }
 }

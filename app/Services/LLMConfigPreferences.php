@@ -64,7 +64,8 @@ final class LLMConfigPreferences
     }
 
     /**
-     * Returns the default LLMDriverConfiguration (is_default = true).
+     * The caller's preferred configuration — their user-principal's
+     * preference, not the global default.
      */
     public function getDefaultConfiguration(int $userId): ?LLMDriverConfiguration
     {
@@ -77,24 +78,38 @@ final class LLMConfigPreferences
      * Tier 1: Agent-specific config     (agent.llm_driver_config_id)
      * Tier 2: Principal preferred config (principal_preferences.preferred_llm_config_id)
      * Tier 3: Global default           (is_global=true, is_default=true)
+     *
+     * A tier-1 / tier-2 configuration is only usable when it is global or
+     * owned by the agent's own principal: a private configuration belongs
+     * to the principal that pays for it, so a reference that outlived its
+     * authorisation — an agent that was transferred, or a row written
+     * before the reference was checked — must not spend another
+     * principal's provider account.
      */
     public function getEffectiveConfigForAgent(Agent $agent): ?LLMDriverConfiguration
     {
+        $principalId = (int) $agent->principal_id;
+
         if ($agent->llm_driver_config_id !== null) {
             $config = LLMDriverConfiguration::find($agent->llm_driver_config_id);
-            if ($config !== null) {
+            if ($config !== null && $this->isUsableByPrincipal($config, $principalId)) {
                 return $config;
             }
         }
 
-        $config = $this->getPrincipalPreferredConfig($agent->principal_id);
-        if ($config !== null) {
+        $config = $this->getPrincipalPreferredConfig($principalId);
+        if ($config !== null && $this->isUsableByPrincipal($config, $principalId)) {
             return $config;
         }
 
         return LLMDriverConfiguration::where('is_global', true)
             ->where('is_default', true)
             ->first();
+    }
+
+    private function isUsableByPrincipal(LLMDriverConfiguration $config, int $principalId): bool
+    {
+        return $config->is_global || (int) $config->principal_id === $principalId;
     }
 
     public function getPrincipalPreferredConfig(int $principalId): ?LLMDriverConfiguration

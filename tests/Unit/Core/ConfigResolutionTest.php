@@ -275,6 +275,31 @@ it('reads an env var set to the empty string as an explicit empty list', functio
 });
 
 /**
+ * `SPORA_ALLOW_REGISTRATION=0` is a restriction, not an absence.
+ *
+ * The process environment is the layer a container or a systemd unit sets, and
+ * it reaches the factory through `getenv()` alone — `$_ENV` and `$_SERVER` are
+ * empty there. `"0"` is a present string, and a truthiness check would drop
+ * it and leave the registry's permissive default in place, so the very
+ * setting an operator turned off would be the one that stopped applying.
+ */
+it('reads a process-environment "0" as the restriction it is', function (): void {
+    configResolutionUseConfigFile([]);
+
+    putenv('SPORA_ALLOW_REGISTRATION=0');
+    putenv('SPORA_ALLOW_GROUP_CREATION=0');
+    unset($_ENV['SPORA_ALLOW_REGISTRATION'], $_SERVER['SPORA_ALLOW_REGISTRATION']);
+    unset($_ENV['SPORA_ALLOW_GROUP_CREATION'], $_SERVER['SPORA_ALLOW_GROUP_CREATION']);
+
+    $config = configResolutionBuildConfig(configResolutionRegistry());
+
+    expect($config->getBool('SPORA_ALLOW_REGISTRATION'))->toBeFalse()
+        ->and($config->sourceOf('SPORA_ALLOW_REGISTRATION'))->toBe(Config::SOURCE_ENV)
+        ->and($config->getBool('SPORA_ALLOW_GROUP_CREATION'))->toBeFalse()
+        ->and($config->sourceOf('SPORA_ALLOW_GROUP_CREATION'))->toBe(Config::SOURCE_ENV);
+});
+
+/**
  * The SVG exclusion has to hold on the layers an operator actually types
  * into. It is asserted on `coerce()` in the registry test; these two are the
  * same control seen through a resolved `Config`.

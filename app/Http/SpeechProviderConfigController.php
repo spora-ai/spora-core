@@ -396,9 +396,6 @@ final class SpeechProviderConfigController
     }
 
     /**
-     * Decode the JSON body or return a 422 envelope — callers check the
-     * type and return early on the error response.
-     *
      * @return array<string, mixed>|JsonResponse
      */
     private function decodeBody(Request $request): array|JsonResponse
@@ -501,9 +498,10 @@ final class SpeechProviderConfigController
 
     /**
      * Defensive normalisation for `scope=user` (and unscoped) writes:
-     * a foreign `principal_id` is silently rewritten to the caller's
-     * user-principal id instead of letting it reach the persistence
-     * layer. Mirrors {@see \Spora\Services\LlmConfigValidator::prepareStoreData()}
+     * a principal the caller cannot manage is silently rewritten to the
+     * caller's own user-principal id instead of letting it reach the
+     * persistence layer. Mirrors
+     * {@see \Spora\Services\LlmConfigValidator::prepareStoreData()}
      * so a request that supplies a foreign id produces the same wire
      * response shape as one that omits `principal_id` — the caller
      * can't distinguish "you can't target that principal" from "you
@@ -515,6 +513,11 @@ final class SpeechProviderConfigController
      * {@see \Spora\Services\SpeechProviderConfigPersistence::createConfiguration()}
      * stays in place as a defence-in-depth backstop.
      *
+     * The bar is management authority, not visibility: an ordinary
+     * member of a group can see that group's principal, and writing a
+     * shared configuration under it would make the group's provider
+     * account theirs to fill.
+     *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
@@ -524,8 +527,7 @@ final class SpeechProviderConfigController
             return $body;
         }
 
-        $visible = $this->principalResolver->visiblePrincipalIds($callerUserId);
-        if (in_array($body['principal_id'], $visible, true)) {
+        if ($this->principalResolver->canManagePrincipal($body['principal_id'], $callerUserId)) {
             return $body;
         }
 
@@ -557,11 +559,11 @@ final class SpeechProviderConfigController
     }
 
     /**
-     * Single error-envelope builder. Replaces the four fixed-shape
-     * helpers that previously lived on this class so the count stays
-     * under the SonarCloud S1448 20-method ceiling — the same
-     * rationale the class docblock (lines 40-43) cites for splitting
-     * the preference endpoints onto {@see SpeechPreferenceController}.
+     * Single error-envelope builder. One place builds the wire envelope
+     * so the count of error helpers stays under the SonarCloud S1448
+     * 20-method ceiling — the same rationale the class docblock cites
+     * for splitting the preference endpoints onto
+     * {@see SpeechPreferenceController}.
      */
     private function error(string $code, string $message, int $status): JsonResponse
     {

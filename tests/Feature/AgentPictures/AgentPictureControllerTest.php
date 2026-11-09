@@ -11,6 +11,8 @@ use Spora\Core\SecurityManager;
 use Spora\Http\AgentPictureController;
 use Spora\Models\Agent;
 use Spora\Models\AgentPicture;
+use Spora\Models\GroupMembership;
+use Spora\Models\Principal;
 use Spora\Services\AgentPictures\AgentPictureService;
 use Spora\Services\AgentPictures\Archetype;
 use Spora\Services\AgentPictures\Palette;
@@ -18,8 +20,11 @@ use Spora\Services\AgentServiceInterface;
 use Spora\Services\AgentToolSettingsServiceInterface;
 use Spora\Services\AutoAssetStore;
 use Spora\Services\DataUrlAssetStore;
+use Spora\Services\GroupService;
 use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MimeSniffer;
+use Spora\Services\PrincipalResolver;
+use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -172,6 +177,7 @@ function buildController(AgentPictureService $service): AgentPictureController
     return new AgentPictureController(
         bootAuthLayer(),
         $agentService,
+        new PrincipalResolver(),
         $service,
         $mediaArchive,
         new MimeSniffer(),
@@ -328,4 +334,69 @@ test('POST /agents/{id}/picture/image accepts a valid WebP with the RIFF + WEBP 
     $resp = buildController(new AgentPictureService())->uploadImage($req);
 
     expect($resp->getStatusCode())->toBe(201);
+});
+
+/**
+ * A group whose principal owns an agent with an uploaded picture, and a
+ * plain member alongside the owner. Returns the owner id, the member id,
+ * the agent id and the attached asset id.
+ *
+ * @return array{0: int, 1: int, 2: int, 3: string}
+ */
+function seedSharedGroupAgent(): array
+{
+    $auth = bootAuthLayer();
+    $ownerId = bootAuth($auth, 'picture-owner@example.com');
+    $memberId = bootAuth($auth, 'picture-member@example.com');
+
+    $groupService = new GroupService(new PrincipalService(new PrincipalResolver()));
+    $group = $groupService->createGroup($ownerId, 'Picture Group');
+    $groupService->addMember((int) $group->id, $memberId, GroupMembership::ROLE_MEMBER, $ownerId);
+
+    $principalId = (int) Principal::query()
+        ->where('type', Principal::TYPE_GROUP)
+        ->where('group_id', (int) $group->id)
+        ->value('id');
+
+    $agentId = (int) \Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        'principal_id' => $principalId,
+        'name'         => 'group-agent',
+        'max_steps'    => 10,
+        'is_active'    => 1,
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+
+    $asset = seedMediaAsset($ownerId, $agentId);
+    (new AgentPictureService())->attachImage(Agent::findOrFail($agentId), $asset);
+
+    return [$ownerId, $memberId, $agentId, $asset->id];
+}
+
+test('DELETE /agents/{id}/picture/image refuses a member who cannot manage the owning principal', function (): void {
+    // Every group member sees the group's agents, so visibility alone let a
+    // member clear the group's uploaded picture.
+    [, $memberId, $agentId, $assetId] = seedSharedGroupAgent();
+
+    simulateLoggedInSession($memberId, 'picture-member@example.com');
+
+    $req = Request::create('/api/v1/agents/' . $agentId . '/picture/image', 'DELETE');
+    $req->attributes->set('id', $agentId);
+    $resp = buildController(new AgentPictureService())->deleteImage($req);
+
+    expect($resp->getStatusCode())->toBe(403);
+    expect(AgentPicture::where('agent_id', $agentId)->first()->media_asset_id)->toBe($assetId);
+});
+
+test('DELETE /agents/{id}/picture/image clears the picture for the principal owner', function (): void {
+    [$ownerId, , $agentId] = seedSharedGroupAgent();
+
+    simulateLoggedInSession($ownerId, 'picture-owner@example.com');
+
+    $req = Request::create('/api/v1/agents/' . $agentId . '/picture/image', 'DELETE');
+    $req->attributes->set('id', $agentId);
+    $resp = buildController(new AgentPictureService())->deleteImage($req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect(AgentPicture::where('agent_id', $agentId)->first()->media_asset_id)->toBeNull();
 });

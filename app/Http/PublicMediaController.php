@@ -28,12 +28,24 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *
  * Per the user's design choice, the endpoint serves **raw bytes only**
  * — no JSON envelope, no Content-Disposition. The MIME is the row's
- * sniffed mime, the cache header is `private, max-age=86400` so
- * CDNs can cache the response for a day without leaking the file
- * to other callers.
+ * sniffed mime, the cache header is `private, max-age=86400` so the
+ * browser may reuse the bytes for a day while a shared cache must not
+ * store them. A document-shaped response (HTML, SVG, XML) is
+ * served with the isolation headers, so a shared asset cannot reach
+ * the operator's origin.
  */
 final class PublicMediaController
 {
+    /**
+     * The XML types a browser parses as a document.
+     *
+     * The archive's text allowlist carries XML, so an XML upload is an
+     * ordinary asset — but a document is a document, and one carrying
+     * XHTML-namespace script elements must not render with the operator's
+     * origin.
+     */
+    private const XML_MIME_TYPES = ['text/xml', 'application/xml'];
+
     public function __construct(
         private readonly DatabaseAssetStore $database,
         private readonly LocalAssetStore $local,
@@ -117,7 +129,7 @@ final class PublicMediaController
             'Content-Length'  => (string) strlen($bytes),
             'Cache-Control'   => 'private, max-age=86400',
             'Referrer-Policy' => 'no-referrer',
-        ] + MediaScriptableTypes::headersFor($mime));
+        ] + $this->headersFor($mime));
     }
 
     private function buildFileResponse(string $mime, string $path): Response
@@ -135,9 +147,32 @@ final class PublicMediaController
         $response = new BinaryFileResponse($realPath, 200, ['Content-Type' => $mime]);
         $response->headers->set('Cache-Control', 'private, max-age=86400');
         $response->headers->set('Referrer-Policy', 'no-referrer');
-        $response->headers->add(MediaScriptableTypes::headersFor($mime));
+        $response->headers->add($this->headersFor($mime));
 
         return $response;
+    }
+
+    /**
+     * The headers a shared media response carries.
+     *
+     * Generic XML joins the script-capable types here: a browser parses
+     * `text/xml` and `application/xml` as documents, and XHTML-namespace
+     * script elements in them are as available as in HTML. The shared
+     * serving policy covers the types it names; this adds the XML ones it
+     * does not, so an XML upload cannot reach the operator's origin.
+     */
+    private function headersFor(string $mime): array
+    {
+        $headers = MediaScriptableTypes::headersFor($mime);
+        if (isset($headers['Content-Security-Policy'])) {
+            return $headers;
+        }
+
+        if (in_array(strtolower(trim($mime)), self::XML_MIME_TYPES, true)) {
+            $headers['Content-Security-Policy'] = 'sandbox';
+        }
+
+        return $headers;
     }
 
     private function storageRoot(): string

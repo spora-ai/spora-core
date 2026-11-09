@@ -44,9 +44,7 @@ final class LlmConfigValidator
         $this->principalResolver = $principalResolver ?? new PrincipalResolver();
     }
 
-    // ---------------------------------------------------------------------
-    // POST /llm-configs (create)
-    // ---------------------------------------------------------------------
+    // POST /llm-configs (create).
 
     /**
      * @param array<string, mixed> $body
@@ -72,10 +70,9 @@ final class LlmConfigValidator
     }
 
     /**
-     * Body validation for `PUT /llm-configs/{id}`. Closes the gap where the
-     * update endpoint skipped body validation entirely — only name and
-     * settings were checked. Now also enforces the limit bounds so a
-     * request like `{"max_tokens_output": 9999999}` is rejected with a 422.
+     * Body validation for `PUT /llm-configs/{id}`: the name, and the limit
+     * bounds — a request like `{"max_tokens_output": 9999999}` is rejected
+     * with a 422.
      */
     public function validateUpdateBody(array $body): ?JsonResponse
     {
@@ -210,9 +207,7 @@ final class LlmConfigValidator
         return $this->error('VALIDATION_ERROR', 'Failed to create configuration.', Response::HTTP_UNPROCESSABLE_ENTITY);
     }
 
-    // ---------------------------------------------------------------------
-    // PUT /llm-configs/{id} (update) — also authorizes the access
-    // ---------------------------------------------------------------------
+    // PUT /llm-configs/{id} (update), which also authorizes the access.
 
     /**
      * Returns the configuration the current user can modify, or a
@@ -221,28 +216,37 @@ final class LlmConfigValidator
     public function resolveAccessibleConfig(int $id, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
     {
         $config = $this->service->getConfiguration($id, $userId ?? 0, $isAdmin);
-        if ($config !== null) {
+        if ($config === null) {
+            $config = $this->service->findConfiguration($id);
+            if ($config === null) {
+                return $this->notFound();
+            }
+        }
+
+        return $this->authorizeNonOwnerAccess($config, $userId, $isAdmin);
+    }
+
+    /**
+     * Editing a configuration needs management authority over the
+     * principal that owns it. Being able to *see* it — an ordinary
+     * member of the owning group sees it through the group's principal —
+     * is not that authority.
+     */
+    private function authorizeNonOwnerAccess(LLMDriverConfiguration $config, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
+    {
+        if ($isAdmin) {
             return $config;
         }
 
-        $existingConfig = $this->service->findConfiguration($id);
-        if ($existingConfig === null) {
-            return $this->notFound();
-        }
-
-        return $this->authorizeNonOwnerAccess($existingConfig, $userId, $isAdmin);
-    }
-
-    private function authorizeNonOwnerAccess(LLMDriverConfiguration $config, ?int $userId, bool $isAdmin): LLMDriverConfiguration|JsonResponse
-    {
-        if (!$isAdmin && $config->is_global) {
+        if ($config->is_global) {
             return $this->forbidden();
         }
-        if ($config->principal_id !== null && ($userId === null || !$this->principalResolver->isPrincipalOwner($userId, (int) $config->principal_id))) {
-            return $this->notFound();
-        }
 
-        return $config;
+        $mayManage = $userId !== null
+            && $config->principal_id !== null
+            && $this->principalResolver->canManagePrincipal((int) $config->principal_id, $userId);
+
+        return $mayManage ? $config : $this->notFound();
     }
 
     /**
@@ -297,9 +301,7 @@ final class LlmConfigValidator
         return $data;
     }
 
-    // ---------------------------------------------------------------------
-    // Error response helpers — kept here so the controller stays thin
-    // ---------------------------------------------------------------------
+    // Error response helpers, kept here so the controller stays thin.
 
     public function error(string $code, string $message, int $status): JsonResponse
     {

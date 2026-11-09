@@ -8,21 +8,25 @@ namespace Spora\Services;
  * Blocks outbound requests to URLs that resolve inside the deployment's
  * own network.
  *
- * Two callers share it: the Agent API, which POSTs to a caller-supplied
- * `callback_url`, and {@see \Spora\Tools\ReadUrlTool}, which fetches a URL
- * an agent named. They differ in what may be fetched and in how a refusal
- * reads, so the guard takes a policy. The Agent API's policy is the default,
- * so `new SsrfGuard()` behaves as it did before the tool was wired in.
+ * Callers share it: the Agent API, which POSTs to a caller-supplied
+ * `callback_url` and screens it again before every delivery, and the web
+ * fetchers — {@see \Spora\Tools\ReadUrlTool} and
+ * {@see \Spora\Services\MediaArchive\RemoteMediaFetcher}. They differ in
+ * what may be fetched and in how a refusal reads, so the guard takes a
+ * policy. The Agent API's policy is the default, so `new SsrfGuard()`
+ * behaves as it did before the tool was wired in.
  *
- * The resolve-then-check sequence has a DNS-rebinding window: the host is
- * resolved here and resolved again inside the HTTP client, and the two
- * answers can differ. Closing that would mean pinning the resolved IP into
- * the request, which `symfony/http-client` does not expose for the TLS
- * SNI/hostname pair these callers need. The guard raises the cost of an
- * attack rather than making it impossible — which is why every caller must
- * also refuse to follow redirects, or a redirect is an unscreened host.
+ * The host is resolved here and the vetted address is handed back with the
+ * verdict, so a caller can pin its request to that address —
+ * `symfony/http-client`'s `resolve` option connects to the pinned address
+ * while the `Host` header, the TLS SNI and the certificate check keep the
+ * hostname. A caller that ignores the pin still has the resolve-then-check
+ * window: the client resolves the name again, and the two answers can
+ * differ. Every caller must also refuse to follow redirects, or a redirect
+ * is an unscreened host.
  *
  * @phpstan-type Policy array{schemes: list<string>, max_length: int|null, messages: array<string, string>}
+ * @phpstan-type Screen array{reason: string|null, resolve: array<string, string>}
  */
 final class SsrfGuard
 {
@@ -42,6 +46,7 @@ final class SsrfGuard
             'no_host'           => 'Callback URL has no host.',
             'loopback_host'     => 'Callback URL resolves to a loopback or link-local address.',
             'private_address'   => 'Callback URL resolves to a private or reserved address.',
+            'unresolvable_host' => 'Callback URL host could not be resolved to an address.',
         ],
     ];
 
@@ -61,23 +66,41 @@ final class SsrfGuard
             'no_host'           => 'Refusing to fetch a URL with no hostname.',
             'loopback_host'     => 'Refusing to fetch a loopback or link-local hostname.',
             'private_address'   => 'Refusing to fetch a private or loopback IP.',
+            'unresolvable_host' => 'Refusing to fetch a hostname that could not be resolved to an address.',
         ],
     ];
 
     /**
-     * Reserved IPv4 space as leading text prefixes: RFC1918, loopback,
+     * Reserved IPv4 space, as network/prefix pairs: RFC1918, loopback,
      * link-local, carrier-grade NAT, `192.0.0.0/24`, benchmarking
      * (`198.18.0.0/15`), multicast and `240.0.0.0/4`.
      *
-     * Not exhaustive — the broadcast address is not covered, and matching on
-     * text rather than on packed bits means an address written in an unusual
-     * numeric form is caught by `inet_pton()` failing to parse it, not here.
+     * Whole ranges, not text prefixes: `100.65.0.0` is inside the
+     * carrier-grade NAT block and `198.19.0.0` is inside the benchmarking
+     * block, and a prefix would have let both through.
+     *
+     * Not exhaustive — the documentation ranges (`192.0.2.0/24`,
+     * `198.51.100.0/24`, `203.0.113.0/24`) are not listed.
+     *
+     * Every address here is a reserved-network constant the guard exists
+     * to refuse, so a hardcoded-address finding on one of them says
+     * nothing: they are the deny list, not a host the deployment talks
+     * to.
+     *
+     * @var list<array{0: string, 1: int}>
      */
-    private const DENY_IPV4_PREFIXES = [
-        '0.', '10.', '100.64.', '127.', '169.254.', '172.16.', '172.17.', '172.18.',
-        '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
-        '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.',
-        '192.0.0.', '192.168.', '198.18.', '224.', '240.',
+    private const DENY_IPV4_RANGES = [
+        ['0.0.0.0', 8],
+        ['10.0.0.0', 8],      // NOSONAR php:S1313 — reserved range, denied by design
+        ['100.64.0.0', 10],  // NOSONAR php:S1313 — reserved range, denied by design
+        ['127.0.0.0', 8],
+        ['169.254.0.0', 16], // NOSONAR php:S1313 — reserved range, denied by design
+        ['172.16.0.0', 12],  // NOSONAR php:S1313 — reserved range, denied by design
+        ['192.0.0.0', 24],   // NOSONAR php:S1313 — reserved range, denied by design
+        ['192.168.0.0', 16], // NOSONAR php:S1313 — reserved range, denied by design
+        ['198.18.0.0', 15],  // NOSONAR php:S1313 — reserved range, denied by design
+        ['224.0.0.0', 4],    // NOSONAR php:S1313 — reserved range, denied by design
+        ['240.0.0.0', 4],    // NOSONAR php:S1313 — reserved range, denied by design
     ];
 
     private const DENY_HOSTS = ['localhost', '::1', '0.0.0.0', '[::1]'];
@@ -95,13 +118,91 @@ final class SsrfGuard
      */
     public function rejectReason(string $url): ?string
     {
+        return $this->screen($url)['reason'];
+    }
+
+    /**
+     * Screen a URL and report the address its request may be pinned to.
+     *
+     * The `resolve` map is the HTTP client's own `resolve` option: the
+     * request connects to the vetted address and keeps the hostname for the
+     * `Host` header, the TLS SNI and the certificate check.
+     *
+     * @return Screen
+     */
+    public function screen(string $url): array
+    {
         $shape = $this->rejectReasonForShape($url);
 
         if ($shape !== null) {
-            return $shape;
+            return ['reason' => $shape, 'resolve' => []];
         }
 
-        return $this->rejectReasonForHost((string) parse_url($url, PHP_URL_HOST));
+        return $this->screenHost(strtolower((string) parse_url($url, PHP_URL_HOST)));
+    }
+
+    /** @return Screen */
+    private function screenHost(string $host): array
+    {
+        $reason = $this->rejectReasonForHost($host);
+
+        if ($reason !== null) {
+            return ['reason' => $reason, 'resolve' => []];
+        }
+
+        return $this->screenAddresses($host);
+    }
+
+    /** The reasons a host is refused before anything is resolved. */
+    private function rejectReasonForHost(string $host): ?string
+    {
+        $literal = $this->literalAddress($host);
+
+        return match (true) {
+            $host === '' => $this->policy['messages']['no_host'],
+            in_array($host, self::DENY_HOSTS, true) => $this->policy['messages']['loopback_host'],
+            $literal !== null && $this->isDeniedAddress($literal) => $this->policy['messages']['private_address'],
+            default => null,
+        };
+    }
+
+    /** @return Screen */
+    private function screenAddresses(string $host): array
+    {
+        if ($this->literalAddress($host) !== null) {
+            // A literal address is the destination: there is nothing to
+            // resolve and nothing to pin.
+            return ['reason' => null, 'resolve' => []];
+        }
+
+        // Both families. `gethostbynamel()` is A-only, so a name whose sole
+        // record is `AAAA ::1` returned `false` and was treated as
+        // acceptable — the guard's IPv6 branch was unreachable from this
+        // path and only ever fired on a literal `[::1]` host.
+        $addresses = $this->resolveBothFamilies($host);
+
+        foreach ($addresses as $candidate) {
+            if ($this->isDeniedAddress($candidate)) {
+                return ['reason' => $this->policy['messages']['private_address'], 'resolve' => []];
+            }
+        }
+
+        // A name that resolves to nothing is refused. An empty resolve map
+        // pins nothing, so the client would run its own lookup — and the
+        // second answer can name a private address. Fail closed: only a
+        // name with a vetted address goes on.
+        return [
+            'reason'  => $addresses === [] ? $this->policy['messages']['unresolvable_host'] : null,
+            'resolve' => $addresses === [] ? [] : [$host => $addresses[0]],
+        ];
+    }
+
+    /** The host as an IP literal, or null when it is a name. */
+    private function literalAddress(string $host): ?string
+    {
+        $bare = trim($host, '[]');
+
+        return filter_var($bare, FILTER_VALIDATE_IP) !== false ? $bare : null;
     }
 
     /** Everything decidable without a host: length, well-formedness, scheme. */
@@ -125,59 +226,6 @@ final class SsrfGuard
         $max = $this->policy['max_length'];
 
         return $max !== null && strlen($url) > $max;
-    }
-
-    private function rejectReasonForHost(string $host): ?string
-    {
-        $host = strtolower($host);
-
-        if ($host === '') {
-            return $this->policy['messages']['no_host'];
-        }
-
-        $literal = $this->rejectReasonForLiteral($host);
-
-        if ($literal !== null) {
-            return $literal;
-        }
-
-        return $this->rejectReasonForResolved($host);
-    }
-
-    /** Everything decidable from the host text itself, without a lookup. */
-    private function rejectReasonForLiteral(string $host): ?string
-    {
-        if (in_array($host, self::DENY_HOSTS, true)) {
-            return $this->policy['messages']['loopback_host'];
-        }
-
-        $bare = trim($host, '[]');
-
-        if (filter_var($bare, FILTER_VALIDATE_IP) === false) {
-            return null;
-        }
-
-        return $this->matchesDenyPrefix($bare)
-            ? $this->policy['messages']['private_address']
-            : null;
-    }
-
-    private function rejectReasonForResolved(string $host): ?string
-    {
-        // Both families. `gethostbynamel()` is A-only, so a name whose sole
-        // record is `AAAA ::1` returned `false` and was treated as
-        // acceptable — the guard's IPv6 branch was unreachable from this
-        // path and only ever fired on a literal `[::1]` host.
-        foreach ($this->resolveBothFamilies($host) as $candidate) {
-            if ($this->matchesDenyPrefix($candidate)) {
-                return $this->policy['messages']['private_address'];
-            }
-        }
-
-        // A name that resolves to nothing is left to the HTTP client, which
-        // will fail with a DNS error. There is nothing to protect against
-        // from a name that never resolves.
-        return null;
     }
 
     /**
@@ -208,7 +256,7 @@ final class SsrfGuard
         return $addresses;
     }
 
-    private function matchesDenyPrefix(string $ip): bool
+    private function isDeniedAddress(string $ip): bool
     {
         $packed = @inet_pton($ip);
 
@@ -217,19 +265,41 @@ final class SsrfGuard
         }
 
         return strlen($packed) === 16
-            ? $this->matchesDenyPrefixV6($packed)
-            : $this->matchesDenyPrefixV4($ip);
+            ? $this->isDeniedAddressV6($packed)
+            : $this->isDeniedAddressV4($packed);
     }
 
-    private function matchesDenyPrefixV4(string $ip): bool
+    private function isDeniedAddressV4(string $packed): bool
     {
-        foreach (self::DENY_IPV4_PREFIXES as $prefix) {
-            if (str_starts_with($ip, $prefix)) {
+        foreach (self::DENY_IPV4_RANGES as [$network, $bits]) {
+            $networkBytes = @inet_pton($network);
+
+            if ($networkBytes !== false && $this->sharesPrefix($packed, $networkBytes, $bits)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /** Whether the two packed addresses agree on the network's first `$bits` bits. */
+    private function sharesPrefix(string $address, string $network, int $bits): bool
+    {
+        $wholeBytes = intdiv($bits, 8);
+
+        if ($wholeBytes > 0 && strncmp($address, $network, $wholeBytes) !== 0) {
+            return false;
+        }
+
+        $spareBits = $bits % 8;
+
+        if ($spareBits === 0) {
+            return true;
+        }
+
+        $mask = (0xFF << (8 - $spareBits)) & 0xFF;
+
+        return (ord($address[$wholeBytes]) & $mask) === (ord($network[$wholeBytes]) & $mask);
     }
 
     /**
@@ -239,7 +309,7 @@ final class SsrfGuard
      * would otherwise pass. `/7` covers both 0xFC and 0xFD — testing 0xFC
      * alone misses half the range.
      */
-    private function matchesDenyPrefixV6(string $packed): bool
+    private function isDeniedAddressV6(string $packed): bool
     {
         $first = ord($packed[0]);
 

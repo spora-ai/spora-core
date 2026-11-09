@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Http;
 
+use Illuminate\Database\Capsule\Manager;
 use Psr\Log\NullLogger;
 use Spora\Core\SecurityManager;
 use Spora\Http\AgentController;
 use Spora\Http\AgentOverrideController;
 use Spora\Http\AgentToolController;
 use Spora\Services\ToolConfigService;
+use Spora\Speech\OpenAiCompatibleTranscriber;
 use Spora\Tools\CalculatorTool;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -161,7 +163,7 @@ describe('AgentController::update', function (): void {
 
     test('accepts speech_driver_config_id in the body and surfaces it in the response (per-agent STT cascade tier 1)', function (): void {
         [$controller, , , $authService] = makeAgentControllers();
-        bootAuth($authService);
+        $userId = bootAuth($authService);
 
         // The new FK replaces the legacy per-agent tool override endpoint
         // (`PUT /agents/{id}/tools/{tool}/override`) which the SPA used
@@ -169,15 +171,30 @@ describe('AgentController::update', function (): void {
         // tier 1 (`SpeechToTextRegistry::loadAgentSpeechConfig`) already
         // reads this column; the controller's allowlist just needs to
         // include it.
+        //
+        // The configuration has to belong to the agent's principal —
+        // pointing an agent at another principal's provider account is
+        // refused.
+        $configId = (int) Manager::table('speech_provider_configurations')->insertGetId([
+            'principal_id'   => createUserPrincipalPublic($userId),
+            'provider_class' => OpenAiCompatibleTranscriber::class,
+            'display_name'   => 'Stub Speech Config',
+            'settings'       => '{}',
+            'is_default'     => false,
+            'is_global'      => false,
+            'created_at'     => date('Y-m-d H:i:s'),
+            'updated_at'     => date('Y-m-d H:i:s'),
+        ]);
+
         $request = jsonRequest('PATCH', '/api/v1/agents/1', [
-            'speech_driver_config_id' => 42,
+            'speech_driver_config_id' => $configId,
         ]);
         $request->attributes->set('id', 1);
         $response = $controller->update($request);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
         $body = json_decode($response->getContent(), true);
-        expect($body['data']['agent']['speech_driver_config_id'])->toBe(42);
+        expect($body['data']['agent']['speech_driver_config_id'])->toBe($configId);
     });
 
     test('clears speech_driver_config_id to null when the operator picks "Use cascade default"', function (): void {

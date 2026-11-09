@@ -19,15 +19,14 @@ use Spora\Models\Agent;
 use Spora\Models\AgentToolOperationOverride;
 use Spora\Models\Task;
 use Spora\Models\TaskHistory;
-use Spora\Models\ToolCall as ToolCallModel;
 use Spora\Plugins\PluginLoader;
 use Spora\Services\AgentServiceInterface;
 use Spora\Services\LLMConfigService;
+use Spora\Services\MediaArchive\MediaAssetAccess;
 use Spora\Services\MercurePublisherInterface;
 use Spora\Services\NotificationService;
 use Spora\Services\PrincipalContext;
 use Spora\Services\PrincipalResolver;
-use Spora\Services\ScrubDataUrls;
 use Spora\Services\SubAgentServiceInterface;
 use Spora\Services\TaskCompactionService;
 use Spora\Services\TaskCompactionServiceInterface;
@@ -95,6 +94,9 @@ final class Orchestrator implements OrchestratorInterface
     public readonly ?PrincipalResolver $principalResolver;
     public readonly ?AuthService $authService;
 
+    /** The archive's ownership union, used to authorize task attachments. */
+    private readonly MediaAssetAccess $mediaAssetAccess;
+
     public function __construct(
         DriverFactory $driverFactory,
         ?OrchestratorConfig $config = null,
@@ -116,6 +118,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->subAgent              = $config->subAgent;
         $this->principalResolver     = $principalResolver ?? new PrincipalResolver();
         $this->authService           = $authService;
+        $this->mediaAssetAccess      = new MediaAssetAccess($authService, $this->principalResolver);
         $this->driverFactory         = $driverFactory;
         $this->errorClassifier       = new ErrorClassifier();
         $this->llmConfigResolver     = new LlmConfigResolver(
@@ -126,7 +129,7 @@ final class Orchestrator implements OrchestratorInterface
             $config->toolInstances,
             $config->toolConfigService,
             $config->pluginLoader,
-            fn(array $llmSettings): string => $this->buildLlmConfigBlock($llmSettings),
+            fn(array $llmSettings): string => (new LlmConfigBlockRenderer())->render($llmSettings),
             $config->logger,
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
@@ -196,7 +199,7 @@ final class Orchestrator implements OrchestratorInterface
         $this->appendHistory($task->id, 'user', $userPrompt);
 
         if ($mediaIds !== []) {
-            $this->appendAttachmentRow($task->id, $mediaIds);
+            $this->appendAttachmentRow($task->id, $mediaIds, $userId);
         }
 
         return $task->fresh();
@@ -227,13 +230,16 @@ final class Orchestrator implements OrchestratorInterface
      * state. The marker row carries `role=system`, `content=JSON`
      * `{"kind":"abort_marker","at":<UTC>}` so the frontend can render
      * a faint divider at the marker position in the chat timeline.
+     *
+     * `$userId` is the caller who sent the turn. It authorizes the
+     * attachments: a shared task's starter is attribution, not authority.
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task
     {
         $sourceStatus = null;
         $taskRef = null;
 
-        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, &$sourceStatus, &$taskRef): void {
+        Capsule::connection()->transaction(function () use ($taskId, $newPrompt, $additionalSteps, $mediaIds, $userId, &$sourceStatus, &$taskRef): void {
             $task = Task::where('id', $taskId)->lockForUpdate()->firstOrFail();
             $sourceStatus = $task->status;
 
@@ -259,7 +265,7 @@ final class Orchestrator implements OrchestratorInterface
                 );
 
                 if ($mediaIds !== []) {
-                    $this->appendAttachmentRow($task->id, $mediaIds);
+                    $this->appendAttachmentRow($task->id, $mediaIds, $userId);
                 }
 
                 $taskRef = $this->statusWriter->applyContinueTransition($task, $newPrompt, $additionalSteps, targetStatus: 'ABORTED', clearAbortedAt: false);
@@ -273,7 +279,7 @@ final class Orchestrator implements OrchestratorInterface
             );
 
             if ($mediaIds !== []) {
-                $this->appendAttachmentRow($task->id, $mediaIds);
+                $this->appendAttachmentRow($task->id, $mediaIds, $userId);
             }
 
             $taskRef = $this->statusWriter->applyContinueTransition(
@@ -322,21 +328,20 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Re-run a failed task in place: same task_id, same URL, full conversation
+     * Re-run a failed task in place: same task_id, full conversation
      * history preserved as LLM context. The LLM sees the original user prompt
      * plus any failed assistant/tool rows from the previous attempt, which lets
      * it either retry the failing call or take an alternative path on transient
      * errors (rate limit, timeout, gateway blip).
      *
      * Resets `error_code`, `failure_reason`, `retry_after`, `step_count`,
-     * `retry_of_task_id`, and `status` (FAILED → RUNNING in Sync mode, FAILED →
-     * QUEUED in Async mode). `max_steps` is preserved. No existing history
-     * rows are rewritten; any new rows produced on this re-run come from the
-     * underlying tick, not from retry() itself. `retry_of_task_id` is cleared
-     * so the task becomes claimable by WorkerQueueProcessor's main QUEUED
-     * loop — the chain "ends" as soon as the worker picks the row up, and a
-     * subsequent failure (if any) re-arms it via TickPhaseRunner::
-     * notifyFailedAndScheduleRetry.
+     * `retry_of_task_id`, and `status` (FAILED → QUEUED). `max_steps` is
+     * preserved. No existing history rows are rewritten; any new rows produced
+     * on this re-run come from the underlying tick, not from retry() itself.
+     * `retry_of_task_id` is cleared so the task becomes claimable by
+     * WorkerQueueProcessor's main QUEUED loop — the chain "ends" as soon as
+     * the worker picks the row up, and a subsequent failure (if any) re-arms
+     * it via TickPhaseRunner::notifyFailedAndScheduleRetry.
      */
     public function retry(int $taskId): Task
     {
@@ -411,11 +416,14 @@ final class Orchestrator implements OrchestratorInterface
      * an `attachment` row to the task history. The MessageHistoryBuilder
      * expands this row into content blocks.
      *
+     * `$authorizingUserId` is the caller who chose the ids — the user who
+     * sent the turn, not whoever started the task. A task is shared, so the
+     * starter's identity is attribution, not authority.
+     *
      * @param list<string> $mediaIds
      */
-    private function appendAttachmentRow(int $taskId, array $mediaIds): void
+    private function appendAttachmentRow(int $taskId, array $mediaIds, ?int $authorizingUserId): void
     {
-        $userId = Task::find($taskId)?->triggerUserId() ?? 0;
         $refs = [];
         foreach ($mediaIds as $mid) {
             if ($mid === '') {
@@ -425,7 +433,7 @@ final class Orchestrator implements OrchestratorInterface
             if ($asset === null) {
                 continue;
             }
-            if ($asset->user_id !== null && $userId !== 0 && (int) $asset->user_id !== $userId) {
+            if ($authorizingUserId === null || !$this->mediaAssetAccess->canAttachAs($asset, $authorizingUserId)) {
                 throw new \Spora\Services\MediaArchive\MediaNotOwnedException(
                     "Media asset {$mid} is not owned by the current user.",
                 );
@@ -542,9 +550,13 @@ final class Orchestrator implements OrchestratorInterface
         $toolName = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
 
         $resolver = $this->principalResolver ?? new PrincipalResolver();
-        $context  = $resolver->resolveForToolExecute($agentId);
+        // The task being executed, not the agent's newest one: a shared
+        // agent's latest task may belong to another member, and a tool
+        // that acts on the caller's behalf must not borrow their identity.
+        $context  = $resolver->resolveForToolExecute($agentId, $taskId);
 
-        // Arguments may contain PII — never log them.
+        // Arguments may contain PII — they stay on the debug channel; the
+        // error paths below omit them.
         $this->logger?->debug('Tool dispatch', [
             'tool'      => $toolName,
             'agent_id'  => $agentId,
@@ -656,41 +668,16 @@ final class Orchestrator implements OrchestratorInterface
     }
 
     /**
-     * Stamp a `tool_calls` row REJECTED for a tool that the agent has been
-     * revoked from or had a specific op disabled, and append a `'tool'`
-     * history message carrying the cause. Shared by both resume paths
-     * (`ApprovedBatchExecutor`, `TickPhaseRunner`) so the disposition shape
-     * stays consistent across sync and worker modes.
+     * The operation a call dispatches to, given its arguments.
      *
-     * `rejected_by` is left null: revocation is an admin/system action with
-     * no single user-actor in this column's model. The reason lives in
-     * `reject_reason` and in the appended history row, which is what the
-     * LLM sees on its next round-trip.
+     * The same resolution the dispatch path uses
+     * ({@see ToolOperationResolver::withResolvedDiscriminator()}), so a
+     * caller can compare the operation a set of arguments selects against
+     * the operation that was authorized.
      */
-    public function recordRevokedToolCall(
-        Task   $task,
-        string $providerCallId,
-        string $toolName,
-        string $rejectReason,
-    ): void {
-        ToolCallModel::where('task_id', $task->id)
-            ->where('provider_call_id', $providerCallId)
-            ->update([
-                'status'        => 'REJECTED',
-                'rejected_at'   => date(self::DB_TIMESTAMP_FORMAT),
-                'rejected_by'   => null,
-                'reject_reason' => $rejectReason,
-            ]);
-
-        $this->appendHistory(
-            taskId: $task->id,
-            role: 'tool',
-            content: ScrubDataUrls::scrub(Utf8Sanitizer::scrubString("Action rejected: {$rejectReason}")),
-            context: new HistoryMessageContext(
-                toolCallId: $providerCallId,
-                toolName: $toolName,
-            ),
-        );
+    public function resolveOperationName(object $toolInstance, array $arguments, int $agentId): string
+    {
+        return $this->toolOperations->resolveOperationName($toolInstance, $arguments, $agentId);
     }
 
     public function buildMessages(int $taskId): array
@@ -718,29 +705,6 @@ final class Orchestrator implements OrchestratorInterface
     private function buildToolDefinitions(array $enabledClasses, int $agentId, ?PrincipalContext $context = null): array
     {
         return $this->toolDefinitionBuilder->buildToolDefinitions($enabledClasses, $agentId, $context);
-    }
-
-    private function buildLlmConfigBlock(array $llmSettings): string
-    {
-        if ($llmSettings === []) {
-            return '';
-        }
-
-        $lines = [];
-        foreach ($llmSettings as $setting) {
-            $value = $setting['value'];
-            if ($value === null || $value === '' || $value === []) {
-                $display = '(not configured)';
-            } elseif (is_array($value)) {
-                // list<string> from a multi-select, or a list of agent "Name (#id)" pairs.
-                $display = implode(', ', array_map(static fn($v) => is_scalar($v) ? (string) $v : json_encode($v), $value));
-            } else {
-                $display = (string) $value;
-            }
-            $lines[] = '- ' . $setting['label'] . ': ' . $display;
-        }
-
-        return "\n[Effective Configuration]\n" . implode("\n", $lines);
     }
 
     public function resolveToolByName(string $toolName): ToolInterface

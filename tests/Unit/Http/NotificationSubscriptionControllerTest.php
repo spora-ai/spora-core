@@ -33,6 +33,19 @@ function seedSubscriptionUserUnit(Spora\Auth\AuthService $authService, string $e
     return $userId;
 }
 
+/**
+ * An agent the given user owns — a target they are allowed to subscribe to.
+ */
+function seedVisibleAgentUnit(int $userId): int
+{
+    return (int) Illuminate\Database\Capsule\Manager::table('agents')->insertGetId([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'name'         => 'SubAgent-' . $userId,
+        'max_steps'    => 10,
+        'is_active'    => 1,
+    ]);
+}
+
 // index
 
 test('index() returns an empty list when the user has no subscriptions', function (): void {
@@ -127,12 +140,13 @@ test('index() reports email_enabled=false when the operator opted out via config
 
 test('subscribe() creates a new subscription and returns 201', function (): void {
     [$controller, $authService] = makeSubscriptionControllerUnit();
-    seedSubscriptionUserUnit($authService);
+    $userId = seedSubscriptionUserUnit($authService);
+    $principalId = createUserPrincipalPublic($userId);
 
     $request = Request::create(
         '/api/v1/notifications/subscriptions',
         'POST',
-        content: json_encode(['target_type' => 'principal', 'target_id' => 7]),
+        content: json_encode(['target_type' => 'principal', 'target_id' => $principalId]),
     );
 
     $response = $controller->subscribe($request);
@@ -140,18 +154,61 @@ test('subscribe() creates a new subscription and returns 201', function (): void
     expect($response->getStatusCode())->toBe(201);
     $body = json_decode($response->getContent(), true);
     expect($body['data']['subscribed'])->toBeTrue();
-    expect(Spora\Models\NotificationSubscription::query()->where('target_type', 'principal')->where('target_id', 7)->count())->toBe(1);
+    expect(Spora\Models\NotificationSubscription::query()->where('target_type', 'principal')->where('target_id', $principalId)->count())->toBe(1);
 });
 
 test('subscribe() is idempotent — repeat calls do not duplicate the row', function (): void {
     [$controller, $authService] = makeSubscriptionControllerUnit();
+    $userId = seedSubscriptionUserUnit($authService);
+    $agentId = seedVisibleAgentUnit($userId);
+
+    $payload = json_encode(['target_type' => 'agent', 'target_id' => $agentId]);
+    $controller->subscribe(Request::create('/api/v1/notifications/subscriptions', 'POST', content: $payload));
+    $controller->subscribe(Request::create('/api/v1/notifications/subscriptions', 'POST', content: $payload));
+
+    expect(Spora\Models\NotificationSubscription::query()->where('target_type', 'agent')->where('target_id', $agentId)->count())->toBe(1);
+});
+
+test('subscribe() refuses a target the caller cannot reach', function (): void {
+    // Another user's agent: the subscription would deliver that user's
+    // scheduled-task prompts to the caller's own inbox.
+    [$controller, $authService] = makeSubscriptionControllerUnit();
+    $otherAuth = bootAuthLayer();
+    $otherUserId = $otherAuth->register('other-sub@example.com', 'Password1!', 'Other');
+    $otherAgentId = seedVisibleAgentUnit($otherUserId);
+
     seedSubscriptionUserUnit($authService);
 
-    $payload = json_encode(['target_type' => 'agent', 'target_id' => 5]);
-    $controller->subscribe(Request::create('/api/v1/notifications/subscriptions', 'POST', content: $payload));
-    $controller->subscribe(Request::create('/api/v1/notifications/subscriptions', 'POST', content: $payload));
+    $request = Request::create(
+        '/api/v1/notifications/subscriptions',
+        'POST',
+        content: json_encode(['target_type' => 'agent', 'target_id' => $otherAgentId]),
+    );
 
-    expect(Spora\Models\NotificationSubscription::query()->where('target_type', 'agent')->where('target_id', 5)->count())->toBe(1);
+    $response = $controller->subscribe($request);
+
+    expect($response->getStatusCode())->toBe(403);
+    expect(Spora\Models\NotificationSubscription::query()->where('target_id', $otherAgentId)->count())->toBe(0);
+});
+
+test('subscribe() refuses a principal the caller cannot act for', function (): void {
+    [$controller, $authService] = makeSubscriptionControllerUnit();
+    $otherAuth = bootAuthLayer();
+    $otherUserId = $otherAuth->register('other-principal@example.com', 'Password1!', 'Other');
+    $otherPrincipalId = createUserPrincipalPublic($otherUserId);
+
+    seedSubscriptionUserUnit($authService);
+
+    $request = Request::create(
+        '/api/v1/notifications/subscriptions',
+        'POST',
+        content: json_encode(['target_type' => 'principal', 'target_id' => $otherPrincipalId]),
+    );
+
+    $response = $controller->subscribe($request);
+
+    expect($response->getStatusCode())->toBe(403);
+    expect(Spora\Models\NotificationSubscription::query()->where('target_id', $otherPrincipalId)->count())->toBe(0);
 });
 
 test('subscribe() returns 400 when target_type is invalid', function (): void {

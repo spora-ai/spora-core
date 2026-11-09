@@ -27,6 +27,8 @@ final class OaiCapturingHttpClient implements HttpClientInterface
 {
     public mixed $capturedBody = null;
     public ?string $capturedUrl = null;
+    public ?array $capturedOptions = null;
+    public ?string $capturedUploadPath = null;
 
     public function __construct(private HttpClientInterface $inner) {}
 
@@ -34,6 +36,15 @@ final class OaiCapturingHttpClient implements HttpClientInterface
     {
         $this->capturedBody = $options['body'] ?? null;
         $this->capturedUrl  = $url;
+        $this->capturedOptions = $options;
+
+        // The staged copy is a file on disk; its path is what the request
+        // carries, and what has to be gone when the request is done.
+        $file = is_array($this->capturedBody) ? ($this->capturedBody['file'] ?? null) : null;
+        if (is_resource($file)) {
+            $this->capturedUploadPath = stream_get_meta_data($file)['uri'];
+        }
+
         return $this->inner->request($method, $url, $options);
     }
 
@@ -78,6 +89,8 @@ test('bindLabel() caches the label; getName/getDisplayName return it', function 
 });
 
 test('isConfigured() is optimistic — always true; the real key check happens at transcribe()', function (): void {
+    // Without bound v2 settings the gate stays optimistic; the v2 path
+    // gates on the bound `api_key` instead.
     $provider = buildOaiProvider([]);
     expect($provider->isConfigured())->toBeTrue();
 });
@@ -315,6 +328,66 @@ test('transcribe() unknown MIME raises InvalidAudioException — never reaches t
 
     expect(fn() => $provider->transcribe('fake', 'audio/x-foo'))
         ->toThrow(InvalidAudioException::class, 'Unsupported audio MIME: audio/x-foo');
+});
+
+/**
+ * The staged copy is the whole recording on disk. It leaves with the
+ * request — a copy that stays behind is a copy of the user's audio nobody
+ * asked for.
+ */
+test('the staged copy of the recording is removed when the request is done', function (): void {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-key-1']);
+
+    $capturing = new OaiCapturingHttpClient(new MockHttpClient([new MockResponse(json_encode(['text' => 'ok']))]));
+    $provider = new OpenAiCompatibleTranscriber($capturing, $config);
+
+    $provider->transcribe('fake-bytes', 'audio/webm');
+
+    expect($capturing->capturedUploadPath)->not->toBeNull()
+        ->and(file_exists((string) $capturing->capturedUploadPath))->toBeFalse();
+});
+
+test('the staged copy is removed when the request fails', function (): void {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-key-1']);
+
+    $capturing = new OaiCapturingHttpClient(new MockHttpClient([new MockResponse('nope', ['http_code' => 500])]));
+    $provider = new OpenAiCompatibleTranscriber($capturing, $config);
+
+    expect(fn() => $provider->transcribe('fake-bytes', 'audio/webm'))
+        ->toThrow(SpeechToTextException::class);
+
+    expect(file_exists((string) $capturing->capturedUploadPath))->toBeFalse();
+});
+
+test('a rejected MIME leaves no copy of the recording behind', function (): void {
+    $bytes = 'rejected-' . uniqid();
+    $provider = buildOaiProvider(['api_key' => 'sk-test']);
+
+    expect(fn() => $provider->transcribe($bytes, 'audio/x-foo'))
+        ->toThrow(InvalidAudioException::class);
+
+    $leaked = array_filter(
+        glob(sys_get_temp_dir() . '/spora_oai_stt_*') ?: [],
+        static fn(string $path): bool => @file_get_contents($path) === $bytes,
+    );
+
+    expect($leaked)->toBe([]);
+});
+
+test('the request does not follow a redirect to another host', function (): void {
+    $config = Mockery::mock(ToolConfigService::class);
+    $config->shouldReceive('getEffectiveSettings')->andReturn(['api_key' => 'sk-key-1']);
+
+    $capturing = new OaiCapturingHttpClient(new MockHttpClient([new MockResponse(json_encode(['text' => 'ok']))]));
+    $provider = new OpenAiCompatibleTranscriber($capturing, $config);
+
+    $provider->transcribe('fake-bytes', 'audio/webm');
+
+    // A redirect would take the recording — and the API key that travels with
+    // it — to a host nobody vetted.
+    expect($capturing->capturedOptions['max_redirects'] ?? null)->toBe(0);
 });
 
 test('common browser-native containers are accepted (one mock per call)', function (): void {

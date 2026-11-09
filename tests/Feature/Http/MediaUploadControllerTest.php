@@ -29,9 +29,6 @@ afterEach(function (): void {
     MediaDerivativeProducerDiscovery::reset();
 });
 
-/**
- * Plan §12 B2b — MediaUploadController end-to-end surface tests.
- */
 test('multipart upload with a text file stores the bytes with no derivative', function (): void {
     [, $service, , , , $controller] = buildUploadControllerFixtures();
     $tmp = tempnam(sys_get_temp_dir(), 'txt');
@@ -242,6 +239,109 @@ test('upload with principal_id=0 (non-numeric string) is silently ignored (legac
     expect($asset)->not->toBeNull();
     unlink($tmp);
 });
+
+test('upload with an agent_id the caller cannot see returns 403 FORBIDDEN_AGENT', function (): void {
+    // The ingest pipeline inherits the agent's principal when the request
+    // names none, so an unchecked agent id would file the upload in
+    // somebody else's archive.
+    [, $service, $auth, , , $controller] = buildUploadControllerFixtures();
+    $userId = (int) $auth->currentUserId();
+    seedAuthUserRow($userId);
+    (new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()))
+        ->ensureUserPrincipal($userId);
+
+    $otherUserId = $userId + 4242;
+    seedAuthUserRow($otherUserId);
+    $otherPrincipalId = (new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()))
+        ->ensureUserPrincipal($otherUserId)->id;
+    $foreignAgentId = (int) \Spora\Models\Agent::create([
+        'principal_id' => $otherPrincipalId,
+        'name'         => 'foreign-agent',
+        'max_steps'    => 10,
+        'is_active'    => 1,
+    ])->id;
+
+    $tmp = tempnam(sys_get_temp_dir(), 'foreign-agent');
+    file_put_contents($tmp, "hello");
+    $req = Request::create('/api/v1/media', 'POST', [
+        'agent_id' => (string) $foreignAgentId,
+    ], files: [
+        'file' => new UploadedFile($tmp, 'intruder.txt', 'text/plain', null, true),
+    ]);
+
+    $resp = $controller->store($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('FORBIDDEN_AGENT');
+    expect(\Spora\Models\MediaAsset::query()->where('filename', 'intruder.txt')->first())->toBeNull();
+    unlink($tmp);
+});
+
+test('upload with an agent_id and a principal_id the agent does not belong to returns 422', function (): void {
+    // Both identifiers name the destination, so they have to agree: an
+    // agent of one principal filed into another would attribute the row
+    // to a principal its own agent cannot see.
+    [, , $auth, , , $controller] = buildUploadControllerFixtures();
+    $userId = (int) $auth->currentUserId();
+    seedAuthUserRow($userId);
+    $ownPrincipalId = (new \Spora\Services\PrincipalService(new \Spora\Services\PrincipalResolver()))
+        ->ensureUserPrincipal($userId)->id;
+
+    $groupPrincipalId = seedUploadGroupPrincipal($userId);
+    $groupAgentId = (int) \Spora\Models\Agent::create([
+        'principal_id' => $groupPrincipalId,
+        'name'         => 'group-agent',
+        'max_steps'    => 10,
+        'is_active'    => 1,
+    ])->id;
+
+    $tmp = tempnam(sys_get_temp_dir(), 'mismatch');
+    file_put_contents($tmp, "hello");
+    $req = Request::create('/api/v1/media', 'POST', [
+        'agent_id'     => (string) $groupAgentId,
+        'principal_id' => (string) $ownPrincipalId,
+    ], files: [
+        'file' => new UploadedFile($tmp, 'mismatch.txt', 'text/plain', null, true),
+    ]);
+
+    $resp = $controller->store($req);
+
+    expect($resp->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
+    expect(json_decode($resp->getContent(), true)['error']['code'])->toBe('AGENT_PRINCIPAL_MISMATCH');
+    expect(\Spora\Models\MediaAsset::query()->where('filename', 'mismatch.txt')->first())->toBeNull();
+    unlink($tmp);
+});
+
+/**
+ * A group principal the user owns, so the caller's visible principals
+ * cover it.
+ */
+function seedUploadGroupPrincipal(int $ownerUserId): int
+{
+    $now = date('Y-m-d H:i:s');
+    $groupId = (int) \Illuminate\Database\Capsule\Manager::table('groups')->insertGetId([
+        'name'               => 'upload-group-' . $ownerUserId,
+        'description'        => null,
+        'created_by_user_id' => $ownerUserId,
+        'created_at'         => $now,
+        'updated_at'         => $now,
+    ]);
+    \Illuminate\Database\Capsule\Manager::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $ownerUserId,
+        'role'       => \Spora\Models\GroupMembership::ROLE_OWNER,
+        'joined_at'  => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    return (int) \Illuminate\Database\Capsule\Manager::table('principals')->insertGetId([
+        'type'       => \Spora\Models\Principal::TYPE_GROUP,
+        'group_id'   => $groupId,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+}
 
 /**
  * @return array{0: AutoAssetStore, 1: MediaArchiveService, 2: \Spora\Auth\AuthService, 3: MediaAllowedTypesService, 4: MimeSniffer, 5: MediaUploadController}

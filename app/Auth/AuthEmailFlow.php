@@ -10,8 +10,11 @@ use Delight\Auth\EmailNotVerifiedException;
 use Delight\Auth\InvalidEmailException;
 use Delight\Auth\NotLoggedInException;
 use Delight\Auth\UserAlreadyExistsException;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Spora\Models\User;
 use Spora\Services\MailerInterface;
+use Throwable;
 
 /**
  * Owns the delight-im callbacks that send transactional emails for
@@ -25,8 +28,10 @@ final class AuthEmailFlow
         private readonly Auth $auth,
         private readonly string $appUrl = '',
         private string $appPrefix = '/spora',
+        ?LoggerInterface $logger = null,
     ) {
         $this->appPrefix = self::normalizePrefix($appPrefix);
+        $this->logger    = $logger ?? new NullLogger();
     }
 
     public function setSystemMailer(MailerInterface $systemMailer): void
@@ -124,28 +129,40 @@ final class AuthEmailFlow
 
     /**
      * Initiate a password reset for the given email address.
+     *
+     * The link is built on `$baseUrl` rather than on the detected origin: it
+     * carries the reset credential, so the host it names decides who gets it.
      */
-    public function forgotPassword(string $email): void
+    public function forgotPassword(string $email, string $baseUrl): void
     {
-        $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email): void {
-            if ($this->systemMailer !== null) {
-                $baseUrl = rtrim($this->appUrl !== '' ? $this->appUrl : 'http://localhost', '/');
-                $resetUrl = "{$baseUrl}{$this->appPrefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
+        $this->auth->forgotPassword($email, function (string $selector, string $token) use ($email, $baseUrl): void {
+            if ($this->systemMailer === null) {
+                return;
+            }
+
+            $resetUrl = "{$baseUrl}{$this->appPrefix}/auth/reset-password/{$selector}?token=" . urlencode($token);
+
+            try {
                 $this->systemMailer->sendPasswordResetEmail($email, $resetUrl);
+            } catch (Throwable $e) {
+                // A broken transport must not answer differently for an
+                // account that exists than for one that does not: the
+                // caller answers the same generic 200 either way, and this
+                // log is the only signal that the mail never went out.
+                $this->logger->error('Password reset email could not be sent', [
+                    'exception_class' => get_class($e),
+                    'message'         => $e->getMessage(),
+                ]);
             }
         });
     }
 
-    /**
-     * Reset the password using a selector/token pair.
-     */
     public function resetPassword(string $selector, string $token, string $newPassword): void
     {
         $this->auth->resetPassword($selector, $token, $newPassword);
     }
 
     /**
-     * Resend the email verification email for an unverified user.
      * Silently returns if there is no pending confirmation request for the email.
      */
     public function resendVerificationEmail(string $email): void
@@ -184,4 +201,6 @@ final class AuthEmailFlow
     }
 
     private ?MailerInterface $systemMailer = null;
+
+    private readonly LoggerInterface $logger;
 }

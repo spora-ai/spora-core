@@ -418,7 +418,6 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
 
         $resolver = makeOverrideResolver();
 
-        // Persisted row with enabled=1 → expect 1
         $rowOn = AgentToolOperationOverride::create([
             'agent_id'   => (int) $agent->getKey(),
             'tool_class' => CalculatorTool::class,
@@ -427,7 +426,6 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         ]);
         expect($resolver->extractOverrideFlag($rowOn, 'enabled'))->toBe(1);
 
-        // Persisted row with enabled=0 → expect 0
         $rowOff = AgentToolOperationOverride::create([
             'agent_id'   => (int) $agent->getKey(),
             'tool_class' => CalculatorTool::class,
@@ -436,31 +434,26 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         ]);
         expect($resolver->extractOverrideFlag($rowOff, 'enabled'))->toBe(0);
 
-        // Field that wasn't set on the row → expect null
         expect($resolver->extractOverrideFlag($rowOn, 'default_requires_approval'))->toBeNull();
     });
 
     it('parseOverrideFlag accepts boolean, integer, and string forms; null when missing', function (): void {
         $resolver = makeOverrideResolver();
 
-        // PHP booleans
         expect($resolver->parseOverrideFlag(['enabled' => true], 'enabled'))->toBe(1);
         expect($resolver->parseOverrideFlag(['enabled' => false], 'enabled'))->toBe(0);
 
-        // Integers (1 / 0)
         expect($resolver->parseOverrideFlag(['enabled' => 1], 'enabled'))->toBe(1);
         expect($resolver->parseOverrideFlag(['enabled' => 0], 'enabled'))->toBe(0);
 
-        // Boolean strings (filter_var uses FILTER_VALIDATE_BOOLEAN)
+        // filter_var with FILTER_VALIDATE_BOOLEAN maps the string forms
         expect($resolver->parseOverrideFlag(['enabled' => 'true'], 'enabled'))->toBe(1);
         expect($resolver->parseOverrideFlag(['enabled' => 'false'], 'enabled'))->toBe(0);
         expect($resolver->parseOverrideFlag(['enabled' => '1'], 'enabled'))->toBe(1);
         expect($resolver->parseOverrideFlag(['enabled' => '0'], 'enabled'))->toBe(0);
 
-        // Explicit null → null
         expect($resolver->parseOverrideFlag(['enabled' => null], 'enabled'))->toBeNull();
 
-        // Key absent → null
         expect($resolver->parseOverrideFlag([], 'enabled'))->toBeNull();
     });
 
@@ -507,12 +500,74 @@ describe('AgentService private helpers (now on collaborators)', function (): voi
         $result = $meth->invoke($resolver, $config);
 
         expect($result)->toBeArray();
-        // api_key is a password field → masked
         expect($result)->toHaveKey('api_key');
         expect($result['api_key'])->toBe('***');
-        // Non-password fields pass through
         expect($result['model'])->toBe('gpt-4o');
         expect($result['base_url'])->toBe('https://api.openai.com/v1');
+    });
+
+    it('maskLlmConfig masks the password fields of a configuration whose driver class carries a leading backslash', function (): void {
+        $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new SecurityManager($key);
+        $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
+        $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $resolver = new AgentToolOverrideResolver(
+            $toolConfig,
+            $llmConfig,
+            new LLMConfigPreferences(),
+        );
+        $ref  = new ReflectionClass(AgentToolOverrideResolver::class);
+        $meth = $ref->getMethod('maskLlmConfig');
+
+        // PHP accepts the leading backslash, so a stored class name can
+        // differ from the spelling the driver registry lists.
+        $config = LLMDriverConfiguration::create([
+            'principal_id' => null,
+            'name'         => 'Mask target',
+            'driver_class' => '\\' . OpenAICompatibleDriver::class,
+            'settings'     => json_encode([
+                'api_key'  => 'plain-secret',
+                'model'    => 'gpt-4o',
+            ]),
+            'is_global'  => true,
+            'is_default' => true,
+        ]);
+
+        $result = $meth->invoke($resolver, $config);
+
+        expect($result)->toBeArray();
+        expect($result['api_key'])->toBe('***');
+        expect($result['model'])->toBe('gpt-4o');
+    });
+
+    it('maskLlmConfig returns no settings when the driver class is unknown', function (): void {
+        $key = str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $security = new SecurityManager($key);
+        $toolConfig = new ToolConfigService($security, new NullLogger(), [CalculatorTool::class]);
+        $llmConfig  = new LLMConfigService($security, [OpenAICompatibleDriver::class]);
+        $resolver = new AgentToolOverrideResolver(
+            $toolConfig,
+            $llmConfig,
+            new LLMConfigPreferences(),
+        );
+        $ref  = new ReflectionClass(AgentToolOverrideResolver::class);
+        $meth = $ref->getMethod('maskLlmConfig');
+
+        // The plugin that shipped this class is gone: without a schema
+        // there is no way to tell which settings are secrets.
+        $config = LLMDriverConfiguration::create([
+            'principal_id' => null,
+            'name'         => 'Unknown class',
+            'driver_class' => 'Spora\\Drivers\\RemovedDriver',
+            'settings'     => json_encode([
+                'api_key'  => 'plain-secret',
+                'model'    => 'gpt-4o',
+            ]),
+            'is_global'  => true,
+            'is_default' => true,
+        ]);
+
+        expect($meth->invoke($resolver, $config))->toBe([]);
     });
 });
 
@@ -588,7 +643,6 @@ describe('AgentService::setPinned / setArchived', function (): void {
         expect($result->id)->toBe($agent->id);
         expect($result->$field)->toBeTrue();
 
-        // Refreshed from DB — read again to confirm persistence
         $fresh = Agent::find($agent->id);
         expect($fresh->$field)->toBeTrue();
     })->with('flagSetters');

@@ -137,6 +137,13 @@ final class LocalAssetStore implements AssetStore
      * derivative 404: `store()` took `thumbnail-256` from the name and this
      * looked for `webp` from the MIME.
      *
+     * The returned MIME is the row's sniffed one, not the extension's: the
+     * extension locates the file, the MIME decides how a browser reads it.
+     * An uploader-supplied `.html` name must not turn an accepted
+     * `text/plain` upload into an HTML response. The database-backed store
+     * answers the same way — {@see DatabaseAssetStore::read()} returns
+     * `mime_type`.
+     *
      * @return array{path: string, mime: string, length: int}
      */
     public function readFromAsset(MediaAsset $asset): array
@@ -153,9 +160,17 @@ final class LocalAssetStore implements AssetStore
 
         return [
             'path'   => $path,
-            'mime'   => self::mimeForExtension($ext),
+            'mime'   => self::mimeForRow($asset, $ext),
             'length' => (int) filesize($path),
         ];
+    }
+
+    /** The row's own MIME, falling back to the extension's when it has none. */
+    private static function mimeForRow(MediaAsset $asset, string $ext): string
+    {
+        $mime = $asset->mime_type;
+
+        return is_string($mime) && $mime !== '' ? $mime : self::mimeForExtension($ext);
     }
 
     /**

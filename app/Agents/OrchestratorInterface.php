@@ -16,8 +16,6 @@ use Spora\Models\Task;
 interface OrchestratorInterface
 {
     /**
-     * @param  int     $agentId
-     * @param  string  $userPrompt   The user's initial instruction.
      * @param  int     $maxSteps     Hard iteration cap. Copied to Task at creation.
      * @param  int|null $parentTaskId Optional parent task for follow-up chaining.
      * @param  int|null $runId       Optional scheduled run ID for tracking.
@@ -27,7 +25,7 @@ interface OrchestratorInterface
      *                                to the agent's runner (used by worker
      *                                and scheduled-run paths that legitimately
      *                                run as the most-recent credential owner).
-     * @return Task                  The newly created Task (status: RUNNING).
+     * @return Task                  The newly created Task (status: QUEUED).
      */
     public function start(int $agentId, string $userPrompt, int $maxSteps = 10, ?int $parentTaskId = null, ?int $runId = null, array $mediaIds = [], ?int $userId = null): Task;
 
@@ -63,7 +61,6 @@ interface OrchestratorInterface
     public function resume(int $taskId, array $decisions): void;
 
     /**
-     * @param  int    $taskId
      * @param  string $reason  Surfaced to the LLM so it can choose an alternative action.
      */
     public function reject(int $taskId, string $reason): void;
@@ -77,12 +74,11 @@ interface OrchestratorInterface
      * (`retry_of_task_id`, `retry_after`, `error_code`, `error_message`,
      * `failure_reason`) so a stale auto-retry row becomes claimable again.
      *
-     * @param  int      $taskId
-     * @param  string   $newPrompt
      * @param  int|null $additionalSteps  Override max_steps for this continuation.
-     * @return Task
+     * @param  int|null $userId  The caller who sent the turn — the identity
+     *                           the attachments are authorized against.
      */
-    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = []): Task;
+    public function continue(int $taskId, string $newPrompt, ?int $additionalSteps = null, array $mediaIds = [], ?int $userId = null): Task;
 
     /**
      * Append a `task_history` row. Used by extracted services (e.g.

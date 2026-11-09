@@ -221,6 +221,59 @@ describe('SubAgentService::resumeParent idempotency', function (): void {
     });
 });
 
+describe('SubAgentService::resumeParent authorization boundary', function (): void {
+    afterEach(function (): void {
+        Mockery::close();
+        \Spora\Core\Database::resetBootState();
+    });
+
+    it('does not import a child answer that left the parent\'s principal', function (): void {
+        // An ownership transfer moves the child's task rows to the new
+        // principal but leaves the parent's delegation link in place. The
+        // child's answer then belongs to the conversation it was continued
+        // in, not to the parent that delegated it.
+        $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: false);
+        $parent = $seed['parent'];
+        $childIds = $seed['childIds'];
+
+        $newPrincipalId = createUserPrincipalPublic(987654);
+        Task::where('id', $childIds[0])->update(['principal_id' => $newPrincipalId]);
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldNotReceive('appendHistory');
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        $service->resumeParent($parent, $childIds);
+
+        $parent->refresh();
+        expect($parent->status)->toBe('QUEUED');
+    });
+
+    it('imports a child answer that is still on the parent\'s principal', function (): void {
+        // The counterpart: a child that stayed on the parent's principal
+        // is delivered as before, so the refusal above is not the resume
+        // simply not happening.
+        $seed = planDSeedParentInAwaiting(expectedCount: 1, spawnedCount: 1, batchOpen: false);
+        $parent = $seed['parent'];
+        $childIds = $seed['childIds'];
+
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->shouldReceive('appendHistory')->once();
+
+        $service = new SubAgentService(
+            static fn(): OrchestratorInterface => $orchestrator,
+        );
+
+        $service->resumeParent($parent, $childIds);
+
+        $parent->refresh();
+        expect($parent->status)->toBe('QUEUED');
+    });
+});
+
 describe('SubAgentService::maybeResumeParentForParent batch-boundary hook', function (): void {
     afterEach(function (): void {
         Mockery::close();

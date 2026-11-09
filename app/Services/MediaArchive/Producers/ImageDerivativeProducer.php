@@ -50,20 +50,29 @@ use Throwable;
  * EXIF orientation is applied by the Intervention driver during decode
  * (`autoOrientation = true` is the default), so a portrait iPhone
  * upload lands the right way up regardless of the resize/convert
- * preset chosen. Metadata (including EXIF tags and colour profiles)
- * is stripped on encode via the dedicated `strip = true` driver
- * config so the operator's derivative doesn't leak GPS coordinates
- * the way the upload sometimes does.
+ * preset chosen. The EXIF profile itself does not travel with the
+ * derivative — see {@see resolveDriver()}.
  */
 final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
 {
-    /** Pillow: lowercase MIMEs, no trailing parameters. */
+    /** Lowercase MIME types, no trailing parameters. */
     private const SUPPORTED_SOURCE_MIMES = [
         'image/png',
         'image/jpeg',
         'image/webp',
         'image/gif',
     ];
+
+    /**
+     * The ceiling on the source's pixel count.
+     *
+     * The decoder allocates the whole raster before the thumbnail size is
+     * applied, so a small compressed image can otherwise ask for a very
+     * large allocation inside the request. The budget is read from the
+     * image header, which costs nothing to parse, so an over-budget
+     * image is refused before the decoder touches it.
+     */
+    private const MAX_SOURCE_PIXELS = 40_000_000;
 
     public function pluginSlug(): string
     {
@@ -105,6 +114,8 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
 
         $bytes = $this->loadSourceBytes($source);
 
+        $this->assertWithinPixelBudget($bytes);
+
         try {
             $manager = new ImageManager($this->resolveDriver());
             $image = $manager->read($bytes);
@@ -137,17 +148,60 @@ final class ImageDerivativeProducer implements MediaDerivativeProducerInterface
     }
 
     /**
+     * Refuse a source whose header declares more pixels than the budget.
+     *
+     * The header is read without decoding the raster, so the check is
+     * cheap for an image that passes it.
+     *
+     * @throws ImageDerivativeProducerException
+     */
+    private function assertWithinPixelBudget(string $bytes): void
+    {
+        // PHP 8.4+ no longer fully honours the `@` error-suppression
+        // operator, so the warning a non-image raises is suppressed with
+        // the explicit handler pattern (same as `readLocalBytes()`).
+        set_error_handler(static fn(): bool => true, E_WARNING);
+        try {
+            $size = getimagesizefromstring($bytes);
+        } finally {
+            restore_error_handler();
+        }
+
+        if ($size === false) {
+            throw new ImageDerivativeProducerException(
+                'ImageDerivativeProducer: source image dimensions could not be read',
+            );
+        }
+
+        $pixels = (int) $size[0] * (int) $size[1];
+        if ($pixels > self::MAX_SOURCE_PIXELS) {
+            throw new ImageDerivativeProducerException(sprintf(
+                'ImageDerivativeProducer: source image is %d pixels, over the %d-pixel budget',
+                $pixels,
+                self::MAX_SOURCE_PIXELS,
+            ));
+        }
+    }
+
+    /**
      * Pick the GD or Imagick driver based on what's loaded. Imagick
      * wins when present — better quality resampling and animated
      * WebP/GIF support — and the producer degrades gracefully to GD
-     * on barebones installs. `strip = true` drops EXIF and other
-     * metadata from the encoded output so the derivative doesn't
-     * leak coordinates the way the upload sometimes does.
+     * on barebones installs.
      */
     private function resolveDriver(): DriverInterface
     {
         if (extension_loaded('imagick')) {
-            return new \Intervention\Image\Drivers\Imagick\Driver();
+            $driver = new \Intervention\Image\Drivers\Imagick\Driver();
+
+            // The derivative is served to everyone who can read the
+            // asset, so the source's EXIF profile must not travel with
+            // it — the profile can carry the GPS coordinates of whoever
+            // took the photo. GD needs no equivalent: it writes no
+            // metadata of its own.
+            $driver->config()->strip = true;
+
+            return $driver;
         }
         return new \Intervention\Image\Drivers\Gd\Driver();
     }

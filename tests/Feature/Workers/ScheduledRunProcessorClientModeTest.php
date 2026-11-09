@@ -87,11 +87,6 @@ function makeClientScheduledProcessor(
     ];
 }
 
-/**
- * Seed an agent owned by the user-principal for $userId.
- *
- * @return int  agent id
- */
 function seedClientAgent(int $userId, string $name): int
 {
     return (int) Agent::create([
@@ -103,8 +98,6 @@ function seedClientAgent(int $userId, string $name): int
 }
 
 /**
- * Seed a ScheduledRun + PENDING entry that's due now.
- *
  * @return array{run: ScheduledRun, entry: object}
  */
 function seedClientSchedule(int $agentId, int $userId, ?string $cron, string $label): array
@@ -258,21 +251,18 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
             600,
         );
 
-        // Old entry must be SKIPPED.
         $oldEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $sched['run']->id)
             ->where('due_at', SRP_CLIENT_PAST_DUE_AT)
             ->first();
         expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
 
-        // A new PENDING row for the next minute must exist.
         $nextEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $sched['run']->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->first();
         expect($nextEntry)->not->toBeNull();
 
-        // Run stays active.
         $sched['run']->refresh();
         expect((bool) $sched['run']->is_active)->toBeTrue();
     });
@@ -314,6 +304,91 @@ describe('ScheduledRunProcessor::processSynchronously', function (): void {
 
         expect($result)->toBeFalse()
             ->and($harness['processor']->lastProcessed)->toBe(0);
+    });
+
+    it('publishes a failure to the task\'s principal, not to the caller\'s user id', function (): void {
+        // The Mercure topic is `principal/{id}/tasks`, and a user id is
+        // not a principal id: publishing the failure under the caller's
+        // user id addresses a different audience than the successful
+        // finalization does.
+        $authService = bootAuthLayer();
+        $userId = $authService->register('srp-audience@example.com', SRP_CLIENT_PASSWORD, 'SRPAudience');
+        createUserPrincipalPublic($userId);
+
+        // A group principal, so its id differs from the caller's user id.
+        $groupId = (int) Capsule::table('groups')->insertGetId([
+            'name'               => 'SRP Audience Group',
+            'description'        => null,
+            'created_by_user_id' => $userId,
+            'created_at'         => date(SRP_CLIENT_DT),
+            'updated_at'         => date(SRP_CLIENT_DT),
+        ]);
+        Capsule::table('group_memberships')->insert([
+            'group_id'   => $groupId,
+            'user_id'    => $userId,
+            'role'       => 'owner',
+            'created_at' => date(SRP_CLIENT_DT),
+            'updated_at' => date(SRP_CLIENT_DT),
+        ]);
+        $groupPrincipalId = (int) Capsule::table('principals')->insertGetId([
+            'type'       => 'group',
+            'group_id'   => $groupId,
+            'user_id'    => null,
+            'created_at' => date(SRP_CLIENT_DT),
+            'updated_at' => date(SRP_CLIENT_DT),
+        ]);
+
+        $published = [];
+        $orchestrator = Mockery::mock(OrchestratorInterface::class);
+        $orchestrator->allows('start')->andReturnUsing(function (int $agentId, string $prompt) use ($groupPrincipalId, $userId): Task {
+            return Task::create([
+                'agent_id'        => $agentId,
+                'principal_id'    => $groupPrincipalId,
+                'trigger_user_id' => $userId,
+                'status'          => 'QUEUED',
+                'user_prompt'     => $prompt,
+                'max_steps'       => 10,
+                'step_count'      => 0,
+            ]);
+        });
+        $orchestrator->allows('tick')->andThrow(new RuntimeException('Tick blew up'));
+
+        /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
+        $mercure = Mockery::mock(MercurePublisherInterface::class)->shouldIgnoreMissing();
+        $mercure->allows('publishForPrincipal')->andReturnUsing(function (int $taskId, int $principalId, array $data) use (&$published): bool {
+            $published[] = $principalId;
+            return true;
+        });
+
+        $notification = Mockery::mock(NotificationService::class);
+        $notification->allows('notifyScheduledRunCompleted')->andReturnNull();
+        $notification->allows('sendEmailForScheduledRun')->andReturnNull();
+
+        $processor = new ScheduledRunProcessor($orchestrator, new NullLogger(), $mercure, $notification);
+
+        $agentId = (int) Agent::create([
+            'principal_id' => $groupPrincipalId,
+            'name'         => 'SRP Audience Agent',
+            'max_steps'    => 10,
+            'is_active'    => true,
+        ])->id;
+
+        seedClientSchedule($agentId, $userId, DAILY_9AM_CLIENT_CRON, 'daily');
+
+        $processor->processSynchronously(new BufferedOutput(), $userId, 600);
+
+        expect($published)->not->toBeEmpty();
+
+        foreach ($published as $principalId) {
+            expect($principalId)->toBe($groupPrincipalId);
+
+            // The audience is a principal, and this one is the group — not
+            // the caller, whose id lives in a different sequence and may
+            // well carry the same number.
+            $audience = Spora\Models\Principal::find($principalId);
+            expect($audience)->not->toBeNull()
+                ->and($audience->type)->toBe(Spora\Models\Principal::TYPE_GROUP);
+        }
     });
 });
 

@@ -133,7 +133,7 @@ final class SubAgentService implements SubAgentServiceInterface
         // Increment AFTER the post-tick re-check so any mid-batch check
         // sees expected from the PREVIOUS spawn, not this one.
         $this->syncExpectedCount($parent->id);
-        $this->publishParentState($parent->id, $userId);
+        $this->publishParentState($parent->id);
 
         return $child;
     }
@@ -185,7 +185,7 @@ final class SubAgentService implements SubAgentServiceInterface
 
         $this->recordSpawnedChild($parent, $child->id);
         $this->syncExpectedCount($parent->id);
-        $this->publishParentState($parent->id, $userId);
+        $this->publishParentState($parent->id);
 
         return $child;
     }
@@ -452,18 +452,7 @@ final class SubAgentService implements SubAgentServiceInterface
             $orchestrator = ($this->orchestratorFactory)();
 
             foreach ($childIds as $childId) {
-                $child = Task::find($childId);
-                if ($child === null) {
-                    continue;
-                }
-
-                $toolCallId = $this->findToolCallIdForChild((int) $parent->id, $childId);
-                $this->replaceOrAppendToolHistory(
-                    orchestrator: $orchestrator,
-                    parentTaskId: (int) $parent->id,
-                    toolCallId: $toolCallId,
-                    content: $this->childContent($child),
-                );
+                $this->importChildAnswer($parent, $childId, $orchestrator);
             }
 
             // Re-decode `$row->data` (the freshly-locked snapshot) instead
@@ -488,10 +477,51 @@ final class SubAgentService implements SubAgentServiceInterface
                     'data'   => json_encode($data, JSON_THROW_ON_ERROR),
                 ]);
 
-            $this->publishParentState((int) $parent->id, (int) $parent->principalOwnerId());
+            $this->publishParentState((int) $parent->id);
 
             return true;
         });
+    }
+
+    /**
+     * Import one child's answer into the parent's tool history.
+     *
+     * A child that no longer exists, or one whose answer belongs to
+     * another principal's conversation, is skipped — see
+     * {@see childIsWithinParentBoundary()}.
+     */
+    private function importChildAnswer(Task $parent, int $childId, OrchestratorInterface $orchestrator): void
+    {
+        $child = Task::find($childId);
+        if ($child === null) {
+            return;
+        }
+        if (!$this->childIsWithinParentBoundary($parent, $child)) {
+            return;
+        }
+
+        $toolCallId = $this->findToolCallIdForChild((int) $parent->id, $childId);
+        $this->replaceOrAppendToolHistory(
+            orchestrator: $orchestrator,
+            parentTaskId: (int) $parent->id,
+            toolCallId: $toolCallId,
+            content: $this->childContent($child),
+        );
+    }
+
+    /**
+     * Whether a delegated child's answer may still be imported into the
+     * parent.
+     *
+     * The delegation link survives an ownership transfer — the transfer
+     * moves the child's task rows to the new principal but does not
+     * detach the parent's `spawned_sub_task_ids` entry. Once the child
+     * sits on another principal, its answer belongs to that principal's
+     * conversation, not to the parent's, so it is not imported.
+     */
+    private function childIsWithinParentBoundary(Task $parent, Task $child): bool
+    {
+        return (int) $child->principal_id === (int) $parent->principal_id;
     }
 
     /**
@@ -593,7 +623,7 @@ final class SubAgentService implements SubAgentServiceInterface
         return array_values(array_map(static fn($id) => (int) $id, $ids));
     }
 
-    private function publishParentState(int $parentTaskId, int $userId): void
+    private function publishParentState(int $parentTaskId): void
     {
         if ($this->mercure === null) {
             return;
@@ -620,6 +650,9 @@ final class SubAgentService implements SubAgentServiceInterface
             'parent_task_id' => $task->parent_task_id,
         ];
 
-        $this->mercure->publishForPrincipal($task->id, $userId, $resource);
+        // The audience is the task's own principal, never a user id: the
+        // two sequences are independent, so a user id here addresses a
+        // principal that has nothing to do with the task.
+        $this->mercure->publishForPrincipal($task->id, $task->principalOwnerId(), $resource);
     }
 }

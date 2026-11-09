@@ -26,7 +26,7 @@ use Spora\Services\PrincipalResolver;
 final class MediaAssetAccess
 {
     public function __construct(
-        private readonly AuthService $auth,
+        private readonly ?AuthService $auth,
         private readonly ?PrincipalResolver $resolver = null,
     ) {}
 
@@ -38,12 +38,49 @@ final class MediaAssetAccess
      */
     public function canRead(MediaAsset $asset): bool
     {
-        $userId = $this->auth->currentUserId();
+        $auth = $this->auth;
+        if ($auth === null) {
+            return false;
+        }
+
+        $userId = $auth->currentUserId();
         if ($userId === null) {
             return false;
         }
 
-        return $this->auth->isAdmin() || $this->ownsAsset($asset, $userId);
+        return $auth->isAdmin() || $this->ownsAsset($asset, $userId);
+    }
+
+    /**
+     * Whether `$userId` may attach `$asset` to one of their tasks.
+     *
+     * The attach-time union: the caller uploaded it, or the caller can act
+     * as the principal the asset was filed under (a group member and the
+     * group's media), or the caller can act as the principal of the agent
+     * that produced it.
+     *
+     * The principal arm is what makes a group member able to attach the
+     * group's own uploads. The direct-ownership arm alone would not: an
+     * asset uploaded by a member keeps that member as its `user_id`, and a
+     * sibling member attaching it must be allowed.
+     *
+     * An asset with no attribution at all matches no arm, so it is not
+     * attachable — an unknown owner is not a permission.
+     */
+    public function canAttachAs(MediaAsset $asset, int $userId): bool
+    {
+        if ($this->ownsDirectly($asset, $userId)) {
+            return true;
+        }
+
+        $resolver = $this->resolver ?? new PrincipalResolver();
+
+        $principalId = $asset->principal_id !== null ? (int) $asset->principal_id : null;
+        if ($principalId !== null && in_array($principalId, $resolver->visiblePrincipalIds($userId), true)) {
+            return true;
+        }
+
+        return $asset->agent_id !== null && $resolver->isVisibleTo((int) $asset->agent_id, $userId);
     }
 
     private function ownsAsset(MediaAsset $asset, int $userId): bool

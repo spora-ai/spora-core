@@ -10,6 +10,7 @@ use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
+use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
 use Spora\Services\TaskServiceInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -141,6 +142,9 @@ final class TaskController
         array $mediaIds,
     ): JsonResponse {
         try {
+            // Before anything writes: an attachment the caller may not read
+            // must not reach the archive, not even as a minted derivative.
+            $this->mediaCapability->ensureAttachmentsAccessible($mediaIds, $userId);
             $this->mediaCapability->ensureMediaCapabilityCompatible($agentId, $mediaIds);
             // After validation, before the turn is queued, so a binary
             // attachment has its `md` derivative by the time the message
@@ -148,18 +152,20 @@ final class TaskController
             // {@see \Spora\Services\MediaArchive\TaskMediaCapabilityService}.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
             $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
-            return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
-        } catch (MediaCapabilityMismatchException $e) {
+        } catch (MediaNotOwnedException|MediaCapabilityMismatchException|InvalidArgumentException $e) {
+            [$code, $status] = match (true) {
+                $e instanceof MediaNotOwnedException            => ['MEDIA_NOT_OWNED', Response::HTTP_FORBIDDEN],
+                $e instanceof MediaCapabilityMismatchException => ['MEDIA_CAPABILITY_MISMATCH', Response::HTTP_BAD_REQUEST],
+                default                                        => ['NOT_FOUND', Response::HTTP_NOT_FOUND],
+            };
+
             return new JsonResponse(
-                ['error' => ['code' => 'MEDIA_CAPABILITY_MISMATCH', 'message' => $e->getMessage()]],
-                Response::HTTP_BAD_REQUEST,
-            );
-        } catch (InvalidArgumentException $e) {
-            return new JsonResponse(
-                ['error' => ['code' => 'NOT_FOUND', 'message' => $e->getMessage()]],
-                Response::HTTP_NOT_FOUND,
+                ['error' => ['code' => $code, 'message' => $e->getMessage()]],
+                $status,
             );
         }
+
+        return new JsonResponse(['data' => ['task' => $task]], Response::HTTP_CREATED);
     }
 
     private function validateStartTaskFields(string $prompt, ?int $agentId): ?JsonResponse
@@ -339,7 +345,7 @@ final class TaskController
      * history row is appended carrying the formatted answers, the batch
      * is removed from `pending_state`, and the task either flips to
      * `QUEUED` (no more batches pending) or stays in `AWAITING_INPUT`
-     * (more batches still pending). Returns 204 No Content.
+     * (more batches still pending). Returns the updated task resource.
      */
     #[OA\Post(
         path: '/api/v1/tasks/{taskId}/answer',
@@ -616,8 +622,7 @@ final class TaskController
     }
 
     /**
-     * Canonical 404 JSON response for "task not found", shared by every
-     * endpoint that resolves the task through the service layer.
+     * Canonical 404 JSON response for "task not found".
      */
     private function notFoundResponse(): JsonResponse
     {

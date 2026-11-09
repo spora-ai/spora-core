@@ -79,9 +79,8 @@ use Spora\Tools\ValueObjects\ToolResult;
  *                           natural key `(parent_id, format, producer_plugin,
  *                           producer_operation)` — re-rendering returns
  *                           the same derivative id, which is what makes a
- *                           blind retry safe. Enabled and auto-approved, which
- *                           this release made explicit rather than
- *                           incidental: the natural key is a DB-enforced
+ *                           blind retry safe. Enabled and auto-approved:
+ *                           the natural key is a DB-enforced
  *                           UNIQUE index, so a retry cannot duplicate and a
  *                           loop cannot grow the row count; the derivative is
  *                           derived from a parent the agent already owns, it
@@ -128,11 +127,11 @@ use Spora\Tools\ValueObjects\ToolResult;
  *
  *   - `agent` (default): `search` filters by `agent_id`, the per-asset
  *     ops require `asset->agent_id === $agentId`.
- *   - `principal`: the per-asset ops accept any asset whose
- *     `asset->user_id === $context->ownerUserId` (direct upload by the
- *     principal's owner user) or whose attached agent belongs to the
- *     calling agent's principal. `search` lists the rows the principal's
- *     agents hold.
+ *   - `principal`: the per-asset ops accept any asset whose stored
+ *     `principal_id` is the calling agent's principal, or — for a legacy
+ *     row with none — whose attached agent belongs to that principal, or
+ *     which the owner of a personal principal uploaded themselves.
+ *     `search` lists the rows the principal's agents hold.
  *   - `user` (legacy): the per-asset ops treat it as an alias for
  *     `principal` so existing `agent_tool_settings` rows keep working
  *     without a DB migration; the listing narrows to the caller user's
@@ -318,7 +317,7 @@ use Spora\Tools\ValueObjects\ToolResult;
 )]
 final class MediaTool extends AbstractTool
 {
-    /** @var string  Single error string used for asset-not-found / not-in-scope responses. */
+    /** Single error string used for asset-not-found / not-in-scope responses. */
     private const ERR_ASSET_NOT_FOUND = 'Media asset not found.';
 
     /**
@@ -378,7 +377,7 @@ final class MediaTool extends AbstractTool
             'create_derivative' => $this->createDerivative($arguments, $agentId, $userId, $context),
             // Straight from the match, no `createMedia()` wrapper: the
             // handler extraction exists to keep this class under the
-            // per-method budget, and a 21st method would undo it.
+            // per-method budget, and a new method here would undo it.
             'create_media'      => $this->createHandler->create($arguments, $agentId, $userId, $context),
             'list_folders', 'create_folder', 'rename_folder', 'delete_folder', 'file_asset', 'search_assets'
                 => $this->folderHandler->run($operation, $principalId, $arguments),
@@ -928,7 +927,7 @@ final class MediaTool extends AbstractTool
             'tags'             => $asset->tags,
             'metadata'         => $asset->metadata,
             'asset_url'        => $assetUrl,
-            'public_url'       => $this->ensurePublicUrl($asset),
+            'public_url'       => $this->sharedPublicUrl($asset),
             'parent_id'        => $this->derivatives->parentOf($asset->id),
             'derivatives'      => $derivativeRows,
             // The embed descriptor for a script-capable asset the operator
@@ -943,8 +942,10 @@ final class MediaTool extends AbstractTool
     /**
      * Mint the public access token if needed and return the share URL.
      * Returns null when no `app_url` is configured. Has a write
-     * side-effect on the asset (token mint + save) — both `get_public_url`
-     * and `get_media` need the URL, so the side-effect lives here.
+     * side-effect on the asset (token mint + save) — only
+     * `get_public_url` needs the URL, and it is the operation that
+     * carries the approval policy for a link that keeps working outside
+     * the session.
      *
      * Reading the host from `SPORA_APP_URL` (not the per-request host)
      * keeps share URLs stable across requests and immune to Host-header
@@ -964,5 +965,24 @@ final class MediaTool extends AbstractTool
         }
 
         return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $asset->public_access_token;
+    }
+
+    /**
+     * The share URL of an asset that is already shared, or null.
+     *
+     * A read must not mint the token: `get_public_url` is approval-gated
+     * because it hands out a link that works outside the session, and a
+     * metadata read that minted one would grant the same capability
+     * without the operator ever seeing it.
+     */
+    private function sharedPublicUrl(MediaAsset $asset): ?string
+    {
+        $host = (string) $this->config->getString('SPORA_APP_URL', '');
+        $token = $asset->public_access_token;
+        if ($host === '' || !is_string($token) || $token === '') {
+            return null;
+        }
+
+        return rtrim($host, '/') . '/api/v1/public/media/' . $asset->id . '?token=' . $token;
     }
 }

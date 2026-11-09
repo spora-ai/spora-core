@@ -49,9 +49,7 @@ const PROMPT_CONTINUED = 'Continued prompt';
 const VALIDATION_ERROR = 'Validation Error';
 const PROMPT_HELLO = 'Hello!';
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function makeOrchestrator(
     DriverFactory $driverFactory,
@@ -67,9 +65,6 @@ function makeOrchestrator(
     );
 }
 
-/**
- * Create a mock LLMDriverInterface that returns a fixed LLMResponse.
- */
 function mockLlm(LLMResponse $response): LLMDriverInterface
 {
     $mock = Mockery::mock(LLMDriverInterface::class);
@@ -81,9 +76,6 @@ function mockLlm(LLMResponse $response): LLMDriverInterface
     return $mock;
 }
 
-/**
- * Wrap a mock LLMDriverInterface in a DriverFactory stub that always returns it.
- */
 function mockDriverFactory(LLMDriverInterface $driver): DriverFactory
 {
     $factory = Mockery::mock(DriverFactory::class);
@@ -123,9 +115,6 @@ function seedAgent(): array
     return [$agent->id, $userId];
 }
 
-/**
- * Marks the given tool instances as enabled for the agent in the database.
- */
 function enableToolsForAgent(int $agentId, array $toolInstances): void
 {
     foreach ($toolInstances as $instance) {
@@ -139,9 +128,6 @@ function enableToolsForAgent(int $agentId, array $toolInstances): void
     }
 }
 
-// ---------------------------------------------------------------------------
-// start() tests
-// ---------------------------------------------------------------------------
 
 it('start creates a QUEUED Task and seeds user history row', function (): void {
     [$agentId] = seedAgent();
@@ -181,9 +167,6 @@ it('after tick the started task reaches COMPLETED', function (): void {
         ->and($task->final_response)->toBe('Done.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — text response path
-// ---------------------------------------------------------------------------
 
 it('tick marks task COMPLETED when LLM returns text', function (): void {
     [$agentId] = seedAgent();
@@ -230,9 +213,6 @@ it('tick is a no-op when task is not RUNNING', function (): void {
     $orch->tick($task->id); // should not call LLM
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — single InputTool path
-// ---------------------------------------------------------------------------
 
 it('InputTool path increments step_count once per LLM turn', function (): void {
     [$agentId] = seedAgent();
@@ -266,9 +246,6 @@ it('InputTool path increments step_count once per LLM turn', function (): void {
         ->and($toolCallRecord->result_content)->toBe('input_result');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — parallel tool calls (Fix #1)
-// ---------------------------------------------------------------------------
 
 it('two parallel InputTools are both executed and step_count is 2', function (): void {
     [$agentId] = seedAgent();
@@ -406,9 +383,6 @@ it('single assistant history row carries both tool calls when LLM fires two in p
     expect($payload[1]['id'])->toBe('call_y');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — OutputTool (requires approval) path
-// ---------------------------------------------------------------------------
 
 it('OutputTool requiring approval pauses task as PENDING_APPROVAL and serializes AgentState', function (): void {
     [$agentId] = seedAgent();
@@ -437,9 +411,6 @@ it('OutputTool requiring approval pauses task as PENDING_APPROVAL and serializes
         ->and($toolCallRecord->tool_type)->toBe('output');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — OutputTool auto-approved (class attribute)
-// ---------------------------------------------------------------------------
 
 it('OutputTool with requiresApproval=false executes immediately', function (): void {
     [$agentId] = seedAgent();
@@ -470,8 +441,6 @@ it('OutputTool with requiresApproval=false executes immediately', function (): v
         ->and($toolCallRecord->result_content)->toBe('auto_output_result');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// max_steps
-// ---------------------------------------------------------------------------
 
 it('task is auto-aborted (not failed) when step_count reaches max_steps', function (): void {
     [$agentId] = seedAgent();
@@ -516,7 +485,6 @@ it('continuing an auto-aborted task clears the max_steps_reached flag', function
     $task = $orch->start($agentId, 'Infinite loop', maxSteps: 3);
     claimAndTick($orch, $task->id);
 
-    // Sanity-check the auto-abort happened.
     $task->refresh();
     $data = is_array($task->data) ? $task->data : [];
     expect($task->status)->toBe('ABORTED')
@@ -569,9 +537,6 @@ it('continuing a task clears the previous batch\'s sub-agent bookkeeping', funct
         ->and($data)->not->toHaveKey('sub_agent_batch_open');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Fix #5 — tool exception recovery
-// ---------------------------------------------------------------------------
 
 it('tool exception is caught, encoded as an error ToolResult, and the loop survives', function (): void {
     [$agentId] = seedAgent();
@@ -601,9 +566,6 @@ it('tool exception is caught, encoded as an error ToolResult, and the loop survi
     expect($toolCallRecord->result_content)->toContain('Community plugin exploded!');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume()
-// ---------------------------------------------------------------------------
 
 it('resume queues the approved OutputTool so the next tick executes it and appends history', function (): void {
     [$agentId] = seedAgent();
@@ -661,9 +623,6 @@ it('resume throws when task is not PENDING_APPROVAL', function (): void {
     expect(fn() => $orch->resume($task->id, []))->toThrow(InvalidTaskTransitionException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Fix #4 — schema validation in resume()
-// ---------------------------------------------------------------------------
 
 it('resume throws InvalidArgumentException when approved arguments fail schema validation', function (): void {
     [$agentId] = seedAgent();
@@ -838,9 +797,6 @@ it('resume rolls back when a state call no longer has a pending database row', f
     expect(TaskHistory::where('task_id', $task->id)->where('role', 'tool')->count())->toBe(0);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// reject()
-// ---------------------------------------------------------------------------
 
 it('reject injects rejection into history and queues the task for the next tick', function (): void {
     [$agentId] = seedAgent();
@@ -898,13 +854,7 @@ it('reject throws when task is not PENDING_APPROVAL', function (): void {
     expect(fn() => $orch->reject($task->id, 'reason'))->toThrow(InvalidTaskTransitionException::class);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Dependency Injection / Context Verification
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Logging
-// ---------------------------------------------------------------------------
 
 it('logs a debug entry with tool name, agent_id, task_id, and arguments on every dispatch', function (): void {
     [$agentId] = seedAgent();
@@ -1002,9 +952,6 @@ it('logs an error with exception_class when a tool throws, without including arg
     claimAndTick($orch, $task->id);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Dependency Injection / Context Verification
-// ---------------------------------------------------------------------------
 
 it('injects the correct agentId into the tool execute scope', function (): void {
     [$agentId] = seedAgent();
@@ -1027,15 +974,11 @@ it('injects the correct agentId into the tool execute scope', function (): void 
 
     $task->refresh();
 
-    // The tool should have returned "Agent ID is: {$agentId}"
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->result_content)->toBe("Agent ID is: {$agentId}");
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// Fix: handleToolCalls schema-validation failure writes ToolCall + history atomically
-// ---------------------------------------------------------------------------
 
 it('handleToolCalls schema validation failure writes both ToolCall and history row', function (): void {
     [$agentId] = seedAgent();
@@ -1060,13 +1003,11 @@ it('handleToolCalls schema validation failure writes both ToolCall and history r
     // The error must be fed back to the LLM so the task can complete, not get stuck
     expect($task->status)->toBe('COMPLETED');
 
-    // ToolCall record must be APPROVED with the validation error message
     $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
     expect($toolCallRecord)->not()->toBeNull()
         ->and($toolCallRecord->status)->toBe('APPROVED')
         ->and($toolCallRecord->result_content)->toContain(VALIDATION_ERROR);
 
-    // A history row for this tool call must also exist (atomically written with the record above)
     $toolHistory = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_schema_fail')
@@ -1098,9 +1039,7 @@ it('handleToolCalls schema validation failure does not pause for approval', func
         ->and($task->pending_state)->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // Empty arguments normalization (MiniMax/LM Studio compatibility)
-// ---------------------------------------------------------------------------
 
 it('continues correctly when LLM sends tool call with empty array arguments "[]"', function (): void {
     [$agentId] = seedAgent();
@@ -1144,7 +1083,6 @@ it('continues correctly when LLM sends tool call with empty array arguments "[]"
     $receivedArgs = null;
     $mock = Mockery::mock(LLMDriverInterface::class);
     $mock->allows('complete')->once()->andReturnUsing(function ($request) use (&$receivedArgs) {
-        // Capture the arguments from the continuation request
         foreach ($request->messages as $msg) {
             if (isset($msg['tool_calls'])) {
                 foreach ($msg['tool_calls'] as $tc) {
@@ -1161,17 +1099,14 @@ it('continues correctly when LLM sends tool call with empty array arguments "[]"
 
     $orch->tick($task->id);
 
-    // The task should complete without error
     $task->refresh();
     expect($task->status)->toBe('COMPLETED');
 
-    // The arguments sent to the LLM should be "{}" (object), NOT "[]" (array/string)
     expect($receivedArgs)->not()->toBe('[]')
         ->and($receivedArgs)->toBe('{}');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
 it('buildMessages normalizes empty array arguments "[]" to empty object "{}" before sending to LLM', function (): void {
-    // This is a unit test for buildMessages specifically
     [$agentId] = seedAgent();
 
     $task = Task::create([
@@ -1203,7 +1138,6 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
         'content'      => 'done',
     ]);
 
-    // Capture what buildMessages produces
     /** @var list<array<string,mixed>> $capturedMessages */
     $capturedMessages = [];
 
@@ -1219,7 +1153,6 @@ it('buildMessages normalizes empty array arguments "[]" to empty object "{}" bef
 
     $orch->tick($task->id);
 
-    // Find the tool call message
     $toolCallMsg = null;
     foreach ($capturedMessages as $msg) {
         if (isset($msg['tool_calls'])) {
@@ -1244,7 +1177,6 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
         'max_steps'   => 10,
     ]);
 
-    // Insert history: 3 user messages (sequences 0, 1, 2) then a summary row
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 0, 'role' => 'user', 'content' => 'Hello']);
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 1, 'role' => 'assistant', 'content' => 'Hi there']);
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 2, 'role' => 'user', 'content' => 'What is the time?']);
@@ -1259,7 +1191,6 @@ it('buildMessages skips rows covered by a summary and includes the summary row i
     // Recent history after the summary
     TaskHistory::create(['task_id' => $task->id, 'sequence' => 4, 'role' => 'user', 'content' => 'Thanks']);
 
-    // Capture what buildMessages produces
     /** @var list<array<string,mixed>> $capturedMessages */
     $capturedMessages = [];
 
@@ -1323,9 +1254,8 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
 
     $orch->tick($task->id);
 
-    // buildMessages iterates sequentially: when summary-2 (seq 3, range 2-2) is encountered,
-    // it removes messages with sequence <= 2. summary-1 (seq 1) is NOT in range 2-2, so it is preserved.
-    // Result: First summary + Second summary + Recent = 3 messages.
+    // Neither range contains the other, so neither summary supersedes the other:
+    // each stands in for its own row, and the row after them is untouched.
     expect(count($capturedMessages))->toBe(3);
     expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('First summary');
@@ -1335,9 +1265,6 @@ it('buildMessages skips multiple summary ranges and only includes post-summary r
     expect($capturedMessages[2]['content'])->toBe('Recent');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resolveLlmConfig() — config resolution chain
-// ---------------------------------------------------------------------------
 
 test('resolveLlmConfig throws when no config exists at any level', function (): void {
     $authService = bootAuthLayer();
@@ -1365,7 +1292,6 @@ test('resolveLlmConfig throws when no config exists at any level', function (): 
 test('resolveLlmConfig uses user preference when agent has no llm_driver_config_id', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create a config and set it as user preference
     $config = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1385,13 +1311,11 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should not throw - uses user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     LLMDriverConfiguration::where('id', $config->id)->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
@@ -1399,7 +1323,6 @@ test('resolveLlmConfig uses user preference when agent has no llm_driver_config_
 test('resolveLlmConfig prefers user preference over global default', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create a global default config
     $globalConfig = LLMDriverConfiguration::create([
         'principal_id' => null,
         'name' => 'Global Default Config',
@@ -1412,7 +1335,6 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $globalConfig->max_tokens_output = 1024;
     $globalConfig->save();
 
-    // Create a user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1432,13 +1354,11 @@ test('resolveLlmConfig prefers user preference over global default', function ()
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should use user preference, not global default
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     // Detach references first (FK from principal_preferences.preferred_llm_config_id).
     PrincipalPreference::whereIn('preferred_llm_config_id', [$globalConfig->id, $prefConfig->id])->delete();
@@ -1449,7 +1369,6 @@ test('resolveLlmConfig prefers user preference over global default', function ()
 test('resolveLlmConfig uses agent-specific config when set', function (): void {
     [$agentId, $userId] = seedAgent();
 
-    // Create user preference config
     $prefConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => USER_PREFERRED_CONFIG_NAME,
@@ -1466,7 +1385,6 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
         'preferred_llm_config_id' => $prefConfig->id,
     ]);
 
-    // Create agent-specific config
     $agentConfig = LLMDriverConfiguration::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name' => 'Agent Config',
@@ -1478,7 +1396,6 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $agentConfig->max_tokens_output = 4096;
     $agentConfig->save();
 
-    // Set the agent to use the agent-specific config
     $agent = Agent::find($agentId);
     $agent->llm_driver_config_id = $agentConfig->id;
     $agent->save();
@@ -1486,13 +1403,11 @@ test('resolveLlmConfig uses agent-specific config when set', function (): void {
     $llm = mockLlm(new LLMResponse('Done', [], 10, 5, 'cmp_1'));
     $orch = makeOrchestrator(mockDriverFactory($llm));
 
-    // Should use agent-specific config, not user preference
     $task = $orch->start($agentId, 'Hello', maxSteps: 5);
     claimAndTick($orch, $task->id);
 
     expect($task->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::where('principal_id', $userId)->delete();
     // Detach references before deleting LLMDriverConfigurations (FK from
     // principal_preferences.preferred_llm_config_id and from agents.llm_driver_config_id).
@@ -1510,7 +1425,6 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     $userA = $authService->register('user-a-iso@example.com', TEST_PASSWORD, 'UseraIso');
     $userB = $authService->register('user-b-iso@example.com', TEST_PASSWORD, 'UserbIso');
 
-    // User A creates their own config
     $configA = LLMDriverConfiguration::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Config',
@@ -1521,13 +1435,11 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
         'max_tokens_output' => 2048,
     ]);
 
-    // User A sets preference for their own config
     PrincipalPreference::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'preferred_llm_config_id' => $configA->id,
     ]);
 
-    // User B creates their own config
     $configB = LLMDriverConfiguration::create([
         'principal_id' => createUserPrincipalPublic($userB),
         'name' => 'User B Config',
@@ -1538,13 +1450,11 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
         'max_tokens_output' => 1024,
     ]);
 
-    // User B sets preference for their own config
     PrincipalPreference::create([
         'principal_id' => createUserPrincipalPublic($userB),
         'preferred_llm_config_id' => $configB->id,
     ]);
 
-    // Create agents for both users
     $agentA = Agent::create([
         'principal_id' => createUserPrincipalPublic($userA),
         'name' => 'User A Agent',
@@ -1575,7 +1485,6 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     claimAndTick($orchB, $taskB->id);
     expect($taskB->refresh()->status)->toBe('COMPLETED');
 
-    // Cleanup
     PrincipalPreference::whereIn('principal_id', [$userA, $userB])->delete();
     // Detach references first (FK from principal_preferences.preferred_llm_config_id).
     PrincipalPreference::whereIn('preferred_llm_config_id', [$configA->id, $configB->id])->delete();
@@ -1587,9 +1496,6 @@ test('resolveLlmConfig uses agent user_id to find preference - user isolation', 
     LLMDriverConfiguration::whereIn('id', [$configA->id, $configB->id])->delete();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// publishIntermediateState — Mercure duplicate fix
-// ---------------------------------------------------------------------------
 
 it('publishes intermediate state exactly once when tools are auto-approved', function (): void {
     [$agentId] = seedAgent();
@@ -1632,9 +1538,9 @@ it('publishes intermediate state exactly once when tools are auto-approved', fun
     expect($task->status)->toBe('COMPLETED')
         ->and($task->step_count)->toBe(2);
 
-    // When all tools are auto-approved, publishIntermediateState should be called exactly once:
-    // - Line 787 publishes before the recursive tick
-    // - Line 821 should NOT publish again (that was the bug)
+    // When all tools are auto-approved, publishIntermediateState should be called
+    // exactly once: the batch publishes before the recursive tick, and the
+    // recursive tick must not publish again (that was the bug).
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1673,7 +1579,7 @@ it('publishes intermediate state when tools require approval', function (): void
     $task->refresh();
     expect($task->status)->toBe('PENDING_APPROVAL');
 
-    // When approval is needed, publishIntermediateState is called exactly once (line 821)
+    // When approval is needed, publishIntermediateState is called exactly once.
     expect($publishCount)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
@@ -1873,9 +1779,6 @@ it('TickPhaseRunner.runTick discards the LLM response when status flips to ABORT
     expect($newHistoryRows)->toBe(0);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// NO_LLM_CONFIGURATION error handling — task state persistence
-// ---------------------------------------------------------------------------
 
 test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfig throws', function (): void {
     $authService = bootAuthLayer();
@@ -1911,9 +1814,6 @@ test('tick sets NO_LLM_CONFIGURATION error code and message when resolveLlmConfi
         ->and($task->error_message)->toBe('No LLM configuration set. Please configure an LLM driver or set a global default.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// continue()
-// ---------------------------------------------------------------------------
 
 it('continue() updates Task.user_prompt to the new prompt', function (): void {
     [$agentId] = seedAgent();
@@ -1975,19 +1875,14 @@ it('buildToolDefinitions only queries operation overrides for enabled tool class
     $logs = Capsule::connection()->getQueryLog();
     Capsule::connection()->disableQueryLog();
 
-    // Find the override query in the log
     $overrideQueryLog = array_filter($logs, fn($log) => str_contains($log['query'], 'agent_tool_operation_overrides'));
 
     expect($overrideQueryLog)->not->toBeEmpty();
     $query = reset($overrideQueryLog)['query'];
 
-    // Check that it includes the 'in' clause for the tool_class
     expect($query)->toContain('in (?)');
 });
 
-// ---------------------------------------------------------------------------
-// continue() — error cases and additionalSteps
-// ---------------------------------------------------------------------------
 
 it('continue() throws InvalidTaskTransitionException when source status is not in the accepted list', function (): void {
     [$agentId] = seedAgent();
@@ -2036,9 +1931,6 @@ it('continue() overrides max_steps when additionalSteps is supplied', function (
         ->and($continuedTask->user_prompt)->toBe(PROMPT_CONTINUED);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — error path: non-context-window LLMProviderException
-// ---------------------------------------------------------------------------
 
 it('tick marks task FAILED with error_code, error_message, and failure_reason when LLM throws non-context-window error', function (): void {
     [$agentId] = seedAgent();
@@ -2137,9 +2029,6 @@ it('tick classifies RetryableException with 529 as SERVER_OVERLOADED', function 
         ->and($task->error_code)->toBe('SERVER_OVERLOADED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — context window error: first turn (historyCount <= 1)
-// ---------------------------------------------------------------------------
 
 it('tick marks task FAILED with CONTEXT_WINDOW_FIRST_TURN on first-turn context window error', function (): void {
     [$agentId] = seedAgent();
@@ -2178,9 +2067,6 @@ it('tick marks task FAILED with CONTEXT_WINDOW_FIRST_TURN on first-turn context 
         ->and($task->error_message)->toContain('2013');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// tick() — context window error: compaction + retry succeeds
-// ---------------------------------------------------------------------------
 
 it('tick compacts history and retries successfully when context window error happens on a long conversation', function (): void {
     [$agentId] = seedAgent();
@@ -2233,15 +2119,11 @@ it('tick compacts history and retries successfully when context window error hap
     expect($task->status)->toBe('COMPLETED')
         ->and($task->final_response)->toBe('Recovered after compaction.');
 
-    // The summary row should exist.
     $summaryRows = TaskHistory::where('task_id', $task->id)->where('role', 'summary')->get();
     expect($summaryRows)->not->toBeEmpty();
     expect($summaryRows->first()->content)->toBe('Summary of past conversation.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// handleToolCalls — disabled operation path
-// ---------------------------------------------------------------------------
 
 it('handleToolCalls writes a DISABLED ToolCall record when operation is disabled for the agent', function (): void {
     [$agentId] = seedAgent();
@@ -2283,9 +2165,6 @@ it('handleToolCalls writes a DISABLED ToolCall record when operation is disabled
         ->and($toolCall->tool_type)->toBe('operation');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// handleToolCalls — tool not enabled for the agent
-// ---------------------------------------------------------------------------
 
 it('handleToolCalls writes a System Error ToolCall when LLM calls a tool that is not enabled for the agent', function (): void {
     [$agentId] = seedAgent();
@@ -2324,20 +2203,6 @@ it('handleToolCalls writes a System Error ToolCall when LLM calls a tool that is
         ->and($errorHistory->content)->not->toContain('System Error');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() — dangling PENDING_APPROVAL records (DB/State drift)
-//
-// "Dangling" here means: a ToolCall row exists in the DB with status
-// PENDING_APPROVAL but is NOT present in the saved `pending_state` JSON.
-// That's a state/DB drift case (concurrency bugs, manual edits, retries
-// from older code paths) — the resume path marks those rows REJECTED.
-//
-// Partial-approval (a tool call IS in `pending_state` but the user didn't
-// include it in the approval batch) is a separate case handled below —
-// those rows stay PENDING_APPROVAL so the user can decide on a later
-// round instead of being silently executed with the LLM's original
-// arguments.
-// ---------------------------------------------------------------------------
 
 it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved state', function (): void {
     [$agentId] = seedAgent();
@@ -2397,7 +2262,6 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
         ->and($rejected)->toHaveCount(1)
         ->and($rejected->first()->provider_call_id)->toBe('call_b');
 
-    // The dangling PENDING_APPROVAL should have a history row explaining the discard.
     $discarded = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_b')
@@ -2406,18 +2270,6 @@ it('resume cleans up dangling PENDING_APPROVAL rows that drift from the saved st
         ->and($discarded->content)->toContain('discarded');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() — partial-approval semantics
-//
-// "Partial approval" = the user explicitly approves some of the pending
-// tool calls in the batch but not others. The previous implementation
-// fell through `$approvedMap[$id] ?? $pendingToolCall->arguments` and
-// silently executed the un-approved calls with the LLM's original
-// arguments — that's the "the other approval was dropped" bug. The
-// new behaviour: un-approved tool calls stay PENDING_APPROVAL, the
-// task stays PENDING_APPROVAL, `pending_state` is rewritten with only
-// the remaining calls, and the LLM is not called this round.
-// ---------------------------------------------------------------------------
 
 it('partial approval in worker mode defers the approved tool and keeps the un-approved set pending for a later round', function (): void {
     [$agentId] = seedAgent();
@@ -2510,9 +2362,6 @@ it('partial approval in worker mode defers the approved tool and keeps the un-ap
         ->and($rowB->executed_at)->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() — two-round sequence completes the partially-approved set
-// ---------------------------------------------------------------------------
 
 it('a second approval round finishes a partially-approved set without re-prompting for the already-approved tool', function (): void {
     [$agentId] = seedAgent();
@@ -2571,9 +2420,7 @@ it('a second approval round finishes a partially-approved set without re-prompti
         ->and($rowB->executed_at)->not->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // runTick() — executes approved-but-pending tools before the LLM round-trip
-// ---------------------------------------------------------------------------
 
 it('runTick() picks up APPROVED + executed_at NULL rows and runs them before the LLM call (worker-mode pickup path)', function (): void {
     [$agentId] = seedAgent();
@@ -2642,7 +2489,6 @@ it('runTick() picks up APPROVED + executed_at NULL rows and runs them before the
     expect($toolHistory)->not->toBeNull();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
 // runTick() worker-mode pickup — failure paths
 //
 // When the daemon's tick() picks up an APPROVED-but-not-yet-executed row,
@@ -2650,7 +2496,6 @@ it('runTick() picks up APPROVED + executed_at NULL rows and runs them before the
 // match the schema) or tool execution failure (the tool throws). Both
 // must record the failure result and stamp executed_at so the LLM's
 // next round-trip sees the error instead of retrying forever.
-// ---------------------------------------------------------------------------
 
 it('runTick() worker-mode pickup records a Validation Error when the approved arguments fail the schema', function (): void {
     [$agentId] = seedAgent();
@@ -2776,13 +2621,6 @@ it('runTick() worker-mode pickup persists the failure result when safeExecute re
     expect($llmCalls)->toBe(1);
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() — worker-mode pickup via daemon (full e2e shape)
-//
-// Reviewer-facing description: in worker mode, the HTTP endpoint must
-// return <50ms with status=QUEUED — the long-running tool is executed
-// only when the worker daemon picks the task up and calls tick().
-// ---------------------------------------------------------------------------
 
 it('worker-mode resume returns immediately and defers tool execution to the next tick', function (): void {
     [$agentId] = seedAgent();
@@ -2894,9 +2732,6 @@ it('worker-mode resume returns immediately and defers tool execution to the next
         ->and($task->final_response)->toBe('Done after worker pickup.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() — exception path: task is marked RESUME_FAILED
-// ---------------------------------------------------------------------------
 
 it('classifies a failure from the tick that follows a resume normally', function (): void {
     [$agentId] = seedAgent();
@@ -2937,9 +2772,6 @@ it('classifies a failure from the tick that follows a resume normally', function
         ->and($task->error_message)->toBe('An unexpected error occurred. Please try again.');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resolveRequiresApproval — AgentToolOperationOverride short-circuits
-// ---------------------------------------------------------------------------
 
 it('resolveRequiresApproval uses override row when present, falling back to tool default when override is null', function (): void {
     [$agentId] = seedAgent();
@@ -2976,9 +2808,6 @@ it('resolveRequiresApproval uses override row when present, falling back to tool
     expect($task->status)->toBe('COMPLETED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// scheduleAutoRetry — when retry policy is configured
-// ---------------------------------------------------------------------------
 
 it('scheduleAutoRetry schedules the retry in place when error code is retryable and retry policy is configured', function (): void {
     [$agentId] = seedAgent();
@@ -3041,7 +2870,6 @@ it('scheduleAutoRetry schedules the retry in place when error code is retryable 
         ->count();
     expect($separateRetries)->toBe(0);
 
-    // Cleanup
     $agent->retry_after_minutes = 0;
     $agent->max_retries         = 0;
     $agent->save();
@@ -3128,15 +2956,11 @@ it('scheduleAutoRetry does NOT exceed max_retries', function (): void {
     $retryTask = Task::where('retry_of_task_id', $task->id)->first();
     expect($retryTask)->toBeNull();
 
-    // Cleanup
     $agent->retry_after_minutes = 0;
     $agent->max_retries         = 0;
     $agent->save();
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// buildToolDefinitions — non-HasOperations tool path
-// ---------------------------------------------------------------------------
 
 it('buildToolDefinitions emits a definition for a tool without HasOperations trait', function (): void {
     [$agentId, $userId] = seedAgent();
@@ -3191,9 +3015,6 @@ it('buildToolDefinitions emits a definition for a tool without HasOperations tra
     expect($capturedTools[0]['function']['description'])->toBe('A tool without operations');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resolveToolByName — tool not found
-// ---------------------------------------------------------------------------
 
 it('resolveToolByName throws when the LLM invokes an unknown tool name', function (): void {
     [$agentId] = seedAgent();
@@ -3210,7 +3031,6 @@ it('resolveToolByName throws when the LLM invokes an unknown tool name', functio
     $task = $orch->start($agentId, 'Unknown tool test', maxSteps: 3);
     claimAndTick($orch, $task->id);
 
-    // Verify the System Error row was written for the unknown tool.
     $errorRow = TaskHistory::where('task_id', $task->id)
         ->where('role', 'tool')
         ->where('tool_call_id', 'call_x')
@@ -3220,9 +3040,6 @@ it('resolveToolByName throws when the LLM invokes an unknown tool name', functio
         ->and($errorRow->content)->toContain("No tool registered with name 'nonexistent_tool'");
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resume() with pending_state = null recovery path
-// ---------------------------------------------------------------------------
 
 it('resume rejects an empty decisions list when pending_state is null', function (): void {
     [$agentId] = seedAgent();
@@ -3247,9 +3064,6 @@ it('resume rejects an empty decisions list when pending_state is null', function
     expect($task->status)->toBe('PENDING_APPROVAL');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// qualifiedToolName — plugin tool name prefix
-// ---------------------------------------------------------------------------
 
 it('qualifiedToolName prepends the plugin slug when the tool belongs to a registered plugin', function (): void {
     [$agentId] = seedAgent();
@@ -3321,9 +3135,6 @@ it('qualifiedToolName prepends the plugin slug when the tool belongs to a regist
     expect($capturedTools[0]['function']['name'])->toBe('test-plugin:plugin_search');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// resolveToolByName — strip plugin slug prefix
-// ---------------------------------------------------------------------------
 
 it('resolveToolByName strips plugin prefix from LLM tool call names', function (): void {
     [$agentId] = seedAgent();
@@ -3355,9 +3166,6 @@ it('resolveToolByName strips plugin prefix from LLM tool call names', function (
         ->and($toolCall->result_content)->toBe('input_result');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// buildMessages — tool result rows included in conversation
-// ---------------------------------------------------------------------------
 
 it('buildMessages includes tool result rows in the conversation sent to the LLM', function (): void {
     [$agentId] = seedAgent();
@@ -3406,7 +3214,6 @@ it('buildMessages includes tool result rows in the conversation sent to the LLM'
     $orch = makeOrchestrator(mockDriverFactory($mock), $tools);
     $orch->tick($task->id);
 
-    // Expect 3 messages: user, assistant tool_calls, tool result.
     expect($capturedMessages)->toHaveCount(3);
     expect($capturedMessages[0]['role'])->toBe('user');
     expect($capturedMessages[0]['content'])->toBe('Hello');
@@ -3418,9 +3225,6 @@ it('buildMessages includes tool result rows in the conversation sent to the LLM'
     expect($capturedMessages[2]['name'])->toBe('stub_input');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// getTemperatureFromSettings — fallback when llmConfigService is null
-// ---------------------------------------------------------------------------
 
 it('resolveLlmConfig falls back to default temperature when llmConfigService is null', function (): void {
     [$agentId] = seedAgent();
@@ -3435,9 +3239,6 @@ it('resolveLlmConfig falls back to default temperature when llmConfigService is 
     expect($task->refresh()->status)->toBe('COMPLETED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// publishIntermediateState — uses ToolCallSerializer when not injected
-// ---------------------------------------------------------------------------
 
 it('publishIntermediateState falls back to a default ToolCallSerializer when none is injected', function (): void {
     [$agentId] = seedAgent();
@@ -3476,9 +3277,6 @@ it('publishIntermediateState falls back to a default ToolCallSerializer when non
     expect($task->status)->toBe('COMPLETED');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// friendlyMessageForError — context window error message includes actual limit
-// ---------------------------------------------------------------------------
 
 it('tick stores a context window error message that mentions the actual limit when error body contains one', function (): void {
     [$agentId] = seedAgent();
@@ -3513,9 +3311,6 @@ it('tick stores a context window error message that mentions the actual limit wh
         ->and($task->error_message)->toContain('4096');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ---------------------------------------------------------------------------
-// System prompt fallback (line 160)
-// ---------------------------------------------------------------------------
 
 it('tick uses the default system prompt when agent has no system_prompt set', function (): void {
     [$agentId] = seedAgent();
@@ -3561,12 +3356,6 @@ it('tick uses the agent-provided system_prompt when set', function (): void {
         ->and($capturedRequest->systemPrompt)->toBe('You are the test agent. Always answer with "OK".');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
-// ============================================================================
-// PR 2.4 — coverage augmentation for Orchestrator::handleToolCalls and
-// ::buildMessages (safety net for Phase 3.6a/3.6b split and Phase 6.4/6.5
-// refactor). These tests pin the contract of the two highest-complexity
-// methods in the codebase.
-// ============================================================================
 
 describe('Orchestrator::handleToolCalls — happy path', function (): void {
     it('executes an auto-approved tool inline, writes the APPROVED ToolCall, history row, and publishes intermediate state once', function (): void {
@@ -3729,8 +3518,6 @@ describe('Orchestrator::handleToolCalls — validation failure', function (): vo
         // Validation failure is recoverable — the LLM is given a second chance.
         expect($task->status)->toBe('COMPLETED');
 
-        // ToolCall row is APPROVED (not PENDING_APPROVAL) and carries the
-        // validation error message in result_content.
         $toolCallRecord = ToolCallModel::where('task_id', $task->id)->first();
         expect($toolCallRecord)->not()->toBeNull()
             ->and($toolCallRecord->status)->toBe('APPROVED')
@@ -4073,7 +3860,6 @@ describe('Orchestrator::buildMessages — tool role', function (): void {
         $orch = makeOrchestrator(mockDriverFactory($mock));
         $orch->tick($task->id);
 
-        // Expect 3 messages: user + assistant(tool_calls) + tool.
         expect($capturedMessages)->toHaveCount(3);
 
         // The tool message has the OpenAI-compatible shape.
@@ -4165,7 +3951,8 @@ describe('Orchestrator::start — attachment serialization round-trip', function
 
         // start() goes through appendHistory with non-null attachments, which
         // is the exact code path that double-encoded the JSON before the fix.
-        $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, mediaIds: [$assetId]);
+        // The caller id is what the attachments are authorized against.
+        $task = $orch->start($agentId, 'Summarize the attached CV', maxSteps: 5, mediaIds: [$assetId], userId: $userId);
 
         // Refetching from a fresh query (not the in-memory model) is
         // important — it forces Eloquent to apply the `array` cast on
@@ -4205,9 +3992,6 @@ describe('Orchestrator::start — attachment serialization round-trip', function
     })->afterEach(fn() => Spora\Core\Database::resetBootState());
 });
 
-// ---------------------------------------------------------------------------
-// Orchestrator::retry — in-place re-run of a failed task
-// ---------------------------------------------------------------------------
 
 it('retry resets failed-task state in place (error fields cleared, history preserved, task re-ticked)', function (): void {
     Spora\Core\Database::resetBootState();

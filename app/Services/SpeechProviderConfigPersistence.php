@@ -78,7 +78,7 @@ final class SpeechProviderConfigPersistence
     /**
      * Create a new config row. Global rows require admin;
      * principal-scoped rows must be under a principal the caller
-     * controls (gate runs before the save so an out-of-scope principal
+     * manages (gate runs before the save so an out-of-scope principal
      * can't get a transient half-written row).
      *
      * @param array<string, mixed> $data
@@ -95,7 +95,10 @@ final class SpeechProviderConfigPersistence
         $validated = $this->validateNewConfigurationInputs($data, $isAdmin);
         $isGlobal = $validated['is_global'];
 
-        if (!$isGlobal && $principalId !== null && !in_array($principalId, $this->principalResolver->visiblePrincipalIds($callerUserId), true)) {
+        // Visibility is not write authority: an ordinary member of a
+        // group can see the group's principal, but the group's
+        // configuration belongs to the people who manage it.
+        if (!$isGlobal && $principalId !== null && !$isAdmin && !$this->principalResolver->canManagePrincipal($principalId, $callerUserId)) {
             throw new PrincipalNotAccessibleException("Caller {$callerUserId} cannot create a config under principal {$principalId}");
         }
 

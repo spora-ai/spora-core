@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Http;
 
+use Delight\Auth\Auth;
 use Delight\Auth\Role;
+use Delight\Auth\Status;
 use Illuminate\Database\Capsule\Manager as DB;
 use Mockery;
 use Spora\Auth\AuthService;
@@ -14,12 +16,14 @@ use Spora\Models\User;
 use Spora\Security\CsrfTokenService;
 use Spora\Services\AuthValidator;
 use Spora\Services\AuthWorkflow;
+use Spora\Services\MailerInterface;
 use Spora\Services\RateLimiter;
 use Spora\Services\SystemMailer;
 use Spora\Services\UserService;
 use Spora\Services\UserServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Mailer\Exception\TransportException;
 
 const AUTHCTL_TEST_PASSWORD = 'Password1!';
 
@@ -51,7 +55,10 @@ function makeAuthController(
         $csrfService,
         $validator,
         $workflow,
-        $config ?? new Config(['SPORA_ALLOW_REGISTRATION' => true]),
+        $config ?? new Config(
+            ['SPORA_ALLOW_REGISTRATION' => true, 'SPORA_APP_URL' => 'https://spora.test'],
+            ['SPORA_APP_URL' => Config::SOURCE_ENV],
+        ),
     );
 
     return [$controller, $authService, $userService, $csrfService];
@@ -75,9 +82,6 @@ afterEach(function (): void {
     Mockery::close();
 });
 
-// ---------------------------------------------------------------------------
-// register()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::register', function (): void {
     test('returns 201 with user data on successful registration', function (): void {
@@ -162,7 +166,6 @@ describe('AuthController::register', function (): void {
 
         $response = $controller->register($request);
 
-        // The forwarded IP is rate limited, so the controller should return 429
         expect($response->getStatusCode())->toBe(Response::HTTP_TOO_MANY_REQUESTS);
     });
 
@@ -283,9 +286,6 @@ describe('AuthController::register', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// login()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::login', function (): void {
     test('returns 200 with user data on successful login', function (): void {
@@ -423,12 +423,74 @@ describe('AuthController::login', function (): void {
         expect($body['error']['code'])->toBe('ACCOUNT_UNVERIFIED');
     });
 
+    test('refuses a browser-simple content type, so a cross-site form cannot log a browser in', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $authService->register('formlogin@example.com', AUTHCTL_TEST_PASSWORD, 'Form Login');
+        User::where('email', 'formlogin@example.com')->update(['verified' => 1]);
+
+        // What a cross-site form may send: a JSON body under a content type
+        // the browser sends without asking the server first.
+        $request = Request::create('/api/v1/auth/login', 'POST', [], [], [], [
+            'CONTENT_TYPE' => 'text/plain',
+        ], (string) json_encode([
+            'email'    => 'formlogin@example.com',
+            'password' => AUTHCTL_TEST_PASSWORD,
+        ]));
+
+        $response = $controller->login($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNSUPPORTED_MEDIA_TYPE);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('UNSUPPORTED_MEDIA_TYPE');
+        expect($authService->isLoggedIn())->toBeFalse();
+    });
+
+    test('refuses an account the administrator suspended', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $authService->register('suspended@example.com', AUTHCTL_TEST_PASSWORD, 'Suspended');
+        User::where('email', 'suspended@example.com')->update(['verified' => 1]);
+
+        $userId = (int) User::where('email', 'suspended@example.com')->value('id');
+        (new UserService())->updateUser($userId, ['suspended' => true]);
+
+        $request = jsonRequest('POST', '/api/v1/auth/login', [
+            'email'    => 'suspended@example.com',
+            'password' => AUTHCTL_TEST_PASSWORD,
+        ]);
+        $response = $controller->login($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_CREDENTIALS');
+    });
+
+    test('refuses a suspended account whose address carries a leading space', function (): void {
+        // The auth library trims the address before it looks the account
+        // up, so the suspension check has to trim it too — otherwise the
+        // space walks past the check and the login succeeds.
+        [$controller, $authService] = makeAuthController();
+        $authService->register('spaced@example.com', AUTHCTL_TEST_PASSWORD, 'Spaced');
+        User::where('email', 'spaced@example.com')->update(['verified' => 1]);
+
+        $userId = (int) User::where('email', 'spaced@example.com')->value('id');
+        (new UserService())->updateUser($userId, ['suspended' => true]);
+
+        $request = jsonRequest('POST', '/api/v1/auth/login', [
+            'email'    => ' spaced@example.com',
+            'password' => AUTHCTL_TEST_PASSWORD,
+        ]);
+        $response = $controller->login($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('INVALID_CREDENTIALS');
+    });
+
     test('clears the rate limit bucket on successful login', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('clear@example.com', AUTHCTL_TEST_PASSWORD, 'Clear');
         User::where('email', 'clear@example.com')->update(['verified' => 1]);
 
-        // 4 failed attempts (under limit)
         for ($i = 0; $i < 4; $i++) {
             $req = jsonRequest('POST', '/api/v1/auth/login', [
                 'email'    => 'clear@example.com',
@@ -444,7 +506,6 @@ describe('AuthController::login', function (): void {
         $okResp = $controller->login($okReq);
         expect($okResp->getStatusCode())->toBe(Response::HTTP_OK);
 
-        // After successful login the bucket should be cleared (rate limit reset)
         $statusReq = jsonRequest('POST', '/api/v1/auth/login', [
             'email'    => 'clear@example.com',
             'password' => 'wrong',
@@ -454,9 +515,6 @@ describe('AuthController::login', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// logout()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::logout', function (): void {
     test('returns 200 with a {logged_out: true} envelope', function (): void {
@@ -469,9 +527,6 @@ describe('AuthController::logout', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// me()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::me', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -530,9 +585,6 @@ describe('AuthController::me', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// password()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::password', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -611,9 +663,6 @@ describe('AuthController::password', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// account()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::account', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -665,11 +714,41 @@ describe('AuthController::account', function (): void {
         $body = json_decode($response->getContent(), true);
         expect($body['data']['user']['name'])->toBe('Renamed');
     });
+
+    test('ignores the verification and suspension fields', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $userId = $authService->register('acc3@example.com', AUTHCTL_TEST_PASSWORD, 'Acc Three');
+        simulateLoggedInSession($userId, 'acc3@example.com');
+        // AuthService auto-verifies when no system mailer is set; force-unverify here
+        User::where('email', 'acc3@example.com')->update(['verified' => 0]);
+
+        $request = jsonRequest('PATCH', '/api/v1/auth/account', [
+            'verified'  => true,
+            'suspended' => true,
+        ]);
+        $response = $controller->account($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $user = User::find($userId);
+        expect((int) $user->verified)->toBe(0)
+            ->and((int) $user->force_logout)->toBe(0)
+            ->and((int) $user->status)->not()->toBe(Status::SUSPENDED);
+    });
+
+    test('treats the session of a suspended account as unauthenticated', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $userId = $authService->register('session-suspended@example.com', AUTHCTL_TEST_PASSWORD, 'Session Suspended');
+        simulateLoggedInSession($userId, 'session-suspended@example.com');
+        // The account state the auth library keeps in the session.
+        $_SESSION[Auth::SESSION_FIELD_STATUS] = Status::SUSPENDED;
+
+        $request = jsonRequest('PATCH', '/api/v1/auth/account', ['name' => 'X']);
+        $response = $controller->account($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_UNAUTHORIZED);
+    });
 });
 
-// ---------------------------------------------------------------------------
-// verify()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::verify', function (): void {
     test('returns 422 when selector is empty', function (): void {
@@ -707,7 +786,6 @@ describe('AuthController::verify', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('verify-ok@example.com', AUTHCTL_TEST_PASSWORD, 'Verify OK');
 
-        // Manually insert a valid confirmation row for the user
         $user = User::where('email', 'verify-ok@example.com')->first();
         $selector = 'sel' . bin2hex(random_bytes(8));
         $rawToken = 'tok' . bin2hex(random_bytes(8));
@@ -742,7 +820,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Confirmation row pointing at a new email (different from users.email)
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $userId,
             'email'    => 'verify-change-new@example.com',
@@ -761,21 +838,17 @@ describe('AuthController::verify', function (): void {
         expect($body['old_email'])->toBe('verify-change@example.com');
         expect($body['new_email'])->toBe('verify-change-new@example.com');
 
-        // The target user's record was updated to the new email.
         $updated = User::find($userId);
         expect($updated->email)->toBe('verify-change-new@example.com');
 
-        // The logged-in session's email sync was applied.
-        expect($_SESSION[\Delight\Auth\Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-change-new@example.com');
+        expect($_SESSION[Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-change-new@example.com');
     });
 
     test('returns kind=change when the requester is logged in as a different user than the confirmation target', function (): void {
         [$controller, $authService] = makeAuthController();
-        // Target user (A) whose email will be changed.
         $targetUserId = $authService->register('verify-cross-target@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Target');
         User::where('id', $targetUserId)->update(['verified' => 1]);
 
-        // Requester (B), logged in but unrelated to the confirmation row.
         $requesterId = $authService->register('verify-cross-requester@example.com', AUTHCTL_TEST_PASSWORD, 'Cross Requester');
         simulateLoggedInSession($requesterId, 'verify-cross-requester@example.com');
 
@@ -783,7 +856,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Confirmation row targeting A (not B).
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $targetUserId,
             'email'    => 'verify-cross-target-new@example.com',
@@ -801,12 +873,10 @@ describe('AuthController::verify', function (): void {
         expect($body['old_email'])->toBe('verify-cross-target@example.com');
         expect($body['new_email'])->toBe('verify-cross-target-new@example.com');
 
-        // A's record updated, B untouched.
         expect(User::find($targetUserId)->email)->toBe('verify-cross-target-new@example.com');
         expect(User::find($requesterId)->email)->toBe('verify-cross-requester@example.com');
 
-        // The requester's session email is the original — no cross-write.
-        expect($_SESSION[\Delight\Auth\Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-cross-requester@example.com');
+        expect($_SESSION[Auth::SESSION_FIELD_EMAIL] ?? null)->toBe('verify-cross-requester@example.com');
     });
 
     test('returns 400 when confirmation token is expired', function (): void {
@@ -869,7 +939,6 @@ describe('AuthController::verify', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // The subject's pending confirmation points at the target's email
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $subjectId,
             'email'    => 'verify-target@example.com',
@@ -887,9 +956,6 @@ describe('AuthController::verify', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// forgotPassword()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::forgotPassword', function (): void {
     test('returns 200 when email exists and user is verified', function (): void {
@@ -946,11 +1012,77 @@ describe('AuthController::forgotPassword', function (): void {
         $body = json_decode($response->getContent(), true);
         expect($body['error']['code'])->toBe('VALIDATION_ERROR');
     });
+
+    test('answers an account that does not exist like an account that does', function (): void {
+        [$controller] = makeAuthController();
+
+        $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
+            'email' => 'nobody-here@example.com',
+        ]);
+        $response = $controller->forgotPassword($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['message'])->toBe('If an account with that email exists, a password reset email has been sent.');
+    });
+
+    test('answers an unverified account like a verified one', function (): void {
+        [$controller, $authService] = makeAuthController();
+        $authService->register('unverified-reset@example.com', AUTHCTL_TEST_PASSWORD, 'Unverified Reset');
+        User::where('email', 'unverified-reset@example.com')->update(['verified' => 0]);
+
+        $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
+            'email' => 'unverified-reset@example.com',
+        ]);
+        $response = $controller->forgotPassword($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['message'])->toBe('If an account with that email exists, a password reset email has been sent.');
+    });
+
+    test('answers a broken mail transport like an account that does not exist', function (): void {
+        // An eligible account reaches the mailer; an unknown one does not.
+        // A transport failure must not turn that difference into a 5xx, or
+        // the status answers whether the account exists.
+        [$controller, $authService] = makeAuthController();
+        $authService->register('broken-mail@example.com', AUTHCTL_TEST_PASSWORD, 'Broken Mail');
+
+        $mailer = Mockery::mock(MailerInterface::class);
+        $mailer->shouldReceive('sendPasswordResetEmail')
+            ->andThrow(new TransportException('smtp is down'));
+        $authService->setSystemMailer($mailer);
+
+        $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
+            'email' => 'broken-mail@example.com',
+        ]);
+        $response = $controller->forgotPassword($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+        $body = json_decode($response->getContent(), true);
+        expect($body['message'])->toBe('If an account with that email exists, a password reset email has been sent.');
+    });
+
+    test('refuses to send a reset link when the application URL is only auto-detected', function (): void {
+        [$controller] = makeAuthController(
+            null,
+            null,
+            null,
+            null,
+            new Config(['SPORA_ALLOW_REGISTRATION' => true]),
+        );
+
+        $request = jsonRequest('POST', '/api/v1/auth/forgot-password', [
+            'email' => 'forgot@example.com',
+        ]);
+        $response = $controller->forgotPassword($request);
+
+        expect($response->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+        $body = json_decode($response->getContent(), true);
+        expect($body['error']['code'])->toBe('PASSWORD_RECOVERY_UNAVAILABLE');
+    });
 });
 
-// ---------------------------------------------------------------------------
-// resetPassword()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::resetPassword', function (): void {
     test('returns 400 on invalid JSON', function (): void {
@@ -1082,7 +1214,6 @@ describe('AuthController::resetPassword', function (): void {
         [$controller, $authService] = makeAuthController();
         $authService->register('reset-dis@example.com', AUTHCTL_TEST_PASSWORD, 'Reset Disabled');
         $user = User::where('email', 'reset-dis@example.com')->first();
-        // Disable password reset for this user
         User::where('id', $user->id)->update(['resettable' => 0]);
 
         $selector = 'rdis' . bin2hex(random_bytes(8));
@@ -1109,9 +1240,6 @@ describe('AuthController::resetPassword', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// resendVerification()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::resendVerification', function (): void {
     test('returns 200 even when email is unknown (no enumeration)', function (): void {
@@ -1178,9 +1306,6 @@ describe('AuthController::resendVerification', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// requestEmailChange()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::requestEmailChange', function (): void {
     test('returns 401 when not authenticated', function (): void {
@@ -1231,7 +1356,6 @@ describe('AuthController::requestEmailChange', function (): void {
         ]);
         $response = $controller->requestEmailChange($request);
 
-        // The current user is unverified, so the request fails with EMAIL_NOT_VERIFIED
         expect($response->getStatusCode())->toBe(Response::HTTP_FORBIDDEN);
         $body = json_decode($response->getContent(), true);
         expect($body['error']['code'])->toBe('EMAIL_NOT_VERIFIED');
@@ -1275,7 +1399,6 @@ describe('AuthController::requestEmailChange', function (): void {
         User::where('id', $userId)->update(['verified' => 1]);
         simulateLoggedInSession($userId, 'chg-take@example.com');
 
-        // Another user already owns the target email
         $authService->register('taken-target@example.com', AUTHCTL_TEST_PASSWORD, 'Taken Target');
 
         $request = jsonRequest('POST', '/api/v1/auth/email/change-request', [
@@ -1349,9 +1472,6 @@ describe('AuthController::requestEmailChange', function (): void {
     });
 });
 
-// ---------------------------------------------------------------------------
-// confirmEmailChange()
-// ---------------------------------------------------------------------------
 
 describe('AuthController::confirmEmailChange', function (): void {
     test('returns 400 on invalid JSON', function (): void {
@@ -1397,7 +1517,6 @@ describe('AuthController::confirmEmailChange', function (): void {
         $rawToken = 'tok' . bin2hex(random_bytes(8));
         $hashedToken = \Delight\Auth\TokenHash::from($rawToken);
 
-        // Insert a confirmation row where the new email differs from the old
         DB::table('users_confirmations')->insert([
             'user_id'  => (int) $user->id,
             'email'    => 'confirm-new@example.com',

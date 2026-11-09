@@ -20,8 +20,6 @@ use Tests\Support\MediaArchiveTestSupport;
 use Tests\Support\TypstSourceDerivativeProducer;
 
 /**
- * Plan §12 B2b — pinning MediaAllowedTypesService behaviour.
- *
  * The dynamic part of the allowlist is now the union of every registered
  * derivative producer's `supportedSourceFormats()`. That is the seam that
  * keeps a binary document uploadable: a PDF is accepted out of the box
@@ -89,9 +87,7 @@ test('a bare extension in supportedSourceFormats does not leak into allowedMimeT
     [$service] = buildAllowedTypesService();
     $mimes = $service->allowedMimeTypes();
 
-    // The real MIME is picked up...
     expect($mimes)->toContain('text/markdown');
-    // ...the bare extensions are not.
     expect($mimes)->not->toContain('md');
     expect($mimes)->not->toContain('markdown');
 });
@@ -157,6 +153,79 @@ test('isAllowed accepts the audio allowlist (incl. video/webm and video/mp4 for 
     }
 });
 
+test('a producer claiming text/html does not make HTML uploadable while active types are off', function (): void {
+    // A producer's claim to handle a format is not an operator's decision
+    // to allow it: the active-content toggle governs HTML and SVG.
+    MediaDerivativeProducerDiscovery::add(new class implements \Spora\Services\MediaArchive\MediaDerivativeProducerInterface {
+        /** @return list<string> */
+        public function supportedSourceFormats(): array
+        {
+            return ['text/html'];
+        }
+
+        /** @return list<string> */
+        public function supportedDerivativeFormats(): array
+        {
+            return ['md'];
+        }
+
+        public function pluginSlug(): string
+        {
+            return 'tests-html-producer';
+        }
+
+        public function operationName(): string
+        {
+            return 'html.to_md';
+        }
+
+        public function produce(\Spora\Models\MediaAsset $source, string $format, array $options = []): \Spora\Services\MediaArchive\DerivativeOutput
+        {
+            return new \Spora\Services\MediaArchive\DerivativeOutput('', 'text/markdown');
+        }
+    }::class);
+
+    [$service] = buildAllowedTypesServiceWithPolicy(false);
+
+    expect($service->isAllowed('text/html', null))->toBeFalse();
+    expect($service->allowedMimeTypes())->not->toContain('text/html');
+});
+
+test('a producer claiming text/html is allowed once the operator permits active types', function (): void {
+    MediaDerivativeProducerDiscovery::add(new class implements \Spora\Services\MediaArchive\MediaDerivativeProducerInterface {
+        /** @return list<string> */
+        public function supportedSourceFormats(): array
+        {
+            return ['text/html'];
+        }
+
+        /** @return list<string> */
+        public function supportedDerivativeFormats(): array
+        {
+            return ['md'];
+        }
+
+        public function pluginSlug(): string
+        {
+            return 'tests-html-producer';
+        }
+
+        public function operationName(): string
+        {
+            return 'html.to_md';
+        }
+
+        public function produce(\Spora\Models\MediaAsset $source, string $format, array $options = []): \Spora\Services\MediaArchive\DerivativeOutput
+        {
+            return new \Spora\Services\MediaArchive\DerivativeOutput('', 'text/markdown');
+        }
+    }::class);
+
+    [$service] = buildAllowedTypesServiceWithPolicy(true);
+
+    expect($service->isAllowed('text/html', null))->toBeTrue();
+});
+
 /**
  * @return array{0: MediaAllowedTypesService, 1: MediaDerivativeService}
  */
@@ -171,6 +240,31 @@ function buildAllowedTypesService(?array $imageExtensions = null): array
     $derivatives = buildAllowedTypesDerivativeService();
     return [
         new MediaAllowedTypesService($derivatives, $factory, $imageExtensions),
+        $derivatives,
+    ];
+}
+
+/**
+ * The same service, wired to an operator decision about the
+ * script-capable formats.
+ *
+ * @return array{0: MediaAllowedTypesService, 1: MediaDerivativeService}
+ */
+function buildAllowedTypesServiceWithPolicy(bool $allowActiveTypes): array
+{
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $llmService = new LLMConfigService($security, [
+        OpenAICompatibleDriver::class,
+        AnthropicCompatibleDriver::class,
+    ]);
+    $factory = new DriverFactory(new NullLogger(), $llmService, 60);
+    $derivatives = buildAllowedTypesDerivativeService();
+    $policy = new \Spora\Services\MediaArchive\MediaActiveTypesPolicy(
+        new \Spora\Core\Config(['SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES' => $allowActiveTypes]),
+    );
+
+    return [
+        new MediaAllowedTypesService($derivatives, $factory, null, $policy),
         $derivatives,
     ];
 }
@@ -332,9 +426,9 @@ test('normalizeImageExtensions preserves an empty list', function (): void {
 });
 
 test('a plugin-registered text/x-typst producer adds the MIME and the typ extension to the allowlist', function (): void {
-    // The plugin seam, re-anchored from the deleted converter: a plugin
-    // makes a format uploadable by registering a *producer*, and the
-    // upload UI's `accept=` attribute is derived from the same union.
+    // The plugin seam: a plugin makes a format uploadable by registering
+    // a *producer*, and the upload UI's `accept=` attribute is derived
+    // from the same union.
     [$serviceWithout] = buildAllowedTypesService();
     expect($serviceWithout->allowedMimeTypes())->not->toContain('text/x-typst');
     expect($serviceWithout->allowedExtensions())->not->toContain('typ');

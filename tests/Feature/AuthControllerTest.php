@@ -227,7 +227,6 @@ test('password endpoint validates required fields', function (): void {
 
     $req = jsonRequest('PATCH', PASSWORD_ENDPOINT, [
         'current_password' => 'old',
-        // missing new_password
     ]);
     $response = $controller->password($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -302,16 +301,13 @@ test('resetPassword resets password with valid selector and token', function ():
     };
     $authService->setSystemMailer($proxyMailer);
 
-    // Initiate password reset to generate selector/token
-    $authService->forgotPassword($email);
+    $authService->forgotPassword($email, 'https://spora.test');
 
-    // Parse selector and token from the captured URL
     $capturedUrl = (string) $captured['url'];
     preg_match('#/auth/reset-password/([^?]+)\?token=(.+)#', $capturedUrl, $matches);
     $selector = $matches[1];
     $token = urldecode($matches[2]);
 
-    // Reset the password using captured selector and token
     $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => $selector,
         'token' => $token,
@@ -322,7 +318,6 @@ test('resetPassword resets password with valid selector and token', function ():
     $body = json_decode($response->getContent(), true);
     expect($body['message'])->toBe('Password reset successfully.');
 
-    // Login with new password should work
     $req = jsonRequest('POST', LOGIN_ENDPOINT, [
         'email' => $email,
         'password' => $newPassword,
@@ -348,7 +343,6 @@ test('resetPassword returns error for invalid selector', function (): void {
 test('resetPassword validates required fields', function (): void {
     [$controller] = makeAuthControllerWithMocks();
 
-    // Missing selector
     $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'token' => 'some_token',
         'password' => NEW_PASSWORD,
@@ -356,7 +350,6 @@ test('resetPassword validates required fields', function (): void {
     $response = $controller->resetPassword($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 
-    // Missing token
     $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => 'some_selector',
         'password' => NEW_PASSWORD,
@@ -364,7 +357,6 @@ test('resetPassword validates required fields', function (): void {
     $response = $controller->resetPassword($req);
     expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
 
-    // Missing password
     $req = jsonRequest('POST', RESET_PASSWORD_ENDPOINT, [
         'selector' => 'some_selector',
         'token' => 'some_token',

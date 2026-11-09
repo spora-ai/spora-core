@@ -277,9 +277,13 @@ describe('MediaTool::get_media', function (): void {
         // existing agents with the legacy setting keep working without a
         // migration. The principal context carries the user-principal
         // info that {@see MediaArchiveService::isAssetInPrincipalScope()}
-        // needs to recognise the asset as belonging to the caller's
-        // principal (via the direct-upload path: `asset.user_id === owner`).
-        $otherAgent = seedMediaToolAgent();
+        // needs: the asset names one of the caller's own agents, and the
+        // agent linkage decides it.
+        $otherAgent = Agent::create([
+            'principal_id' => createUserPrincipalPublic(42),
+            'name'         => 'Another Of The Users Agents',
+            'is_active'    => true,
+        ])->id;
         $asset = seedMediaAsset(agentId: $otherAgent, userId: 42);
         $config = Mockery::mock(ToolConfigService::class);
         $config->allows('getEffectiveSettings')->andReturn(['scope' => 'user']);
@@ -544,6 +548,55 @@ describe('MediaTool::get_media', function (): void {
 
             expect($result->success)->toBeTrue();
             expect($result->data['id'])->toBe($asset->id);
+        } finally {
+            $restore();
+        }
+    });
+
+    it('does not mint a public share token', function (): void {
+        // `get_public_url` is the operation that hands out a link that
+        // keeps working outside the session, and it is approval-gated. A
+        // metadata read must not mint the same capability behind the
+        // operator's back.
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99);
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['public_url'])->toBeNull();
+            expect($asset->fresh()->public_access_token)->toBeNull();
+        } finally {
+            $restore();
+        }
+    });
+
+    it('reports the share URL of an asset that is already shared', function (): void {
+        $agentA = seedMediaToolAgent();
+        $asset = seedMediaAsset(agentId: $agentA, userId: 99, publicToken: 'tok-shared');
+
+        ['tool' => $tool, 'restore' => $restore] = makeMediaToolWithRealArchive(
+            makeMediaToolNonAdminAuth(),
+            null,
+            new Spora\Core\Config(['SPORA_APP_URL' => 'https://example.test']),
+        );
+        try {
+            $result = $tool->execute(
+                ['action' => 'get_media', 'asset_id' => $asset->id],
+                agentId: $agentA,
+            );
+
+            expect($result->success)->toBeTrue();
+            expect($result->data['public_url'])->toBe('https://example.test/api/v1/public/media/' . $asset->id . '?token=tok-shared');
         } finally {
             $restore();
         }

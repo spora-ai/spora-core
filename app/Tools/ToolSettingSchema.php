@@ -23,10 +23,12 @@ final class ToolSettingSchema
      * Collect every `#[ToolSetting]` declared on the class and any
      * ancestor, deduplicated by key.
      *
-     * Parents are walked first so that a subclass redeclaration of
-     * the same key wins — matching PHP's natural attribute lookup
-     * semantics and the "last write wins" contract that consumers
-     * (settings forms, defaults tables, the LLM projection) depend on.
+     * The nearest declaration wins: a subclass overrides its parent, a
+     * parent overrides its own parent. The chain is therefore applied
+     * oldest-first so the last write is the most specific one — walking
+     * it the other way lets a grandparent's stale declaration replace
+     * the parent's, which is how a `password` key loses its masking and
+     * an `exposeToLlm: false` key loses its disclosure restriction.
      *
      * @return list<ToolSetting>
      */
@@ -39,13 +41,11 @@ final class ToolSettingSchema
         $ref = new ReflectionClass($class);
         $byKey = [];
 
-        $cursor = $ref->getParentClass();
-        while ($cursor !== false) {
-            foreach ($cursor->getAttributes(ToolSetting::class) as $attr) {
+        foreach (self::ancestorsOldestFirst($ref) as $ancestor) {
+            foreach ($ancestor->getAttributes(ToolSetting::class) as $attr) {
                 $instance = $attr->newInstance();
                 $byKey[$instance->key] = $instance;
             }
-            $cursor = $cursor->getParentClass();
         }
 
         foreach ($ref->getAttributes(ToolSetting::class) as $attr) {
@@ -54,5 +54,26 @@ final class ToolSettingSchema
         }
 
         return array_values($byKey);
+    }
+
+    /**
+     * The ancestor chain, oldest ancestor first.
+     *
+     * `getParentClass()` walks towards the root, so the collected list is
+     * reversed before it is applied — see {@see self::collect()}.
+     *
+     * @return list<ReflectionClass>
+     */
+    private static function ancestorsOldestFirst(ReflectionClass $ref): array
+    {
+        $ancestors = [];
+
+        $cursor = $ref->getParentClass();
+        while ($cursor !== false) {
+            $ancestors[] = $cursor;
+            $cursor = $cursor->getParentClass();
+        }
+
+        return array_reverse($ancestors);
     }
 }
