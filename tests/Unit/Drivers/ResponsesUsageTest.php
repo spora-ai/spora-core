@@ -32,6 +32,10 @@ test('the Responses usage is stored under the openai provider tag', function ():
         'output_tokens' => 5,
     ], 'openai_responses');
 
+    // This is the frontend's provider vocabulary, not the driver's
+    // pricing tag: `getProviderName()` answers which price rows a call
+    // is metered against (`openai_compatible`), this one says which
+    // provider the counters came from.
     expect($usage->provider)->toBe('openai');
 });
 

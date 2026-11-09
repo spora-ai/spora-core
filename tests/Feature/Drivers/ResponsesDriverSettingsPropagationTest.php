@@ -151,8 +151,19 @@ test('the driver identifies itself as the openai_responses protocol', function (
     $driver = responsesDriverWithBody($captured);
 
     expect(OpenAIResponsesDriver::getName())->toBe('openai_responses')
-        ->and(OpenAIResponsesDriver::getDisplayName())->toBe('OpenAI Responses')
-        ->and($driver->getProviderName())->toBe('openai');
+        ->and(OpenAIResponsesDriver::getDisplayName())->toBe('OpenAI Responses');
+});
+
+test('the pricing tag is the one the operator\'s existing price rows use', function (): void {
+    $captured = [];
+    $driver = responsesDriverWithBody($captured);
+
+    // The price book is keyed on `(provider, model)`, and the provider
+    // is the driver's protocol name. Every OpenAI price row an operator
+    // already has is keyed on `openai_compatible`, so this driver has to
+    // answer with that: a tag of its own would match no row, and a call
+    // with no price row is unpriced — free, with no limits.
+    expect($driver->getProviderName())->toBe('openai_compatible');
 });
 
 test('the effort levels the driver declares are the options its effort setting offers', function (): void {

@@ -45,12 +45,12 @@ function wireContractBody(LLMRequest $request): array
     return $captured['body'];
 }
 
-function wireContractRequest(?string $effort): LLMRequest
+function wireContractRequest(?string $effort, ?array $tools = null): LLMRequest
 {
     return new LLMRequest(
         systemPrompt: 'You are helpful.',
         messages: [['role' => 'user', 'content' => 'hi']],
-        tools: [[
+        tools: $tools ?? [[
             'type' => 'function',
             'function' => [
                 'name' => 'web_search',
@@ -62,7 +62,7 @@ function wireContractRequest(?string $effort): LLMRequest
     );
 }
 
-test('the Responses body carries exactly the documented keys', function (): void {
+test('the Responses body with tools carries exactly the documented keys', function (): void {
     $body = wireContractBody(wireContractRequest(null));
 
     expect(array_keys($body))->toEqualCanonicalizing([
@@ -85,6 +85,31 @@ test('the Responses body with an effort carries the reasoning key as well', func
         'input',
         'tools',
         'tool_choice',
+        'max_output_tokens',
+        'store',
+        'reasoning',
+    ]);
+});
+
+test('the Responses body without tools carries neither the tools nor the tool choice', function (): void {
+    $body = wireContractBody(wireContractRequest(null, []));
+
+    expect(array_keys($body))->toEqualCanonicalizing([
+        'model',
+        'instructions',
+        'input',
+        'max_output_tokens',
+        'store',
+    ]);
+});
+
+test('the Responses body without tools and with an effort carries the reasoning key', function (): void {
+    $body = wireContractBody(wireContractRequest('high', []));
+
+    expect(array_keys($body))->toEqualCanonicalizing([
+        'model',
+        'instructions',
+        'input',
         'max_output_tokens',
         'store',
         'reasoning',

@@ -171,6 +171,11 @@ final readonly class Usage
             // next to the ones it read; that is what Anthropic calls a
             // cache creation, so it lands on the same counter.
             cacheCreationTokens: (int) ($inputDetails['cache_write_tokens'] ?? 0),
+            // The frontend's provider vocabulary, not the driver's
+            // pricing tag: `getProviderName()` answers which price rows
+            // a call is metered against, and that is `openai_compatible`
+            // for both OpenAI protocols. This one says which provider
+            // the counters came from, and the frontend renders it.
             provider: 'openai',
             rawUsage: $usage,
         );

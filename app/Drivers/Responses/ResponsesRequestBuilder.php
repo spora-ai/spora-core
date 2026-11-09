@@ -76,11 +76,19 @@ final class ResponsesRequestBuilder
             'model' => $this->model,
             'instructions' => $request->systemPrompt,
             'input' => $this->convertMessages($request->messages),
-            'tools' => $this->convertTools($request->tools),
-            'tool_choice' => 'auto',
-            'max_output_tokens' => max(self::MINIMUM_OUTPUT_TOKENS, $request->maxTokens),
-            'store' => $this->store,
         ];
+
+        // The tool definitions and the choice between them go together,
+        // and only when there is a tool to choose: an empty tool list
+        // with a `tool_choice` is at best a no-op.
+        $tools = $this->convertTools($request->tools);
+        if ($tools !== []) {
+            $body['tools'] = $tools;
+            $body['tool_choice'] = 'auto';
+        }
+
+        $body['max_output_tokens'] = max(self::MINIMUM_OUTPUT_TOKENS, $request->maxTokens);
+        $body['store'] = $this->store;
 
         if ($effort === null) {
             return $body;

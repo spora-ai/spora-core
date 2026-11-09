@@ -101,11 +101,20 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
     /**
      * The pricing tag, which is not the protocol identifier:
      * `getName()` names the protocol (`openai_responses`), this names
-     * the provider (`openai`).
+     * the provider whose price rows the call is metered against.
+     *
+     * The tag is the one the operator's existing rows already use —
+     * `openai_compatible`, the Chat Completions driver's name — so
+     * pointing an agent at this driver with the same model keeps the
+     * price it already has. A tag of its own would match no row, and a
+     * call with no price row is unpriced: free, with no limits.
+     *
+     * `Usage::$provider` is a different vocabulary — the frontend's
+     * provider union — and stays `openai` for both OpenAI protocols.
      */
     public function getProviderName(): string
     {
-        return 'openai';
+        return 'openai_compatible';
     }
 
     /**
