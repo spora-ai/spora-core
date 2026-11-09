@@ -79,11 +79,9 @@ final class WorkerRunCommand extends Command
     private readonly ?DueWorkDispatcher $dueWorkDispatcher;
 
     /**
-     * Build the pieces the command delegates to.
-     *
-     * The lock belongs to this installation's storage directory, and the
-     * queue and scheduled-run processors are built here because the
-     * command's constructor is already long and positional.
+     * The two dispatchers are resolved from the container and are
+     * optional: a test container that does not know them must still be
+     * able to build this command.
      */
     public function __construct(
         private readonly Database            $database,
@@ -97,10 +95,6 @@ final class WorkerRunCommand extends Command
     ) {
         $this->lock = new WorkerLock($paths->storage('spora-worker.lock'));
         $this->reaper = $container->get(WorkerReaper::class);
-        // Resolved from the container rather than injected, for the same
-        // reason the reaper is: the command's constructor is already long and
-        // positional. Optional, because a test container that does not know
-        // the class must still be able to build this.
         $this->callbackDispatcher = $container->has(ApiKeyCallbackDispatcher::class)
             ? $container->get(ApiKeyCallbackDispatcher::class)
             : null;
@@ -159,8 +153,7 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Run one worker invocation in the mode the flags select: reap
-     * orphans, then work through scheduled runs and the queue.
+     * Run the worker in the mode the flags select.
      *
      * `--once` stops after a single pass; the daemon loops until it is
      * asked to stop.
@@ -349,10 +342,8 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * Run the worker loop until the mode says to stop.
-     *
-     * `--once` leaves the loop after one pass; the daemon sleeps between
-     * passes and keeps going.
+     * One pass is one iteration of the loop body. `--once` makes exactly
+     * one; the daemon sleeps between passes and keeps going.
      */
     private function runWorkerLoop(
         WorkerLoopOptions $options,
@@ -488,8 +479,10 @@ final class WorkerRunCommand extends Command
     }
 
     /**
-     * The tail of a loop iteration: `--once` is done after one pass, the
-     * daemon sleeps and goes round again.
+     * The tail of a pass.
+     *
+     * True means the caller leaves the loop; false means it sleeps and
+     * goes round again.
      */
     private function endOfIteration(bool $isOnce, int $sleep): bool
     {

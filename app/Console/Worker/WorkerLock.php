@@ -64,9 +64,7 @@ final class WorkerLock
             }
 
             // The lock is held. It may only be taken over when its recorded
-            // holder is gone — a lock that cannot be attributed to a process
-            // is a lock we do not steal, because the holder may be a worker
-            // that has not written its pid yet.
+            // holder is gone.
             $holderPid = $this->readHolderPid();
 
             return $holderPid !== null
@@ -201,11 +199,11 @@ final class WorkerLock
     }
 
     /**
-     * Read the recorded holder pid from the lock file.
+     * Read the holder pid from the lock file.
      *
-     * A file that cannot be read yields no pid, and no pid means the lock
-     * is not ours to take over: the holder may be a worker that has taken
-     * the flock but not yet written its pid.
+     * A file that cannot be read yields no pid, and no pid stops the
+     * takeover: the holder may be a worker that has taken the flock but
+     * not yet written its pid.
      */
     private function readHolderPid(): ?int
     {
