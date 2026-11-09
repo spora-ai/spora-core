@@ -8,6 +8,7 @@ use Spora\Http\AgentApi\AgentApiChatActionController;
 use Spora\Http\AgentApi\AgentApiChatController;
 use Spora\Http\AgentApi\AgentApiKeyController;
 use Spora\Http\AgentApi\AgentApiMediaController;
+use Spora\Http\AgentApi\AgentApiSpeechController;
 use Spora\Http\Middleware\AgentApiKeyMiddleware;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
@@ -54,6 +55,8 @@ use Spora\OpenApi\RouteSpecCollector;
  *   POST   /api/v1/agent-api/chats/{chatId}/approve        — unblock approval
  *   POST   /api/v1/agent-api/chats/{chatId}/reject         — unblock approval
  *   POST   /api/v1/agent-api/chats/{chatId}/answer         — answer a question
+ *   POST   /api/v1/agent-api/transcribe            — transcribe an audio asset
+ *   POST   /api/v1/agent-api/transcribe-and-send   — transcribe, then send it
  *   POST   /api/v1/agent-api/media                 — upload a file
  *   GET    /api/v1/agent-api/media/{mediaId}       — read a file back
  *
@@ -92,6 +95,7 @@ final class AgentApiRouteDefinitions
         $chat = AgentApiChatController::class;
         $action = AgentApiChatActionController::class;
         $media = AgentApiMediaController::class;
+        $speech = AgentApiSpeechController::class;
 
         $r->addRoute('GET', '/api/v1/agent-api/chats', [$chat, 'index'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/chats', [$chat, 'store'], $bearer);
@@ -102,6 +106,8 @@ final class AgentApiRouteDefinitions
         $r->addRoute('POST', '/api/v1/agent-api/chats/{chatId}/approve', [$action, 'approve'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/chats/{chatId}/reject', [$action, 'reject'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/chats/{chatId}/answer', [$action, 'answer'], $bearer);
+        $r->addRoute('POST', '/api/v1/agent-api/transcribe', [$speech, 'transcribe'], $bearer);
+        $r->addRoute('POST', '/api/v1/agent-api/transcribe-and-send', [$speech, 'transcribeAndSend'], $bearer);
         $r->addRoute('POST', '/api/v1/agent-api/media', [$media, 'store'], $bearer);
         $r->addRoute('GET', '/api/v1/agent-api/media/{mediaId}', [$media, 'show'], $bearer);
     }

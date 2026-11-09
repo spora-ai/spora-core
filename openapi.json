@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-6-ga6233706"
+        "version": "0.32.0-10-gf63b03e8"
     },
     "servers": [
         {
@@ -4087,6 +4087,142 @@
                     },
                     "409": {
                         "description": "The chat is not awaiting input."
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/transcribe": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Transcribe an audio asset with this agent's driver",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "media_id"
+                                ],
+                                "properties": {
+                                    "media_id": {
+                                        "description": "The audio asset to transcribe.",
+                                        "type": "string"
+                                    },
+                                    "language": {
+                                        "description": "BCP-47 hint (e.g. \"en-US\"). Omit to auto-detect.",
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The transcript."
+                    },
+                    "404": {
+                        "description": "MEDIA_NOT_FOUND — no such asset on this agent."
+                    },
+                    "422": {
+                        "description": "INVALID_AUDIO or validation error"
+                    },
+                    "502": {
+                        "description": "SPEECH_PROVIDER_FAILED"
+                    },
+                    "503": {
+                        "description": "SPEECH_PROVIDER_UNAVAILABLE"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/agent-api/transcribe-and-send": {
+            "post": {
+                "tags": [
+                    "Agent-api"
+                ],
+                "summary": "Transcribe an audio asset and send the transcript to this agent",
+                "parameters": [],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "media_id"
+                                ],
+                                "properties": {
+                                    "media_id": {
+                                        "description": "The audio asset to transcribe.",
+                                        "type": "string"
+                                    },
+                                    "chat_id": {
+                                        "description": "Send into this chat instead of starting a new one.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "text": {
+                                        "description": "Appended after the transcript, separated by a blank line.",
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "language": {
+                                        "description": "BCP-47 hint (e.g. \"en-US\"). Omit to auto-detect.",
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "callback_url": {
+                                        "type": "string",
+                                        "format": "uri",
+                                        "nullable": true
+                                    },
+                                    "max_steps": {
+                                        "description": "New chat only.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "additional_steps": {
+                                        "description": "Existing chat only.",
+                                        "type": "integer",
+                                        "nullable": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "The transcript was queued as a message."
+                    },
+                    "404": {
+                        "description": "No such chat or media on this agent."
+                    },
+                    "409": {
+                        "description": "The chat is not in a state that can be continued."
+                    },
+                    "422": {
+                        "description": "INVALID_AUDIO or validation error"
+                    },
+                    "502": {
+                        "description": "SPEECH_PROVIDER_FAILED"
+                    },
+                    "503": {
+                        "description": "SPEECH_PROVIDER_UNAVAILABLE"
                     }
                 },
                 "security": [

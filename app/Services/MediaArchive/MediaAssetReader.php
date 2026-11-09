@@ -22,6 +22,12 @@ use Spora\Services\LocalAssetStore;
  * service has no auth context, so an admin caller passes `userId = null`
  * — same as the system-context contract used by `MediaArchiveService::list()`.
  *
+ * A null `userId` therefore means "the caller has authorised this id by
+ * another rule". The API-key surfaces use it that way: the key's reach
+ * ({@see \Spora\Services\ApiKeys\ApiKeyMediaAccess}) is wider than the
+ * predicate below, which cannot express an asset a plugin stored for the
+ * agent — such an asset carries no `user_id` at all.
+ *
  * Lives outside `MediaArchiveService` so that class stays under the
  * Sonar 20-method threshold (the class docstring explicitly carves out
  * the URL branch to {@see MediaArchiveUrlResolver} for the same reason).
