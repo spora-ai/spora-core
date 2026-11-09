@@ -36,7 +36,7 @@ const DAILY_9AM_CRON = '0 9 * * *';
 /**
  * @return array{0: WorkerRunCommand, 1: OrchestratorInterface, 2: Database}
  */
-function makeWorkerRunCommand(): array
+function makeWorkerRunCommand(?Paths $paths = null): array
 {
     Database::resetBootState();
     $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
@@ -72,10 +72,10 @@ function makeWorkerRunCommand(): array
         ->andReturn(new SettingsRegistry(new Paths(BASE_PATH)));
     $container->allows('get')->with(SettingsRepository::class)
         ->andReturn(new SettingsRepository(new Spora\Core\SecurityManager(random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES)), new SettingsRegistry(new Paths(BASE_PATH))));
-    // WorkerRunCommand now resolves WorkerReaper from the container (DI wiring
-    // shipped in Plan 2). The real container's factory wires the optional
-    // SubAgentServiceInterface as `null`; the test mock returns a fresh
-    // NullLogger-backed reaper so the existing sweep assertions stay in scope.
+    // WorkerRunCommand resolves WorkerReaper from the container. The real
+    // container's factory wires the optional SubAgentServiceInterface as
+    // `null`; the test mock returns a fresh NullLogger-backed reaper so the
+    // existing sweep assertions stay in scope.
     // `shouldIgnoreMissing` lets the mocked container accept any other lookup
     // the WorkerRunCommand may add later without each test needing a
     // per-call binding update.
@@ -93,7 +93,7 @@ function makeWorkerRunCommand(): array
         $container,
         $mercure,
         $notificationService,
-        new Paths(BASE_PATH),
+        $paths ?? new Paths(BASE_PATH),
         WorkerRuntimeMode::Server,
     );
 
@@ -629,20 +629,17 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
             'updated_at'      => date(DATETIME_FORMAT),
         ]);
 
-        // Intercept the Capsule connection to make the UPDATE fail after orchestrator succeeds.
-        // This simulates a crash between orchestrator->start() and the DB transaction commit.
         $pdo = Capsule::connection()->getRawPdo();
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-        // We'll use a sentinel to cause the second UPDATE to fail — the DONE update will succeed,
-        // but the insert of next PENDING will fail due to the transaction being rolled back.
-        // Actually, we can't easily inject failure mid-transaction in SQLite without a custom driver.
-        // Instead, verify the happy path: no CLAIMED entries remain after processing.
+        // A failure mid-transaction cannot be injected in SQLite without a
+        // custom driver, so this checks the happy path: the old entry is
+        // DONE, the next PENDING entry exists, and no CLAIMED entry is left
+        // behind.
         $processed = runProcessScheduledRuns($command);
 
         expect($processed)->toBe(1);
 
-        // No CLAIMED entries should remain — old entry is DONE, new entry is PENDING
         $claimedCount = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_CLAIMED)
@@ -756,7 +753,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $processor->process(new NullOutput());
 
-        // Old entry must be SKIPPED, not stuck CLAIMED
         $oldEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('due_at', WORKER_TEST_PAST_DUE_AT)
@@ -764,7 +760,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
         expect($oldEntry->completed_at)->not->toBeNull();
 
-        // A new PENDING row must exist for the next cron fire
         $nextEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
@@ -772,7 +767,6 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
         expect($nextEntry)->not->toBeNull();
         expect($nextEntry->due_at)->not->toBe(WORKER_TEST_PAST_DUE_AT);
 
-        // Recurring run must stay active and have its next_run_at advanced
         $run->refresh();
         expect((bool) $run->is_active)->toBeTrue();
         expect($run->next_run_at)->not->toBeNull();
@@ -826,20 +820,17 @@ describe('WorkerRunCommand processScheduledRuns', function (): void {
 
         $processor->process(new NullOutput());
 
-        // Old entry is SKIPPED
         $oldEntry = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->first();
         expect($oldEntry->status)->toBe(ScheduledRunNext::STATUS_SKIPPED);
 
-        // No orphan PENDING row was left behind
         $pendingCount = Capsule::table('scheduled_runs_next')
             ->where('scheduled_run_id', $run->id)
             ->where('status', ScheduledRunNext::STATUS_PENDING)
             ->count();
         expect($pendingCount)->toBe(0);
 
-        // Run is deactivated
         $run->refresh();
         expect((bool) $run->is_active)->toBeFalse();
     });
@@ -884,7 +875,6 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
             new Paths(BASE_PATH),
         );
 
-        // Create agent and task
         $authService = bootAuthLayer();
         $userId = $authService->register('worker-test@example.com', WORKER_TEST_PASSWORD, 'Workertest');
 
@@ -912,7 +902,6 @@ describe('WorkerQueueProcessor processQueuedTaskSync', function (): void {
         $ref = new ReflectionMethod($processor, 'processQueuedTaskSync');
         $ref->invokeArgs($processor, [$output, 1000, &$processed]);
 
-        // Task must be FAILED, not RUNNING
         $task->refresh();
         expect($task->status)->toBe('FAILED');
         expect($processed)->toBe(1);
@@ -928,7 +917,6 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $orchestrator = Mockery::mock(OrchestratorInterface::class);
         // tick() must NOT be called in --reap-only mode
         $orchestrator->shouldNotReceive('tick');
-        // start() must NOT be called either
         $orchestrator->shouldNotReceive('start');
 
         /** @var Mockery\MockInterface&MercurePublisherInterface $mercure */
@@ -990,10 +978,8 @@ describe('WorkerRunCommand --reap-only', function (): void {
         $ref = new ReflectionMethod($command, 'execute');
         $exitCode = $ref->invoke($command, $input, $output);
 
-        // Must exit cleanly
         expect($exitCode)->toBe(0);
 
-        // Task must still be QUEUED (not processed)
         $task = Task::first();
         expect($task->status)->toBe('QUEUED');
     });
@@ -1217,15 +1203,82 @@ describe('WorkerRunCommand mode flag validation', function (): void {
     });
 });
 
+describe('WorkerRunCommand — worker lock', function (): void {
+    beforeEach(function (): void {
+        $this->storageDir = sys_get_temp_dir() . '/spora-worker-lock-' . getmypid() . '-' . uniqid();
+        mkdir($this->storageDir, 0777, true);
+        // Paths::storage() resolves SPORA_STORAGE_DIR, so the worker lock
+        // lands in the temp dir instead of the repository's storage/.
+        $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir;
+        $this->lockFile = $this->storageDir . '/spora-worker.lock';
+    });
+
+    afterEach(function (): void {
+        unset($_SERVER['SPORA_STORAGE_DIR']);
+        foreach (glob($this->storageDir . '/*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($this->storageDir);
+    });
+
+    function invokeAcquireLock(WorkerRunCommand $command, Symfony\Component\Console\Output\BufferedOutput $output): bool
+    {
+        $ref = new ReflectionMethod($command, 'acquireLock');
+
+        return (bool) $ref->invoke($command, $output);
+    }
+
+    it('reports a live worker and does not take the lock', function (): void {
+        // The pid of this test process is alive, so the lock is not stale
+        // and must not be taken over.
+        $holderFd = holdWorkerLockFile($this->lockFile, getmypid());
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeFalse()
+            ->and($output->fetch())->toContain('Could not acquire the worker lock');
+
+        fclose($holderFd);
+    });
+
+    it('takes over a lock whose holder is gone', function (): void {
+        $holderFd = holdWorkerLockFile($this->lockFile, 4194304);
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeTrue()
+            ->and(trim((string) file_get_contents($this->lockFile)))->toBe((string) getmypid());
+
+        fclose($holderFd);
+    });
+
+    it('reports a lock file it cannot open', function (): void {
+        // Point the storage dir at a path that does not exist, so the lock
+        // file cannot be created.
+        $_SERVER['SPORA_STORAGE_DIR'] = $this->storageDir . '/missing';
+
+        [$command] = makeWorkerRunCommand(new Paths(BASE_PATH));
+        $output = new Symfony\Component\Console\Output\BufferedOutput();
+
+        $acquired = invokeAcquireLock($command, $output);
+
+        expect($acquired)->toBeFalse()
+            ->and($output->fetch())->toContain('Could not open the worker lock file');
+    });
+});
+
 describe('ScheduledRunProcessor substituteVariables', function (): void {
     /**
      * Invoke the private substituteVariables() method via reflection.
-     * Uses the already-booted DB (do NOT reset/boot here — that would discard
-     * the caller-side Agent/User data).
      */
     function invokeSubstituteVariables(string $template, array $variables, ?Agent $agent = null): string
     {
-        // Make sure DB is booted (it's already booted by the test's beforeEach).
         Database::resetBootState();
         $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => SQLITE_MEMORY]));
         $db->boot();

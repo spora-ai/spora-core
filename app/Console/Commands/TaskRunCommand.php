@@ -26,7 +26,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
 /**
- * Spawned via proc_open() by WorkerRunCommand when running in --daemon --workers mode.
+ * Spawned via proc_open() by WorkerRunCommand in --daemon mode.
  * Each invocation is a fresh PHP interpreter — no shared static state.
  *
  * Usage: php bin/spora task:run {taskId}
@@ -131,13 +131,12 @@ final class TaskRunCommand extends Command
 
         // Notification is sent by Orchestrator.tick() — do not duplicate here.
         try {
-            // One LLM step per iteration, so the loop runs only while the
-            // task is RUNNING. A task that pauses for approval
-            // (PENDING_APPROVAL) is quiescent — tick() returns without
-            // touching it — and the approval path re-queues the task, so
-            // the daemon picks it up with a fresh child. Continuing to loop
-            // here would spin a core at 100% for as long as the task waits
-            // for a human.
+            // The loop runs only while the task is RUNNING. A task that
+            // pauses for approval (PENDING_APPROVAL) is quiescent —
+            // tick() returns without touching it — and the approval path
+            // re-queues the task, so the daemon picks it up with a fresh
+            // child. Continuing to loop here would spin a core at 100% for
+            // as long as the task waits for a human.
             while ($task->status === 'RUNNING') {
                 $orchestrator->tick($task->id);
                 $task->refresh();
@@ -186,7 +185,7 @@ final class TaskRunCommand extends Command
                 agentService: $this->container->get(\Spora\Services\AgentServiceInterface::class),
                 // Wire SubAgentService so the worker-mode batch-boundary hook
                 // (executeApprovedPendingToolsForTask → maybeResumeParentFromBatchBoundary)
-                // and the per-child hook (completeResponse → maybeResumeParentForChild)
+                // and the per-child hook (completeTaskWithResponse → maybeResumeParentForChild)
                 // can wake up a parent in AWAITING_SUB_AGENTS once every spawned
                 // sub-agent has reached a terminal state. Without this wiring
                 // both hooks short-circuit on the null guard and the parent

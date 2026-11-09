@@ -46,7 +46,7 @@ This is the operator-facing CLI for installing, migrating, seeding, running work
 - `db:reset` — Wipe the database (SQLite file or MySQL DROP+CREATE) and clear the schema stamp
 - `db:seed` — Seed database with sample data
 - `worker:run` — Run the async worker as a daemon (the default with no flag)
-- `worker:run --once [--include-queue]` — One pass over the due scheduled runs and, with `--include-queue`, the queued task backlog; then exit. The cron mode
+- `worker:run --once [--include-queue]` — One pass: claim at most one due scheduled run and, with `--include-queue`, process at most one queued task; then exit. Remaining due runs and queued tasks wait for a later invocation, so the cron frequency has to keep up with the backlog.
 - `worker:run --reap-only` — Reap orphaned RUNNING tasks once, then exit
 - `spora:openapi [--output=openapi.json] [--check]` — Generate / drift-check the OpenAPI spec
 - `spora:audit-operation-overrides` — Read-only report of tool-config rows whose `tool_class` no longer resolves

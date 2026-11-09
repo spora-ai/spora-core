@@ -30,8 +30,6 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Tests\Fixtures\StubOutputTool;
 
-// Helpers
-
 defined('SQLITE_MEMORY') || define('SQLITE_MEMORY', ':memory:');
 const PLUGINS_PATH = '/plugins';
 const TEST_PASSWORD_RUN = 'Password1!';
@@ -531,7 +529,6 @@ describe('TaskRunCommand — orchestrator integration', function (): void {
             new OrchestratorConfig(),
         );
 
-        // Run one tick — task should complete.
         $orchestrator->tick($task->id);
         $task->refresh();
 
@@ -740,7 +737,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
         $this->authService = bootAuthLayer();
         $this->userId = $this->authService->register('toolconfig@example.com', TEST_PASSWORD_RUN, 'ToolConfig');
 
-        // Create a global LLM config
         $this->llmConfig = LLMDriverConfiguration::create([
             'principal_id' => null,
             'name'          => TEST_GLOBAL_CONFIG_NAME,
@@ -752,7 +748,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'max_tokens_output' => 4096,
         ]);
 
-        // Set up ToolConfigService with TestTool
         $key = random_bytes(SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
         $this->security = new SecurityManager($key);
         $this->toolConfigService = new ToolConfigService(
@@ -761,7 +756,7 @@ describe('TaskRunCommand — tool config injection', function (): void {
             [Tests\Fixtures\TestTool::class],
         );
 
-        // Set up LLMConfigService (required by Orchestrator.getTemperatureFromSettings)
+        // Set up LLMConfigService (required by LlmConfigResolver::getTemperatureFromSettings)
         $this->llmConfigService = new LLMConfigService(
             $this->security,
             [
@@ -770,7 +765,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             ],
         );
 
-        // Set up LLM config for the agent
         $this->agent = Agent::create([
             'principal_id' => createUserPrincipalPublic($this->userId),
             'name'                 => 'ToolConfigAgent',
@@ -779,7 +773,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'is_active'            => true,
         ]);
 
-        // Enable TestTool for the agent
         AgentTool::create([
             'agent_id'   => $this->agent->id,
             'tool_class' => Tests\Fixtures\TestTool::class,
@@ -793,7 +786,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
             'allowed_target_agents'       => ['agent-1', 'agent-2'],
         ]);
 
-        // Use reflection to call private buildToolDefinitions
         $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(
@@ -836,7 +828,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
 
         $orchestrator->tick($task->id);
 
-        // Verify the email tool description includes the config block
         $reflection = new ReflectionClass($orchestrator);
         $method = $reflection->getMethod('buildToolDefinitions');
         $defs = $method->invoke($orchestrator, [Tests\Fixtures\TestTool::class], $this->agent->id, new Spora\Services\PrincipalContext($this->agent->principal_id, 'user', $this->userId, $this->userId));
@@ -852,8 +843,6 @@ describe('TaskRunCommand — tool config injection', function (): void {
     })->afterEach(fn() => Database::resetBootState());
 
     it('buildToolDefinitions shows (not configured) for unset exposeToLlm settings', function (): void {
-        // No settings stored — all exposeToLlm fields should show as (not configured)
-
         $emailTool = new Tests\Fixtures\TestTool();
         $capturingDriver = Mockery::mock(LLMDriverInterface::class);
         $capturingDriver->allows('complete')->andReturn(new LLMResponse(
