@@ -36,7 +36,16 @@ final class WorkerLock
 
     private ?int $takenOverFromPid = null;
 
-    public function __construct(private readonly string $lockFile) {}
+    /**
+     * `$procRoot` is where the pid directories live. It is a parameter
+     * because the `/proc` fallback — the only liveness check on a build
+     * without `posix_kill()` — has to be exercisable where `/proc` cannot
+     * be read.
+     */
+    public function __construct(
+        private readonly string $lockFile,
+        private readonly string $procRoot = '/proc',
+    ) {}
 
     /**
      * Take the lock, replacing one whose recorded holder is gone.
@@ -61,7 +70,7 @@ final class WorkerLock
             $holderPid = $this->readHolderPid();
 
             return $holderPid !== null
-                && !self::isProcessAlive($holderPid)
+                && !$this->isProcessAlive($holderPid)
                 && $this->replaceStaleLock($holderPid);
         } finally {
             flock($mutex, LOCK_UN);
@@ -69,6 +78,12 @@ final class WorkerLock
         }
     }
 
+    /**
+     * Unlock and close the descriptor.
+     *
+     * The flock lives on the descriptor, so unlocking without closing
+     * would keep the lock held for as long as the process runs.
+     */
     public function release(): void
     {
         if ($this->fd === null) {
@@ -185,6 +200,13 @@ final class WorkerLock
         file_put_contents($this->lockFile, (string) getmypid());
     }
 
+    /**
+     * Read the recorded holder pid from the lock file.
+     *
+     * A file that cannot be read yields no pid, and no pid means the lock
+     * is not ours to take over: the holder may be a worker that has taken
+     * the flock but not yet written its pid.
+     */
     private function readHolderPid(): ?int
     {
         if (!is_file($this->lockFile)) {
@@ -208,11 +230,23 @@ final class WorkerLock
      * does not exist (ESRCH) and for one owned by another user (EPERM).
      * The second means the process is there, so the lock is not ours to
      * take.
+     *
+     * Without `posix_kill()` the answer comes from `/proc`. A `/proc` that
+     * cannot be read leaves the question open, and the caller reads "not
+     * alive" as "safe to take the lock over" — so an unknown liveness
+     * counts as alive and the lock is left alone.
      */
-    private static function isProcessAlive(int $pid): bool
+    private function isProcessAlive(int $pid): bool
     {
         if (!function_exists('posix_kill')) {
-            return is_dir('/proc/' . $pid);
+            // `/proc/self` exists wherever procfs is mounted, so its
+            // absence means there is no procfs to read a pid directory
+            // from.
+            if (!is_dir($this->procRoot . '/self')) {
+                return true;
+            }
+
+            return is_dir($this->procRoot . '/' . $pid);
         }
 
         return posix_kill($pid, 0) || posix_get_last_error() === self::EPERM;

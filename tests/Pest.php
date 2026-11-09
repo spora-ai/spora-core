@@ -150,6 +150,40 @@ function holdWorkerLockFile(string $lockFile, int $holderPid): mixed
 }
 
 /**
+ * Acquire a worker lock in a process that has no `posix_kill()`.
+ *
+ * The function is disabled rather than stubbed because the liveness check
+ * it selects is a property of the build, not of the call.
+ *
+ * @return array{acquired: bool, takenOverFrom: int|null}
+ */
+function acquireWorkerLockWithoutPosix(string $lockFile, string $procRoot): array
+{
+    $script = sprintf(
+        'require %s; $lock = new Spora\Console\Worker\WorkerLock($argv[1], $argv[2]);'
+        . ' echo json_encode(["acquired" => $lock->acquire(), "takenOverFrom" => $lock->takenOverFrom()]);',
+        var_export(BASE_PATH . '/vendor/autoload.php', true),
+    );
+
+    $process = proc_open(
+        [PHP_BINARY, '-d', 'disable_functions=posix_kill', '-r', $script, $lockFile, $procRoot],
+        [1 => ['pipe', 'w']],
+        $pipes,
+    );
+
+    $output = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    proc_close($process);
+
+    $result = json_decode($output, true);
+    if (!is_array($result)) {
+        throw new RuntimeException('The worker lock subprocess returned no result: ' . $output);
+    }
+
+    return $result;
+}
+
+/**
  * Invoke a controller method through the middleware pipeline (for testing).
  * This mimics what Router::handleFound() does at runtime.
  *

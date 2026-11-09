@@ -91,6 +91,47 @@ describe('WorkerLock', function (): void {
         fclose($holderFd);
     });
 
+    it('leaves a lock alone when the holder cannot be checked', function (): void {
+        // Without `posix_kill()` the only liveness check left is the pid
+        // directory under procfs. Where procfs cannot be read the answer
+        // is unknown, and unknown must not be read as "dead" — a second
+        // worker would then steal a lock a live worker still holds.
+        $holderFd = holdWorkerLockFile($this->lockFile, 4194304);
+        $procRoot = $this->storageDir . '/proc';
+        mkdir($procRoot);
+
+        try {
+            $result = acquireWorkerLockWithoutPosix($this->lockFile, $procRoot);
+
+            expect($result['acquired'])->toBeFalse()
+                ->and($result['takenOverFrom'])->toBeNull()
+                ->and(trim((string) file_get_contents($this->lockFile)))->toBe('4194304');
+        } finally {
+            fclose($holderFd);
+            @rmdir($procRoot);
+        }
+    });
+
+    it('takes over a lock whose holder is gone when procfs is readable', function (): void {
+        // The same fallback, with a procfs to read: the holder's pid has
+        // no directory there, so the holder is gone and the lock is stale.
+        $holderFd = holdWorkerLockFile($this->lockFile, 4194304);
+        $procRoot = $this->storageDir . '/proc';
+        mkdir($procRoot);
+        mkdir($procRoot . '/self');
+
+        try {
+            $result = acquireWorkerLockWithoutPosix($this->lockFile, $procRoot);
+
+            expect($result['acquired'])->toBeTrue()
+                ->and($result['takenOverFrom'])->toBe(4194304);
+        } finally {
+            fclose($holderFd);
+            @rmdir($procRoot . '/self');
+            @rmdir($procRoot);
+        }
+    });
+
     it('does not steal a lock whose holder cannot be identified', function (): void {
         // The holder may be a worker that has taken the flock but not yet
         // written its pid into the file.
