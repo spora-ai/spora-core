@@ -123,6 +123,7 @@ final class ScopedApiGroupController
         properties: [
             new OA\Property(property: 'name', type: 'string'),
             new OA\Property(property: 'description', type: 'string'),
+            new OA\Property(property: 'information', type: 'string'),
         ],
     ))]
     #[OA\Response(response: 200, description: 'The group was updated.')]
@@ -224,7 +225,7 @@ final class ScopedApiGroupController
      * "set to nothing" are different edits.
      *
      * @param array<string, mixed> $body
-     * @return array{name?: string, description?: ?string}|JsonResponse
+     * @return array{name?: string, description?: ?string, information?: ?string}|JsonResponse
      */
     private function groupChanges(array $body): array|JsonResponse
     {
@@ -243,6 +244,11 @@ final class ScopedApiGroupController
         if (array_key_exists('description', $body)) {
             $description = $body['description'] === null ? null : trim((string) $body['description']);
             $changes['description'] = $description === '' ? null : $description;
+        }
+
+        if (array_key_exists('information', $body)) {
+            $information = $body['information'] === null ? null : trim((string) $body['information']);
+            $changes['information'] = $information === '' ? null : $information;
         }
 
         return $changes;

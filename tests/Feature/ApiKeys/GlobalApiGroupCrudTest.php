@@ -116,6 +116,28 @@ describe('group CRUD on the global surface', function (): void {
         expect(Group::findOrFail($group['groupId'])->description)->toBe('A new description');
     });
 
+    it('writes the group information the payload names', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('global-information');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-information');
+
+        $update = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiGroupController::class,
+            'update',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GLOBAL_PREFIX . '/groups/1',
+                ['information' => "## Address\nMusterstraße 1"],
+                'PATCH',
+            ),
+            [$group['groupId']],
+        );
+
+        expect($update->getStatusCode())->toBe(200);
+        expect(Group::findOrFail($group['groupId'])->information)->toBe("## Address\nMusterstraße 1");
+    });
+
     it('refuses to delete a group that still owns agents', function (): void {
         $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
         $group = AgentApiTestSupport::seedGroup('global-delete-agents');
