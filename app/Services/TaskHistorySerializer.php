@@ -96,8 +96,9 @@ final class TaskHistorySerializer
      * Build the wire payload for a single history row, including the
      * sanitised content blocks and (when present) a sanitised usage subobject.
      *
-     * Reasoning is reachable only via `content_blocks[].type === "thinking"`.
-     * The legacy flat `reasoning` column was dropped from `task_history` in
+     * Reasoning is reachable only via `content_blocks[].type` — `"thinking"`
+     * for Anthropic, `"reasoning"` for the OpenAI Responses driver. The
+     * legacy flat `reasoning` column was dropped from `task_history` in
      * favour of structured content blocks; clients that need reasoning must
      * filter the blocks list.
      *

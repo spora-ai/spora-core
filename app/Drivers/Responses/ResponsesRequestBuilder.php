@@ -254,7 +254,8 @@ final class ResponsesRequestBuilder
      * Responses *attempts* strict mode when the flag is omitted and falls
      * back silently when it cannot, so the flag is always sent: `true`
      * only for a schema that is already strict-compatible, `false` for
-     * the rest — which is what the Chat Completions driver sends today.
+     * the rest. The Chat Completions driver sends no such flag — it
+     * names the schema and lets the provider decide.
      *
      * @param array<string, mixed> $schema
      */

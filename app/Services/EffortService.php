@@ -103,12 +103,13 @@ final class EffortService
      *
      * Each refusal names the reason it is refused for: an agent with no
      * configuration is fixed in the agent's LLM settings, a driver that
-     * cannot be built in the configuration that names it, and a driver
-     * with no effort for this model in the model.
+     * cannot be built in the configuration that names it, a driver with
+     * no effort for this model in the model, and a level outside the set
+     * the driver declares.
      *
-     * A null agent is not an answer: the caller could not resolve the
-     * agent the request is for, and the request is refused for that
-     * reason further up.
+     * A null agent means the caller could not resolve the agent the
+     * request is for. There is no level set to check the level against,
+     * so the level is left alone here.
      *
      * @throws EffortValidationException
      */
