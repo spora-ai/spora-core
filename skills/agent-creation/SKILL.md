@@ -270,6 +270,8 @@ Two things to get right, both of which fail silently if you assume the opposite:
 
 A multi-select takes an array, but the element type depends on the setting: `allowed_skills` is `string[]` (names), while `allowed_target_agents` is `int[]` (agent ids) — send `[3, 4]`, not `["3", "4"]`. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`. A `type: 'password'` setting is refused outright and always will be: a tool call must not be able to write a credential, because the value would land in the call's own recorded arguments. Credentials stay operator-only, through the settings panel.
 
+**Some providers wrap a nested array in `{"item": …}`.** When that happens the list you sent arrives as an object, and the tool unwraps it before it judges it — both `{item: [...]}` and the one-element `{item: "name"}`. So a write that lands is a write; do not keep re-sending a corrected array because the *first* attempt was refused. If a refusal names a shape you did not send (`got an object with the key(s) item`), read that part: it says what the provider handed over.
+
 Operating the tool once you already have it — including granting yourself a skill — is the **agent-tool** skill. This section covers only the new-agent flow.
 
 #### Delta syntax
@@ -315,11 +317,11 @@ The slim `create_agent` + `configure_tools(agent_id?)` flow fixes these directly
 | `allow_followup must be a boolean` | Sent the string `"true"` | Send `allow_followup: true` (real bool, not string) |
 | `\`template_id\` is no longer an identifier` | Sent `template_id: "weather-agent"` to `read_agent`, `configure_tools`, `update_agent`, or `list_agents` | Use the numeric `agent_id` you got from `create_agent` (or `list_agents`) |
 | `\`agent_id\` must be a positive integer` | Sent zero, a string, or omitted entirely + couldn't fall back | Use a numeric `agent_id`; if omitted is intended, the agent must exist as the calling agent |
-| `configure_tools: operations[0][item]` | Sent inner arrays wrapped as `{item: [...]}` (an OpenAI-tools serialization quirk) | Send the array literally: `[{name: "now", enabled: true}]` — the tool auto-unwraps the `{item: …}` quirk defensively, but plain arrays are preferred |
+| `configure_tools: operations[N] must be an array of \`{name, enabled?, auto_approve?}\`` | The operations list arrived as an object rather than a list — usually the provider's `{item: …}` envelope around it | Send `[{name: "now", enabled: true}]`. The envelope is unwrapped for you, in both forms: `{item: [...]}` and the one-element `{item: {...}}` |
 | `configure_tools: tool entry #N must be an object` | Sent the tool entry as a string or array | Wrap each entry in `{...}` |
 | `configure_tools: settings[0] 'X' is not a setting on <FQCN>` | Misspelled or invented a setting key | Use a key the tool declares; the refusal lists the valid ones |
-| `configure_tools: settings[0] 'allowed_skills' must be an array of strings` | Sent a multi-select as a string, or as an array of objects | Send `["time-arithmetic"]`, not `"time-arithmetic"` or `[{name: "..."}]` |
-| `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
+| `configure_tools: settings[0] 'allowed_skills' must be an array of strings, got <what arrived>` | Sent a multi-select as a string, or as an array of objects. The refusal names what arrived — read that part | Send `["time-arithmetic"]`, not `"time-arithmetic"` or `[{name: "..."}]` |
+| `configure_tools: settings[0] 'allowed_target_agents' must be an array of agent ids, got <what arrived>` | Sent an agent-resolved multi-select as strings | Send `[3, 4]` — this one is stored as `int[]`, unlike `allowed_skills` |
 | `configure_tools: settings[0] 'X' is a credential` | Tried to write a `type: 'password'` setting | Operator-only, through the settings panel. This is not a bug to work around |
 | `configure_tools: settings[0] 'allowed_skills' names 'X', which is not available to this principal` | Named a skill the current principal cannot see | Read `get_available_tools` → `skills.visible` and pick from it |
 | `configure_tools: tool entry #N 'enabled' must be true or false` | Sent `"yes"` / `2` / `null` — nothing that names a flag | Send `true` / `false`, `"true"` / `"false"`, or `0` / `1`. Quoted scalars are read as the value they name, so `"false"` really does disable |

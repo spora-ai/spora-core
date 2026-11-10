@@ -186,6 +186,13 @@ allowlist, through the `agent` tool:
 
 Omit `agent_id` to target **yourself**. Supply it to configure a different agent.
 
+**The list may arrive wrapped.** Some providers hand over an array that sits
+inside a `tools[]` entry as `{"item": [...]}` instead of as a plain list, and
+the model cannot send the flat shape on request — a retry gets the same
+wrapper. The tool unwraps it before it judges the write, so the grant lands.
+Do not conclude from a refusal that the list was rejected for its *contents*
+unless the refusal names an entry.
+
 **This replaces the whole list. It does not append.** Whatever you send becomes the
 complete `allowed_skills` for that agent. To add one skill, read the current list first
 and send it back with the addition — otherwise you silently drop everything that was
@@ -248,6 +255,7 @@ a *different* agent, note that you have no way to read that agent's current list
 | `tool_class` guessed from the tool's display name | Refused. Get the FQCN from `get_available_tools`. The text payload carries `tool_class` and `display_name`; `tool_name` exists only in the result's `data` field, which you do not read. |
 | `allowed_skills` sent as a comma-joined string | Refused. It is a JSON array. |
 | `allowed_target_agents` sent as `["3","4"]` | Refused. That multi-select is stored as `int[]` — send `[3, 4]`. `allowed_skills` is the opposite: `string[]`. |
+| A nested array arriving as `{"item": […]}` | Unwrapped for you, in both forms. Some providers wrap every array nested inside a `tools[]` entry, and the model cannot stop them, so the write lands either way. |
 | Any `type: 'password'` setting | Refused, always. A credential is the one thing a tool call may not write: the value would land in the call's own recorded arguments, so you could read back the key you just set. Credentials are operator-only. |
 | A `type: 'select'` value outside the options the tool declares | Refused, with the legal option keys listed. An unlisted value is not rendered by the settings form's dropdown at all, so the operator's next save overwrites it with the default — "landed, then reverted". Read the legal values off the refusal. |
 | Replacing another agent's `allowed_skills` | Allowed, and blind — you cannot read their current list. Ask the operator instead. |

@@ -16,9 +16,6 @@ use Spora\Tools\ValueObjects\ToolResult;
  * through an LLM-facing call was the root cause of the task #46
  * failures (too many nested keys, too easy to put `name` inside
  * `agent{}` or send `required_plugins` as a bare value).
- *
- * The static `unwrapSingleItemArray()` is shared with `ConfigurePlanner`
- * (defensive unwrap of the OpenAI assistant `{item: [...]}` quirk).
  */
 final class SlimPayloadValidator
 {
@@ -136,34 +133,6 @@ final class SlimPayloadValidator
             return true;
         }
         return self::allStrings($value);
-    }
-
-    /**
-     * Defensive unwrap for the OpenAI assistant tool-call channel,
-     * which can serialise a single-element array as `{"item": [...]}`
-     * instead of `[...]`. Without this unwrap the LLM sees a
-     * confusing "must be an array" error on payloads that clearly
-     * were arrays.
-     *
-     * Fires only on the unambiguous wrap shape: non-list assoc with
-     * one key called `item` whose value is itself an array. Anything
-     * else (multi-key objects, regular lists, scalars, `{item:
-     * "scalar"}`) passes through untouched so legitimate payloads
-     * survive.
-     *
-     * @param  mixed        $value
-     * @return mixed
-     */
-    public static function unwrapSingleItemArray(mixed $value): mixed
-    {
-        if (!is_array($value)) {
-            return $value;
-        }
-        $keys = array_keys($value);
-        if ($keys === ['item'] && is_array($value['item'] ?? null)) {
-            return $value['item'];
-        }
-        return $value;
     }
 
     private function validateMaxSteps(array $raw): ?ToolResult
