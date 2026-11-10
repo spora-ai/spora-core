@@ -209,7 +209,13 @@ final class ModelFamily
         $version = self::claudeVersion($id);
         if ($version === null) {
             // No numeric component at all: the id names the current
-            // generation, which takes every level.
+            // generation, which takes every level. Anthropic's effort
+            // table lists the `claude-mythos-preview` alias with `max`
+            // but not with `xhigh`, and an id carries no way to tell
+            // that alias from `claude-latest` — so the rule does not
+            // encode it, because a provider error on one preview alias
+            // costs less than withholding `xhigh` from the current
+            // generation.
             return self::ANTHROPIC_EFFORT_LEVELS;
         }
 

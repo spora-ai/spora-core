@@ -17,6 +17,7 @@ use Spora\Models\LLMDriverConfiguration;
 use Spora\Services\EffortService;
 use Spora\Services\LLMConfigPreferences;
 use Spora\Services\LLMConfigService;
+use Symfony\Component\HttpClient\MockHttpClient;
 
 /**
  * The levels an agent's effective driver can express, and the refusal of a
@@ -28,13 +29,20 @@ use Spora\Services\LLMConfigService;
  */
 afterEach(fn() => \Spora\Core\Database::resetBootState());
 
-test('the declared levels are the ones the endpoint reports', function (): void {
+test('the reported levels are the ones the driver declares', function (): void {
     [$service, $agent] = effortServiceFixture();
 
     $described = $service->describe($agent);
 
-    expect($service->declaredLevels($agent))
-        ->toBe(array_column($described['levels'], 'value'))
+    $driver = new AnthropicCompatibleDriver(
+        apiKey: 'test',
+        model: 'claude-sonnet-5-5',
+        baseUrl: 'https://example.invalid',
+        httpClient: new MockHttpClient(),
+    );
+
+    expect(array_column($described['levels'], 'value'))
+        ->toBe(array_keys($driver->effortLevels()))
         ->and($described['supported'])->toBeTrue();
 });
 
@@ -66,16 +74,14 @@ test('a level the driver does not offer is refused', function (): void {
     $this->fail('Expected an EffortValidationException.');
 });
 
-test('a driver that cannot express an effort refuses every level', function (): void {
+test('a driver that declares no level refuses every level', function (): void {
     [$service, $agent] = effortServiceFixture(EffortlessDriver::class);
-
-    expect($service->declaredLevels($agent))->toBe([]);
 
     try {
         $service->assertLevel('high', $agent);
     } catch (EffortValidationException $e) {
         expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
-            ->and($e->getMessage())->toContain('cannot express a reasoning effort');
+            ->and($e->getMessage())->toContain('cannot express a reasoning effort for this model');
 
         return;
     }
@@ -86,13 +92,11 @@ test('a driver that cannot express an effort refuses every level', function (): 
 test('a model that takes no effort refuses every level', function (): void {
     [$service, $agent] = effortServiceFixture(AnthropicCompatibleDriver::class, 'claude-sonnet-4-5-20250929');
 
-    expect($service->declaredLevels($agent))->toBe([]);
-
     try {
         $service->assertLevel('high', $agent);
     } catch (EffortValidationException $e) {
         expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
-            ->and($e->getMessage())->toContain('cannot express a reasoning effort');
+            ->and($e->getMessage())->toContain('cannot express a reasoning effort for this model');
 
         return;
     }
@@ -108,6 +112,21 @@ test('an agent with no LLM configuration is told that, and not that its driver c
     } catch (EffortValidationException $e) {
         expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
             ->and($e->getMessage())->toContain('no LLM configuration');
+
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
+});
+
+test('a driver that cannot be built is told that, and not that it cannot reason', function (): void {
+    [$service, $agent] = effortServiceFixtureWithMissingDriver();
+
+    try {
+        $service->assertLevel('high', $agent);
+    } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
+            ->and($e->getMessage())->toContain('could not be resolved');
 
         return;
     }
@@ -217,6 +236,50 @@ function effortServiceFixture(
 }
 
 /**
+ * An agent whose configuration names a driver class nobody ships.
+ *
+ * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
+ */
+function effortServiceFixtureWithMissingDriver(): array
+{
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+
+    $config = LLMDriverConfiguration::create([
+        'principal_id' => null,
+        'name' => 'Effort Service Config Without Driver',
+        'driver_class' => 'Spora\\Drivers\\RemovedDriver',
+        'settings' => json_encode([
+            'api_key' => 'test',
+            'model' => 'gpt-4o',
+            'base_url' => 'https://example.invalid',
+        ]),
+        'is_global' => true,
+        'is_default' => true,
+    ]);
+
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'name' => 'Effort Service Agent Without Driver',
+        'llm_driver_config_id' => $config->id,
+        'max_steps' => 10,
+        'is_active' => true,
+    ]);
+
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $llmConfigService = new LLMConfigService($security, [AnthropicCompatibleDriver::class]);
+
+    return [
+        new EffortService(
+            new LLMConfigPreferences(),
+            $llmConfigService,
+            new DriverFactory(new NullLogger(), $llmConfigService, 60),
+        ),
+        $agent,
+    ];
+}
+
+/**
  * An agent with no effective configuration at all.
  *
  * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
@@ -248,8 +311,8 @@ function effortServiceFixtureWithoutConfiguration(): array
 }
 
 /**
- * A driver that cannot express a reasoning effort — the shape of every
- * driver that does not implement the capability.
+ * A driver that declares no effort level — the shape of a driver with no
+ * effort capability, and of a driver whose model takes none.
  */
 final class EffortlessDriver extends AbstractCompatibleDriver
 {

@@ -57,41 +57,36 @@ final class EffortService
     }
 
     /**
-     * The levels the configuration's driver can express, or none.
+     * The levels the configuration's driver declares, or none.
      *
      * A driver that does not speak effort, and one that speaks it without
      * naming a level, both leave the agent without a picker.
      *
-     * @return array<string, string>
+     * @return list<string>
      */
     private function supportedLevels(LLMDriverConfiguration $config): array
     {
         $driver = $this->driverFor($config);
 
+        if ($driver === null) {
+            return [];
+        }
+
+        return $this->levelsOf($driver);
+    }
+
+    /**
+     * The levels a driver declares.
+     *
+     * @return list<string>
+     */
+    private function levelsOf(LLMDriverInterface $driver): array
+    {
         if (!$driver instanceof EffortAwareDriverInterface) {
             return [];
         }
 
-        return $driver->effortLevels();
-    }
-
-    /**
-     * The canonical levels the agent's effective driver can express.
-     *
-     * The same resolution {@see self::describe()} uses, so the levels a
-     * request is refused against are the levels the client was told about.
-     *
-     * @return list<string>
-     */
-    public function declaredLevels(Agent $agent): array
-    {
-        $config = $this->preferences->getEffectiveConfigForAgent($agent);
-
-        if ($config === null) {
-            return [];
-        }
-
-        return array_keys($this->supportedLevels($config));
+        return array_keys($driver->effortLevels());
     }
 
     /**
@@ -106,10 +101,11 @@ final class EffortService
      * A level the driver *does* offer is not checked any further: the
      * provider validates the level against the model it is talking to.
      *
-     * An agent with no configuration at all is a different refusal from a
-     * driver that cannot express an effort, and the message says which
-     * one it is: the first is fixed in the agent's LLM settings, the
-     * second in the driver.
+     * Each refusal names the reason it is refused for, because the three
+     * are fixed in three different places: an agent with no configuration
+     * is fixed in the agent's LLM settings, a driver that cannot be built
+     * in the configuration that names it, and a driver with no effort for
+     * this model in the model.
      *
      * A null agent is not an answer: the caller could not resolve the
      * agent the request is for, and the request is refused for that
@@ -132,7 +128,16 @@ final class EffortService
             );
         }
 
-        $declared = array_keys($this->supportedLevels($config));
+        $driver = $this->driverFor($config);
+
+        if ($driver === null) {
+            throw new EffortValidationException(
+                sprintf('effort "%s" cannot be sent: this agent\'s LLM driver could not be resolved.', $level),
+                EffortValidationException::CODE_UNSUPPORTED,
+            );
+        }
+
+        $declared = $this->levelsOf($driver);
 
         if (in_array($level, $declared, true)) {
             return;
@@ -140,7 +145,7 @@ final class EffortService
 
         if ($declared === []) {
             throw new EffortValidationException(
-                sprintf('effort "%s" is not offered by this agent\'s LLM driver: it cannot express a reasoning effort.', $level),
+                sprintf('effort "%s" is not offered by this agent\'s LLM driver: it cannot express a reasoning effort for this model.', $level),
                 EffortValidationException::CODE_UNSUPPORTED,
             );
         }
@@ -158,13 +163,13 @@ final class EffortService
      * default the model does not take is the model's own default —
      * reporting it would promise a level the request never carries.
      *
-     * @param array<string, string> $levels
+     * @param list<string> $levels
      */
     private function declaredDefault(LLMDriverConfiguration $config, array $levels): ?string
     {
         $default = $this->llmConfigService->defaultEffort($config);
 
-        if ($default === null || !array_key_exists($default, $levels)) {
+        if ($default === null || !in_array($default, $levels, true)) {
             return null;
         }
 
@@ -194,7 +199,7 @@ final class EffortService
      * does not name falls back to its canonical value, so a driver that
      * adds a level before it adds a label still shows something readable.
      *
-     * @param  array<string, string> $levels canonical level => provider wire value
+     * @param  list<string> $levels
      * @return list<array{value: string, label: string}>
      */
     private function labelled(string $driverClass, array $levels): array
@@ -202,7 +207,7 @@ final class EffortService
         $options = $this->effortOptions($driverClass);
 
         $labelled = [];
-        foreach (array_keys($levels) as $level) {
+        foreach ($levels as $level) {
             $labelled[] = [
                 'value' => $level,
                 'label' => $options[$level] ?? $level,
