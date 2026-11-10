@@ -903,6 +903,7 @@ final class ContainerDefinitions
                 return new UserService(
                     $c->get(PrincipalService::class),
                     $c->get(UserPictureService::class),
+                    $c->get(PrincipalLocationService::class),
                 );
             },
         ];
