@@ -24,7 +24,7 @@ final readonly class UsageDecision
         public string $scope = '',
     ) {}
 
-    /** Only a hard decision stops a run; a soft one is recorded and the call proceeds. */
+    /** Only a hard decision stops a run; a soft one lets the call proceed, and the core records neither. */
     public function isHard(): bool
     {
         return $this->mode === self::MODE_HARD;
