@@ -82,6 +82,9 @@ final class User extends Model
      * so the accessor walks the user's user-principal. A group-principal's
      * locations belong to the group, not to the user who happens to be in
      * it.
+     *
+     * The service layer reads them through `PrincipalLocationService`; this
+     * is the model-level path for a caller that holds a `User`.
      */
     protected function locations(): Attribute
     {

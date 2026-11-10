@@ -20,8 +20,10 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  *   membership are 404-ed so existence-hiding is preserved; they
  *   manage members via the admin-panel overlay, which has its own
  *   dedicated read rule in `GroupMemberController::callerCanReadGroup()`.
- * - `callerCanManageGroup()` keeps the global-admin bypass for write
- *   access on the group-settings pages.
+ * - `callerCanManageGroup()` keeps the global-admin bypass, but it only
+ *   decides on the group row: the group-settings pages run the
+ *   membership-only read gate first, so a global admin who is not a
+ *   member never reaches the write gate there.
  *
  * The `resolve*()` / `requireCurrentUserIdOrFail()` /
  * `loadGroupPrincipalIfVisible()` helpers compose the canonical

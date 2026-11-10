@@ -238,10 +238,10 @@ final class RouteDefinitions
         $r->addRoute('DELETE', self::ROUTE_GROUPS_ID_MEMBERS_UID, [GroupMemberController::class, 'destroy'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         // Group settings pages (Overview / Agents / Tools / LLM Drivers / Preferences).
-        // All routes use AuthMiddleware + CsrfMiddleware; the per-action
-        // `callerCanManageGroup()` does the write gate (owner / admin / global admin),
-        // and `callerCanSeeGroup()` does the read gate (member / owner / admin / global admin).
-        // Non-members receive 404 (existence-hiding, not 403).
+        // All routes use AuthMiddleware + CsrfMiddleware; the read gate is
+        // `callerCanSeeGroup()` — membership only, so a non-member receives
+        // 404 (existence-hiding, not 403) — and the write gate is
+        // `callerCanManageGroup()` (owner / admin).
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_AGENTS, [GroupController::class, 'agents'], [AuthMiddleware::class, CsrfMiddleware::class]);
 
         $r->addRoute('GET', self::ROUTE_GROUPS_ID_PREFERENCES, [GroupPreferencesController::class, 'show'], [AuthMiddleware::class, CsrfMiddleware::class]);
