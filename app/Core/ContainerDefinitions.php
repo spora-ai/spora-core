@@ -223,6 +223,7 @@ use Spora\Tools\MediaDerivativeHandler;
 use Spora\Tools\MediaFolderHandler;
 use Spora\Tools\MediaSourceReader;
 use Spora\Tools\MediaTool;
+use Spora\Tools\PrincipalInfoTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ScheduleTool;
 use Spora\Tools\SharedSettingsResolver;
@@ -230,7 +231,6 @@ use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\TodoTool;
-use Spora\Tools\UserInfoTool;
 use Symfony\Component\HttpClient\HttpClient;
 use Symfony\Component\Process\Process;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -807,7 +807,7 @@ final class ContainerDefinitions
                 TimeTool::class,
                 CalculatorTool::class,
                 ReadUrlTool::class,
-                UserInfoTool::class,
+                PrincipalInfoTool::class,
                 SubAgentTool::class,
                 AgentTool::class,
                 SkillTool::class,
@@ -1685,7 +1685,7 @@ final class ContainerDefinitions
                 );
             },
 
-            UserInfoTool::class => static fn(): UserInfoTool => new UserInfoTool(),
+            PrincipalInfoTool::class => static fn(): PrincipalInfoTool => new PrincipalInfoTool(),
 
             SubAgentTool::class => static function (ContainerInterface $c): SubAgentTool {
                 return new SubAgentTool(

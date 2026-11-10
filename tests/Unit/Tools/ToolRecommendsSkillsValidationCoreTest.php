@@ -14,13 +14,13 @@ use Spora\Tools\AgentTool;
 use Spora\Tools\AskUserQuestionTool;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\MediaTool;
+use Spora\Tools\PrincipalInfoTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\ScheduleTool;
 use Spora\Tools\SkillTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\TodoTool;
-use Spora\Tools\UserInfoTool;
 
 /**
  * Build-time gate for the strict-mode contract.
@@ -40,7 +40,7 @@ test('all spora-core tools declare recommendsSkills slugs that exist on disk', f
         TimeTool::class,
         CalculatorTool::class,
         ReadUrlTool::class,
-        UserInfoTool::class,
+        PrincipalInfoTool::class,
         SubAgentTool::class,
         AgentTool::class,
         SkillTool::class,

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Services;
 
 use Spora\Models\Agent;
+use Spora\Models\Group;
+use Spora\Models\Principal;
 use Spora\Models\User;
 use Spora\Services\Exceptions\PromptExpansionTooLargeException;
 
@@ -29,6 +31,18 @@ final class PromptTemplateExpander
     public const MAX_EXPANDED_BYTES = 1_048_576;
 
     /**
+     * The principal's placeholder values for the expansion in flight.
+     *
+     * A template may name all four principal placeholders; reading the
+     * principal once keeps that one lookup instead of four. Reset at the
+     * start of every {@see self::expand()} so a reused expander never
+     * answers from the previous expansion's principal.
+     *
+     * @var array{type: string, name: string, description: string, information: string}|null
+     */
+    private ?array $resolvedPrincipalValues = null;
+
+    /**
      * @param list<array<string, mixed>> $variables The template's stored variables.
      *
      * @throws PromptExpansionTooLargeException
@@ -40,6 +54,8 @@ final class PromptTemplateExpander
                 'The expanded prompt exceeds ' . self::MAX_EXPANDED_BYTES . ' bytes.',
             );
         }
+
+        $this->resolvedPrincipalValues = null;
 
         $defaults = $this->defaultsByKey($variables);
         $budget   = self::MAX_EXPANDED_BYTES - strlen($template);
@@ -99,11 +115,92 @@ final class PromptTemplateExpander
      */
     private function resolveAgentValue(string $key, ?Agent $agent): ?string
     {
-        if ($agent === null || ($key !== 'agent_name' && $key !== 'user_name')) {
+        if ($agent === null) {
             return null;
         }
 
-        return $key === 'agent_name' ? (string) $agent->name : $this->resolveUserName($agent);
+        return match ($key) {
+            'agent_name'            => (string) $agent->name,
+            'user_name'             => $this->resolveUserName($agent),
+            'principal_type'        => $this->principalValues($agent)['type'],
+            'principal_name'        => $this->principalValues($agent)['name'],
+            'principal_description' => $this->principalValues($agent)['description'],
+            'principal_information' => $this->principalValues($agent)['information'],
+            default                 => null,
+        };
+    }
+
+    /**
+     * The principal's placeholder values, read once per expansion.
+     *
+     * Identity fields fall back rather than going empty — a user's display
+     * name is optional, so it falls back to the username and only then to
+     * the placeholder name itself, the same sentinel shape `user_name`
+     * already uses. Content fields resolve to an empty string instead:
+     * "nothing to say" is a legitimate value for prose, and a raw
+     * `{{principal_description}}` left in a scheduled prompt is not.
+     *
+     * @return array{type: string, name: string, description: string, information: string}
+     */
+    private function principalValues(Agent $agent): array
+    {
+        if ($this->resolvedPrincipalValues !== null) {
+            return $this->resolvedPrincipalValues;
+        }
+
+        return $this->resolvedPrincipalValues = $this->readPrincipalValues($agent);
+    }
+
+    /**
+     * @return array{type: string, name: string, description: string, information: string}
+     */
+    private function readPrincipalValues(Agent $agent): array
+    {
+        $principal = Principal::find((int) $agent->principal_id);
+        if (!$principal instanceof Principal) {
+            return [
+                'type'        => 'principal_type',
+                'name'        => 'principal_name',
+                'description' => '',
+                'information' => '',
+            ];
+        }
+
+        if ($principal->type === Principal::TYPE_GROUP) {
+            $group = Group::find((int) $principal->group_id);
+            if (!$group instanceof Group) {
+                return [
+                    'type'        => Principal::TYPE_GROUP,
+                    'name'        => 'principal_name',
+                    'description' => '',
+                    'information' => '',
+                ];
+            }
+
+            return [
+                'type'        => Principal::TYPE_GROUP,
+                'name'        => $group->name ?: 'principal_name',
+                'description' => $group->description ?? '',
+                'information' => $group->information ?? '',
+            ];
+        }
+
+        $user = User::find((int) $principal->user_id);
+        if (!$user instanceof User) {
+            return [
+                'type'        => Principal::TYPE_USER,
+                'name'        => 'principal_name',
+                'description' => '',
+                'information' => '',
+            ];
+        }
+
+        return [
+            'type'        => Principal::TYPE_USER,
+            'name'        => $user->name ?: $user->username ?: 'principal_name',
+            'description' => $user->about_me ?? '',
+            'information' => $user->about_me ?? '',
+        ];
     }
 
     /**

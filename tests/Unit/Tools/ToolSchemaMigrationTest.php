@@ -15,11 +15,11 @@ use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\CalculatorTool;
 use Spora\Tools\HttpTimeoutResolver;
+use Spora\Tools\PrincipalInfoTool;
 use Spora\Tools\ReadUrlTool;
 use Spora\Tools\SubAgentTool;
 use Spora\Tools\TimeTool;
 use Spora\Tools\ToolInterface;
-use Spora\Tools\UserInfoTool;
 use stdClass;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -52,7 +52,7 @@ function instantiateAllTools(): array
         CalculatorTool::class       => new CalculatorTool(),
         TimeTool::class      => new TimeTool(),
         ReadUrlTool::class          => new ReadUrlTool($httpClient, $configService, new HttpTimeoutResolver(new Config())),
-        UserInfoTool::class         => new UserInfoTool(),
+        PrincipalInfoTool::class         => new PrincipalInfoTool(),
         SubAgentTool::class         => new SubAgentTool(
             Mockery::mock(HandoverServiceInterface::class),
             Mockery::mock(SubAgentServiceInterface::class),
