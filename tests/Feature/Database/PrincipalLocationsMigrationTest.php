@@ -63,8 +63,7 @@ test('the location table is keyed on the principal', function (): void {
     expect(Capsule::schema()->hasTable('principal_locations'))->toBeTrue();
     expect(Capsule::schema()->hasTable('user_locations'))->toBeFalse();
 
-    $columns = Capsule::select("PRAGMA table_info('principal_locations')");
-    $names = array_map(static fn(object $column): string => (string) $column->name, $columns);
+    $names = Capsule::schema()->getColumnListing('principal_locations');
     expect($names)->toContain('id', 'principal_id', 'name', 'address', 'is_default', 'created_at', 'updated_at');
 });
 
