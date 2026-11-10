@@ -20,9 +20,12 @@ use Symfony\Component\HttpFoundation\Response;
  * concept, one table, one service.
  *
  * Authorisation: read uses `callerCanSeeGroup()` (members can list);
- * write uses `callerCanManageGroup()` (owner / admin / global admin).
- * A member below `admin` is refused; a non-member is not told the group
- * exists.
+ * write uses `callerCanManageGroup()` (owner / admin). A member below
+ * `admin` is refused; a non-member is not told the group exists — and
+ * that holds for a global admin too, because these routes are the
+ * group's settings surface rather than its row. (The group row,
+ * `PATCH /api/v1/groups/{id}`, is the one a global admin may write
+ * without membership.)
  *
  * Endpoints:
  *   GET    /api/v1/groups/{id}/locations
@@ -88,6 +91,7 @@ final class GroupLocationController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
+        [$principalId] = $resolved;
 
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
@@ -99,7 +103,7 @@ final class GroupLocationController
             return $invalid;
         }
 
-        $created = $this->locations->create($this->principalIdFor($id), $body);
+        $created = $this->locations->create($principalId, $body);
 
         return new JsonResponse(['data' => ['location' => $created['location']]], Response::HTTP_CREATED);
     }
@@ -126,6 +130,7 @@ final class GroupLocationController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
+        [$principalId] = $resolved;
 
         $body = $this->safeDecodeJson($request);
         if ($body instanceof JsonResponse) {
@@ -137,7 +142,7 @@ final class GroupLocationController
             return $invalid;
         }
 
-        $updated = $this->locations->update($locationId, $this->principalIdFor($id), $body);
+        $updated = $this->locations->update($locationId, $principalId, $body);
         if ($updated === null) {
             return $this->locationNotFound();
         }
@@ -159,22 +164,13 @@ final class GroupLocationController
         if ($resolved instanceof JsonResponse) {
             return $resolved;
         }
+        [$principalId] = $resolved;
 
-        if (!$this->locations->delete($locationId, $this->principalIdFor($id))) {
+        if (!$this->locations->delete($locationId, $principalId)) {
             return $this->locationNotFound();
         }
 
         return new JsonResponse(['data' => ['deleted' => true]]);
-    }
-
-    /**
-     * The principal a write hangs on. `ensureGroupPrincipal()` because a
-     * write needs a principal id that is on the row — one that was merely
-     * looked up may not be there.
-     */
-    private function principalIdFor(int $groupId): int
-    {
-        return (int) $this->principalService->ensureGroupPrincipal($groupId)->id;
     }
 
     /**
