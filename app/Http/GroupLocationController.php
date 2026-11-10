@@ -178,12 +178,16 @@ final class GroupLocationController
      * both are required; on a PATCH only the keys that were sent are
      * checked.
      *
+     * A null is "not mentioned", not "set to nothing": the name and the
+     * address are not nullable, and the `/me/locations` surface reads a
+     * null the same way.
+     *
      * @param  array<string, mixed> $body
      */
     private function validateFields(array $body, bool $requireBoth): ?JsonResponse
     {
         foreach (['name', 'address'] as $field) {
-            if (!array_key_exists($field, $body)) {
+            if (!isset($body[$field])) {
                 if ($requireBoth) {
                     return $this->unprocessable('VALIDATION_ERROR', $field . ' is required.');
                 }

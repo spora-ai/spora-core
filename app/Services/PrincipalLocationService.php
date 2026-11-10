@@ -70,15 +70,17 @@ final class PrincipalLocationService
             return null;
         }
 
-        if (array_key_exists('name', $data)) {
+        // A null is "not mentioned", not "set to nothing": the name and the
+        // address are not nullable, and blanking one would be a silent loss.
+        if (isset($data['name'])) {
             $location->name = trim((string) $data['name']);
         }
 
-        if (array_key_exists('address', $data)) {
+        if (isset($data['address'])) {
             $location->address = trim((string) $data['address']);
         }
 
-        if (array_key_exists('is_default', $data)) {
+        if (isset($data['is_default'])) {
             if ($data['is_default'] === true) {
                 $this->clearDefaults($principalId, $locationId);
             }

@@ -236,6 +236,28 @@ describe('GroupLocationController', function (): void {
         expect(PrincipalLocation::find($location->id)->name)->toBe('Original');
     });
 
+    it('reads a null field as "not mentioned" rather than "set to nothing"', function (): void {
+        [$controller, $auth, $principalService] = makeGroupLocationController();
+        $ownerId = bootAuth($auth, 'gl-update-null-owner@example.com', GL_TEST_PASSWORD);
+        $group = (new GroupService($principalService))->createGroup($ownerId, 'Locations');
+        $principalId = (int) $principalService->principalForGroup($group->id)->id;
+        $location = PrincipalLocation::create([
+            'principal_id' => $principalId,
+            'name'         => 'Original',
+            'address'      => 'Musterstraße 1',
+        ]);
+        simulateLoggedInSession($ownerId, 'gl-update-null-owner@example.com');
+
+        $response = $controller->update(
+            $group->id,
+            (int) $location->id,
+            jsonRequest('PATCH', '/api/v1/groups/' . $group->id . '/locations/' . $location->id, ['name' => null]),
+        );
+
+        expect($response->getStatusCode())->toBe(200);
+        expect(PrincipalLocation::find($location->id)->name)->toBe('Original');
+    });
+
     it('deletes a location of the group', function (): void {
         [$controller, $auth, $principalService] = makeGroupLocationController();
         $ownerId = bootAuth($auth, 'gl-delete-owner@example.com', GL_TEST_PASSWORD);

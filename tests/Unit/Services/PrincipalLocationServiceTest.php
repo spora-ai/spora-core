@@ -101,6 +101,24 @@ describe('PrincipalLocationService', function (): void {
         expect(PrincipalLocation::find($theirs['location']['id'])->name)->toBe('Theirs');
     });
 
+    it('reads a null field as "not mentioned" rather than "set to nothing"', function (): void {
+        $created = $this->service->create($this->principalId, [
+            'name'       => 'HQ',
+            'address'    => 'Musterstraße 1',
+            'is_default' => true,
+        ]);
+
+        $result = $this->service->update($created['location']['id'], $this->principalId, [
+            'name'       => null,
+            'address'    => null,
+            'is_default' => null,
+        ]);
+
+        expect($result['location']['name'])->toBe('HQ');
+        expect($result['location']['address'])->toBe('Musterstraße 1');
+        expect($result['location']['is_default'])->toBeTrue();
+    });
+
     it('returns null when updating a missing location', function (): void {
         expect($this->service->update(999999, $this->principalId, ['name' => 'x']))->toBeNull();
     });
