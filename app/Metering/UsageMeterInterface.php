@@ -32,8 +32,10 @@ interface UsageMeterInterface
      * Consulted before every provider request and every tool execution.
      *
      * @return UsageDecision|null  Null allows the call. A hard decision
-     *                              stops the task; a soft decision is
-     *                              recorded and the call proceeds.
+     *                              stops the task; a soft decision lets the
+     *                              call proceed and is not recorded here —
+     *                              a meter that wants a soft breach to be
+     *                              visible writes it down itself.
      */
     public function evaluate(MeteringContext $context, MeteringSubject $subject): ?UsageDecision;
 
