@@ -281,7 +281,20 @@ final class ConfigurePlanSettingsParser
             return 'an object with the key(s) ' . implode(', ', array_keys($value));
         }
 
+        return $this->describeListEntries($value, $resolveAs)
+            ?? sprintf('a list of %d entries', count($value));
+    }
+
+    /**
+     * The first entry of a list that is not the type the setting stores, or
+     * null when every entry is.
+     *
+     * @param list<mixed> $value
+     */
+    private function describeListEntries(array $value, string $resolveAs): ?string
+    {
         $expected = $resolveAs === 'agent' ? 'an integer id' : 'a string';
+
         foreach ($value as $index => $entry) {
             $typed = $resolveAs === 'agent' ? is_int($entry) : is_string($entry);
             if (!$typed) {
@@ -289,7 +302,7 @@ final class ConfigurePlanSettingsParser
             }
         }
 
-        return sprintf('a list of %d entries', count($value));
+        return null;
     }
 
     /**
