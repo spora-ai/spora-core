@@ -94,10 +94,10 @@ final class ResponsesRequestBuilder
             // The encrypted reasoning content is what makes a reasoning
             // item replayable in the next turn. The spec says it is
             // populated by default, and documents this `include` value
-            // for the stateless case — `store` off, or an organisation
-            // enrolled in zero data retention — where the item comes
-            // back with the blob and not by id. A model that does not
-            // reason has no reasoning item to include.
+            // for the stateless case — `store` off, or a project with
+            // zero data retention enabled — where the item comes back
+            // with the blob and not by id. A model that does not reason
+            // has no reasoning item to include.
             $body['include'] = ['reasoning.encrypted_content'];
         }
 
@@ -473,8 +473,8 @@ final class ResponsesRequestBuilder
         $blob = isset($block['data']) && is_string($block['data']) ? $block['data'] : '';
 
         if ($blob === '' && ! $this->store) {
-            // There is nothing to resolve the item by: the provider kept
-            // nothing, so the id alone resolves to nothing and the
+            // There is nothing to resolve the item by: the response was
+            // not stored, so the id alone resolves to nothing and the
             // replay fails. A lost chain of thought is better than a
             // failed request.
             return null;

@@ -29,8 +29,13 @@ final class ResponsesDriverOptions
          * which only the provider can resolve if it kept the item.
          *
          * Turning it off does not keep the prompts and responses out of
-         * OpenAI's abuse-monitoring logs — only an approved Zero Data
-         * Retention or Modified Abuse Monitoring control does that.
+         * OpenAI's abuse-monitoring logs — only a Zero Data Retention or
+         * Modified Abuse Monitoring control on the project the API key
+         * belongs to does that. Under Zero Data Retention the provider
+         * treats the store parameter as false whatever the toggle says,
+         * so there is no stored response for a reasoning id to resolve
+         * against: the toggle changes nothing on the provider's side,
+         * and its id-only fallback would have nothing to resolve.
          */
         public readonly bool $store = false,
     ) {}

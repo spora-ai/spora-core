@@ -206,7 +206,7 @@ test('a reasoning block is replayed in position, before the message it belongs t
     expect($body['input'][2]['type'])->toBe('function_call');
 });
 
-test('a reasoning item is replayed with its blob when the provider stores it too', function (): void {
+test('a reasoning item is replayed with its blob when the response is stored', function (): void {
     $body = responsesBuilder(store: true)->buildBody(responsesRequest(messages: [[
         'role' => 'assistant',
         'content' => [
@@ -227,7 +227,7 @@ test('a reasoning item is replayed with its blob when the provider stores it too
     ]);
 });
 
-test('a reasoning item without a blob is replayed by id when the provider keeps it', function (): void {
+test('a reasoning item without a blob is replayed by id when the response is stored', function (): void {
     $body = responsesBuilder(store: true)->buildBody(responsesRequest(messages: [[
         'role' => 'assistant',
         'content' => [
@@ -246,7 +246,7 @@ test('a reasoning item without a blob is replayed by id when the provider keeps 
     ]);
 });
 
-test('a reasoning item without a blob is skipped when the provider keeps nothing', function (): void {
+test('a reasoning item without a blob is skipped when the response is not stored', function (): void {
     $body = responsesBuilder()->buildBody(responsesRequest(messages: [[
         'role' => 'assistant',
         'content' => [
