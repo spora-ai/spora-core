@@ -18,7 +18,14 @@ final class NullUsageMeter implements UsageMeterInterface
         return null;
     }
 
-    public function recordLlmUsage(MeteringContext $context, LlmUsage $usage): void {}
+    public function recordLlmUsage(MeteringContext $context, LlmUsage $usage): void
+    {
+        // Deliberately empty: the null meter is the seam's default, and it
+        // must not cost an install anything.
+    }
 
-    public function recordToolUsage(MeteringContext $context, ToolUsage $usage): void {}
+    public function recordToolUsage(MeteringContext $context, ToolUsage $usage): void
+    {
+        // Deliberately empty, like recordLlmUsage() above.
+    }
 }
