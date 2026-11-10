@@ -470,13 +470,21 @@ final class ResponsesRequestBuilder
             return null;
         }
 
+        $blob = isset($block['data']) && is_string($block['data']) ? $block['data'] : '';
+
+        if ($blob === '' && ! $this->store) {
+            // There is nothing to resolve the item by: the provider kept
+            // nothing, so the id alone resolves to nothing and the
+            // replay fails. A lost chain of thought is better than a
+            // failed request.
+            return null;
+        }
+
         $item = [
             'type' => 'reasoning',
             'id' => $id,
             'summary' => is_array($metadata['summary'] ?? null) ? $metadata['summary'] : [],
         ];
-
-        $blob = isset($block['data']) && is_string($block['data']) ? $block['data'] : '';
 
         if ($blob !== '') {
             // The encrypted blob is what the provider decrypts to restore
@@ -484,16 +492,6 @@ final class ResponsesRequestBuilder
             // not the provider stored it — so it goes out whatever
             // `store` says.
             $item['encrypted_content'] = $blob;
-
-            return $item;
-        }
-
-        if (!$this->store) {
-            // There is nothing to resolve the item by: the provider kept
-            // nothing, so the id alone resolves to nothing and the
-            // replay fails. A lost chain of thought is better than a
-            // failed request.
-            return null;
         }
 
         return $item;
