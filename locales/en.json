@@ -247,6 +247,7 @@
     "Only an owner or a global admin can delete the group.": "Only an owner or a global admin can delete the group.",
     "Only failed tasks can be retried.": "Only failed tasks can be retried.",
     "Only group owners can add owners.": "Only group owners can add owners.",
+    "Only group owners or admins can edit the group.": "Only group owners or admins can edit the group.",
     "Only group owners or admins can manage members.": "Only group owners or admins can manage members.",
     "Only group owners or admins can manage the group picture.": "Only group owners or admins can manage the group picture.",
     "Only owners can change the role of an owner.": "Only owners can change the role of an owner.",

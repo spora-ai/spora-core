@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Spora\Models;
 
 use Delight\Auth\Role;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -28,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property float|null  $height_cm
  * @property float|null  $weight_kg
  * @property string|null $locale        Catalogue code, or null for "auto" — see {@see \Spora\I18n\LocaleResolver}. Written only by {@see \Spora\Http\UserLocaleController}.
+ * @property-read Collection<int, PrincipalLocation> $locations
  * @method static User|null find(mixed $id, array $columns = ['*'])
  * @method static \Illuminate\Database\Eloquent\Builder where(string $column, mixed $operator = null, mixed $value = null)
  */
@@ -72,9 +75,19 @@ final class User extends Model
         return $this->hasOne(Agent::class);
     }
 
-    public function locations(): HasMany
+    /**
+     * The locations saved for this user.
+     *
+     * The rows live on the principal (`principal_locations.principal_id`),
+     * so the accessor walks the user's user-principal. A group-principal's
+     * locations belong to the group, not to the user who happens to be in
+     * it.
+     */
+    protected function locations(): Attribute
     {
-        return $this->hasMany(UserLocation::class);
+        return Attribute::make(
+            get: fn(): Collection => $this->principalLocations(),
+        );
     }
 
     public function principal(): HasOne
@@ -102,5 +115,18 @@ final class User extends Model
     public function isAdmin(): bool
     {
         return $this->hasRole(Role::ADMIN);
+    }
+
+    /**
+     * @return Collection<int, PrincipalLocation>
+     */
+    private function principalLocations(): Collection
+    {
+        $principal = $this->principal()->first();
+        if (!$principal instanceof Principal) {
+            return new Collection();
+        }
+
+        return $principal->locations()->get();
     }
 }

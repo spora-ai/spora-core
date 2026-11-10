@@ -31,6 +31,23 @@ if (!function_exists('makeAdmin')) {
     }
 }
 
+if (!function_exists('makeUserService')) {
+    /**
+     * A {@see Spora\Services\UserService} with the collaborators it needs
+     * outside the container. The production wiring hands it the shared
+     * `PrincipalService`; the tests only need one that materialises
+     * user-principals.
+     */
+    function makeUserService(
+        ?Spora\Services\UserPictures\UserPictureService $userPictures = null,
+    ): Spora\Services\UserService {
+        return new Spora\Services\UserService(
+            new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
+            $userPictures,
+        );
+    }
+}
+
 if (!function_exists('encodeLlmSettingsForTest')) {
     /**
      * Test helper: encode LLM settings using a freshly-wired

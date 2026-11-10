@@ -6,7 +6,6 @@ use Spora\Http\GroupMemberController;
 use Spora\Services\GroupService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
-use Spora\Services\UserService;
 
 defined('GMC_TEST_PASSWORD') || define('GMC_TEST_PASSWORD', 'Password1!');
 
@@ -15,7 +14,7 @@ function makeGroupMemberController(): array
     $auth = bootAuthLayer();
     $principalService = new PrincipalService(new PrincipalResolver());
     $groupService = new GroupService($principalService);
-    $userService = new UserService();
+    $userService = makeUserService();
     $controller = new GroupMemberController($auth, $groupService, $userService);
 
     return [$controller, $auth, $groupService, $principalService, $userService];

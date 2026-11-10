@@ -552,6 +552,176 @@ describe('GroupController success paths', function (): void {
     });
 });
 
+describe('GroupController update write gate', function (): void {
+    beforeEach(function (): void {
+        clearSession();
+    });
+
+    afterEach(function (): void {
+        clearSession();
+    });
+
+    it('lets a group owner save the name and the description', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-gate-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Owned');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name'        => 'Renamed',
+            'description' => 'Fresh',
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['name'])->toBe('Renamed');
+        expect($body['data']['group']['description'])->toBe('Fresh');
+    });
+
+    it('lets a group admin save the group', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-admin-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Owned');
+        $adminId = bootAuth($auth, 'gc-gate-admin@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, $adminId, 'admin', $ownerId);
+        simulateLoggedInSession($adminId, 'gc-gate-admin@example.com');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'RenamedByAdmin',
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+    });
+
+    it('refuses a member whose role is below admin', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-member-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Owned');
+        $memberId = bootAuth($auth, 'gc-gate-member@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $groupService->addMember((int) $group->id, $memberId, 'member', $ownerId);
+        simulateLoggedInSession($memberId, 'gc-gate-member@example.com');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'RenamedByMember',
+        ]));
+
+        expect($response->getStatusCode())->toBe(403);
+        expect(json_decode($response->getContent(), true)['error']['code'])->toBe('FORBIDDEN');
+    });
+
+    it('hides the group from a caller who is not a member', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-stranger-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Owned');
+        $strangerId = bootAuth($auth, 'gc-gate-stranger@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($strangerId, 'gc-gate-stranger@example.com');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'RenamedByStranger',
+        ]));
+
+        expect($response->getStatusCode())->toBe(404);
+        expect(json_decode($response->getContent(), true)['error']['code'])->toBe('GROUP_NOT_FOUND');
+    });
+
+    it('lets a global admin save a group they are not a member of', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-global-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Owned');
+        $adminId = bootAuth($auth, 'gc-gate-global@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        makeAdmin($auth, $adminId);
+        simulateLoggedInSession($adminId, 'gc-gate-global@example.com');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'RenamedByGlobalAdmin',
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+    });
+
+    it('returns 401 when no user is logged in', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-gate-401-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        $group = $groupService->createGroup($ownerId, 'Owned');
+        clearSession();
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'Renamed',
+        ]));
+
+        expect($response->getStatusCode())->toBe(401);
+    });
+
+    it('saves the information block and returns it in the payload', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-information-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-information-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Acme Corp', 'We build things');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'information' => "## Address\nMusterstraße 1, 10115 Berlin",
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['information'])->toBe("## Address\nMusterstraße 1, 10115 Berlin");
+    });
+
+    it('treats an empty information block as no information at all', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-information-empty-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-information-empty-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Acme Corp');
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'information' => '   ',
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['information'])->toBeNull();
+    });
+
+    it('leaves the information block alone when it is not mentioned', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-information-keep-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-information-keep-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Acme Corp');
+
+        $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'information' => '## Address',
+        ]));
+
+        $response = $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'name' => 'Renamed',
+        ]));
+
+        expect($response->getStatusCode())->toBe(200);
+        $body = json_decode($response->getContent(), true);
+        expect($body['data']['group']['information'])->toBe('## Address');
+    });
+
+    it('carries the information block in the group list too', function (): void {
+        [$controller, $auth, $groupService] = makeGroupController();
+        $ownerId = bootAuth($auth, 'gc-information-list-owner@example.com', GROUPCONTROLLER_TEST_PASSWORD);
+        simulateLoggedInSession($ownerId, 'gc-information-list-owner@example.com');
+        $group = $groupService->createGroup($ownerId, 'Acme Corp');
+
+        $controller->update($group->id, jsonRequest('PATCH', '/api/v1/groups/' . $group->id, [
+            'information' => '## Address',
+        ]));
+
+        $response = $controller->index();
+        $body = json_decode($response->getContent(), true);
+        $payload = array_values(array_filter(
+            $body['data']['groups'],
+            static fn(array $g): bool => $g['id'] === (int) $group->id,
+        ))[0] ?? null;
+        expect($payload)->not->toBeNull();
+        expect($payload['information'])->toBe('## Address');
+    });
+});
+
 describe('GroupController index membership filter (regression for stale-cache bug)', function (): void {
     beforeEach(function (): void {
         clearSession();

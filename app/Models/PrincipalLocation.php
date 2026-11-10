@@ -8,19 +8,23 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
+ * A saved location, owned by the principal it belongs to.
+ *
  * @property int         $id
- * @property int         $user_id
+ * @property int         $principal_id
  * @property string      $name
- * @property string $address
- * @property bool   $is_default
+ * @property string      $address
+ * @property bool        $is_default
+ * @property \Carbon\Carbon $created_at
+ * @property \Carbon\Carbon $updated_at
  */
-final class UserLocation extends Model
+final class PrincipalLocation extends Model
 {
-    protected $table = 'user_locations';
+    protected $table = 'principal_locations';
 
     /** @var list<string> */
     protected $fillable = [
-        'user_id',
+        'principal_id',
         'name',
         'address',
         'is_default',
@@ -31,8 +35,8 @@ final class UserLocation extends Model
         'is_default' => 'boolean',
     ];
 
-    public function user(): BelongsTo
+    public function principal(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(Principal::class);
     }
 }

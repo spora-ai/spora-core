@@ -11,15 +11,15 @@ const USERPROFILE_ADDRESS_OFFICE = '456 Office Blvd';
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Http\UserProfileController;
+use Spora\Models\Principal;
+use Spora\Models\PrincipalLocation;
 use Spora\Models\User;
-use Spora\Models\UserLocation;
 use Spora\Security\CsrfTokenService;
-use Spora\Services\UserService;
 
 function makeUserProfileController(): array
 {
     $authService = bootAuthLayer();
-    $userService = new UserService();
+    $userService = makeUserService();
     $controller = new UserProfileController($authService, $userService);
     $authMiddleware = new AuthMiddleware($authService);
     $csrfService = new CsrfTokenService();
@@ -150,14 +150,14 @@ test('getLocations returns user locations', function (): void {
     $userId = bootAuth($authService, 'profile6@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile6@example.com');
 
-    UserLocation::create([
-        'user_id' => $userId,
+    PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'   => 'Home',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
     ]);
-    UserLocation::create([
-        'user_id' => $userId,
+    PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'   => 'Work',
         'address' => USERPROFILE_ADDRESS_OFFICE,
         'is_default' => false,
@@ -201,6 +201,24 @@ test('postLocation creates a new location', function (): void {
     expect($data['is_default'])->toBeFalse();
 });
 
+test('postLocation saves the location under the caller\'s principal', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'profile-principal@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'profile-principal@example.com');
+
+    $request = jsonRequest('POST', USERPROFILE_LOCATIONS_PATH, [
+        'name'    => 'Beach House',
+        'address' => '100 Ocean Drive',
+    ]);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(201);
+    $principalId = (int) Principal::where('type', 'user')->where('user_id', $userId)->value('id');
+    $location = PrincipalLocation::where('principal_id', $principalId)->first();
+    expect($location)->not->toBeNull();
+    expect($location->name)->toBe('Beach House');
+});
+
 test('postLocation validates name is required', function (): void {
     [$controller, $authService, , $authMiddleware] = makeUserProfileController();
     $userId = bootAuth($authService, 'profile8@example.com', USERPROFILE_TEST_PASSWORD);
@@ -230,8 +248,8 @@ test('postLocation sets is_default and unsets other defaults', function (): void
     $userId = bootAuth($authService, 'profile10@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile10@example.com');
 
-    UserLocation::create([
-        'user_id' => $userId,
+    PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'   => 'Existing',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => true,
@@ -245,7 +263,7 @@ test('postLocation sets is_default and unsets other defaults', function (): void
     $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(201);
-    $locations = UserLocation::where('user_id', $userId)->get();
+    $locations = PrincipalLocation::where('principal_id', $this->createUserPrincipal($userId))->get();
     expect($locations->where('is_default', true)->count())->toBe(1);
     expect($locations->where('name', 'New Default')->first()->is_default)->toBeTrue();
 });
@@ -265,8 +283,8 @@ test('putLocation updates own location', function (): void {
     $userId = bootAuth($authService, 'profile11@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile11@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $userId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'   => 'Old Name',
         'address' => USERPROFILE_ADDRESS_HOME,
         'is_default' => false,
@@ -291,8 +309,8 @@ test('putLocation returns 404 for another users location', function (): void {
     $otherUserId = bootAuth($authService, 'other12@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile12@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $otherUserId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($otherUserId),
         'name'   => 'Other Home',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -320,8 +338,8 @@ test('deleteLocation deletes own location', function (): void {
     $userId = bootAuth($authService, 'profile13@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile13@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $userId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'   => 'To Delete',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -331,7 +349,7 @@ test('deleteLocation deletes own location', function (): void {
     $response = callController($controller, 'deleteLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(200);
-    expect(UserLocation::find($loc->id))->toBeNull();
+    expect(PrincipalLocation::find($loc->id))->toBeNull();
 });
 
 test('deleteLocation returns 404 for another users location', function (): void {
@@ -340,8 +358,8 @@ test('deleteLocation returns 404 for another users location', function (): void 
     $otherUserId = bootAuth($authService, 'other14@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'profile14@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $otherUserId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($otherUserId),
         'name'   => 'Other Location',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -351,7 +369,7 @@ test('deleteLocation returns 404 for another users location', function (): void 
     $response = callController($controller, 'deleteLocation', $request, [$authMiddleware]);
 
     expect($response->getStatusCode())->toBe(404);
-    expect(UserLocation::find($loc->id))->not()->toBeNull();
+    expect(PrincipalLocation::find($loc->id))->not()->toBeNull();
 });
 
 test('deleteLocation rejects unauthenticated requests', function (): void {
@@ -454,7 +472,7 @@ test('postLocation returns 422 when name is empty string', function (): void {
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
     expect($body['error']['message'])->toBe('name is required.');
-    expect(UserLocation::where('user_id', $userId)->count())->toBe(0);
+    expect(PrincipalLocation::where('principal_id', $this->createUserPrincipal($userId))->count())->toBe(0);
 });
 
 test('postLocation returns 422 when name is whitespace only', function (): void {
@@ -487,7 +505,7 @@ test('postLocation returns 422 when address is empty string', function (): void 
     $body = json_decode($response->getContent(), true);
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
     expect($body['error']['message'])->toBe('address is required.');
-    expect(UserLocation::where('user_id', $userId)->count())->toBe(0);
+    expect(PrincipalLocation::where('principal_id', $this->createUserPrincipal($userId))->count())->toBe(0);
 });
 
 test('putLocation returns 400 on invalid JSON', function (): void {
@@ -495,8 +513,8 @@ test('putLocation returns 400 on invalid JSON', function (): void {
     $userId = bootAuth($authService, 'badjsonputloc@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'badjsonputloc@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $userId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'    => 'Home',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -523,8 +541,8 @@ test('putLocation returns 422 when name is empty string', function (): void {
     $userId = bootAuth($authService, 'emptynameput@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'emptynameput@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $userId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'    => 'Original',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);
@@ -547,8 +565,8 @@ test('putLocation returns 422 when address is empty string', function (): void {
     $userId = bootAuth($authService, 'emptyaddrput@example.com', USERPROFILE_TEST_PASSWORD);
     simulateLoggedInSession($userId, 'emptyaddrput@example.com');
 
-    $loc = UserLocation::create([
-        'user_id' => $userId,
+    $loc = PrincipalLocation::create([
+        'principal_id' => $this->createUserPrincipal($userId),
         'name'    => 'Original',
         'address' => USERPROFILE_ADDRESS_HOME,
     ]);

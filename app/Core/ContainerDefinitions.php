@@ -65,6 +65,7 @@ use Spora\Http\DecisionsRequestValidator;
 use Spora\Http\GlobalSettingsController;
 use Spora\Http\GroupController;
 use Spora\Http\GroupLlmConfigsController;
+use Spora\Http\GroupLocationController;
 use Spora\Http\GroupMemberController;
 use Spora\Http\GroupPictureController;
 use Spora\Http\GroupPreferencesController;
@@ -177,6 +178,7 @@ use Spora\Services\NotificationServiceInterface;
 use Spora\Services\PluginCatalogService;
 use Spora\Services\PluginMetadataExtractor;
 use Spora\Services\PluginsService;
+use Spora\Services\PrincipalLocationService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Spora\Services\ProfilePictures\GroupPictureService;
@@ -449,6 +451,8 @@ final class ContainerDefinitions
             },
 
             PrincipalResolver::class => static fn(): PrincipalResolver => new PrincipalResolver(),
+
+            PrincipalLocationService::class => static fn(): PrincipalLocationService => new PrincipalLocationService(),
 
             PrincipalService::class => static function (ContainerInterface $c): PrincipalService {
                 return new PrincipalService(
@@ -896,7 +900,10 @@ final class ContainerDefinitions
             },
 
             UserServiceInterface::class => static function (ContainerInterface $c): UserServiceInterface {
-                return new UserService($c->get(UserPictureService::class));
+                return new UserService(
+                    $c->get(PrincipalService::class),
+                    $c->get(UserPictureService::class),
+                );
             },
         ];
     }
@@ -1070,6 +1077,14 @@ final class ContainerDefinitions
                     $c->get(AuthService::class),
                     $c->get(PrincipalService::class),
                     $c->get(ToolConfigService::class),
+                );
+            },
+
+            GroupLocationController::class => static function (ContainerInterface $c): GroupLocationController {
+                return new GroupLocationController(
+                    $c->get(AuthService::class),
+                    $c->get(PrincipalService::class),
+                    $c->get(PrincipalLocationService::class),
                 );
             },
 

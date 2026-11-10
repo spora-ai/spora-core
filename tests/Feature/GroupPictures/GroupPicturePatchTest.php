@@ -50,6 +50,16 @@ function seedGroupForPicture(int $id, int $userId): void
         'created_at' => date('Y-m-d H:i:s'),
         'updated_at' => date('Y-m-d H:i:s'),
     ]);
+    // PATCH /groups/{id} is gated by the group role, so the caller has to
+    // be a member of the group it edits.
+    \Illuminate\Database\Capsule\Manager::table('group_memberships')->insert([
+        'group_id' => $id,
+        'user_id' => $userId,
+        'role' => 'owner',
+        'joined_at' => date('Y-m-d H:i:s'),
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
 }
 
 function patchGroupPicture(int $groupId, array $body): \Symfony\Component\HttpFoundation\Response

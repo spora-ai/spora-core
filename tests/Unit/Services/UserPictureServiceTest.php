@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Spora\Core\Paths;
 use Spora\Models\UserPicture;
 use Spora\Services\UserPictures\UserPictureService;
-use Spora\Services\UserService;
 
 /**
  * Verify that the user wire shape (returned by `/auth/me`,
@@ -18,7 +17,7 @@ beforeEach(function (): void {
 });
 
 test('UserService::getUser includes profile_picture in the wire shape', function (): void {
-    $service = new UserService(new UserPictureService(new Paths(BASE_PATH)));
+    $service = makeUserService(new UserPictureService(new Paths(BASE_PATH)));
 
     $result = $service->getUser($this->userId);
 
@@ -28,7 +27,7 @@ test('UserService::getUser includes profile_picture in the wire shape', function
 });
 
 test('UserService::getUser surfaces the uploaded picture in profile_picture', function (): void {
-    $service = new UserService(new UserPictureService(new Paths(BASE_PATH)));
+    $service = makeUserService(new UserPictureService(new Paths(BASE_PATH)));
 
     UserPicture::create([
         'user_id'    => $this->userId,
@@ -49,10 +48,10 @@ test('UserService::getUser surfaces the uploaded picture in profile_picture', fu
 
 test('UserService without a picture service keeps the wire shape backwards-compatible', function (): void {
     // Pre-feature UserService consumers (tests, plugins) construct
-    // `new UserService()` with no args. The default-null picture
+    // `makeUserService()` with no args. The default-null picture
     // service means the wire shape carries `profile_picture: null`
     // instead of throwing.
-    $service = new UserService();
+    $service = makeUserService();
 
     $result = $service->getUser($this->userId);
 

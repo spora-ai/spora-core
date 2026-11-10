@@ -74,6 +74,18 @@ final class Principal extends Model
     }
 
     /**
+     * The locations saved for this principal. Keyed on
+     * `principal_locations.principal_id`, so a user-principal and a
+     * group-principal carry the same kind of rows.
+     *
+     * @return HasMany<PrincipalLocation, $this>
+     */
+    public function locations(): HasMany
+    {
+        return $this->hasMany(PrincipalLocation::class, 'principal_id');
+    }
+
+    /**
      * Validate the XOR invariant before letting Eloquent persist the
      * row. Spora runs Eloquent standalone, so model events do not fire;
      * an override here is the only path that always runs.

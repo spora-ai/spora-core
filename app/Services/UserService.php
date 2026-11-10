@@ -7,8 +7,8 @@ namespace Spora\Services;
 use Delight\Auth\Role;
 use Delight\Auth\Status;
 use Illuminate\Support\Carbon;
+use Spora\Models\Principal;
 use Spora\Models\User;
-use Spora\Models\UserLocation;
 use Spora\Services\UserPictures\UserPictureService;
 
 /**
@@ -26,12 +26,14 @@ final class UserService implements UserServiceInterface
     ];
 
     /**
-     * `$userPictures` is nullable so {@see UserService} stays
-     * constructible in tests that don't care about the avatar column —
-     * `serializeUser()` skips the lookup when it is null.
+     * `$userPictures` is nullable so a caller that does not care about the
+     * avatar column can leave it out — `serializeUser()` skips the lookup
+     * when it is null.
      */
     public function __construct(
+        private readonly PrincipalService $principalService,
         private readonly ?UserPictureService $userPictures = null,
+        private readonly PrincipalLocationService $locations = new PrincipalLocationService(),
     ) {}
 
     /**
@@ -221,86 +223,46 @@ final class UserService implements UserServiceInterface
 
     public function getLocations(int $userId): array
     {
-        $user = User::find($userId);
-        if ($user === null) {
+        $principalId = $this->principalIdFor($userId);
+        if ($principalId === null) {
             return [];
         }
 
-        $locations = $user->locations ?? collect();
-
-        return $locations->map(fn(UserLocation $loc) => [
-            'id'        => $loc->id,
-            'name'      => $loc->name,
-            'address'   => $loc->address,
-            'is_default' => $loc->is_default,
-        ])->values()->toArray();
+        return $this->locations->listFor($principalId);
     }
 
     public function createLocation(int $userId, array $data): array
     {
-        $name = trim((string) ($data['name'] ?? ''));
-        $address = trim((string) ($data['address'] ?? ''));
-        $isDefault = ($data['is_default'] ?? false) === true;
+        $principal = $this->principalService->ensureUserPrincipal($userId);
 
-        if ($isDefault) {
-            UserLocation::where('user_id', $userId)->update(['is_default' => false]);
-        }
-
-        $location = UserLocation::create([
-            'user_id'    => $userId,
-            'name'       => $name,
-            'address'    => $address,
-            'is_default' => $isDefault,
-        ]);
-
-        return ['location' => [
-            'id'        => $location->id,
-            'name'      => $location->name,
-            'address'   => $location->address,
-            'is_default' => $location->is_default,
-        ]];
+        return $this->locations->create((int) $principal->id, $data);
     }
 
     public function updateLocation(int $locationId, int $userId, array $data): ?array
     {
-        $location = UserLocation::where('id', $locationId)->where('user_id', $userId)->first();
-        if ($location === null) {
-            return null;
-        }
+        $principal = $this->principalService->ensureUserPrincipal($userId);
 
-        if (isset($data['name'])) {
-            $location->name = trim((string) $data['name']);
-        }
-        if (isset($data['address'])) {
-            $location->address = trim((string) $data['address']);
-        }
-        if (isset($data['is_default'])) {
-            if ($data['is_default'] === true) {
-                UserLocation::where('user_id', $userId)->where('id', '!=', $locationId)->update(['is_default' => false]);
-            }
-            $location->is_default = $data['is_default'] === true;
-        }
-
-        $location->save();
-
-        return ['location' => [
-            'id'        => $location->id,
-            'name'      => $location->name,
-            'address'   => $location->address,
-            'is_default' => $location->is_default,
-        ]];
+        return $this->locations->update($locationId, (int) $principal->id, $data);
     }
 
     public function deleteLocation(int $locationId, int $userId): bool
     {
-        $location = UserLocation::where('id', $locationId)->where('user_id', $userId)->first();
-        if ($location === null) {
-            return false;
-        }
+        $principal = $this->principalService->ensureUserPrincipal($userId);
 
-        $location->delete();
+        return $this->locations->delete($locationId, (int) $principal->id);
+    }
 
-        return true;
+    /**
+     * The user's own principal, without creating one — a read must never
+     * write, and a user without a principal has no locations.
+     */
+    private function principalIdFor(int $userId): ?int
+    {
+        $id = Principal::where('type', Principal::TYPE_USER)
+            ->where('user_id', $userId)
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
     }
 
     private function serializeUser(User $user): array
