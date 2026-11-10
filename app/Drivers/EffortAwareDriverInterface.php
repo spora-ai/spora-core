@@ -18,6 +18,11 @@ interface EffortAwareDriverInterface
      * The canonical effort levels this driver can express, mapped to the
      * value the provider expects.
      *
+     * The set may be narrower than the driver's `effort` setting offers:
+     * a level the model does not take is not one the driver can send, and
+     * the levels are a subset of the options rather than the whole of
+     * them.
+     *
      * @return array<string, string> canonical level value => provider wire value
      */
     public function effortLevels(): array;

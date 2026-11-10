@@ -49,7 +49,7 @@ function wireContractRequest(?string $effort, ?array $tools = null): LLMRequest
     );
 }
 
-function wireContractBody(LLMRequest $request): array
+function wireContractBody(LLMRequest $request, string $model = 'gpt-5.5'): array
 {
     $captured = [];
 
@@ -66,7 +66,7 @@ function wireContractBody(LLMRequest $request): array
 
     (new OpenAIResponsesDriver(
         apiKey: 'test',
-        model: 'gpt-5.5',
+        model: $model,
         baseUrl: 'https://api.openai.com/v1',
         httpClient: $client,
     ))->complete($request);
@@ -134,6 +134,22 @@ test('the Responses body with tools carries exactly the documented keys', functi
         'tool_choice',
         'max_output_tokens',
         'store',
+        'include',
+    ])
+        ->and($body['include'])->toBe(['reasoning.encrypted_content']);
+});
+
+test('the Responses body of a model that does not reason carries no include', function (): void {
+    $body = wireContractBody(wireContractRequest(null), 'gpt-4o');
+
+    expect(array_keys($body))->toEqualCanonicalizing([
+        'model',
+        'instructions',
+        'input',
+        'tools',
+        'tool_choice',
+        'max_output_tokens',
+        'store',
     ]);
 });
 
@@ -148,6 +164,7 @@ test('the Responses body with an effort carries the reasoning key as well', func
         'tool_choice',
         'max_output_tokens',
         'store',
+        'include',
         'reasoning',
     ]);
 });
@@ -161,6 +178,7 @@ test('the Responses body without tools carries neither the tools nor the tool ch
         'input',
         'max_output_tokens',
         'store',
+        'include',
     ]);
 });
 
@@ -173,6 +191,7 @@ test('the Responses body without tools and with an effort carries the reasoning 
         'input',
         'max_output_tokens',
         'store',
+        'include',
         'reasoning',
     ]);
 });
@@ -321,12 +340,41 @@ test('the Anthropic body with an effort carries exactly the documented keys', fu
         ])
         ->and($withTools['output_config'])->toBe(['effort' => 'high'])
         ->and($withoutTools['output_config'])->toBe(['effort' => 'high']);
+});
 
-    // Adaptive thinking arrived with the 4.6 generation, so the older
-    // model carries the effort without the thinking key.
-    $withoutAdaptiveThinking = wireContractAnthropicBody('claude-sonnet-4-5-20250929', wireContractRequest(EffortLevel::High->value));
+test('an Anthropic model without an effort carries no output_config at all', function (): void {
+    // Sonnet 4.5 has no effort: the parameter is not one of its own, and
+    // a request that carries it is refused.
+    $body = wireContractAnthropicBody('claude-sonnet-4-5-20250929', wireContractRequest(EffortLevel::High->value));
 
-    expect(array_keys($withoutAdaptiveThinking))->toEqualCanonicalizing([
+    expect(array_keys($body))->toEqualCanonicalizing([
+        'model',
+        'system',
+        'messages',
+        'max_tokens',
+        'tools',
+    ]);
+});
+
+test('an Anthropic model that rejects a level carries no output_config for it', function (): void {
+    // Opus 4.6 and Sonnet 4.6 have no xhigh.
+    $body = wireContractAnthropicBody('claude-opus-4-6', wireContractRequest(EffortLevel::XHigh->value));
+
+    expect(array_keys($body))->toEqualCanonicalizing([
+        'model',
+        'system',
+        'messages',
+        'max_tokens',
+        'tools',
+    ]);
+});
+
+test('an Anthropic model below 4.6 carries the effort without the thinking key', function (): void {
+    // Adaptive thinking arrived with the 4.6 generation, and it is a 400
+    // below it.
+    $body = wireContractAnthropicBody('claude-opus-4-5-20251101', wireContractRequest(EffortLevel::High->value));
+
+    expect(array_keys($body))->toEqualCanonicalizing([
         'model',
         'system',
         'messages',
@@ -334,5 +382,5 @@ test('the Anthropic body with an effort carries exactly the documented keys', fu
         'tools',
         'output_config',
     ])
-        ->and($withoutAdaptiveThinking['output_config'])->toBe(['effort' => 'high']);
+        ->and($body['output_config'])->toBe(['effort' => 'high']);
 });

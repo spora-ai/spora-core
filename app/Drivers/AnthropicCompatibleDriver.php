@@ -94,20 +94,25 @@ final class AnthropicCompatibleDriver extends AbstractCompatibleDriver implement
     }
 
     /**
-     * Anthropic spells every level the way the canonical scale does, and
+     * The levels the model takes.
+     *
+     * Anthropic spells every level the way the canonical scale does and
      * offers no `none` or `minimal` — the model thinks or it does not.
+     * Which of the five a model takes is the model's own property, so
+     * the question is asked in {@see ModelFamily}: Sonnet 4.5 and Haiku
+     * 4.5 have no effort at all, Opus 4.5 has no `max`, and Opus 4.6
+     * and Sonnet 4.6 have no `xhigh`.
      *
      * @return array<string, string>
      */
     public function effortLevels(): array
     {
-        return [
-            EffortLevel::Low->value    => EffortLevel::Low->value,
-            EffortLevel::Medium->value => EffortLevel::Medium->value,
-            EffortLevel::High->value   => EffortLevel::High->value,
-            EffortLevel::XHigh->value  => EffortLevel::XHigh->value,
-            EffortLevel::Max->value    => EffortLevel::Max->value,
-        ];
+        $levels = [];
+        foreach (ModelFamily::claudeEffortLevels($this->model) as $level) {
+            $levels[$level->value] = $level->value;
+        }
+
+        return $levels;
     }
 
     public function getProviderName(): string

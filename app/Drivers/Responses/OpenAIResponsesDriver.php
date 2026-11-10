@@ -12,6 +12,7 @@ use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
 use Spora\Drivers\LLMDriverInterface;
+use Spora\Drivers\ModelFamily;
 use Spora\Drivers\ValueObjects\LLMRequest;
 use Spora\Drivers\ValueObjects\LLMResponse;
 use Spora\Tools\Attributes\ToolSetting;
@@ -145,21 +146,7 @@ final class OpenAIResponsesDriver extends AbstractCompatibleDriver implements Dr
      */
     protected function modelBasedSupportsImageInput(): bool
     {
-        $model = strtolower($this->model);
-        if ($model === '' || $model === 'gpt-3.5-turbo' || $model === 'gpt-4' || $model === 'o1-mini') {
-            return false;
-        }
-
-        return str_starts_with($model, 'gpt-4o')
-            || str_starts_with($model, 'gpt-4-turbo')
-            || str_starts_with($model, 'gpt-4-vision')
-            || str_starts_with($model, 'gpt-4.1')
-            || str_starts_with($model, 'gpt-5')
-            || str_starts_with($model, 'gpt-6')
-            || str_starts_with($model, 'o1')
-            || str_starts_with($model, 'o3')
-            || str_starts_with($model, 'o4')
-            || str_starts_with($model, 'chatgpt-4o');
+        return ModelFamily::openAISupportsImageInput($this->model);
     }
 
     public function complete(LLMRequest $request): LLMResponse

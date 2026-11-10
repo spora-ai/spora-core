@@ -1290,6 +1290,21 @@ test('resolveLlmConfig throws when no config exists at any level', function (): 
         ->toThrow(RuntimeException::class, 'No LLM configuration set for this agent');
 })->afterEach(fn() => Spora\Core\Database::resetBootState());
 
+test('resolveLlmConfig carries no effort', function (): void {
+    [$agentId] = seedAgent();
+
+    $llm  = mockLlm(new LLMResponse('Done.', [], 5, 3, 'cmp_1'));
+    $orch = makeOrchestrator(mockDriverFactory($llm));
+
+    $config = $orch->llmConfigResolver->resolveLlmConfig(Agent::findOrFail($agentId));
+
+    // The tick sends the effort the task row carries — the requested
+    // level or the configuration's default. A key here would hand out
+    // the default where the resolved effort belongs, and the two differ
+    // whenever a message overrode the default.
+    expect($config)->not->toHaveKey('effort');
+})->afterEach(fn() => Spora\Core\Database::resetBootState());
+
 test('resolveLlmConfig uses user preference when agent has no llm_driver_config_id', function (): void {
     [$agentId, $userId] = seedAgent();
 

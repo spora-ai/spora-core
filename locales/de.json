@@ -444,6 +444,7 @@
   "data": "Daten",
   "decision must be either 'approve' or 'reject'.": "decision muss entweder 'approve' oder 'reject' sein.",
   "decisions must be a non-empty array.": "decisions muss ein nicht leeres Array sein.",
+  "effort \"%s\" cannot be sent: this agent has no LLM configuration.": "Der Denkaufwand \"%s\" kann nicht gesendet werden: Dieser Agent hat keine LLM-Konfiguration.",
   "effort \"%s\" is not offered by this agent's LLM driver. Supported levels: %s.": "Der Denkaufwand \"%s\" wird von dem LLM-Treiber dieses Agenten nicht angeboten. Unterstützte Stufen: %s.",
   "effort \"%s\" is not offered by this agent's LLM driver: it cannot express a reasoning effort.": "Der Denkaufwand \"%s\" wird von dem LLM-Treiber dieses Agenten nicht angeboten: Er kann keinen Denkaufwand ausdrücken.",
   "effort must be a string.": "Der Denkaufwand muss eine Zeichenkette sein.",

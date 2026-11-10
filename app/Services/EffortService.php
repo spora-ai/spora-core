@@ -13,7 +13,6 @@ use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Models\Agent;
 use Spora\Models\LLMDriverConfiguration;
 use Spora\Tools\ToolSettingSchema;
-use Throwable;
 
 /**
  * The reasoning-effort capabilities of an agent's effective driver.
@@ -44,17 +43,16 @@ final class EffortService
             return ['supported' => false, 'levels' => [], 'default' => null];
         }
 
-        $default = $this->defaultEffort($config);
         $levels = $this->supportedLevels($config);
 
         if ($levels === []) {
-            return ['supported' => false, 'levels' => [], 'default' => $default];
+            return ['supported' => false, 'levels' => [], 'default' => null];
         }
 
         return [
             'supported' => true,
             'levels' => $this->labelled($config->driver_class, $levels),
-            'default' => $default,
+            'default' => $this->declaredDefault($config, $levels),
         ];
     }
 
@@ -108,6 +106,11 @@ final class EffortService
      * A level the driver *does* offer is not checked any further: the
      * provider validates the level against the model it is talking to.
      *
+     * An agent with no configuration at all is a different refusal from a
+     * driver that cannot express an effort, and the message says which
+     * one it is: the first is fixed in the agent's LLM settings, the
+     * second in the driver.
+     *
      * A null agent is not an answer: the caller could not resolve the
      * agent the request is for, and the request is refused for that
      * reason further up.
@@ -120,7 +123,16 @@ final class EffortService
             return;
         }
 
-        $declared = $this->declaredLevels($agent);
+        $config = $this->preferences->getEffectiveConfigForAgent($agent);
+
+        if ($config === null) {
+            throw new EffortValidationException(
+                sprintf('effort "%s" cannot be sent: this agent has no LLM configuration.', $level),
+                EffortValidationException::CODE_UNSUPPORTED,
+            );
+        }
+
+        $declared = array_keys($this->supportedLevels($config));
 
         if (in_array($level, $declared, true)) {
             return;
@@ -140,19 +152,23 @@ final class EffortService
     }
 
     /**
-     * The configured default, or null for the model default.
+     * The configured default, when the driver would send it.
+     *
+     * A level the driver does not declare is never sent, so a configured
+     * default the model does not take is the model's own default —
+     * reporting it would promise a level the request never carries.
+     *
+     * @param array<string, string> $levels
      */
-    private function defaultEffort(LLMDriverConfiguration $config): ?string
+    private function declaredDefault(LLMDriverConfiguration $config, array $levels): ?string
     {
-        try {
-            $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
-        } catch (Throwable) {
+        $default = $this->llmConfigService->defaultEffort($config);
+
+        if ($default === null || !array_key_exists($default, $levels)) {
             return null;
         }
 
-        $effort = $settings['effort'] ?? null;
-
-        return is_string($effort) && $effort !== '' ? $effort : null;
+        return $default;
     }
 
     /**

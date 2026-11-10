@@ -8,12 +8,29 @@ namespace Spora\Drivers;
  * The one place a model name is interpreted.
  *
  * Both drivers ask it a question instead of re-implementing the parse:
- * the Anthropic driver asks which thinking mode the model has and
- * whether it takes images, the OpenAI driver asks whether the model is a
- * reasoning model. A new model family is a change here and nowhere else.
+ * the Anthropic driver asks which thinking mode the model has, whether
+ * it takes images and which effort levels it takes, the OpenAI driver
+ * asks whether the model is a reasoning model and whether it takes
+ * images. A new model family is a change here and nowhere else.
  */
 final class ModelFamily
 {
+    /**
+     * Anthropic's effort levels, in the canonical order.
+     *
+     * The vocabulary is five levels wide: there is no `none` and no
+     * `minimal`, because the model thinks or it does not.
+     *
+     * @var list<EffortLevel>
+     */
+    private const ANTHROPIC_EFFORT_LEVELS = [
+        EffortLevel::Low,
+        EffortLevel::Medium,
+        EffortLevel::High,
+        EffortLevel::XHigh,
+        EffortLevel::Max,
+    ];
+
     /**
      * OpenAI's reasoning families.
      *
@@ -84,6 +101,37 @@ final class ModelFamily
     }
 
     /**
+     * Whether the model accepts image content blocks.
+     *
+     * A conservative allowlist of the vision-capable OpenAI families:
+     * `gpt-4o`, `gpt-4-turbo`, `gpt-4-vision`, `gpt-4.1`, `gpt-5`,
+     * `gpt-6`, the o-series and `chatgpt-4o`. `gpt-3.5-turbo`, the
+     * plain `gpt-4` and `o1-mini` are text-only.
+     *
+     * A custom OpenAI-compatible endpoint — a private deployment — is
+     * text-only too, unless the operator says otherwise with the
+     * `supports_image_input` setting on the LLM driver config.
+     */
+    public static function openAISupportsImageInput(string $model): bool
+    {
+        $id = strtolower(trim($model));
+        if ($id === '' || $id === 'gpt-3.5-turbo' || $id === 'gpt-4' || $id === 'o1-mini') {
+            return false;
+        }
+
+        return str_starts_with($id, 'gpt-4o')
+            || str_starts_with($id, 'gpt-4-turbo')
+            || str_starts_with($id, 'gpt-4-vision')
+            || str_starts_with($id, 'gpt-4.1')
+            || str_starts_with($id, 'gpt-5')
+            || str_starts_with($id, 'gpt-6')
+            || str_starts_with($id, 'o1')
+            || str_starts_with($id, 'o3')
+            || str_starts_with($id, 'o4')
+            || str_starts_with($id, 'chatgpt-4o');
+    }
+
+    /**
      * Whether the model has an adaptive thinking mode.
      *
      * Adaptive thinking arrived with the 4.6 generation; below it the
@@ -128,6 +176,51 @@ final class ModelFamily
         }
 
         return $version[0] >= 3;
+    }
+
+    /**
+     * The effort levels the model takes.
+     *
+     * Anthropic's effort vocabulary is five levels wide — `low`, `medium`,
+     * `high`, `xhigh` and `max`; there is no `none` and no `minimal`,
+     * because the model thinks or it does not. Which of them a model
+     * takes is a property of the model and not of the driver: a model
+     * that does not offer the parameter rejects the request that carries
+     * it, while a level that is withheld degrades to the model's own
+     * default.
+     *
+     * A name that is not a Claude id belongs to an Anthropic-compatible
+     * endpoint with its own model names — Kimi and the like. The driver
+     * does not model another provider's model zoo, and the operator who
+     * pointed the agent at that endpoint is the only one who knows what
+     * it takes, so the full set stands there and the provider has the
+     * last word.
+     *
+     * @return list<EffortLevel>
+     */
+    public static function claudeEffortLevels(string $model): array
+    {
+        $id = self::stripVendorAffixes($model);
+
+        if (!str_starts_with($id, 'claude-')) {
+            return self::ANTHROPIC_EFFORT_LEVELS;
+        }
+
+        $version = self::claudeVersion($id);
+        if ($version === null) {
+            // No numeric component at all: the id names the current
+            // generation, which takes every level.
+            return self::ANTHROPIC_EFFORT_LEVELS;
+        }
+
+        $levels = [];
+        foreach (self::ANTHROPIC_EFFORT_LEVELS as $level) {
+            if (self::claudeTakesEffortLevel($id, $version, $level)) {
+                $levels[] = $level;
+            }
+        }
+
+        return $levels;
     }
 
     /**
@@ -178,6 +271,70 @@ final class ModelFamily
         }
 
         return [(int) $matches[1], (int) ($matches[2] ?? 0)];
+    }
+
+    /**
+     * Whether the model takes one effort level.
+     *
+     * `max` arrived with the 4.6 generation and `xhigh` with the 4.7
+     * one, so the generation decides the two upper levels on its own.
+     *
+     * @param array{0: int, 1: int} $version
+     */
+    private static function claudeTakesEffortLevel(string $id, array $version, EffortLevel $level): bool
+    {
+        return match ($level) {
+            EffortLevel::Low, EffortLevel::Medium, EffortLevel::High => self::claudeTakesEffort($id, $version),
+            EffortLevel::XHigh => self::claudeVersionIsAtLeast($version, 4, 7),
+            EffortLevel::Max => self::claudeVersionIsAtLeast($version, 4, 6),
+            EffortLevel::None, EffortLevel::Minimal => false,
+        };
+    }
+
+    /**
+     * Whether the model has an effort at all.
+     *
+     * Effort arrived with the 4.6 generation. The one model below it
+     * that has it is Opus 4.5 — Sonnet 4.5 and Haiku 4.5 have none.
+     *
+     * @param array{0: int, 1: int} $version
+     */
+    private static function claudeTakesEffort(string $id, array $version): bool
+    {
+        if (self::claudeVersionIsAtLeast($version, 4, 6)) {
+            return true;
+        }
+
+        return $version === [4, 5] && self::claudeFamilyName($id) === 'opus';
+    }
+
+    /**
+     * @param array{0: int, 1: int} $version
+     */
+    private static function claudeVersionIsAtLeast(array $version, int $major, int $minor): bool
+    {
+        return $version[0] > $major || ($version[0] === $major && $version[1] >= $minor);
+    }
+
+    /**
+     * The model family an id names: `claude-opus-4-5` is an `opus`.
+     *
+     * The legacy ids put the version first (`claude-3-5-sonnet-20241022`)
+     * and name no family at all.
+     */
+    private static function claudeFamilyName(string $id): string
+    {
+        $segments = explode('-', substr($id, strlen('claude-')));
+        $name = [];
+
+        foreach ($segments as $segment) {
+            if ($segment === '' || ctype_digit($segment)) {
+                break;
+            }
+            $name[] = $segment;
+        }
+
+        return implode('-', $name);
     }
 
     /**

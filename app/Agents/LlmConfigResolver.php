@@ -15,9 +15,12 @@ use Throwable;
  *
  * Thin wrapper around {@see LLMConfigPreferences::getEffectiveConfigForAgent()}
  * that adds the LLM-specific shape the orchestrator expects (context_window,
- * max_tokens_output, temperature and effort, with the defaults the legacy
- * resolver used).
+ * max_tokens_output and temperature, with the defaults the legacy resolver used).
  * Delegation keeps the principal-aware resolution logic in one place.
+ *
+ * The reasoning effort is not part of that shape: the tick sends the effort
+ * the task row carries, which is the requested level or the configuration's
+ * default, and that row is written by the orchestrator.
  *
  * Package-private collaborator: constructed and called only by
  * {@see Orchestrator}.
@@ -30,7 +33,7 @@ final class LlmConfigResolver
     ) {}
 
     /**
-     * @return array{context_window: int, max_tokens_output: int, temperature: float, effort: ?string}
+     * @return array{context_window: int, max_tokens_output: int, temperature: float}
      */
     public function resolveLlmConfig(Agent $agent): array
     {
@@ -49,7 +52,6 @@ final class LlmConfigResolver
             'context_window'    => $config->context_window ?? $defaults['context_window'],
             'max_tokens_output' => $config->max_tokens_output ?? $defaults['max_tokens_output'],
             'temperature'       => $this->getTemperatureFromSettings($config, $defaults['temperature']),
-            'effort'            => $this->getEffortFromSettings($config),
         ];
     }
 
@@ -70,7 +72,7 @@ final class LlmConfigResolver
             return null;
         }
 
-        return $this->getEffortFromSettings($config);
+        return $this->llmConfigService?->defaultEffort($config);
     }
 
     private function getTemperatureFromSettings(\Spora\Models\LLMDriverConfiguration $config, float $default): float
@@ -86,28 +88,6 @@ final class LlmConfigResolver
                 : $default;
         } catch (Throwable) {
             return $default;
-        }
-    }
-
-    /**
-     * The configured effort, or null for the model default.
-     *
-     * The stored value is the canonical level; an empty setting means the
-     * model default, which is the same as sending nothing at all.
-     */
-    private function getEffortFromSettings(\Spora\Models\LLMDriverConfiguration $config): ?string
-    {
-        if ($this->llmConfigService === null) {
-            return null;
-        }
-
-        try {
-            $settings = $this->llmConfigService->decryptSettings($config->driver_class, $config->settings ?? '');
-            $effort = $settings['effort'] ?? null;
-
-            return is_string($effort) && $effort !== '' ? $effort : null;
-        } catch (Throwable) {
-            return null;
         }
     }
 }

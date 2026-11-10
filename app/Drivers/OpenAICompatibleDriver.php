@@ -52,33 +52,12 @@ final class OpenAICompatibleDriver extends AbstractCompatibleDriver
     }
 
     /**
-     * Vision-capable OpenAI-family model names. Conservative allowlist:
-     *   - gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4-vision*
-     *   - gpt-4.1*, gpt-5*, gpt-6*
-     *   - o1, o1-pro, o3, o3-mini, o4-mini
-     *   - chatgpt-4o*
-     *
-     * `gpt-3.5*`, `gpt-4` (non-vision), `o1-mini` are explicitly excluded.
-     * Custom OpenAI-compatible endpoints (e.g. a private deployment) are
-     * treated as text-only unless the operator overrides via the
-     * `supports_image_input` setting on the LLM driver config.
+     * The vision-capable OpenAI families, asked of the one place a model
+     * name is interpreted.
      */
     protected function modelBasedSupportsImageInput(): bool
     {
-        $m = strtolower($this->model);
-        if ($m === '' || $m === 'gpt-3.5-turbo' || $m === 'gpt-4' || $m === 'o1-mini') {
-            return false;
-        }
-        return str_starts_with($m, 'gpt-4o')
-            || str_starts_with($m, 'gpt-4-turbo')
-            || str_starts_with($m, 'gpt-4-vision')
-            || str_starts_with($m, 'gpt-4.1')
-            || str_starts_with($m, 'gpt-5')
-            || str_starts_with($m, 'gpt-6')
-            || str_starts_with($m, 'o1')
-            || str_starts_with($m, 'o3')
-            || str_starts_with($m, 'o4')
-            || str_starts_with($m, 'chatgpt-4o');
+        return ModelFamily::openAISupportsImageInput($this->model);
     }
 
     /**

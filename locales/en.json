@@ -444,6 +444,7 @@
     "data": "data",
     "decision must be either 'approve' or 'reject'.": "decision must be either 'approve' or 'reject'.",
     "decisions must be a non-empty array.": "decisions must be a non-empty array.",
+    "effort \"%s\" cannot be sent: this agent has no LLM configuration.": "effort \"%s\" cannot be sent: this agent has no LLM configuration.",
     "effort \"%s\" is not offered by this agent's LLM driver. Supported levels: %s.": "effort \"%s\" is not offered by this agent's LLM driver. Supported levels: %s.",
     "effort \"%s\" is not offered by this agent's LLM driver: it cannot express a reasoning effort.": "effort \"%s\" is not offered by this agent's LLM driver: it cannot express a reasoning effort.",
     "effort must be a string.": "effort must be a string.",

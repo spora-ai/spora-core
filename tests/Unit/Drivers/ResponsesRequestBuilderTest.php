@@ -133,7 +133,7 @@ test('an assistant turn with tool calls becomes a message and one function_call 
     expect($body['input'][0])->toBe([
         'type' => 'message',
         'role' => 'assistant',
-        'content' => [['type' => 'input_text', 'text' => 'Calling two tools.']],
+        'content' => [['type' => 'output_text', 'text' => 'Calling two tools.']],
     ]);
 
     expect($body['input'][1])->toBe([
@@ -200,13 +200,13 @@ test('a reasoning block is replayed in position, before the message it belongs t
     expect($body['input'][1])->toBe([
         'type' => 'message',
         'role' => 'assistant',
-        'content' => [['type' => 'input_text', 'text' => 'The answer is 42.']],
+        'content' => [['type' => 'output_text', 'text' => 'The answer is 42.']],
     ]);
 
     expect($body['input'][2]['type'])->toBe('function_call');
 });
 
-test('a stored reasoning item is replayed by id when the provider keeps it', function (): void {
+test('a reasoning item is replayed with its blob when the provider stores it too', function (): void {
     $body = responsesBuilder(store: true)->buildBody(responsesRequest(messages: [[
         'role' => 'assistant',
         'content' => [
@@ -223,7 +223,73 @@ test('a stored reasoning item is replayed by id when the provider keeps it', fun
         'type' => 'reasoning',
         'id' => 'rs_123',
         'summary' => [],
+        'encrypted_content' => 'encrypted-blob',
     ]);
+});
+
+test('a reasoning item without a blob is replayed by id when the provider keeps it', function (): void {
+    $body = responsesBuilder(store: true)->buildBody(responsesRequest(messages: [[
+        'role' => 'assistant',
+        'content' => [
+            [
+                'type' => 'reasoning',
+                'text' => 'Weighing the options.',
+                'metadata' => ['id' => 'rs_123', 'summary' => []],
+            ],
+        ],
+    ]]));
+
+    expect($body['input'][0])->toBe([
+        'type' => 'reasoning',
+        'id' => 'rs_123',
+        'summary' => [],
+    ]);
+});
+
+test('a reasoning item without a blob is skipped when the provider keeps nothing', function (): void {
+    $body = responsesBuilder()->buildBody(responsesRequest(messages: [[
+        'role' => 'assistant',
+        'content' => [
+            [
+                'type' => 'reasoning',
+                'text' => 'Weighing the options.',
+                'metadata' => ['id' => 'rs_123', 'summary' => []],
+            ],
+            ['type' => 'text', 'text' => 'The answer is 42.'],
+        ],
+    ]]));
+
+    expect($body['input'])->toHaveCount(1);
+    expect($body['input'][0]['type'])->toBe('message');
+    expect(json_encode($body['input']))->not->toContain('encrypted_content');
+});
+
+test('a reasoning item is never sent with an empty encrypted content', function (): void {
+    $body = responsesBuilder()->buildBody(responsesRequest(messages: [[
+        'role' => 'assistant',
+        'content' => [
+            [
+                'type' => 'reasoning',
+                'text' => 'Weighing the options.',
+                'data' => '',
+                'metadata' => ['id' => 'rs_123', 'summary' => []],
+            ],
+        ],
+    ]]));
+
+    expect(json_encode($body['input']))->not->toContain('encrypted_content');
+});
+
+test('the encrypted reasoning content is requested from a reasoning model', function (): void {
+    $body = responsesBuilder(model: 'gpt-6-astra')->buildBody(responsesRequest());
+
+    expect($body['include'])->toBe(['reasoning.encrypted_content']);
+});
+
+test('a model that does not reason asks for no encrypted reasoning content', function (): void {
+    $body = responsesBuilder(model: 'gpt-4o')->buildBody(responsesRequest());
+
+    expect($body)->not->toHaveKey('include');
 });
 
 test('a system row stays an input item and is not folded into the instructions', function (): void {
@@ -255,4 +321,38 @@ test('an image block becomes an input_image part with the url as a plain string'
         ['type' => 'input_text', 'text' => 'What is this?'],
         ['type' => 'input_image', 'image_url' => 'data:image/png;base64,AAAA', 'detail' => 'auto'],
     ]);
+});
+
+test('a user turn carries an input_text part and an assistant turn an output_text part', function (): void {
+    $body = responsesBuilder()->buildBody(responsesRequest(messages: [
+        ['role' => 'user', 'content' => [['type' => 'text', 'text' => 'Knock knock.']]],
+        ['role' => 'assistant', 'content' => [['type' => 'text', 'text' => "Who's there?"]]],
+    ]));
+
+    expect($body['input'][0]['content'])->toBe([['type' => 'input_text', 'text' => 'Knock knock.']]);
+    expect($body['input'][1]['content'])->toBe([['type' => 'output_text', 'text' => "Who's there?"]]);
+});
+
+test('a plain string content follows the role too', function (): void {
+    $body = responsesBuilder()->buildBody(responsesRequest(messages: [
+        ['role' => 'user', 'content' => 'Knock knock.'],
+        ['role' => 'assistant', 'content' => "Who's there?"],
+    ]));
+
+    expect($body['input'][0]['content'])->toBe([['type' => 'input_text', 'text' => 'Knock knock.']]);
+    expect($body['input'][1]['content'])->toBe([['type' => 'output_text', 'text' => "Who's there?"]]);
+});
+
+test('an assistant row carries no image part', function (): void {
+    // The assistant role takes `output_text` and `refusal` — there is no
+    // `input_image` there.
+    $body = responsesBuilder()->buildBody(responsesRequest(messages: [[
+        'role' => 'assistant',
+        'content' => [
+            ['type' => 'text', 'text' => 'Here it is.'],
+            ['type' => 'image', 'mediaType' => 'image/png', 'base64' => 'AAAA'],
+        ],
+    ]]));
+
+    expect($body['input'][0]['content'])->toBe([['type' => 'output_text', 'text' => 'Here it is.']]);
 });

@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use Spora\Drivers\ModelFamily;
+use Spora\Drivers\OpenAICompatibleDriver;
+use Spora\Drivers\Responses\OpenAIResponsesDriver;
+use Symfony\Component\HttpClient\MockHttpClient;
 
 /**
  * The model-name parse.
@@ -103,6 +106,42 @@ test('a name that is not a Claude id is not answered for', function (): void {
     expect(ModelFamily::claudeSupportsAdaptiveThinking('gpt-4o'))->toBeFalse()
         ->and(ModelFamily::claudeSupportsImageInput('gpt-4o'))->toBeFalse();
 });
+
+test('the image allowlist is the one both OpenAI drivers read', function (string $model, bool $expected): void {
+    expect(ModelFamily::openAISupportsImageInput($model))->toBe($expected);
+})->with([
+    'gpt-4o' => ['gpt-4o', true],
+    'gpt-4o-mini' => ['gpt-4o-mini', true],
+    'gpt-4-turbo' => ['gpt-4-turbo', true],
+    'gpt-4-vision-preview' => ['gpt-4-vision-preview', true],
+    'gpt-4.1' => ['gpt-4.1', true],
+    'gpt-5.5' => ['gpt-5.5', true],
+    'gpt-6-astra' => ['gpt-6-astra', true],
+    'o3-mini' => ['o3-mini', true],
+    'chatgpt-4o' => ['chatgpt-4o', true],
+    'gpt-3.5-turbo' => ['gpt-3.5-turbo', false],
+    'gpt-4' => ['gpt-4', false],
+    'o1-mini' => ['o1-mini', false],
+    'an empty model' => ['', false],
+]);
+
+test('both OpenAI drivers answer the image question the same way', function (string $model): void {
+    $chat = new OpenAICompatibleDriver(
+        apiKey: 'test',
+        model: $model,
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: new MockHttpClient(),
+    );
+
+    $responses = new OpenAIResponsesDriver(
+        apiKey: 'test',
+        model: $model,
+        baseUrl: 'https://api.openai.com/v1',
+        httpClient: new MockHttpClient(),
+    );
+
+    expect($chat->supportsImageInput())->toBe($responses->supportsImageInput());
+})->with(['gpt-4o', 'gpt-4', 'gpt-5.5', 'o1-mini', 'gpt-3.5-turbo']);
 
 /**
  * The model enum of the live OpenAI API spec

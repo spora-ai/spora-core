@@ -90,6 +90,17 @@ final class ResponsesRequestBuilder
         $body['max_output_tokens'] = max(self::MINIMUM_OUTPUT_TOKENS, $request->maxTokens);
         $body['store'] = $this->store;
 
+        if (ModelFamily::isOpenAIReasoningModel($this->model)) {
+            // The encrypted reasoning content is what makes a reasoning
+            // item replayable in the next turn. The spec says it is
+            // populated by default, and documents this `include` value
+            // for the stateless case — `store` off, or an organisation
+            // enrolled in zero data retention — where the item comes
+            // back with the blob and not by id. A model that does not
+            // reason has no reasoning item to include.
+            $body['include'] = ['reasoning.encrypted_content'];
+        }
+
         if ($effort === null) {
             return $body;
         }
@@ -187,7 +198,7 @@ final class ResponsesRequestBuilder
                 $items[] = $item;
             }
 
-            $parts = $this->contentParts($content);
+            $parts = $this->contentParts($content, $role);
             if ($parts !== []) {
                 $items[] = [
                     'type' => 'message',
@@ -334,10 +345,10 @@ final class ResponsesRequestBuilder
     /**
      * @return list<array<string, mixed>>
      */
-    private function contentParts(mixed $content): array
+    private function contentParts(mixed $content, string $role): array
     {
         if (is_string($content)) {
-            return $content === '' ? [] : [['type' => 'input_text', 'text' => $content]];
+            return $content === '' ? [] : [['type' => $this->textPartType($role), 'text' => $content]];
         }
 
         if (!is_array($content)) {
@@ -349,7 +360,7 @@ final class ResponsesRequestBuilder
             if (!is_array($block)) {
                 continue;
             }
-            $part = $this->contentPart($block);
+            $part = $this->contentPart($block, $role);
             if ($part !== null) {
                 $parts[] = $part;
             }
@@ -362,16 +373,40 @@ final class ResponsesRequestBuilder
      * @param array<string, mixed> $block
      * @return array<string, mixed>|null
      */
-    private function contentPart(array $block): ?array
+    private function contentPart(array $block, string $role): ?array
     {
         return match ($block['type'] ?? null) {
-            ContentBlock::TYPE_TEXT => ['type' => 'input_text', 'text' => (string) ($block['text'] ?? '')],
-            ContentBlock::TYPE_IMAGE => $this->imagePart($block),
+            ContentBlock::TYPE_TEXT => ['type' => $this->textPartType($role), 'text' => (string) ($block['text'] ?? '')],
+            // The assistant role takes no image: its content is the
+            // model's own output, and the API validates that content
+            // against `OutputMessageContent` — `output_text` and
+            // `refusal`.
+            ContentBlock::TYPE_IMAGE => $role === 'assistant' ? null : $this->imagePart($block),
             // A thinking or redacted-thinking block belongs to another
             // provider's chain, and a tool-use block is carried by the
             // `function_call` items instead.
             default => null,
         };
+    }
+
+    /**
+     * The type of the text part the role takes.
+     *
+     * An assistant turn is replayed as the model's own output: the API
+     * validates its content against `OutputMessageContent`, which is
+     * `output_text` and `refusal` — `input_text` there is a 400. OpenAI's
+     * "Migrate to the Responses API" guide makes the same split for the
+     * roles a conversation carries, `input_text` for the user and
+     * `output_text` for the assistant.
+     *
+     * The published OpenAPI schema does not list `output_text` in the
+     * `InputContent` union, so the schema alone reads as if the
+     * assistant role took `input_text`; it is the narrower statement of
+     * the two, and it does not describe what the API accepts.
+     */
+    private function textPartType(string $role): string
+    {
+        return $role === 'assistant' ? 'output_text' : 'input_text';
     }
 
     /**
@@ -441,12 +476,24 @@ final class ResponsesRequestBuilder
             'summary' => is_array($metadata['summary'] ?? null) ? $metadata['summary'] : [],
         ];
 
-        if (! $this->store) {
+        $blob = isset($block['data']) && is_string($block['data']) ? $block['data'] : '';
+
+        if ($blob !== '') {
             // The encrypted blob is what the provider decrypts to restore
-            // the chain of thought. With `store` on, the provider keeps
-            // the item itself and the id is the reference — a path no
-            // live call has verified yet.
-            $item['encrypted_content'] = (string) ($block['data'] ?? '');
+            // the chain of thought, and it resolves the item whether or
+            // not the provider stored it — so it goes out whatever
+            // `store` says.
+            $item['encrypted_content'] = $blob;
+
+            return $item;
+        }
+
+        if (!$this->store) {
+            // There is nothing to resolve the item by: the provider kept
+            // nothing, so the id alone resolves to nothing and the
+            // replay fails. A lost chain of thought is better than a
+            // failed request.
+            return null;
         }
 
         return $item;

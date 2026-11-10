@@ -619,10 +619,10 @@ test('a model below 4.6 sends no thinking field even with an effort level', func
         ->and($body)->not->toHaveKey('thinking');
 });
 
-test('a Claude 3 model sends no thinking field even with an effort level', function (): void {
+test('a model without an effort sends no output_config even with an effort level', function (): void {
     $body = captureAnthropicBody('claude-3-5-sonnet-20241022', makeAnthropicEffortRequest('medium'));
 
-    expect($body)->toHaveKey('output_config')
+    expect($body)->not->toHaveKey('output_config')
         ->and($body)->not->toHaveKey('thinking');
 });
 

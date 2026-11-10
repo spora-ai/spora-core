@@ -83,23 +83,114 @@ test('a driver that cannot express an effort refuses every level', function (): 
     $this->fail('Expected an EffortValidationException.');
 });
 
-/**
- * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
- */
-function effortServiceFixture(string $driverClass = AnthropicCompatibleDriver::class): array
-{
+test('a model that takes no effort refuses every level', function (): void {
+    [$service, $agent] = effortServiceFixture(AnthropicCompatibleDriver::class, 'claude-sonnet-4-5-20250929');
+
+    expect($service->declaredLevels($agent))->toBe([]);
+
+    try {
+        $service->assertLevel('high', $agent);
+    } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
+            ->and($e->getMessage())->toContain('cannot express a reasoning effort');
+
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
+});
+
+test('an agent with no LLM configuration is told that, and not that its driver cannot reason', function (): void {
+    [$service, $agent] = effortServiceFixtureWithoutConfiguration();
+
+    try {
+        $service->assertLevel('high', $agent);
+    } catch (EffortValidationException $e) {
+        expect($e->errorCode())->toBe('EFFORT_LEVEL_UNSUPPORTED')
+            ->and($e->getMessage())->toContain('no LLM configuration');
+
+        return;
+    }
+
+    $this->fail('Expected an EffortValidationException.');
+});
+
+test('the reported default is one the driver would send', function (): void {
+    [$service, $agent] = effortServiceFixture(AnthropicCompatibleDriver::class, 'claude-sonnet-5-5', 'high');
+
+    expect($service->describe($agent)['default'])->toBe('high');
+});
+
+test('a default the model does not take is not reported', function (): void {
+    // Opus 4.6 has no xhigh, so the driver would never send it.
+    [$service, $agent] = effortServiceFixture(AnthropicCompatibleDriver::class, 'claude-opus-4-6', 'xhigh');
+
+    $described = $service->describe($agent);
+
+    expect($described['supported'])->toBeTrue()
+        ->and($described['default'])->toBeNull();
+});
+
+test('a model that takes no effort reports no levels and no default', function (): void {
+    [$service, $agent] = effortServiceFixture(AnthropicCompatibleDriver::class, 'claude-sonnet-4-5-20250929', 'high');
+
+    $described = $service->describe($agent);
+
+    expect($described['supported'])->toBeFalse()
+        ->and($described['levels'])->toBe([])
+        ->and($described['default'])->toBeNull();
+});
+
+test('the configuration default effort is read by one rule', function (): void {
+    // The rule lives in {@see \Spora\Services\LLMConfigService}: the
+    // endpoint and the write path both read it there.
     $authService = bootAuthLayer();
     $userId = bootAuth($authService);
 
     $config = LLMDriverConfiguration::create([
         'principal_id' => null,
-        'name' => 'Effort Service Config',
-        'driver_class' => $driverClass,
+        'name' => 'Default Effort Config',
+        'driver_class' => AnthropicCompatibleDriver::class,
         'settings' => json_encode([
             'api_key' => 'test',
             'model' => 'claude-sonnet-5-5',
-            'base_url' => 'https://example.invalid',
+            'effort' => 'high',
         ]),
+        'is_global' => true,
+        'is_default' => true,
+    ]);
+
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $llmConfigService = new LLMConfigService($security, [AnthropicCompatibleDriver::class]);
+
+    expect($llmConfigService->defaultEffort($config))->toBe('high');
+});
+
+/**
+ * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
+ */
+function effortServiceFixture(
+    string  $driverClass = AnthropicCompatibleDriver::class,
+    string  $model = 'claude-sonnet-5-5',
+    ?string $configuredEffort = null,
+): array {
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+
+    $settings = [
+        'api_key' => 'test',
+        'model' => $model,
+        'base_url' => 'https://example.invalid',
+    ];
+    if ($configuredEffort !== null) {
+        $settings['effort'] = $configuredEffort;
+    }
+
+    $config = LLMDriverConfiguration::create([
+        'principal_id' => null,
+        'name' => 'Effort Service Config',
+        'driver_class' => $driverClass,
+        'settings' => json_encode($settings),
         'is_global' => true,
         'is_default' => true,
     ]);
@@ -114,6 +205,37 @@ function effortServiceFixture(string $driverClass = AnthropicCompatibleDriver::c
 
     $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
     $llmConfigService = new LLMConfigService($security, [$driverClass]);
+
+    return [
+        new EffortService(
+            new LLMConfigPreferences(),
+            $llmConfigService,
+            new DriverFactory(new NullLogger(), $llmConfigService, 60),
+        ),
+        $agent,
+    ];
+}
+
+/**
+ * An agent with no effective configuration at all.
+ *
+ * @return array{0: EffortService, 1: Agent} the service and the agent it answers for
+ */
+function effortServiceFixtureWithoutConfiguration(): array
+{
+    $authService = bootAuthLayer();
+    $userId = bootAuth($authService);
+
+    $agent = Agent::create([
+        'principal_id' => createUserPrincipalPublic($userId),
+        'name' => 'Effort Service Agent Without Configuration',
+        'llm_driver_config_id' => null,
+        'max_steps' => 10,
+        'is_active' => true,
+    ]);
+
+    $security = new SecurityManager(str_repeat("\0", SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+    $llmConfigService = new LLMConfigService($security, [AnthropicCompatibleDriver::class]);
 
     return [
         new EffortService(
