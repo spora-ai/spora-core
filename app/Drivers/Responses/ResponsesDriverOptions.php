@@ -20,10 +20,17 @@ final class ResponsesDriverOptions
          *
          * The Responses API stores a response as a retrievable object for
          * at least 30 days unless it is told not to, so the default is
-         * off: Spora replays the encrypted reasoning itself. Turning it
-         * off does not keep the prompts and responses out of OpenAI's
-         * abuse-monitoring logs — only an approved Zero Data Retention
-         * or Modified Abuse Monitoring control does that.
+         * off.
+         *
+         * The toggle does not decide who replays the reasoning: Spora
+         * sends the encrypted content whenever it has one, and the
+         * toggle only decides what happens to an item that carries none
+         * — dropped from the replay when off, sent by id alone when on,
+         * which only the provider can resolve if it kept the item.
+         *
+         * Turning it off does not keep the prompts and responses out of
+         * OpenAI's abuse-monitoring logs — only an approved Zero Data
+         * Retention or Modified Abuse Monitoring control does that.
          */
         public readonly bool $store = false,
     ) {}

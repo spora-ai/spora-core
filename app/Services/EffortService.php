@@ -101,11 +101,10 @@ final class EffortService
      * A level the driver *does* offer is not checked any further: the
      * provider validates the level against the model it is talking to.
      *
-     * Each refusal names the reason it is refused for, because the three
-     * are fixed in three different places: an agent with no configuration
-     * is fixed in the agent's LLM settings, a driver that cannot be built
-     * in the configuration that names it, and a driver with no effort for
-     * this model in the model.
+     * Each refusal names the reason it is refused for: an agent with no
+     * configuration is fixed in the agent's LLM settings, a driver that
+     * cannot be built in the configuration that names it, and a driver
+     * with no effort for this model in the model.
      *
      * A null agent is not an answer: the caller could not resolve the
      * agent the request is for, and the request is refused for that
