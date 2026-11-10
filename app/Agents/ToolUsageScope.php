@@ -9,10 +9,10 @@ use Spora\Metering\MeteringContext;
 /**
  * What the meter should be told about one tool call.
  *
- * The context and the subject are built once and used twice — once to ask
- * the meter whether the call may proceed, and once to tell it what the call
- * cost. Building them twice would cost a query per call and could resolve
- * the operation to two different answers.
+ * The context is built once and used twice — once to ask the meter whether
+ * the call may proceed, and once to tell it what the call cost. Building it
+ * twice would cost a query per call and could resolve the operation to two
+ * different answers.
  */
 final readonly class ToolUsageScope
 {

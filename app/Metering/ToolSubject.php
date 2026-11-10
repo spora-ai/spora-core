@@ -10,7 +10,7 @@ namespace Spora\Metering;
  * `toolClass` is the fully-qualified class name and is the stable key: the
  * wire name comes from the `#[Tool]` attribute and changes between plugin
  * releases, while the class does not. `operation` narrows a multi-operation
- * tool down to the operation the call actually dispatches to.
+ * tool down to the operation the call dispatches to.
  */
 final readonly class ToolSubject implements MeteringSubject
 {

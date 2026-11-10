@@ -18,13 +18,7 @@ final class NullUsageMeter implements UsageMeterInterface
         return null;
     }
 
-    public function recordLlmUsage(MeteringContext $context, LlmUsage $usage): void
-    {
-        // Nothing to record.
-    }
+    public function recordLlmUsage(MeteringContext $context, LlmUsage $usage): void {}
 
-    public function recordToolUsage(MeteringContext $context, ToolUsage $usage): void
-    {
-        // Nothing to record.
-    }
+    public function recordToolUsage(MeteringContext $context, ToolUsage $usage): void {}
 }

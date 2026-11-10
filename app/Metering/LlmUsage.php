@@ -9,8 +9,8 @@ use Spora\Drivers\ValueObjects\Usage;
 /**
  * The tokens one provider request consumed.
  *
- * Wraps the core's own {@see Usage} rather than restating its counters, so
- * a meter sees the same numbers the platform records and there is no second
+ * Wraps the core's own {@see Usage} rather than copying its counters, so
+ * a meter sees the numbers the platform records and there is no second
  * token accounting to keep in step.
  */
 final readonly class LlmUsage

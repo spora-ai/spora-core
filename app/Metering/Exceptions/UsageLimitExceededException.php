@@ -10,9 +10,9 @@ use Spora\Metering\UsageDecision;
 /**
  * A hard usage decision stopped the run.
  *
- * Thrown by the core at the two moments it can veto: before a provider
- * request leaves and before a tool executes. It carries the decision so the
- * caller can write the operator-facing reason onto the task row.
+ * Thrown at the two moments the core can veto — before a provider request
+ * leaves and before a tool executes. It carries the decision so the caller
+ * can write the operator-facing reason onto the task row.
  */
 final class UsageLimitExceededException extends RuntimeException
 {

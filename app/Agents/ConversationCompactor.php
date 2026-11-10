@@ -75,10 +75,10 @@ final class ConversationCompactor
         private readonly ?LoggerInterface $logger = null,
         ?LlmCallRunner $llmCallRunner = null,
     ) {
-        // The driver factory only feeds the fallback — the runner resolves the
-        // driver from the agent itself. A hand-built compactor has no metering
-        // plugin behind it, so the fallback allows everything and records
-        // nothing.
+        // The driver factory only feeds the fallback: the runner resolves the
+        // driver from the agent itself. A hand-built compactor has no
+        // metering plugin behind it, so the fallback allows everything and
+        // records nothing.
         $this->llmCallRunner = $llmCallRunner ?? new LlmCallRunner(
             $driverFactory,
             new NullUsageMeter(),
@@ -232,7 +232,7 @@ final class ConversationCompactor
         );
 
         // The summary is a provider turn like any other: it goes through the
-        // runner so its tokens are metered and a hard limit stops it.
+        // runner, so its tokens are metered and a hard limit stops it.
         $response = $this->llmCallRunner->complete($task, $agent, $summaryRequest);
 
         $summary = trim((string) ($response->content ?? ''));

@@ -12,7 +12,7 @@ namespace Spora\Metering;
  * one. A plugin that answers `null` lets the work proceed; a hard decision
  * stops the task.
  *
- * The default binding is {@see NullUsageMeter}, so a Spora install with no
+ * The default binding is {@see NullUsageMeter}, so an install with no
  * metering plugin behaves exactly as it did before the seam existed. A
  * plugin replaces the binding from a `ContainerBuildingEvent` subscriber:
  *
@@ -24,7 +24,7 @@ namespace Spora\Metering;
  *
  * Implementations are third-party code in the hot path, so the core calls
  * them through {@see MeteringGuard}: a meter that throws is logged and
- * ignored. Only a returned hard decision stops a run.
+ * ignored, and only a returned hard decision stops a run.
  */
 interface UsageMeterInterface
 {

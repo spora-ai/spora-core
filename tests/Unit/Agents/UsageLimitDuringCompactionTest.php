@@ -70,7 +70,7 @@ function compactionLimitSeed(): array
 it('fails the task with USAGE_LIMIT_REACHED when the recovery compaction hits a limit', function (): void {
     [$agent, $task] = compactionLimitSeed();
 
-    // Long enough that the compaction has something to summarise — the
+    // Long enough that the compaction has something to summarise: the
     // compactor keeps the last five rows verbatim and needs more than that
     // before it asks the model for a summary.
     for ($i = 0; $i < 8; $i++) {

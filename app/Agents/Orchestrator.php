@@ -76,8 +76,7 @@ final class Orchestrator implements OrchestratorInterface
 
     /** The tool gate, and the context factory it shares with the provider
      *  funnel. The gate's guard fails open — a meter that throws is logged
-     *  and ignored — and the factory costs one query per metered call, so
-     *  it is only consulted when a meter is installed at all. */
+     *  and ignored — and the factory costs one query per metered call. */
     private readonly ToolUsageGate $toolUsageGate;
     private readonly MeteringContextFactory $meteringContextFactory;
 
@@ -152,8 +151,6 @@ final class Orchestrator implements OrchestratorInterface
         );
         $this->retryScheduler        = new RetryScheduler($config->logger, $config->notificationService);
 
-        // The fallback runner is built over the meter, so the meter is
-        // resolved first.
         $this->usageMeter             = $config->usageMeter ?? new NullUsageMeter();
         $this->meteringContextFactory = new MeteringContextFactory();
         $this->llmCallRunner          = $config->llmCallRunner ?? new LlmCallRunner(
@@ -586,8 +583,8 @@ final class Orchestrator implements OrchestratorInterface
         $toolName  = $attrs !== [] ? $attrs[0]->newInstance()->name : get_class($toolInstance);
         $toolClass = get_class($toolInstance);
 
-        // One scope for the gate and the record. Building it costs a query,
-        // so an install without a metering plugin skips it.
+        // Building the scope costs a query, so an install without a metering
+        // plugin skips it.
         $usageScope = $this->toolUsageGate->scopeFor(
             $taskId,
             $toolName,
@@ -612,9 +609,9 @@ final class Orchestrator implements OrchestratorInterface
             'arguments' => $arguments,
         ]);
 
-        // The gate sits outside the try below on purpose: inside it the
-        // limit would become a failed ToolResult, the LLM would read that
-        // as a tool error and keep spending.
+        // The gate sits outside the try below on purpose: inside it the limit
+        // would become a failed ToolResult, the LLM would read that as a
+        // tool error and keep spending.
         $this->toolUsageGate->enforce($usageScope);
 
         try {

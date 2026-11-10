@@ -62,7 +62,7 @@ final class OrchestratorConfig
         public int $tickLeaseSeconds = 600,
         public bool $singleStep = false,
         // The metering seam. Null means no metering plugin is installed, and
-        // the Orchestrator falls back to the null-object meter — a run then
+        // the Orchestrator falls back to the null-object meter: a run then
         // costs no query and behaves exactly as it did before the seam.
         public readonly ?UsageMeterInterface $usageMeter = null,
         public readonly ?LlmCallRunner $llmCallRunner = null,

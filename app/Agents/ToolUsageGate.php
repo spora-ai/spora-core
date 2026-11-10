@@ -16,15 +16,13 @@ use Throwable;
  * The metering seam's view of the tool path.
  *
  * The gate is asked whether a tool call may proceed, and told what the call
- * cost afterwards. Both halves live here because they share the scope: the
- * meter's answer to "may this call proceed?" and the record of "what did it
- * cost" have to describe the same call, and building the subject twice
- * could resolve it to two different answers.
+ * cost afterwards. Both halves share one scope: the answer and the record
+ * have to describe the same call, and building the subject twice could
+ * resolve it to two different answers.
  *
- * The scope is **null** when there is no meter to talk to, which is what
- * keeps the seam invisible on an install without a metering plugin: no
- * query, no operation resolution, no call the agent turn did not already
- * make.
+ * The scope is null when there is no meter to talk to, which keeps the seam
+ * invisible on an install without a metering plugin: no query, no operation
+ * resolution, no call the agent turn did not already make.
  */
 final class ToolUsageGate
 {
@@ -34,10 +32,6 @@ final class ToolUsageGate
         private readonly ToolOperationResolver $toolOperations,
     ) {}
 
-    /**
-     * What the meter should be told about this call, or null when there is
-     * no meter to tell.
-     */
     public function scopeFor(
         int $taskId,
         string $toolName,
@@ -55,8 +49,7 @@ final class ToolUsageGate
 
         $context = $this->contextFactory->forTaskId($taskId);
         if ($context === null) {
-            // The task was deleted mid-call. A meter that cannot be asked
-            // must not stop the work it was supposed to measure.
+            // The task was deleted mid-call.
             return null;
         }
 
@@ -69,8 +62,6 @@ final class ToolUsageGate
     }
 
     /**
-     * The gate.
-     *
      * @throws UsageLimitExceededException  The meter returned a hard decision.
      */
     public function enforce(?ToolUsageScope $scope): void
@@ -105,8 +96,8 @@ final class ToolUsageGate
      * The operation a call dispatches to, or null when it cannot be resolved.
      *
      * A tool that declares no operation makes the resolver throw. That is a
-     * property of the tool, not a usage question, so the metered subject
-     * simply names no operation.
+     * property of the tool, not a usage question, so the subject names no
+     * operation.
      */
     private function resolveOperation(ToolInterface $toolInstance, array $arguments, int $agentId): ?string
     {

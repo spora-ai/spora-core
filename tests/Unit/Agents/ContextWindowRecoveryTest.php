@@ -240,6 +240,6 @@ it('re-throws a usage limit the compaction hits instead of the context-window er
 
     // The limit, not the context-window error: a limit is terminal, and
     // reporting it as a window problem would send the task down a recovery
-    // path that spends the budget the limit just refused.
+    // path that spends the budget the limit refused.
     expect($thrown)->toBe($limit);
 });

@@ -60,10 +60,6 @@ final class TaskLifecyclePolicy
         return in_array($status, self::QUIESCENT_STATUSES, true);
     }
 
-    /**
-     * True when the task is still in progress, so a run that has to stop
-     * can end it.
-     */
     public function isInProgress(string $status): bool
     {
         return in_array($status, self::IN_PROGRESS_STATUSES, true);

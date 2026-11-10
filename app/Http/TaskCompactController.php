@@ -87,7 +87,7 @@ final class TaskCompactController
      * Map a compaction failure to the JSON error response the API contract
      * uses.
      *
-     * The three failures are told apart by their type rather than by three
+     * The failures are told apart by their type rather than by three
      * separate catches, so the response is built in one place.
      */
     private function failureResponse(

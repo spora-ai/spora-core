@@ -11,9 +11,9 @@ use Spora\Models\Task;
  *
  * A scheduled run is a task whose `data` carries a `run_id` — the marker
  * {@see \Spora\Agents\Orchestrator::start()} writes for a run the platform
- * started rather than a user. A meter uses it to tell "a person asked for
- * this" apart from "the platform asked for this", which is what decides
- * whether an individual can be charged alongside the owner.
+ * started rather than a user. That is what tells "a person asked for this"
+ * apart from "the platform asked for this", and it is what decides whether
+ * an individual can be charged alongside the owner.
  */
 final class MeteringContextFactory
 {
@@ -29,9 +29,9 @@ final class MeteringContextFactory
     }
 
     /**
-     * Null when the task does not exist — a task that was deleted mid-tick
-     * cannot be metered, and a meter that cannot be asked must not stop
-     * the work it was supposed to measure.
+     * Null when the task does not exist — a task deleted mid-tick cannot be
+     * metered, and a meter that cannot be asked must not stop the work it
+     * was supposed to measure.
      */
     public function forTaskId(int $taskId): ?MeteringContext
     {

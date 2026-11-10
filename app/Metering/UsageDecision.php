@@ -7,14 +7,11 @@ namespace Spora\Metering;
 /**
  * The meter's answer to "may this call proceed?".
  *
- * The core interprets nothing beyond hard vs soft. `scope` is an opaque
- * key the meter chose — `month:credits`, `rolling:total_tokens`,
- * `credits:balance` — and the core passes it through untouched, so the
- * vocabulary of windows and units stays with the plugin that owns the
- * price book. A meter with no opinion leaves it empty.
- *
- * `reason` is the sentence the operator reads: it becomes the task's
- * `failure_reason` and `error_message`.
+ * The core interprets nothing beyond hard vs soft. `scope` is an opaque key
+ * the meter chose — `month:credits`, `rolling:total_tokens` — and passes
+ * through untouched, so the vocabulary of windows and units stays with the
+ * plugin that owns the price book. `reason` is the sentence the operator
+ * reads: it becomes the task's `failure_reason` and `error_message`.
  */
 final readonly class UsageDecision
 {

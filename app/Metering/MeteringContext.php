@@ -9,13 +9,12 @@ namespace Spora\Metering;
  *
  * Built from the task row alone. The principal is the owner — a user or a
  * group — and is always the entity a charge lands on; migration 0073 makes
- * `tasks.principal_id` NOT NULL. The trigger user is whoever clicked; it is
- * nullable and carries no ownership weight, which is why a scheduled run has
- * none.
+ * `tasks.principal_id` NOT NULL. The trigger user is whoever clicked: it is
+ * nullable, carries no ownership weight, and is absent on a scheduled run.
  *
  * `principalType` is deliberately absent: the context costs one query per
- * metered call, and a meter that needs the type resolves it once and
- * caches it — a principal's type never changes.
+ * metered call, and a meter that needs the type resolves it once and caches
+ * it — a principal's type never changes.
  */
 final readonly class MeteringContext
 {

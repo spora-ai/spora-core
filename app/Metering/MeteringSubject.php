@@ -12,6 +12,5 @@ interface MeteringSubject
     public const KIND_LLM = 'llm';
     public const KIND_TOOL = 'tool';
 
-    /** Which kind of work this subject describes. */
     public function kind(): string;
 }

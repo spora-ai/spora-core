@@ -103,9 +103,8 @@ final class OrchestratorContainerBindings
             // seam existed — no queries, no writes, no behaviour change. A
             // plugin replaces this binding from a `ContainerBuildingEvent`
             // subscriber: the plugin loader dispatches that event after the
-            // core's definitions are added and the container keeps the last
-            // definition for a key, so the plugin's meter replaces this null
-            // object.
+            // core's definitions are added, and the container keeps the last
+            // definition for a key.
             UsageMeterInterface::class => static function (): UsageMeterInterface {
                 return new NullUsageMeter();
             },
@@ -147,8 +146,7 @@ final class OrchestratorContainerBindings
                     $c->get(DriverFactory::class),
                     $c->get(LoggerInterface::class),
                     // The compaction call spends tokens like any other, so it
-                    // goes through the same runner the agent turn uses. A
-                    // compactor built without one meters nothing.
+                    // goes through the same runner the agent turn uses.
                     $c->get(LlmCallRunner::class),
                 );
             },

@@ -39,7 +39,7 @@ final class TickPhaseRunner
 {
     /**
      * Every provider call leaves through the runner, so the meter sees each
-     * one — the tokens a call costs are only knowable once it is answered.
+     * one: the tokens a call costs are only knowable once it is answered.
      */
     public readonly LlmCallRunner $llmCallRunner;
 
@@ -428,9 +428,9 @@ final class TickPhaseRunner
                 $this->orchestrator->contextWindowRecovery->tryCompactionAndRetry($context['task'], $context['agent'], $e);
             } catch (UsageLimitExceededException $limit) {
                 // The recovery's own compaction hit a limit. That is what
-                // stopped the run, and it is terminal — reporting it as a
+                // stopped the run, and it is terminal: reporting it as a
                 // context-window error would send the task down a recovery
-                // path that spends the budget the limit just refused.
+                // path that spends the budget the limit refused.
                 $this->abortForUsageLimit($taskId, $limit);
             }
             return;
@@ -473,10 +473,10 @@ final class TickPhaseRunner
      * The write is a compare-and-set on the statuses a run is still in:
      * another path may have ended the task already, and the loser of that
      * race must not overwrite the outcome. A parent waiting for its
-     * sub-agents is in that set — it is quiescent, but its children are
-     * running and the run is not over, so the limit has to reach it there
-     * too. No retry is scheduled — a limit is terminal, not a transient
-     * failure, and `USAGE_LIMIT_REACHED` is not retryable.
+     * sub-agents is in that set — quiescent, but its children are running
+     * and the run is not over, so the limit has to reach it there too. No
+     * retry is scheduled: a limit is terminal, and `USAGE_LIMIT_REACHED` is
+     * not retryable.
      */
     private function abortForUsageLimit(int $taskId, UsageLimitExceededException $e): void
     {

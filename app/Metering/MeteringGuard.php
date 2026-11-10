@@ -10,15 +10,12 @@ use Throwable;
 /**
  * The only path the core uses to reach a {@see UsageMeterInterface}.
  *
- * A meter is plugin code running inside the agent loop. If it throws — a
- * database hiccup, a bug, a price book that does not parse — the run must
- * not die with it, so every call is wrapped: the exception is logged at
- * ERROR and the call proceeds as if the meter had answered "allow".
- *
- * That is the fail-open rule: **a broken meter never stops work**. The one
- * thing that stops a run is a hard decision the meter deliberately
- * returned, which is a value rather than an exception and therefore passes
- * through untouched.
+ * A meter is plugin code running inside the agent loop, so it can throw — a
+ * database hiccup, a bug, a price book that does not parse. Every call is
+ * wrapped: the exception is logged at ERROR and the call proceeds as if the
+ * meter had answered "allow". **A broken meter never stops work**; the one
+ * thing that stops a run is a hard decision the meter returned, which is a
+ * value rather than an exception and passes through untouched.
  */
 final class MeteringGuard
 {
@@ -28,11 +25,11 @@ final class MeteringGuard
     ) {}
 
     /**
-     * Whether anything is actually installed.
+     * Whether a meter is installed at all.
      *
-     * The core binds {@see NullUsageMeter} when no plugin provides a meter.
-     * A caller that would have to load a task row to build a
-     * {@see MeteringContext} asks this first, so an install without a
+     * The core binds {@see NullUsageMeter} when no plugin provides one, and
+     * a caller that would have to load a task row to build a
+     * {@see MeteringContext} asks this first — so an install without a
      * metering plugin pays no query for the seam.
      */
     public function isActive(): bool

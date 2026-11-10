@@ -15,12 +15,11 @@ use Spora\Models\Task;
 /**
  * The one place a provider is called.
  *
- * Both provider call sites in the platform come through here: the agent
- * turn ({@see \Spora\Agents\TickPhaseRunner}) and the conversation
- * compaction ({@see \Spora\Agents\ConversationCompactor}). Routing both
- * through one funnel is what makes the usage visible at all — the
- * compaction call discards its {@see \Spora\Drivers\ValueObjects\Usage},
- * so a meter had no way to see those tokens.
+ * Both provider call sites come through here — the agent turn
+ * ({@see \Spora\Agents\TickPhaseRunner}) and the conversation compaction
+ * ({@see \Spora\Agents\ConversationCompactor}) — because the compaction
+ * call discards its {@see \Spora\Drivers\ValueObjects\Usage}: a meter had
+ * no other way to see those tokens.
  *
  * The order is the point: the meter is asked **before** the request
  * leaves, and the tokens are recorded **after** it returns. A hard
@@ -46,9 +45,8 @@ final class LlmCallRunner
     {
         $driver = $this->driverFactory->makeFromAgent($agent);
 
-        // With no meter installed the seam is invisible: the request goes
-        // out exactly as it did before, and the driver is not even asked
-        // for its provider and model name.
+        // Without a meter the request goes out exactly as it did before,
+        // and the driver is not even asked for its provider and model.
         if (!$this->guard->isActive()) {
             return $driver->complete($request);
         }
