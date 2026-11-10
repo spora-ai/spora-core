@@ -18,11 +18,8 @@ use Spora\Tools\WrappedList;
  * check a principal's visible names against an `allowed_skills` write, which
  * neither the entry's shape nor its operations rows have any use for.
  *
- * A list-typed setting arrives in the provider's `{"item": …}` envelope as
- * often as not — the same quirk the operations half absorbs — so every
- * list-typed slot is unwrapped before it is judged. A multi-select refused
- * because of the envelope is a grant the agent cannot make, and no retry
- * fixes it: the provider re-wraps the list the model sends.
+ * A list-typed setting arrives wrapped, in the provider's `{"item": …}`
+ * envelope, so every list-typed slot is unwrapped before it is judged.
  */
 final class ConfigurePlanSettingsParser
 {
@@ -99,11 +96,8 @@ final class ConfigurePlanSettingsParser
             return $this->settingsFailure($i, 'must be an object of `{setting_key: value}` pairs.');
         }
 
-        // The provider's envelope around the whole map: `{"item": {...}}`.
-        // Unwrapped only when the payload is itself an array, so a tool that
-        // declares a setting literally named `item` keeps it — and a payload
-        // that is not a map at all stays put and is refused as the malformed
-        // map it is.
+        // The envelope around the whole map: `{"item": {...}}`. Unwrapped only
+        // when the payload is an array, so a setting named `item` keeps it.
         if (WrappedList::isWrapped($settings)) {
             $payload = WrappedList::unwrap($settings);
             if (is_array($payload)) {
@@ -264,12 +258,9 @@ final class ConfigurePlanSettingsParser
     /**
      * The shape of a value that should have been a list, in one phrase.
      *
-     * The refusal has to name what arrived, because the difference between the
-     * shapes is the whole diagnosis: a string is a model that sent the wrong
-     * thing, an object is a list that arrived wrapped or under the wrong key,
-     * and a list with a bad entry is a model that sent the right container
-     * with the wrong element type. A refusal that names none of them leaves
-     * the caller guessing.
+     * A string, an object and a list with a bad entry are three different
+     * mistakes, and a refusal that names none of them leaves the caller
+     * guessing.
      */
     private function describeListValue(mixed $value, string $resolveAs): string
     {

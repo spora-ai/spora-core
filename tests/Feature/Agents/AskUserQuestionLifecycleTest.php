@@ -145,6 +145,57 @@ it('persists a PendingQuestionBatch on a Task via the executor path', function (
     expect($historyCount)->toBe(1);
 });
 
+it('persists the validated questions when the list arrives wrapped', function (): void {
+    // The provider hands a nested list over as `{"item": [...]}`. The tool
+    // unwraps it to validate, and the executor rebuilds the batch from the
+    // raw arguments — so without the same unwrap there, the task parks on a
+    // blank question the operator never sees the text of.
+    $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
+
+    $toolCall = new Spora\Drivers\ValueObjects\ToolCall(
+        providerCallId: 'pc_ask_wrapped',
+        toolName: 'ask_user_question',
+        arguments: [
+            'questions' => ['item' => [[
+                'question' => 'Pick a database',
+                'header'   => 'DB',
+                'options'  => ['item' => [
+                    ['label' => 'SQLite', 'description' => 'Zero-config'],
+                    ['label' => 'MySQL', 'description' => 'Shared hosting'],
+                ]],
+            ]]],
+        ],
+    );
+
+    $driverFactory = Mockery::mock(Spora\Drivers\DriverFactory::class);
+    $driverFactory->allows('makeFromAgent')->andReturn(null);
+    /** @var \Spora\Services\MercurePublisherInterface&\Mockery\MockInterface $mercure */
+    $mercure = Mockery::mock(Spora\Services\MercurePublisherInterface::class)->shouldIgnoreMissing();
+    $orch = new Spora\Agents\Orchestrator(
+        $driverFactory,
+        new Spora\Agents\OrchestratorConfig(
+            toolInstances: [new Spora\Tools\AskUserQuestionTool()],
+            mercure: $mercure,
+        ),
+    );
+
+    $agent = Agent::find($task->agent_id);
+    $disposition = $orch->toolCallExecutor->executeOrQueue($toolCall, $agent, $task);
+
+    expect($disposition)->toBe(Spora\Agents\ToolCallDisposition::AwaitingInput);
+
+    $task->refresh();
+    $state = AgentState::fromJson($task->pending_state);
+    $questions = $state->pendingQuestions[0]->questions;
+
+    expect($questions)->toHaveCount(1)
+        ->and($questions[0]->question)->toBe('Pick a database')
+        ->and($questions[0]->header)->toBe('DB')
+        ->and($questions[0]->options)->toHaveCount(2)
+        ->and($questions[0]->options[0]['label'])->toBe('SQLite')
+        ->and($questions[0]->options[1]['label'])->toBe('MySQL');
+});
+
 it('answerTask flips AWAITING_INPUT → QUEUED when no batches remain', function (): void {
     $task = harnessTaskInRunningState(Spora\Tools\AskUserQuestionTool::class);
     $task->status = 'AWAITING_INPUT';

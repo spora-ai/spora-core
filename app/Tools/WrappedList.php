@@ -10,19 +10,16 @@ namespace Spora\Tools;
  * Some OpenAI-compatible providers serialise an array that sits as an
  * object's value inside a `{"item": …}` envelope instead of as a plain JSON
  * array. MiniMax's tool-call channel does this for every array nested inside
- * a `configure_tools` entry: a model that asks for
+ * a `configure_tools` entry — a model that sends
  * `settings: {allowed_skills: ["a", "b"]}` has it arrive as
- * `settings: {allowed_skills: {item: ["a", "b"]}}` — and the model cannot
- * produce the flat shape on request, so a retry gets the same envelope.
+ * `settings: {allowed_skills: {item: ["a", "b"]}}` — and cannot produce the
+ * flat shape on request, so a retry gets the same envelope.
  *
- * Two shapes arrive, and the second is why a plain key lookup is not enough:
- *
- *   - `{item: [...]}` — the list, inside the envelope.
- *   - `{item: x}`     — a one-element list with the element unwrapped too.
+ * Two shapes arrive: `{item: [...]}` keeps the list inside the envelope,
+ * `{item: x}` unwraps a one-element list to the element itself.
  *
  * A value that is not the envelope passes through untouched, so a payload
- * that is legitimately an object — a settings map with a key called `item`,
- * a tool's own object-valued setting — survives.
+ * that is legitimately an object survives.
  */
 final class WrappedList
 {
@@ -33,8 +30,7 @@ final class WrappedList
      * Is this the envelope?
      *
      * Only the unambiguous shape counts: a non-list array whose sole key is
-     * `item`. A multi-key object is a payload, not an envelope, and a list
-     * is a list however it was written.
+     * `item`. A multi-key object is a payload, not an envelope.
      */
     public static function isWrapped(mixed $value): bool
     {
@@ -45,8 +41,7 @@ final class WrappedList
      * The envelope's payload, or the value unchanged.
      *
      * For a slot that expects a map rather than a list — `settings` — the
-     * payload is taken as it is. The caller decides whether a payload that
-     * is not a map is acceptable there.
+     * payload is taken as it is.
      */
     public static function unwrap(mixed $value): mixed
     {
@@ -61,10 +56,8 @@ final class WrappedList
      * The envelope's payload as a list.
      *
      * A payload that is not a list is a one-element list with the element
-     * unwrapped too, so it goes back into one — including a scalar payload,
-     * which is the same shape one level further down. A payload that is a
-     * list is returned as it is, including the empty list, which is a list
-     * and not a missing value.
+     * unwrapped too, so it goes back into one. A payload that is a list is
+     * returned as it is, empty list included.
      */
     public static function unwrapToList(mixed $value): mixed
     {

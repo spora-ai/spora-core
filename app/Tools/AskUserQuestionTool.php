@@ -125,9 +125,7 @@ final class AskUserQuestionTool extends AbstractTool
         if ($raw === null) {
             return new ToolResult(false, "Required argument 'questions' is missing.");
         }
-        // The provider's `{item: […]}` envelope, unwrapped — the same one the
-        // `configure_tools` path absorbs. Without it a question list the model
-        // plainly sent arrives as an object and is refused as malformed.
+        // The provider's `{"item": …}` envelope, unwrapped.
         $raw = WrappedList::unwrapToList($raw);
         if (!is_array($raw) || !array_is_list($raw)) {
             return new ToolResult(false, "Argument 'questions' must be a list of 1-4 question objects.");
@@ -233,10 +231,7 @@ final class AskUserQuestionTool extends AbstractTool
      */
     private function validateOptionsChain(mixed $optionsRaw, string $header): ?ToolResult
     {
-        // The provider's `{item: […]}` envelope, unwrapped. `options` is a list
-        // nested inside a list element, which is where the envelope shows up;
-        // a refusal here reads as "you sent no options" for a list the model
-        // plainly sent.
+        // The provider's `{"item": …}` envelope, unwrapped.
         $optionsRaw = WrappedList::unwrapToList($optionsRaw);
         if (!is_array($optionsRaw) || !array_is_list($optionsRaw)) {
             return new ToolResult(false, "Question '{$header}' must have an 'options' list.");

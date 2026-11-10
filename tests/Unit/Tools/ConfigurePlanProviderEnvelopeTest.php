@@ -22,18 +22,12 @@ use Tests\Fixtures\Skills\StubSkillProvider;
  * The provider's `{item: …}` envelope, and the `configure_tools` writes it
  * used to make impossible.
  *
- * MiniMax's OpenAI-compatible tool-call channel serialises an array that sits
- * as an object's value inside a `{"item": …}` envelope instead of as a plain
- * JSON array, and the model cannot produce the flat shape on request — it
- * retries and gets the envelope again. Every array-valued setting write was
- * therefore refused with "must be an array of strings" although a list had
- * been sent, which left `allowed_skills` ungrantable and `SubAgentTool`
- * permanently unready.
- *
- * The unwrap lives in {@see \Spora\Tools\WrappedList} and is applied where a
- * list or a map is expected. These cases pin the shapes that actually arrive:
- * the list inside the envelope, the one-element list with its element
- * unwrapped too, and the envelope around the whole settings map.
+ * Every array-valued setting write was refused with "must be an array of
+ * strings" although a list had been sent, which left `allowed_skills`
+ * ungrantable and `SubAgentTool` permanently unready. These cases pin the
+ * shapes that actually arrive: the list inside the envelope, the one-element
+ * list with its element unwrapped too, and the envelope around the whole
+ * settings map.
  */
 defined('ENVELOPE_TEST_PASSWORD') || define('ENVELOPE_TEST_PASSWORD', 'Password1!');
 

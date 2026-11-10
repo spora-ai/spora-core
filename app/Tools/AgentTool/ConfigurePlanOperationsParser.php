@@ -44,11 +44,7 @@ final class ConfigurePlanOperationsParser
         if ($ops === null || $ops === []) {
             return [];
         }
-        // The provider's `{"item": …}` envelope, unwrapped. A one-element
-        // list arrives with its element unwrapped too, so the envelope's
-        // payload goes back into a list of one — otherwise the row lands
-        // as an object where a list of rows was claimed, and the refusal
-        // below names a shape the caller never sent.
+        // The provider's `{"item": …}` envelope, unwrapped.
         $ops = WrappedList::unwrapToList($ops);
         if (!is_array($ops) || ($ops !== [] && !array_is_list($ops))) {
             return $this->operationsFailure($i);

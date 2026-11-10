@@ -270,7 +270,7 @@ Two things to get right, both of which fail silently if you assume the opposite:
 
 A multi-select takes an array, but the element type depends on the setting: `allowed_skills` is `string[]` (names), while `allowed_target_agents` is `int[]` (agent ids) — send `[3, 4]`, not `["3", "4"]`. A skill name the current principal cannot see is refused outright, with the offending name — pick names from `get_available_tools` → `skills.visible`. A `type: 'password'` setting is refused outright and always will be: a tool call must not be able to write a credential, because the value would land in the call's own recorded arguments. Credentials stay operator-only, through the settings panel.
 
-**Some providers wrap a nested array in `{"item": …}`.** When that happens the list you sent arrives as an object, and the tool unwraps it before it judges it — both `{item: [...]}` and the one-element `{item: "name"}`. So a write that lands is a write; do not keep re-sending a corrected array because the *first* attempt was refused. If a refusal names a shape you did not send (`got an object with the key(s) item`), read that part: it says what the provider handed over.
+**Some providers wrap a nested array in `{"item": …}`.** The tool unwraps that before it judges the write — both `{item: [...]}` and the one-element `{item: "name"}` — so the write lands either way. Do not keep re-sending a corrected array because an earlier attempt was refused; a refusal that names a shape you did not send is telling you what the provider handed over.
 
 Operating the tool once you already have it — including granting yourself a skill — is the **agent-tool** skill. This section covers only the new-agent flow.
 
