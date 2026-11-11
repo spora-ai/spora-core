@@ -127,6 +127,52 @@ test('the audit trail keeps the class that actually ran', function (): void {
         ->and((string) $call->tool_name)->toBe('user_info');
 });
 
+test('a call that is still to be run follows the rename', function (): void {
+    // The row the migration left behind is the default status with no
+    // `executed_at`, which is not one of the live statuses — so make the
+    // row a real pending call.
+    Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->update([
+        'status'      => 'PENDING_APPROVAL',
+        'executed_at' => null,
+    ]);
+
+    $this->migration->up();
+
+    $call = Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->first();
+
+    expect((string) $call->tool_class)->toBe('Spora\\Tools\\PrincipalInfoTool')
+        ->and((string) $call->tool_name)->toBe('principal_info');
+});
+
+test('a call that already ran keeps the name of the class that ran it', function (): void {
+    Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->update([
+        'status'      => 'APPROVED',
+        'executed_at' => '2026-01-01 00:00:00',
+    ]);
+
+    $this->migration->up();
+
+    $call = Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->first();
+
+    expect((string) $call->tool_class)->toBe('Spora\\Tools\\UserInfoTool')
+        ->and((string) $call->tool_name)->toBe('user_info');
+});
+
+test('down puts the old name back on the calls that are still to be run', function (): void {
+    Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->update([
+        'status'      => 'APPROVED',
+        'executed_at' => null,
+    ]);
+
+    $this->migration->up();
+    $this->migration->down();
+
+    $call = Capsule::table('tool_calls')->where('provider_call_id', 'call_1')->first();
+
+    expect((string) $call->tool_class)->toBe('Spora\\Tools\\UserInfoTool')
+        ->and((string) $call->tool_name)->toBe('user_info');
+});
+
 test('another tool is left alone', function (): void {
     Capsule::table('tool_configurations')->insert([
         'tool_class' => 'Spora\\Tools\\TimeTool',

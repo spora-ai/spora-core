@@ -15,9 +15,12 @@ use Illuminate\Database\Migrations\Migration;
  * still names the old class is a row the container can no longer resolve:
  * the tool silently disappears from the agent.
  *
- * `tool_calls` is deliberately left alone. It is the audit trail of what
- * actually ran, and the class that ran it was `UserInfoTool`; rewriting it
- * would make the history claim something that never happened.
+ * `tool_calls` is the audit trail of what actually ran, and the class that
+ * ran it was `UserInfoTool`; rewriting it would make the history claim
+ * something that never happened. The rows that have **not** run yet are
+ * the exception: a call still awaiting approval or execution is resolved
+ * by its name on the next tick, and a name that no longer resolves fails
+ * the task before it records a tool result.
  */
 return new class extends Migration
 {
@@ -43,6 +46,14 @@ return new class extends Migration
         'tool_configurations',
         'agent_tools',
     ];
+
+    /**
+     * The statuses a tool call row carries while it is still to be run.
+     *
+     * `APPROVED` with a stamped `executed_at` is a call that already ran,
+     * so the row is only live while `executed_at` is still null.
+     */
+    private const IN_FLIGHT_STATUSES = ['PENDING_APPROVAL', 'AWAITING_FINAL_APPROVAL', 'APPROVED'];
 
     public function up(): void
     {
@@ -77,5 +88,15 @@ return new class extends Migration
                 ->where('tool_name', $fromName)
                 ->update(['tool_name' => $toName]);
         }
+
+        if (!$schema->hasTable('tool_calls')) {
+            return;
+        }
+
+        Capsule::table('tool_calls')
+            ->where('tool_name', $fromName)
+            ->whereIn('status', self::IN_FLIGHT_STATUSES)
+            ->whereNull('executed_at')
+            ->update(['tool_name' => $toName, 'tool_class' => $toClass]);
     }
 };
