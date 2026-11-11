@@ -22,6 +22,7 @@ final class ContentBlockParserRegistry
             'text'              => new TextBlockParser(),
             'thinking'          => new ThinkingBlockParser(),
             'redacted_thinking' => new RedactedThinkingBlockParser(),
+            'reasoning'         => new ReasoningBlockParser(),
         ];
     }
 

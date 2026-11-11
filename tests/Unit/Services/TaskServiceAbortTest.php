@@ -266,7 +266,7 @@ it('continueTask persists aborted_at in buildBaseTaskResource', function (): voi
 
     $orch = Mockery::mock(OrchestratorInterface::class);
     $orch->shouldReceive('continue')
-        ->with($task->id, 'redirect', null, [], $userId)
+        ->with($task->id, 'redirect', null, [], $userId, null)
         ->andReturnUsing(static function (int $id): Task {
             $t = Task::find($id);
             $t->status = 'ABORTED';

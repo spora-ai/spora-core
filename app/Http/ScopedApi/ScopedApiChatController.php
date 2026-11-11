@@ -7,7 +7,9 @@ namespace Spora\Http\ScopedApi;
 use InvalidArgumentException;
 use OpenApi\Attributes as OA;
 use Spora\Core\Config;
+use Spora\Http\Exceptions\EffortValidationException;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Http\TaskEffortRequestValidator;
 use Spora\Models\Agent;
 use Spora\Models\Task;
 use Spora\Services\ApiKeys\ApiKeyCallbackRecorder;
@@ -16,6 +18,7 @@ use Spora\Services\ApiKeys\ApiKeyChatProjection;
 use Spora\Services\ApiKeys\ApiKeyContext;
 use Spora\Services\ApiKeys\ApiKeyFileIngest;
 use Spora\Services\ApiKeys\ApiKeyReach;
+use Spora\Services\EffortService;
 use Spora\Services\SsrfGuard;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -50,6 +53,7 @@ final class ScopedApiChatController
         private readonly SsrfGuard $ssrf,
         private readonly Config $config,
         private readonly ScopedApiChatBody $body,
+        private readonly EffortService $effortService,
     ) {}
 
     #[OA\Get(summary: 'List the chats this key may reach')]
@@ -98,6 +102,13 @@ final class ScopedApiChatController
             new OA\Property(property: 'files', type: 'array', items: new OA\Items(type: 'object'), description: 'Inline attachments as data URLs.'),
             new OA\Property(property: 'callback_url', type: 'string', format: 'uri'),
             new OA\Property(property: 'max_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The chat was queued.')]
@@ -107,12 +118,25 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($context, $body);
+
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareStart($context, $body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
+        return $this->queueChat($context, $prepared);
+    }
+
+    /**
+     * @param array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
+     */
+    private function queueChat(ApiKeyContext $context, array $prepared): JsonResponse
+    {
         $task = $this->start($context, $prepared);
 
         if ($task === null) {
@@ -194,6 +218,13 @@ final class ScopedApiChatController
             new OA\Property(property: 'text', type: 'string'),
             new OA\Property(property: 'media_ids', type: 'array', items: new OA\Items(type: 'string')),
             new OA\Property(property: 'additional_steps', type: 'integer'),
+            new OA\Property(
+                property: 'effort',
+                type: 'string',
+                nullable: true,
+                enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
+            ),
         ],
     ))]
     #[OA\Response(response: 202, description: 'The follow-up was queued.')]
@@ -203,12 +234,25 @@ final class ScopedApiChatController
     {
         $context = ApiKeyContext::fromRequest($request);
         $body = $this->safeDecodeJson($request);
-        $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($context, $chatId, $body);
+
+        try {
+            $prepared = $body instanceof JsonResponse ? $body : $this->prepareContinue($context, $chatId, $body);
+        } catch (EffortValidationException $e) {
+            return TaskEffortRequestValidator::errorResponse($e);
+        }
 
         if ($prepared instanceof JsonResponse) {
             return $prepared;
         }
 
+        return $this->acceptContinue($context, $chatId, $prepared);
+    }
+
+    /**
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
+     */
+    private function acceptContinue(ApiKeyContext $context, int $chatId, array $prepared): JsonResponse
+    {
         $outcome = $this->continue($context, $chatId, $prepared);
 
         if ($outcome instanceof JsonResponse) {
@@ -223,7 +267,9 @@ final class ScopedApiChatController
      * that survive the check.
      *
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     * @return JsonResponse|array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows,
+     *                                   or one the agent's driver does not offer
      */
     private function prepareStart(ApiKeyContext $context, array $body): JsonResponse|array
     {
@@ -239,7 +285,11 @@ final class ScopedApiChatController
             return $problem;
         }
 
-        return $this->startValues($body, $agent);
+        $effort = TaskEffortRequestValidator::parse($body);
+
+        $this->effortService->assertLevel($effort, $agent);
+
+        return $this->startValues($body, $agent, $effort);
     }
 
     /**
@@ -287,9 +337,9 @@ final class ScopedApiChatController
      * The values that survive the check.
      *
      * @param array<string, mixed> $body
-     * @return array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>}
+     * @return array{agentId: int, text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, effort: ?string}
      */
-    private function startValues(array $body, Agent $agent): array
+    private function startValues(array $body, Agent $agent, ?string $effort): array
     {
         $mediaIds = $this->body->readableMediaIds($body, (int) $agent->id);
         $ownerUserId = (int) $this->reach->ownerUserId($agent);
@@ -304,12 +354,15 @@ final class ScopedApiChatController
             'callbackUrl' => $this->body->string($body, 'callback_url'),
             'maxSteps' => $this->boundedInt($this->body->int($body, 'max_steps'), 1, 100),
             'mediaIds' => $mediaIds,
+            'effort' => $effort,
         ];
     }
 
     /**
      * @param array<string, mixed> $body
-     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>}
+     * @return JsonResponse|array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string}
+     * @throws EffortValidationException  When the body names an effort nobody knows,
+     *                                   or one the agent's driver does not offer
      */
     private function prepareContinue(ApiKeyContext $context, int $chatId, array $body): JsonResponse|array
     {
@@ -325,15 +378,22 @@ final class ScopedApiChatController
             return $task;
         }
 
+        $effort = TaskEffortRequestValidator::parse($body);
+
+        // The chat is inside the key's reach, so the agent it belongs to is
+        // the one the effort has to be checked against.
+        $this->effortService->assertLevel($effort, Agent::find((int) $task->agent_id));
+
         return [
             'text' => $text,
             'additionalSteps' => $this->boundedInt($this->body->int($body, 'additional_steps'), 1, 100),
             'mediaIds' => $this->body->readableMediaIds($body, (int) $task->agent_id),
+            'effort' => $effort,
         ];
     }
 
     /**
-     * @param array{text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, agentId: int} $prepared
+     * @param array{text: string, callbackUrl: ?string, maxSteps: ?int, mediaIds: list<string>, agentId: int, effort: ?string} $prepared
      */
     private function start(ApiKeyContext $context, array $prepared): ?Task
     {
@@ -344,6 +404,7 @@ final class ScopedApiChatController
                 $prepared['text'],
                 $prepared['maxSteps'],
                 $prepared['mediaIds'],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException) {
             return null;
@@ -351,7 +412,7 @@ final class ScopedApiChatController
     }
 
     /**
-     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>} $prepared
+     * @param array{text: string, additionalSteps: ?int, mediaIds: list<string>, effort: ?string} $prepared
      * @return Task|JsonResponse
      */
     private function continue(ApiKeyContext $context, int $chatId, array $prepared): Task|JsonResponse
@@ -363,6 +424,7 @@ final class ScopedApiChatController
                 $prepared['text'],
                 $prepared['additionalSteps'],
                 $prepared['mediaIds'],
+                $prepared['effort'],
             );
         } catch (InvalidArgumentException $e) {
             return $this->chatConflict($context, $chatId, $e);

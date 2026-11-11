@@ -29,7 +29,6 @@ function makeAnthropicRequestBuilder(string $model): AnthropicRequestBuilder
         apiKey: 'test',
         model: $model,
         enablePromptCaching: false,
-        thinkingBudget: null,
     );
 }
 

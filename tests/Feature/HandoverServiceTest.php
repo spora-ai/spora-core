@@ -39,16 +39,12 @@ function makeHandoverFixture(): array
     $sourceAgent = Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'           => 'Source Agent',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 10,
         'is_active'      => true,
     ]);
     $targetAgent = Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'           => 'Target Agent',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 7,
         'is_active'      => true,
     ]);
@@ -81,7 +77,7 @@ describe('HandoverService::handover', function (): void {
         $newTask->user_prompt = 'ctx';
 
         $orchestrator->allows('start')
-            ->with($targetAgentId, 'ctx', 7, $source->id, null, [], $userId)
+            ->with($targetAgentId, 'ctx', 7, $source->id, Mockery::type(Spora\Agents\TaskStartOptions::class))
             ->andReturn($newTask);
 
         $returned = $service->handover(
@@ -139,8 +135,6 @@ describe('HandoverService::handover', function (): void {
         $foreignAgent = Agent::create([
             'principal_id' => createUserPrincipalPublic($otherUserId),
             'name'         => 'Foreign Agent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -215,8 +209,6 @@ describe('HandoverService::handover', function (): void {
         $foreignAgent = Agent::create([
             'principal_id' => createUserPrincipalPublic($otherUserId),
             'name'         => 'Foreign X-Principal Agent',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);
@@ -264,8 +256,6 @@ describe('SubAgentService::spawn', function (): void {
         $sourceAgent = Agent::create([
             'principal_id' => createUserPrincipalPublic($userId),
             'name'         => 'SubAgent Source',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ]);
@@ -275,8 +265,6 @@ describe('SubAgentService::spawn', function (): void {
         $foreignAgent = Agent::create([
             'principal_id' => createUserPrincipalPublic($otherUserId),
             'name'         => 'Foreign SubAgent Target',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 5,
             'is_active'    => true,
         ]);

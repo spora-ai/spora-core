@@ -75,8 +75,6 @@ it('resolves a live principal normally', function (): void {
     $agentId = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Live Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ])->id;

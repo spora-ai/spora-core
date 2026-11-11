@@ -146,16 +146,12 @@ test('multi-select: getLlmToolSettings resolves non-empty IDs to "Name (#id)" st
     $agentA = Spora\Models\Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'           => 'Legal Agent',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 5,
         'is_active'      => true,
     ]);
     $agentB = Spora\Models\Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'           => 'Sales Agent',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 5,
         'is_active'      => true,
     ]);
@@ -187,24 +183,18 @@ test('multi-select: getLlmToolSettings scopes names to the source agent\'s group
     $groupAgentA = Spora\Models\Agent::create([
         'principal_id' => $groupPrincipal,
         'name'           => 'Group Agent A',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 5,
         'is_active'      => true,
     ]);
     $groupAgentB = Spora\Models\Agent::create([
         'principal_id' => $groupPrincipal,
         'name'           => 'Group Agent B',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 5,
         'is_active'      => true,
     ]);
     $userAgent = Spora\Models\Agent::create([
         'principal_id' => $userPrincipal,
         'name'           => 'User Agent',
-        'llm_provider'   => 'mock',
-        'llm_model'      => 'mock',
         'max_steps'      => 5,
         'is_active'      => true,
     ]);

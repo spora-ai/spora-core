@@ -9,6 +9,9 @@ use InvalidArgumentException;
 use JsonException;
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Http\Exceptions\EffortValidationException;
+use Spora\Services\AgentServiceInterface;
+use Spora\Services\EffortService;
 use Spora\Services\MediaArchive\MediaCapabilityMismatchException;
 use Spora\Services\MediaArchive\MediaNotOwnedException;
 use Spora\Services\MediaArchive\TaskMediaCapabilityService;
@@ -38,6 +41,8 @@ final class TaskController
         private readonly ContinueTaskDispatcher $continuationDispatcher,
         private readonly DecisionsRequestValidator $decisionsValidator,
         private readonly AnswerQuestionRequestValidator $answerValidator,
+        private readonly AgentServiceInterface $agentService,
+        private readonly EffortService $effortService,
     ) {}
 
     /**
@@ -100,6 +105,13 @@ final class TaskController
                     items: new OA\Items(type: 'string', format: 'uuid'),
                     description: 'Media Archive UUIDs to attach to the user turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
                 ),
+                new OA\Property(
+                    property: 'effort',
+                    type: 'string',
+                    nullable: true,
+                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
+                ),
             ],
         ),
     )]
@@ -109,15 +121,30 @@ final class TaskController
 
         try {
             $body = $this->decodeJson($request);
-        } catch (JsonException) {
-            return new JsonResponse(
-                ['error' => ['code' => 'INVALID_JSON', 'message' => self::ERR_INVALID_JSON]],
-                Response::HTTP_BAD_REQUEST,
-            );
+            $effort = TaskEffortRequestValidator::parse($body);
+            $agentId = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
+
+            // The agent is resolved with the caller's visibility, so a
+            // request for an agent they cannot see is answered the same way
+            // as one that names no effort at all. The lookup only runs when
+            // a level was named: a request without one has nothing to
+            // check, and resolving the agent is not free.
+            $agent = null;
+            if ($effort !== null && $effort !== '' && $agentId !== null) {
+                $agent = $this->agentService->getAgent($agentId, $userId);
+            }
+
+            $this->effortService->assertLevel($effort, $agent);
+        } catch (JsonException | EffortValidationException $e) {
+            // An unreadable body, an unusable field and a level the
+            // agent's driver does not offer are three different refusals;
+            // the exception says which one this is.
+            return $e instanceof JsonException
+                ? $this->invalidJsonResponse()
+                : TaskEffortRequestValidator::errorResponse($e);
         }
 
         $prompt       = trim((string) ($body['prompt'] ?? ''));
-        $agentId      = isset($body['agent_id']) ? (int) $body['agent_id'] : null;
         $maxSteps     = isset($body['max_steps']) ? (int) $body['max_steps'] : null;
         $parentTaskId = isset($body['parent_task_id']) ? (int) $body['parent_task_id'] : null;
         $mediaIds     = $this->mediaCapability->parseMediaIds($body['media_ids'] ?? null);
@@ -127,7 +154,7 @@ final class TaskController
             return $validation;
         }
 
-        return $this->startTaskWithCapability($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+        return $this->startTaskWithCapability($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds, $effort);
     }
 
     /**
@@ -140,6 +167,7 @@ final class TaskController
         ?int $maxSteps,
         ?int $parentTaskId,
         array $mediaIds,
+        ?string $effort,
     ): JsonResponse {
         try {
             // Before anything writes: an attachment the caller may not read
@@ -151,7 +179,7 @@ final class TaskController
             // builder reads it. See
             // {@see \Spora\Services\MediaArchive\TaskMediaCapabilityService}.
             $this->mediaCapability->ensureTextDerivatives($mediaIds);
-            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds);
+            $task = $this->taskService->startTask($userId, $agentId, $prompt, $maxSteps, $parentTaskId, $mediaIds, $effort);
         } catch (MediaNotOwnedException|MediaCapabilityMismatchException|InvalidArgumentException $e) {
             [$code, $status] = match (true) {
                 $e instanceof MediaNotOwnedException            => ['MEDIA_NOT_OWNED', Response::HTTP_FORBIDDEN],
@@ -481,6 +509,13 @@ final class TaskController
                     type: 'array',
                     items: new OA\Items(type: 'string', format: 'uuid'),
                     description: 'Media Archive UUIDs to attach to the follow-up turn. Image attachments require a vision-capable LLM (HTTP 400 MEDIA_CAPABILITY_MISMATCH otherwise).',
+                ),
+                new OA\Property(
+                    property: 'effort',
+                    type: 'string',
+                    nullable: true,
+                    enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', ''],
+                    description: 'The reasoning effort for this message. Omit it and the configuration default applies; an empty string asks for the model default. A level the agent\'s LLM driver does not offer is refused with 422 EFFORT_LEVEL_UNSUPPORTED; GET /api/v1/agents/{id}/effort lists the levels it offers.',
                 ),
             ],
         ),

@@ -23,16 +23,12 @@ it('does not modify the agent_tool_overrides row when the SubAgentTool is invoke
     $sourceAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $targetAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Target',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
@@ -104,16 +100,12 @@ it('does not wipe the allowlist when the handover is rejected (target not in all
     $sourceAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Source',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $allowedAgent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Allowed',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

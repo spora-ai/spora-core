@@ -52,8 +52,6 @@ final class BuildMessagesSummaryTest extends TestCase
         $agent = Agent::create([
             'principal_id' => createUserPrincipalPublic($userId),
             'name' => 'Test Agent',
-            'llm_provider' => 'openai_compatible',
-            'llm_model' => 'gpt-4o',
             'max_steps' => 10,
             'is_active' => true,
         ]);

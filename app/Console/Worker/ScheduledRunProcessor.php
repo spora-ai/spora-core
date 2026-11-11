@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use Psr\Log\LoggerInterface;
 use Spora\Agents\OrchestratorConfig;
 use Spora\Agents\OrchestratorInterface;
+use Spora\Agents\TaskStartOptions;
 use Spora\Models\Agent;
 use Spora\Models\AgentPromptTemplate;
 use Spora\Models\ScheduledRun;
@@ -74,7 +75,13 @@ final class ScheduledRunProcessor
             $prompt   = $this->buildPrompt($run, $template, $agent);
             $maxSteps = $this->resolveMaxSteps($run, $template, $agent);
 
-            $task = $this->orchestrator->start((int) $run->agent_id, $prompt, (int) $maxSteps, null, $run->id);
+            $task = $this->orchestrator->start(
+                (int) $run->agent_id,
+                $prompt,
+                (int) $maxSteps,
+                null,
+                new TaskStartOptions(runId: $run->id),
+            );
         } catch (Throwable $e) {
             $this->logger->error('Scheduled run failed', [
                 'run_id' => $run->id,
@@ -187,8 +194,7 @@ final class ScheduledRunProcessor
                 userPrompt: $prompt,
                 maxSteps: (int) $maxSteps,
                 parentTaskId: null,
-                runId: $run->id,
-                userId: $userId,
+                options: new TaskStartOptions(runId: $run->id, userId: $userId),
             );
 
             // CAS-claim the row inside a transaction so two /housekeeping calls

@@ -34,8 +34,6 @@ function makeAgentWithLlm(mixed $authService): int
     return Agent::create([
         'principal_id' => createUserPrincipalPublic($userId),
         'name'         => 'LLM Test Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ])->id;
@@ -110,16 +108,12 @@ test('getLlmToolSettings resolves agent names when a PrincipalResolver is wired'
     $source = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Source',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $target = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'My Target Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
@@ -154,16 +148,12 @@ test('getLlmToolSettings falls back to "#id" placeholders when no PrincipalResol
     $source = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Source Noop',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);
     $target = Agent::create([
         'principal_id' => $principalId,
         'name'         => 'Target Noop',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

@@ -19,8 +19,6 @@ it('casts is_active to bool and date columns to Carbon', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Scheduled Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -46,8 +44,6 @@ it('belongs to an agent and a template', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Rel Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -68,8 +64,6 @@ it('has many next run entries ordered by due_at', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Has Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);

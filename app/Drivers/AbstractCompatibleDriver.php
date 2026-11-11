@@ -9,7 +9,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 #[ToolSetting(key: 'supports_image_input', label: 'Allow images', type: 'toggle', default: false, description: 'When enabled, image attachments are forwarded to the LLM as image content blocks. Disable for non-vision endpoints to avoid API errors.')]
-abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface
+abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriverConfigInterface, EffortAwareDriverInterface
 {
     public function __construct(
         protected readonly string              $apiKey,
@@ -45,6 +45,29 @@ abstract class AbstractCompatibleDriver implements LLMDriverInterface, LLMDriver
     protected function modelBasedSupportsImageInput(): bool
     {
         return false;
+    }
+
+    /**
+     * A driver that cannot express an effort level declares no levels.
+     */
+    public function effortLevels(): array
+    {
+        return [];
+    }
+
+    /**
+     * The provider value for a canonical effort level.
+     *
+     * `null` means the request carries no level — the model default, and
+     * the driver sends no effort parameter at all.
+     */
+    protected function resolveEffort(?string $effort): ?string
+    {
+        if ($effort === null) {
+            return null;
+        }
+
+        return $this->effortLevels()[$effort] ?? null;
     }
 
     /** @return list<class-string> */

@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use Spora\Drivers\AnthropicCompatibleDriver;
-use Spora\Drivers\AnthropicDriverOptions;
 use Spora\Drivers\Exceptions\LLMProviderException;
 use Spora\Drivers\Exceptions\LLMRateLimitException;
 use Spora\Drivers\Exceptions\LLMRetryableException;
@@ -270,9 +269,9 @@ test('complete throws LLMRetryableException on HTTP 500', function (): void {
     expect(fn() => $driver->complete(makeAnthropicRequest()))->toThrow(LLMRetryableException::class);
 });
 
-// Temperature and thinking_budget are forwarded to the request body
+// Temperature is never sent; the effort level replaces it
 
-test('temperature and thinking_budget are forwarded to the request body when set', function (): void {
+test('the temperature never reaches the Anthropic body', function (): void {
     $capturedBody = null;
 
     $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$capturedBody): MockResponse {
@@ -286,33 +285,15 @@ test('temperature and thinking_budget are forwarded to the request body when set
         ]), ['http_code' => 200]);
     });
 
-    $driver = new AnthropicCompatibleDriver(
-        apiKey: 'test-key',
-        model: 'claude-3-7-sonnet-20250219',
-        baseUrl: 'https://api.anthropic.com/v1/messages',
-        httpClient: $client,
-        options: new AnthropicDriverOptions(
-            thinkingBudget: 2048,
-        ),
-    );
-
-    // Temperature now flows from LLMRequest (single source of truth), shared with the OpenAI driver.
-    $request = makeAnthropicRequest();
-    $requestWithTemp = new LLMRequest(
-        systemPrompt: $request->systemPrompt,
-        messages: $request->messages,
-        tools: $request->tools,
+    $driver = makeAnthropicDriver($client);
+    $driver->complete(new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [],
+        tools: [],
         temperature: 0.3,
-    );
-    $driver->complete($requestWithTemp);
+    ));
 
-    expect($capturedBody)->toHaveKey('temperature');
-    expect($capturedBody['temperature'])->toBe(0.3);
-    expect($capturedBody)->toHaveKey('thinking');
-    expect($capturedBody['thinking'])->toBe([
-        'type'          => 'enabled',
-        'budget_tokens' => 2048,
-    ]);
+    expect($capturedBody)->not->toHaveKey('temperature');
 });
 
 test('skips tool_use blocks in stop_reason=tool_use that are not actually tool_use', function (): void {
@@ -486,7 +467,7 @@ test('x-api-key header is omitted when apiKey is empty (local models)', function
     expect($capturedHeaders)->not->toHaveKey('x-api-key');
     // The version and content-type must still be there (Symfony flattens headers into a list of "Name: Value" strings)
     $flat = implode("\n", $capturedHeaders);
-    expect($flat)->toContain('anthropic-version: 2023-06-01')
+    expect($flat)->toContain('anthropic-version: 2026-10-21')
         ->and($flat)->toContain('Content-Type: application/json');
 });
 
@@ -562,4 +543,181 @@ test('complete falls back to empty content for tool_use with no text', function 
     expect($response->content)->toBeNull()
         ->and($response->toolCalls)->toHaveCount(1)
         ->and($response->toolCalls[0]->toolName)->toBe('do_x');
+});
+
+// Reasoning effort
+
+/**
+ * Send a request through the driver and return the body that reached
+ * the wire.
+ *
+ * @return array<string, mixed>
+ */
+function captureAnthropicBody(string $model, LLMRequest $request): array
+{
+    $captured = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
+        $captured = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'          => 'msg_effort',
+            'stop_reason' => 'end_turn',
+            'content'     => [['type' => 'text', 'text' => 'ok']],
+            'usage'       => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    (new AnthropicCompatibleDriver(
+        apiKey: 'test-key',
+        model: $model,
+        baseUrl: 'https://api.anthropic.com',
+        httpClient: $client,
+    ))->complete($request);
+
+    return $captured;
+}
+
+function makeAnthropicEffortRequest(?string $effort): LLMRequest
+{
+    return new LLMRequest(
+        systemPrompt: 'You are helpful.',
+        messages: [['role' => 'user', 'content' => 'hi']],
+        tools: [],
+        effort: $effort,
+    );
+}
+
+test('a resolved effort level reaches the wire as output_config effort', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest('high'));
+
+    expect($body['output_config'])->toBe(['effort' => 'high']);
+});
+
+test('no effort level means no output_config on the wire', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest(null));
+
+    expect($body)->not->toHaveKey('output_config');
+});
+
+test('an effort level on an adaptive-capable model turns on adaptive thinking with a summarized display', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest('medium'));
+
+    expect($body['thinking'])->toBe(['type' => 'adaptive', 'display' => 'summarized']);
+});
+
+test('no effort level sends no thinking field', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest(null));
+
+    expect($body)->not->toHaveKey('thinking');
+});
+
+test('a model below 4.6 sends no thinking field even with an effort level', function (): void {
+    $body = captureAnthropicBody('claude-opus-4-5-20251101', makeAnthropicEffortRequest('medium'));
+
+    expect($body)->toHaveKey('output_config')
+        ->and($body)->not->toHaveKey('thinking');
+});
+
+test('a model without an effort sends no output_config even with an effort level', function (): void {
+    $body = captureAnthropicBody('claude-3-5-sonnet-20241022', makeAnthropicEffortRequest('medium'));
+
+    expect($body)->not->toHaveKey('output_config')
+        ->and($body)->not->toHaveKey('thinking');
+});
+
+// The exact body shape
+
+test('the body without an effort level carries exactly the documented keys', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest(null));
+
+    expect(array_keys($body))->toBe(['model', 'system', 'messages', 'max_tokens']);
+});
+
+test('the body with an effort level carries exactly the documented keys', function (): void {
+    $body = captureAnthropicBody('claude-sonnet-5-5', makeAnthropicEffortRequest('high'));
+
+    expect(array_keys($body))->toBe(['model', 'system', 'messages', 'max_tokens', 'output_config', 'thinking']);
+});
+
+// Image input
+
+test('the current Claude generations accept image input', function (): void {
+    foreach (['claude-sonnet-5-5', 'claude-opus-4-6', 'claude-haiku-5-5', 'claude-mythos-preview'] as $model) {
+        $driver = new AnthropicCompatibleDriver(
+            apiKey: 'test-key',
+            model: $model,
+            baseUrl: 'https://api.anthropic.com',
+            httpClient: new MockHttpClient(),
+        );
+
+        expect($driver->supportsImageInput())->toBeTrue();
+    }
+});
+
+test('Claude 2 and the Instant models do not accept image input', function (): void {
+    foreach (['claude-2.1', 'claude-instant-1.2'] as $model) {
+        $driver = new AnthropicCompatibleDriver(
+            apiKey: 'test-key',
+            model: $model,
+            baseUrl: 'https://api.anthropic.com',
+            httpClient: new MockHttpClient(),
+        );
+
+        expect($driver->supportsImageInput())->toBeFalse();
+    }
+});
+
+// The settings blob
+
+test('the driver options are read from the settings blob', function (): void {
+    $captured = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
+        $captured = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'          => 'msg_settings',
+            'stop_reason' => 'end_turn',
+            'content'     => [['type' => 'text', 'text' => 'ok']],
+            'usage'       => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = AnthropicCompatibleDriver::makeFromSettings([
+        'apiKey' => 'test-key',
+        'model' => 'claude-sonnet-5-5',
+        'baseUrl' => 'https://api.anthropic.com',
+        'httpClient' => $client,
+    ], ['enable_prompt_caching' => 'false']);
+
+    $driver->complete(makeAnthropicRequest());
+
+    expect($captured['system'])->toBe('You are helpful.');
+});
+
+test('prompt caching is on when the settings blob says nothing about it', function (): void {
+    $captured = [];
+
+    $client = new MockHttpClient(static function (string $method, string $url, array $options) use (&$captured): MockResponse {
+        $captured = json_decode($options['body'], true);
+
+        return new MockResponse(json_encode([
+            'id'          => 'msg_settings',
+            'stop_reason' => 'end_turn',
+            'content'     => [['type' => 'text', 'text' => 'ok']],
+            'usage'       => ['input_tokens' => 1, 'output_tokens' => 1],
+        ]), ['http_code' => 200]);
+    });
+
+    $driver = AnthropicCompatibleDriver::makeFromSettings([
+        'apiKey' => 'test-key',
+        'model' => 'claude-sonnet-5-5',
+        'baseUrl' => 'https://api.anthropic.com',
+        'httpClient' => $client,
+    ], []);
+
+    $driver->complete(makeAnthropicRequest());
+
+    expect($captured['system'])->toBeArray();
 });

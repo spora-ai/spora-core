@@ -87,8 +87,6 @@ it('renders a real SubAgentTool LLM projection end-to-end', function (): void {
     $agent = Spora\Models\Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Legal Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 5,
         'is_active'    => true,
     ]);

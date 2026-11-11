@@ -138,24 +138,18 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         $sourceAgent = Agent::create([
             'principal_id' => $principalA,
             'name'         => 'Source',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
         $targetInA = Agent::create([
             'principal_id' => $principalA,
             'name'         => 'TargetInA',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
         $targetInB = Agent::create([
             'principal_id' => $principalB,
             'name'         => 'TargetInB',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
@@ -187,13 +181,11 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         $source = Agent::create([
             'principal_id' => $principal,
             'name'         => 'Source',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
-        $t1 = Agent::create(['principal_id' => $principal, 'name' => 'T1', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
-        $t2 = Agent::create(['principal_id' => $principal, 'name' => 'T2', 'llm_provider' => 'mock', 'llm_model' => 'mock', 'max_steps' => 10, 'is_active' => true])->id;
+        $t1 = Agent::create(['principal_id' => $principal, 'name' => 'T1', 'max_steps' => 10, 'is_active' => true])->id;
+        $t2 = Agent::create(['principal_id' => $principal, 'name' => 'T2', 'max_steps' => 10, 'is_active' => true])->id;
 
         $toolConfig->putAgentOverride(SubAgentTool::class, $source, [
             'allowed_target_agents' => [$t1, $t2],
@@ -212,8 +204,6 @@ describe('AgentPrincipalService::pruneHandoverAllowlist', function (): void {
         $agentId = Agent::create([
             'principal_id' => $principal,
             'name'         => 'NoIds',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
@@ -244,8 +234,6 @@ describe('AgentPrincipalService::transferAgent task-principal propagation (post-
         $agent = Agent::create([
             'principal_id' => $principalA,
             'name'         => 'TransferMe',
-            'llm_provider' => 'mock',
-            'llm_model'    => 'mock',
             'max_steps'    => 10,
             'is_active'    => true,
         ])->id;
@@ -298,11 +286,11 @@ describe('AgentPrincipalService::transferAgent task-principal propagation (post-
         $principalB = (int) $principalService->ensureGroupPrincipal($groupB->id)->id;
 
         $agentA = Agent::create([
-            'principal_id' => $principalA, 'name' => 'A', 'llm_provider' => 'mock', 'llm_model' => 'mock',
+            'principal_id' => $principalA, 'name' => 'A',
             'max_steps' => 10, 'is_active' => true,
         ])->id;
         $agentB = Agent::create([
-            'principal_id' => $principalB, 'name' => 'B', 'llm_provider' => 'mock', 'llm_model' => 'mock',
+            'principal_id' => $principalB, 'name' => 'B',
             'max_steps' => 10, 'is_active' => true,
         ])->id;
 

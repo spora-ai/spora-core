@@ -22,6 +22,7 @@ function makeDispatcher(?TaskServiceInterface $tasks = null, ?TaskMediaCapabilit
     return new ContinueTaskDispatcher(
         $tasks ?? new StubTaskService(),
         $mediaCapability ?? new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
+        makeEffortService(),
     );
 }
 
@@ -46,7 +47,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $tasks->shouldReceive('getTask')->once()->with(1, 1)->andReturn(['id' => 1, 'agent_id' => 7]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, ['mid-image-1', 'mid-image-2'])
+            ->with(1, 1, 'go', null, ['mid-image-1', 'mid-image-2'], null)
             ->andReturn(['id' => 1, 'agent_id' => 7, 'status' => 'PENDING']);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
@@ -55,7 +56,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with(['mid-image-1', 'mid-image-2']);
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, [
             'prompt' => 'go',
             'media_ids' => ['mid-image-1', 'mid-image-2'],
@@ -69,7 +70,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $tasks->shouldReceive('getTask')->once()->andReturn(['id' => 1, 'agent_id' => 7]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, [])
+            ->with(1, 1, 'go', null, [], null)
             ->andReturn(['id' => 1, 'agent_id' => 7]);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
@@ -78,7 +79,7 @@ describe('ContinueTaskDispatcher::handleContinue — success path', function ():
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -166,7 +167,7 @@ describe('ContinueTaskDispatcher::handleContinue — body validation', function 
         $mediaCapability->shouldNotReceive('ensureMediaCapabilityCompatible');
         $mediaCapability->shouldNotReceive('ensureAttachmentsAccessible');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, []);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -184,7 +185,7 @@ describe('ContinueTaskDispatcher::handleContinue — task lookup', function (): 
         $mediaCapability->shouldNotReceive('ensureMediaCapabilityCompatible');
         $mediaCapability->shouldNotReceive('ensureAttachmentsAccessible');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(999999, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
@@ -203,7 +204,7 @@ describe('ContinueTaskDispatcher::handleContinue — task lookup', function (): 
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives')->once()->with([]);
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);
@@ -225,7 +226,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $tasks->shouldReceive('getTask')->once()->andReturn(['id' => 1, 'agent_id' => 5]);
         $tasks->shouldNotReceive('continueTask');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, [
             'prompt' => 'go',
             'media_ids' => ['img-1'],
@@ -248,7 +249,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_NOT_FOUND);
@@ -269,7 +270,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_CONFLICT);
@@ -289,7 +290,7 @@ describe('ContinueTaskDispatcher::handleContinue — domain failures', function 
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
 
         expect(static fn() => $dispatcher->handleContinue(1, 1, ['prompt' => 'go']))
             ->toThrow(RuntimeException::class, 'database went away');
@@ -323,7 +324,7 @@ describe('ContinueTaskDispatcher — input shape', function (): void {
         $tasks->shouldReceive('getTask')->once()->andReturn(['id' => 1, 'agent_id' => 5]);
         $tasks->shouldReceive('continueTask')
             ->once()
-            ->with(1, 1, 'go', null, [])
+            ->with(1, 1, 'go', null, [], null)
             ->andReturn(['id' => 1, 'agent_id' => 5]);
 
         $mediaCapability = Mockery::mock(TaskMediaCapabilityInterface::class);
@@ -332,7 +333,7 @@ describe('ContinueTaskDispatcher — input shape', function (): void {
         $mediaCapability->shouldReceive('ensureAttachmentsAccessible');
         $mediaCapability->shouldReceive('ensureTextDerivatives');
 
-        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability);
+        $dispatcher = new ContinueTaskDispatcher($tasks, $mediaCapability, makeEffortService());
         $response = $dispatcher->handleContinue(1, 1, ['prompt' => 'go']);
 
         expect($response->getStatusCode())->toBe(Response::HTTP_OK);

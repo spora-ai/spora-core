@@ -66,9 +66,11 @@ it('POST /abort returns 200 with the aborted task on a RUNNING source', function
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
-        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
+        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService(), makeEffortService()),
         new Spora\Http\DecisionsRequestValidator($service),
         new Spora\Http\AnswerQuestionRequestValidator(new Spora\Services\PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
 
     $req = new Request();
@@ -105,9 +107,11 @@ it('POST /abort returns 409 when the task is in a non-abortable state (PENDING_A
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
-        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
+        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService(), makeEffortService()),
         new Spora\Http\DecisionsRequestValidator($service),
         new Spora\Http\AnswerQuestionRequestValidator(new Spora\Services\PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
 
     $req = new Request();
@@ -135,9 +139,11 @@ it('POST /abort returns 404 when the task is not found', function (): void {
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
-        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
+        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService(), makeEffortService()),
         new Spora\Http\DecisionsRequestValidator($service),
         new Spora\Http\AnswerQuestionRequestValidator(new Spora\Services\PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
 
     $req = new Request();
@@ -176,9 +182,11 @@ it('POST /abort with no body works (no-body call)', function (): void {
         bootAuthLayer(),
         $service,
         new Spora\Services\MediaArchive\TaskMediaCapabilityService(),
-        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService()),
+        new Spora\Http\ContinueTaskDispatcher($service, new Spora\Services\MediaArchive\TaskMediaCapabilityService(), makeEffortService()),
         new Spora\Http\DecisionsRequestValidator($service),
         new Spora\Http\AnswerQuestionRequestValidator(new Spora\Services\PrincipalResolver()),
+        makeAgentService(),
+        makeEffortService(),
     );
 
     $req = new Request([], [], [], [], [], ['CONTENT_TYPE' => 'application/json'], '');

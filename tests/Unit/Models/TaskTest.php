@@ -21,8 +21,6 @@ it('casts step_count, max_steps, retry_count to integers and data to array', fun
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Task Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -48,8 +46,6 @@ it('belongs to an agent and a user', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Belongs Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -88,8 +84,6 @@ it('save() rejects a task whose failure_reason exceeds VARCHAR(1000)', function 
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Failure Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -111,8 +105,6 @@ it('has many task history entries and tool calls', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Many Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);

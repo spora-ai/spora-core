@@ -24,9 +24,6 @@ use Throwable;
  * @property string|null $system_prompt
  * @property int|null    $llm_driver_config_id
  * @property int|null    $speech_driver_config_id
- * @property string|null $llm_provider
- * @property string|null $llm_model
- * @property string|null $llm_base_url
  * @property int|null    $max_steps
  * @property bool $is_active
  * @property bool $allow_followup
@@ -230,10 +227,7 @@ final class Agent extends Model
 
     /** @var array<string, int> */
     public const STRING_COLUMN_MAX_LENGTHS = [
-        'name'         => 100,
-        'llm_provider' => 50,
-        'llm_model'    => 100,
-        'llm_base_url' => 255,
+        'name' => 100,
     ];
 
     /** @return array{0: string, 1: string} */

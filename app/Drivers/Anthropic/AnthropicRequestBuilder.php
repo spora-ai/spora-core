@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Drivers\Anthropic;
 
+use Spora\Drivers\ModelFamily;
 use Spora\Drivers\ValueObjects\ContentBlock;
 use Spora\Drivers\ValueObjects\LLMRequest;
 
@@ -14,8 +15,8 @@ use Spora\Drivers\ValueObjects\LLMRequest;
  *
  * Split out of {@see \Spora\Drivers\AnthropicCompatibleDriver} so the
  * Anthropic-specific rules (cache-control breakpoints, system-prompt
- * array wrap, thinking-budget header) live next to the request shape
- * they govern and the driver class stays focused on transport.
+ * array wrap, the thinking shape) live next to the request shape they
+ * govern and the driver class stays focused on transport.
  */
 final class AnthropicRequestBuilder
 {
@@ -23,7 +24,6 @@ final class AnthropicRequestBuilder
         private readonly string $apiKey,
         private readonly string $model,
         private readonly bool $enablePromptCaching,
-        private readonly ?int $thinkingBudget,
     ) {}
 
     /**
@@ -32,7 +32,7 @@ final class AnthropicRequestBuilder
     public function buildHeaders(): array
     {
         $headers = [
-            'anthropic-version' => '2023-06-01',
+            'anthropic-version' => '2026-10-21',
             'Content-Type'      => 'application/json',
         ];
 
@@ -46,9 +46,10 @@ final class AnthropicRequestBuilder
     /**
      * @param  list<array<string, mixed>>  $tools
      * @param  list<array<string, mixed>>  $messages
+     * @param  string|null  $effort the provider's effort value, or null to send none
      * @return array<string, mixed>
      */
-    public function buildBody(LLMRequest $request, array $tools, array $messages): array
+    public function buildBody(LLMRequest $request, array $tools, array $messages, ?string $effort = null): array
     {
         // Skip the cache breakpoint on an empty system prompt — the
         // breakpoint would be wasted on a one-byte auto-wrap and the
@@ -77,13 +78,16 @@ final class AnthropicRequestBuilder
             $body['tools'] = $tools;
         }
 
-        $body['temperature'] = $request->temperature;
+        if ($effort !== null) {
+            $body['output_config'] = ['effort' => $effort];
 
-        if ($this->thinkingBudget !== null) {
-            $body['thinking'] = [
-                'type' => 'enabled',
-                'budget_tokens' => $this->thinkingBudget,
-            ];
+            // Effort turns on adaptive thinking wherever adaptive
+            // thinking exists. `display` is sent only with it: the
+            // default flipped to "omitted" on every current model, so
+            // without it the reasoning text never reaches the chat.
+            if (ModelFamily::claudeSupportsAdaptiveThinking($this->model)) {
+                $body['thinking'] = ['type' => 'adaptive', 'display' => 'summarized'];
+            }
         }
 
         return $body;

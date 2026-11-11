@@ -19,8 +19,6 @@ it('allows mass assignment of agent_id, tool_class, tool_name', function (): voi
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Test Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
@@ -41,8 +39,6 @@ it('belongs to an agent', function (): void {
     $agent = Agent::create([
         'principal_id' => $this->createUserPrincipal($userId),
         'name'         => 'Relation Agent',
-        'llm_provider' => 'mock',
-        'llm_model'    => 'mock',
         'max_steps'    => 10,
         'is_active'    => true,
     ]);
