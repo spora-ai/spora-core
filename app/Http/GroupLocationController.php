@@ -116,8 +116,10 @@ final class GroupLocationController
     )]
     #[OA\RequestBody(required: true, content: new OA\JsonContent(
         properties: [
-            new OA\Property(property: 'name', type: 'string', maxLength: 100),
-            new OA\Property(property: 'address', type: 'string'),
+            // A null is "not mentioned" on a PATCH, so the schema has to
+            // allow it; the POST body keeps both fields required.
+            new OA\Property(property: 'name', type: 'string', nullable: true, maxLength: 100),
+            new OA\Property(property: 'address', type: 'string', nullable: true),
             new OA\Property(property: 'is_default', type: 'boolean'),
         ],
     ))]

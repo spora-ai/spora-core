@@ -265,6 +265,42 @@ describe('OpenAPI specification generation', function (): void {
         }
     });
 
+    it('requires cookieAuth and csrfToken together on a write route', function (): void {
+        $spec = openApiTestSpec();
+
+        // The schemes inside one requirement object are ANDed; the objects
+        // are ORed. A write route registers both middlewares, so the spec
+        // has to say "both" — one object with two schemes, not two objects.
+        $op = openApiTestFindOperation($spec, 'POST', '/api/v1/agents');
+        expect($op)->not->toBeNull();
+        expect($op->security)->toHaveCount(1);
+        expect(array_keys($op->security[0]))->toEqualCanonicalizing(['cookieAuth', 'csrfToken']);
+    });
+
+    it('documents the null a location PATCH accepts', function (): void {
+        // A null field is "not mentioned" on a PATCH, so the schema has to
+        // allow it. The POST body keeps both fields required.
+        $path = tempnam(sys_get_temp_dir(), 'openapi-locations-');
+        expect($path)->not->toBeFalse();
+
+        try {
+            expect(OpenApiGenerateCommand::regenerate($path))->toBe(Command::SUCCESS);
+            $decoded = json_decode((string) file_get_contents($path), true);
+
+            $patch = $decoded['paths']['/api/v1/groups/{id}/locations/{locationId}']['patch'];
+            $properties = $patch['requestBody']['content']['application/json']['schema']['properties'];
+            expect($properties['name']['nullable'])->toBeTrue();
+            expect($properties['address']['nullable'])->toBeTrue();
+
+            $post = $decoded['paths']['/api/v1/groups/{id}/locations']['post'];
+            $required = $post['requestBody']['content']['application/json']['schema']['required'];
+            expect($required)->toContain('name');
+            expect($required)->toContain('address');
+        } finally {
+            @unlink($path);
+        }
+    });
+
     it('documents per-call approval decisions on the approve endpoint', function (): void {
         $spec = openApiTestSpec();
         $operation = openApiTestFindOperation($spec, 'POST', '/api/v1/tasks/{taskId}/approve');

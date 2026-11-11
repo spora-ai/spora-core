@@ -301,6 +301,14 @@ final class RouteToOpenApi
     }
 
     /**
+     * The security an operation's middleware demands.
+     *
+     * One requirement object, not one per scheme: the schemes inside an
+     * object are ANDed and the objects are ORed. The middleware chain
+     * demands every one of them, so a write route that registers the
+     * session cookie *and* the CSRF token needs both — and a spec that
+     * says "either" tells a generated client to send one.
+     *
      * @param list<string> $middleware
      * @return list<array<string, list<string>>>
      */
@@ -326,12 +334,7 @@ final class RouteToOpenApi
             }
         }
 
-        $out = [];
-        foreach ($schemes as $name => $scopes) {
-            $out[] = [$name => $scopes];
-        }
-
-        return $out;
+        return $schemes === [] ? [] : [$schemes];
     }
 
     private function isSafeMethod(string $method): bool
