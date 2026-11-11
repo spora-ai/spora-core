@@ -94,7 +94,7 @@ final class AgentTemplateToolsApplier
         int $toolIndex,
         array &$warnings,
     ): array {
-        $toolClass = (string) ($toolEntry['tool_class'] ?? '');
+        $toolClass = RenamedToolClasses::resolve((string) ($toolEntry['tool_class'] ?? ''));
         $missingWarning = $this->buildToolPluginMissingWarning($toolClass, $registeredTools);
 
         if ($missingWarning !== null) {
