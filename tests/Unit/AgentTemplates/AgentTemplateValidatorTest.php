@@ -58,6 +58,20 @@ test('duplicate tool_class is rejected', function (): void {
     expect(array_column($result->errors(), 'code'))->toContain('TOOL_CLASS_DUPLICATE');
 });
 
+test('a renamed tool and its new name in one template are one tool', function (): void {
+    $raw = [
+        'id' => 'dup-renamed', 'name' => 'Dup Renamed', 'version' => '1.0.0',
+        'agent' => ['max_steps' => 5],
+        'tools' => [
+            ['tool_class' => 'Spora\\Tools\\UserInfoTool', 'enabled' => true, 'operations' => []],
+            ['tool_class' => 'Spora\\Tools\\PrincipalInfoTool', 'enabled' => true, 'operations' => []],
+        ],
+        'required_plugins' => [],
+    ];
+    $result = validatePayload($raw);
+    expect(array_column($result->errors(), 'code'))->toContain('TOOL_CLASS_DUPLICATE');
+});
+
 test('unknown top-level key is rejected', function (): void {
     $raw = [
         'id' => 'x', 'name' => 'X', 'version' => '1.0.0',
