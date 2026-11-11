@@ -39,20 +39,22 @@ final readonly class LlmUsage
     /**
      * Every token the provider reported for this call.
      *
-     * The two providers count their caches differently, and the sum has to
-     * hold for both: OpenAI folds cached prompt tokens into
-     * `prompt_tokens` and reports no separate cache counters, while
-     * Anthropic reports `cache_read_input_tokens` and
-     * `cache_creation_input_tokens` *beside* `input_tokens`. Adding the
-     * Anthropic counters is therefore correct for OpenAI too — they are
-     * zero there — while adding them to a total that already includes
-     * `cachedTokens` would double-count the OpenAI case.
+     * The providers disagree about whether the cache counters sit inside
+     * the input count or beside it, and the sum has to hold for each:
+     * Anthropic's `input_tokens` excludes the tokens it read from and wrote
+     * to the cache, so the total has to add them back. OpenAI's input count
+     * includes them — the Chat Completions `prompt_tokens` and the Responses
+     * `input_tokens` both cover the cached and the cache-written tokens —
+     * so adding the counters there would count them twice.
      */
     public function totalTokens(): int
     {
-        return $this->usage->inputTokens
-            + $this->usage->outputTokens
-            + $this->usage->cacheReadTokens
-            + $this->usage->cacheCreationTokens;
+        $tokens = $this->usage->inputTokens + $this->usage->outputTokens;
+
+        if ($this->usage->provider === 'anthropic') {
+            $tokens += $this->usage->cacheReadTokens + $this->usage->cacheCreationTokens;
+        }
+
+        return $tokens;
     }
 }
