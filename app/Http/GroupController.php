@@ -403,18 +403,27 @@ final class GroupController
     {
         $update = [];
         if (array_key_exists('name', $body)) {
-            $name = trim((string) $body['name']);
+            if (!is_string($body['name'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'name must be a string.');
+            }
+            $name = trim($body['name']);
             if ($name === '') {
                 return $this->unprocessable('VALIDATION_ERROR', 'name cannot be empty.');
             }
             $update['name'] = $name;
         }
         if (array_key_exists('description', $body)) {
-            $description = $body['description'] === null ? null : trim((string) $body['description']);
+            if ($body['description'] !== null && !is_string($body['description'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'description must be a string.');
+            }
+            $description = $body['description'] === null ? null : trim($body['description']);
             $update['description'] = ($description === '') ? null : $description;
         }
         if (array_key_exists('information', $body)) {
-            $information = $body['information'] === null ? null : trim((string) $body['information']);
+            if ($body['information'] !== null && !is_string($body['information'])) {
+                return $this->unprocessable('VALIDATION_ERROR', 'information must be a string.');
+            }
+            $information = $body['information'] === null ? null : trim($body['information']);
             $update['information'] = ($information === '') ? null : $information;
         }
 

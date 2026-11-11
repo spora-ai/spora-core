@@ -441,6 +441,8 @@
     "data": "data",
     "decision must be either 'approve' or 'reject'.": "decision must be either 'approve' or 'reject'.",
     "decisions must be a non-empty array.": "decisions must be a non-empty array.",
+    "description must be a string.": "description must be a string.",
+    "information must be a string.": "information must be a string.",
     "kind must be one of: %s.": "kind must be one of: %s.",
     "media_id is required.": "media_id is required.",
     "media_ids may carry at most ": "media_ids may carry at most ",

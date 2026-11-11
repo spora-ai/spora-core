@@ -7,7 +7,7 @@
             "name": "Spora",
             "url": "https://spora-ai.com"
         },
-        "version": "0.32.0-16-g45b10b8b"
+        "version": "0.32.0-20-g6b052545"
     },
     "servers": [
         {
@@ -6344,10 +6344,12 @@
                                         "type": "string"
                                     },
                                     "description": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "nullable": true
                                     },
                                     "information": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "nullable": true
                                     }
                                 }
                             }

@@ -138,6 +138,27 @@ describe('group CRUD on the global surface', function (): void {
         expect(Group::findOrFail($group['groupId'])->information)->toBe("## Address\nMusterstraße 1");
     });
 
+    it('refuses an information value that is not a string', function (): void {
+        $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
+        $group = AgentApiTestSupport::seedGroup('global-information-type');
+        [, $key] = AgentApiTestSupport::mintGlobalKey('global-information-type');
+
+        $update = ScopedApiTestSupport::callGlobal(
+            $container,
+            ScopedApiGroupController::class,
+            'update',
+            ScopedApiTestSupport::bearer(
+                $key,
+                ScopedApiTestSupport::GLOBAL_PREFIX . '/groups/1',
+                ['information' => ['x']],
+                'PATCH',
+            ),
+            [$group['groupId']],
+        );
+
+        expect($update->getStatusCode())->toBe(422);
+    });
+
     it('refuses to delete a group that still owns agents', function (): void {
         $container = AgentApiTestSupport::container(AgentApiTestSupport::llm());
         $group = AgentApiTestSupport::seedGroup('global-delete-agents');
