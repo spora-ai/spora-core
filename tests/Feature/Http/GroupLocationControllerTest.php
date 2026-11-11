@@ -258,6 +258,37 @@ describe('GroupLocationController', function (): void {
         expect(PrincipalLocation::find($location->id)->name)->toBe('Original');
     });
 
+    it('refuses a name that is not a string', function (): void {
+        [$controller, $auth, $principalService] = makeGroupLocationController();
+        $ownerId = bootAuth($auth, 'gl-nonstring-owner@example.com', GL_TEST_PASSWORD);
+        $group = (new GroupService($principalService))->createGroup($ownerId, 'Locations');
+        simulateLoggedInSession($ownerId, 'gl-nonstring-owner@example.com');
+
+        $response = $controller->store(
+            $group->id,
+            jsonRequest('POST', '/api/v1/groups/' . $group->id . '/locations', ['name' => ['x'], 'address' => 'Musterstraße 1']),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+    });
+
+    it('refuses a name longer than the column', function (): void {
+        [$controller, $auth, $principalService] = makeGroupLocationController();
+        $ownerId = bootAuth($auth, 'gl-longname-owner@example.com', GL_TEST_PASSWORD);
+        $group = (new GroupService($principalService))->createGroup($ownerId, 'Locations');
+        simulateLoggedInSession($ownerId, 'gl-longname-owner@example.com');
+
+        $response = $controller->store(
+            $group->id,
+            jsonRequest('POST', '/api/v1/groups/' . $group->id . '/locations', [
+                'name'    => str_repeat('x', 101),
+                'address' => 'Musterstraße 1',
+            ]),
+        );
+
+        expect($response->getStatusCode())->toBe(422);
+    });
+
     it('deletes a location of the group', function (): void {
         [$controller, $auth, $principalService] = makeGroupLocationController();
         $ownerId = bootAuth($auth, 'gl-delete-owner@example.com', GL_TEST_PASSWORD);

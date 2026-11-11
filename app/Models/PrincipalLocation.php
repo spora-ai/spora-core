@@ -20,6 +20,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 final class PrincipalLocation extends Model
 {
+    /**
+     * The width of the `name` column — `string('name', 100)`.
+     *
+     * A longer name is refused by the request validators rather than
+     * handed to the engine, where it is a data-too-long error.
+     */
+    public const MAX_NAME_LENGTH = 100;
+
     protected $table = 'principal_locations';
 
     /** @var list<string> */

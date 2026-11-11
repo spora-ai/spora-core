@@ -322,6 +322,28 @@ test('putLocation returns 404 for another users location', function (): void {
     expect($response->getStatusCode())->toBe(404);
 });
 
+test('postLocation refuses a name that is not a string', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'profile-nonstring@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'profile-nonstring@example.com');
+
+    $request = jsonRequest('POST', '/me/locations', ['name' => ['x'], 'address' => 'Musterstraße 1']);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
+test('postLocation refuses a name longer than the column', function (): void {
+    [$controller, $authService, , $authMiddleware] = makeUserProfileController();
+    $userId = bootAuth($authService, 'profile-longname@example.com', USERPROFILE_TEST_PASSWORD);
+    simulateLoggedInSession($userId, 'profile-longname@example.com');
+
+    $request = jsonRequest('POST', '/me/locations', ['name' => str_repeat('x', 101), 'address' => 'Musterstraße 1']);
+    $response = callController($controller, 'postLocation', $request, [$authMiddleware]);
+
+    expect($response->getStatusCode())->toBe(422);
+});
+
 test('putLocation rejects unauthenticated requests', function (): void {
     [$controller, , , $authMiddleware] = makeUserProfileController();
     clearSession();

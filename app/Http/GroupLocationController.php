@@ -6,6 +6,7 @@ namespace Spora\Http;
 
 use OpenApi\Attributes as OA;
 use Spora\Auth\AuthService;
+use Spora\Models\PrincipalLocation;
 use Spora\Services\PrincipalLocationService;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -182,6 +183,10 @@ final class GroupLocationController
      * address are not nullable, and the `/me/locations` surface reads a
      * null the same way.
      *
+     * The name is bounded at 100 characters because the column is
+     * `string('name', 100)`: a longer one is a 422 here rather than a
+     * data-too-long error from the engine.
+     *
      * @param  array<string, mixed> $body
      */
     private function validateFields(array $body, bool $requireBoth): ?JsonResponse
@@ -194,16 +199,24 @@ final class GroupLocationController
                 continue;
             }
 
-            if (trim((string) $body[$field]) !== '') {
-                continue;
+            $value = $body[$field];
+            if (!is_string($value)) {
+                return $this->unprocessable('VALIDATION_ERROR', $field . ' must be a string.');
             }
 
-            return $this->unprocessable(
-                'VALIDATION_ERROR',
-                $requireBoth
-                    ? $field . ' is required.'
-                    : $field . ' is required and cannot be empty.',
-            );
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return $this->unprocessable(
+                    'VALIDATION_ERROR',
+                    $requireBoth
+                        ? $field . ' is required.'
+                        : $field . ' is required and cannot be empty.',
+                );
+            }
+
+            if ($field === 'name' && mb_strlen($trimmed) > PrincipalLocation::MAX_NAME_LENGTH) {
+                return $this->unprocessable('VALIDATION_ERROR', 'name must be 100 characters or fewer.');
+            }
         }
 
         return null;
