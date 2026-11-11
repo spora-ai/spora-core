@@ -21,6 +21,7 @@ use Spora\Tools\PendingQuestionBatch;
 use Spora\Tools\ToolInterface;
 use Spora\Tools\Traits\HasOperations;
 use Spora\Tools\ValueObjects\ToolResult;
+use Spora\Tools\WrappedList;
 use Throwable;
 
 /**
@@ -345,7 +346,9 @@ final class ToolCallExecutor
     private function parkQuestionBatch(Task $task, string $providerCallId, array $arguments): void
     {
         $questions = [];
-        foreach (($arguments['questions'] ?? []) as $rawQuestion) {
+        // The provider's `{"item": …}` envelope: the tool unwrapped it to
+        // validate, and the parked question has to be the validated one.
+        foreach (WrappedList::unwrapToList($arguments['questions'] ?? []) as $rawQuestion) {
             if (!is_array($rawQuestion)) {
                 continue;
             }

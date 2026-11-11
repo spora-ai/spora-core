@@ -714,7 +714,7 @@ final class AgentTool extends AbstractTool
             return ToolResult::fail('configure_tools requires an authenticated user.');
         }
 
-        $entries = SlimPayloadValidator::unwrapSingleItemArray($arguments['tools'] ?? []);
+        $entries = WrappedList::unwrapToList($arguments['tools'] ?? []);
         if (!is_array($entries) || ($entries !== [] && !array_is_list($entries))) {
             return ToolResult::fail(self::CONFIGURE_TOOLS_ERR_PREFIX . '`tools` must be an array.');
         }

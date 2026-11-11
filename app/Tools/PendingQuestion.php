@@ -26,7 +26,9 @@ final readonly class PendingQuestion
     public static function fromLlmInput(array $input): self
     {
         $options = [];
-        foreach (($input['options'] ?? []) as $raw) {
+        // The provider's `{"item": …}` envelope. The executor rebuilds the
+        // parked question from this same raw input, so both sides unwrap.
+        foreach (WrappedList::unwrapToList($input['options'] ?? []) as $raw) {
             if (!is_array($raw)) {
                 continue;
             }

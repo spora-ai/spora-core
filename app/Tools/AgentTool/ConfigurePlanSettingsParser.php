@@ -9,6 +9,7 @@ use Spora\Tools\Attributes\ToolSetting;
 use Spora\Tools\LlmScalarCoercion;
 use Spora\Tools\ToolSettingSchema;
 use Spora\Tools\ValueObjects\ToolResult;
+use Spora\Tools\WrappedList;
 
 /**
  * The settings half of a `configure_tools` entry.
@@ -16,6 +17,9 @@ use Spora\Tools\ValueObjects\ToolResult;
  * Split from {@see ConfigurePlanParser}: this half needs the skill registry, to
  * check a principal's visible names against an `allowed_skills` write, which
  * neither the entry's shape nor its operations rows have any use for.
+ *
+ * A list-typed setting arrives wrapped, in the provider's `{"item": …}`
+ * envelope, so every list-typed slot is unwrapped before it is judged.
  */
 final class ConfigurePlanSettingsParser
 {
@@ -90,6 +94,15 @@ final class ConfigurePlanSettingsParser
         }
         if (!is_array($settings)) {
             return $this->settingsFailure($i, 'must be an object of `{setting_key: value}` pairs.');
+        }
+
+        // The envelope around the whole map: `{"item": {...}}`. Unwrapped only
+        // when the payload is an array, so a setting named `item` keeps it.
+        if (WrappedList::isWrapped($settings)) {
+            $payload = WrappedList::unwrap($settings);
+            if (is_array($payload)) {
+                $settings = $payload;
+            }
         }
 
         return $settings;
@@ -220,11 +233,16 @@ final class ConfigurePlanSettingsParser
         int $i,
         ?int $principalId,
     ): string|ToolResult {
-        $names = self::idOrNameList($value, $setting->resolveAs);
+        $list  = WrappedList::unwrapToList($value);
+        $names = self::idOrNameList($list, $setting->resolveAs);
         if ($names === null) {
-            return $this->settingsFailure($i, $setting->resolveAs === 'agent'
-                ? "'{$key}' must be an array of agent ids."
-                : "'{$key}' must be an array of strings.");
+            return $this->settingsFailure($i, sprintf(
+                "'%s' must be an array of %s, got %s. Send a plain JSON array — %s.",
+                $key,
+                $setting->resolveAs === 'agent' ? 'agent ids' : 'strings',
+                $this->describeListValue($list, $setting->resolveAs),
+                $setting->resolveAs === 'agent' ? '[3, 4]' : '["time-arithmetic"]',
+            ));
         }
 
         if ($setting->resolveAs === 'skill') {
@@ -235,6 +253,47 @@ final class ConfigurePlanSettingsParser
         }
 
         return json_encode($names, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * The shape of a value that should have been a list, in one phrase.
+     *
+     * A string, an object and a list with a bad entry are three different
+     * mistakes, and a refusal that names none of them leaves the caller
+     * guessing.
+     */
+    private function describeListValue(mixed $value, string $resolveAs): string
+    {
+        if (!is_array($value)) {
+            return $this->describeValue($value);
+        }
+
+        if (!array_is_list($value)) {
+            return 'an object with the key(s) ' . implode(', ', array_keys($value));
+        }
+
+        return $this->describeListEntries($value, $resolveAs)
+            ?? sprintf('a list of %d entries', count($value));
+    }
+
+    /**
+     * The first entry of a list that is not the type the setting stores, or
+     * null when every entry is.
+     *
+     * @param list<mixed> $value
+     */
+    private function describeListEntries(array $value, string $resolveAs): ?string
+    {
+        $expected = $resolveAs === 'agent' ? 'an integer id' : 'a string';
+
+        foreach ($value as $index => $entry) {
+            $typed = $resolveAs === 'agent' ? is_int($entry) : is_string($entry);
+            if (!$typed) {
+                return sprintf('entry %s is %s, not %s', $index, get_debug_type($entry), $expected);
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -125,6 +125,8 @@ final class AskUserQuestionTool extends AbstractTool
         if ($raw === null) {
             return new ToolResult(false, "Required argument 'questions' is missing.");
         }
+        // The provider's `{"item": …}` envelope, unwrapped.
+        $raw = WrappedList::unwrapToList($raw);
         if (!is_array($raw) || !array_is_list($raw)) {
             return new ToolResult(false, "Argument 'questions' must be a list of 1-4 question objects.");
         }
@@ -229,6 +231,8 @@ final class AskUserQuestionTool extends AbstractTool
      */
     private function validateOptionsChain(mixed $optionsRaw, string $header): ?ToolResult
     {
+        // The provider's `{"item": …}` envelope, unwrapped.
+        $optionsRaw = WrappedList::unwrapToList($optionsRaw);
         if (!is_array($optionsRaw) || !array_is_list($optionsRaw)) {
             return new ToolResult(false, "Question '{$header}' must have an 'options' list.");
         }
